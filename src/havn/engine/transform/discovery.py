@@ -126,13 +126,21 @@ def build_dag_tiers(models: list[SQLModel]) -> list[list[SQLModel]]:
 
 
 def _compute_upstream_hash(model: SQLModel, model_map: dict[str, SQLModel]) -> str:
-    """Compute a combined hash of all upstream model content hashes."""
+    """Compute a combined hash of all upstream model content and upstream hashes.
+
+    Includes both content_hash and upstream_hash of each dependency so that
+    changes propagate transitively through the full DAG (not just one level).
+    Models must be processed in topological order so that upstream_hash is
+    already set on dependencies before it is read here.
+    """
     if not model.depends_on:
         return ""
     upstream_hashes = []
     for dep in sorted(model.depends_on):
         if dep in model_map:
-            upstream_hashes.append(model_map[dep].content_hash)
+            dep_model = model_map[dep]
+            upstream_hashes.append(dep_model.content_hash)
+            upstream_hashes.append(dep_model.upstream_hash)
     return hashlib.sha256("".join(upstream_hashes).encode()).hexdigest()[:16]
 
 
