@@ -12,47 +12,32 @@
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  --bg-deep: #0a0f14;
-  --bg-surface: #0f1921;
-  --bg-card: #141f2b;
-  --bg-card-hover: #192838;
-  --border: #1e3044;
-  --border-light: #264059;
-  --teal: #2dd4a8;
-  --teal-dim: #1a8a6e;
-  --teal-glow: rgba(45, 212, 168, 0.12);
-  --teal-glow-strong: rgba(45, 212, 168, 0.25);
-  --text: #e2e8f0;
-  --text-dim: #8899aa;
-  --text-muted: #5a6f82;
-  --white: #f1f5f9;
-  --code-bg: #0c1318;
-  --bronze: #cd7f32;
-  --silver-color: #a8b5c4;
-  --gold-color: #d4a843;
+  --bg: #fafbfc;
+  --bg-warm: #f5f6f8;
+  --surface: #ffffff;
+  --border: #e8ecf1;
+  --border-hover: #d0d7e0;
+  --teal: #0d9373;
+  --teal-light: #e8f5f1;
+  --teal-bg: #f0faf6;
+  --text: #1a2332;
+  --text-secondary: #4a5568;
+  --text-muted: #8494a7;
+  --code-bg: #1a2332;
+  --code-text: #c4cdd9;
+  --code-teal: #5ee6c0;
+  --code-comment: #5a6a7e;
+  --code-string: #f0c674;
 }
 
 html { scroll-behavior: smooth; }
 
 body {
   font-family: 'Outfit', sans-serif;
-  background: var(--bg-deep);
+  background: var(--bg);
   color: var(--text);
   line-height: 1.6;
-  overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
-}
-
-/* --- Water line accent --- */
-.waterline {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--teal), transparent);
-  opacity: 0.4;
-  z-index: 100;
 }
 
 /* --- Nav --- */
@@ -62,578 +47,428 @@ nav {
   left: 0;
   right: 0;
   z-index: 50;
-  padding: 1.25rem 2rem;
+  padding: 0 2rem;
+  height: 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: rgba(10, 15, 20, 0.8);
-  backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(30, 48, 68, 0.5);
+  background: rgba(250, 251, 252, 0.85);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
 }
 
 .nav-logo {
-  font-size: 1.4rem;
+  font-size: 1.35rem;
   font-weight: 700;
-  letter-spacing: -0.03em;
-  color: var(--white);
+  letter-spacing: -0.04em;
+  color: var(--text);
 }
 
 .nav-logo span { color: var(--teal); }
 
-.nav-links {
+.nav-right {
   display: flex;
-  gap: 2rem;
   align-items: center;
-  list-style: none;
+  gap: 0.25rem;
 }
 
-.nav-links a {
-  color: var(--text-dim);
+.nav-right a {
+  color: var(--text-secondary);
   text-decoration: none;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   font-weight: 400;
-  transition: color 0.2s;
-  letter-spacing: 0.01em;
+  padding: 0.4rem 0.85rem;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
 }
 
-.nav-links a:hover { color: var(--teal); }
+.nav-right a:hover {
+  color: var(--text);
+  background: var(--bg-warm);
+}
 
-.nav-links .gh-link {
-  display: flex;
+.nav-right .gh-link {
+  display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
 }
 
-.nav-links .gh-link svg {
-  width: 18px;
-  height: 18px;
+.nav-right .gh-link svg {
+  width: 16px;
+  height: 16px;
   fill: currentColor;
 }
 
-/* --- Sections --- */
-section { padding: 6rem 2rem; }
+.nav-right .nav-cta {
+  color: var(--surface);
+  background: var(--text);
+  font-weight: 500;
+  margin-left: 0.5rem;
+}
 
+.nav-right .nav-cta:hover {
+  background: #2d3a4a;
+  color: var(--surface);
+}
+
+/* --- Container --- */
 .container {
-  max-width: 1100px;
+  max-width: 980px;
   margin: 0 auto;
+  padding: 0 2rem;
 }
 
 /* --- Hero --- */
 .hero {
-  padding: 10rem 2rem 6rem;
-  position: relative;
+  padding: 9rem 0 5rem;
   text-align: center;
-  overflow: hidden;
-}
-
-.hero::before {
-  content: '';
-  position: absolute;
-  top: -40%;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 800px;
-  height: 800px;
-  background: radial-gradient(ellipse, var(--teal-glow) 0%, transparent 70%);
-  pointer-events: none;
-}
-
-.hero-badge {
-  display: inline-block;
-  padding: 0.35rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: 100px;
-  font-size: 0.8rem;
-  color: var(--text-dim);
-  margin-bottom: 2rem;
-  letter-spacing: 0.04em;
-  font-weight: 400;
-}
-
-.hero-badge strong {
-  color: var(--teal);
-  font-weight: 500;
 }
 
 .hero h1 {
-  font-size: clamp(2.8rem, 6vw, 4.8rem);
+  font-size: clamp(2.6rem, 5.5vw, 4rem);
   font-weight: 700;
-  line-height: 1.08;
-  letter-spacing: -0.035em;
-  color: var(--white);
-  margin-bottom: 1.5rem;
-}
-
-.hero h1 em {
-  font-style: normal;
-  color: var(--teal);
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+  color: var(--text);
+  margin-bottom: 1.25rem;
 }
 
 .hero-sub {
   font-size: 1.15rem;
-  color: var(--text-dim);
-  max-width: 600px;
-  margin: 0 auto 3rem;
-  line-height: 1.7;
+  color: var(--text-secondary);
+  max-width: 520px;
+  margin: 0 auto 2.5rem;
+  line-height: 1.65;
   font-weight: 300;
 }
 
 .hero-actions {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
   justify-content: center;
-  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 2.5rem;
 }
 
 .btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1.75rem;
+  gap: 0.45rem;
+  padding: 0.65rem 1.5rem;
   border-radius: 8px;
   font-family: 'Outfit', sans-serif;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   font-weight: 500;
   text-decoration: none;
-  transition: all 0.2s;
+  transition: all 0.15s;
   cursor: pointer;
   border: none;
 }
 
 .btn-primary {
   background: var(--teal);
-  color: var(--bg-deep);
+  color: #fff;
 }
 
-.btn-primary:hover {
-  background: #3de6b8;
-  box-shadow: 0 0 30px var(--teal-glow-strong);
-}
+.btn-primary:hover { background: #0ba881; }
 
-.btn-secondary {
+.btn-ghost {
   background: transparent;
-  color: var(--text);
+  color: var(--text-secondary);
   border: 1px solid var(--border);
 }
 
-.btn-secondary:hover {
-  border-color: var(--border-light);
-  background: var(--bg-card);
+.btn-ghost:hover {
+  border-color: var(--border-hover);
+  background: var(--surface);
 }
 
-/* --- Install bar --- */
-.install-bar {
-  margin-top: 3rem;
+/* --- Install snippet --- */
+.install-snippet {
   display: inline-flex;
   align-items: center;
-  background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 0.15rem 0.15rem 0.15rem 1.25rem;
   gap: 0.75rem;
+  background: var(--code-bg);
+  border-radius: 10px;
+  padding: 0.6rem 0.6rem 0.6rem 1.25rem;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.88rem;
+  font-size: 0.85rem;
+  color: var(--code-text);
 }
 
-.install-bar code {
-  color: var(--text-dim);
-  white-space: nowrap;
-}
+.install-snippet .prompt { color: var(--code-comment); }
+.install-snippet .cmd { color: var(--code-teal); }
 
-.install-bar code strong {
-  color: var(--teal);
-  font-weight: 500;
-}
-
-.install-bar .copy-btn {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  padding: 0.6rem 0.9rem;
-  border-radius: 8px;
+.install-snippet button {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: var(--code-text);
+  padding: 0.45rem 0.75rem;
+  border-radius: 6px;
   cursor: pointer;
-  font-family: 'Outfit', sans-serif;
-  font-size: 0.78rem;
-  transition: all 0.15s;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  transition: background 0.15s;
 }
 
-.install-bar .copy-btn:hover {
-  background: var(--bg-card-hover);
-  color: var(--text);
+.install-snippet button:hover { background: rgba(255,255,255,0.14); }
+
+/* --- Pillars --- */
+.pillars {
+  padding: 4rem 0;
 }
 
-/* --- Section headings --- */
-.section-label {
-  font-size: 0.78rem;
-  font-weight: 500;
+.pillars-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+}
+
+.pillar {
+  text-align: center;
+  padding: 2.5rem 1.75rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.pillar:hover {
+  border-color: var(--border-hover);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.04);
+}
+
+.pillar-label {
+  font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   color: var(--teal);
+  font-weight: 600;
   margin-bottom: 0.75rem;
 }
 
-.section-title {
-  font-size: clamp(1.8rem, 3.5vw, 2.5rem);
-  font-weight: 700;
-  letter-spacing: -0.025em;
-  color: var(--white);
-  margin-bottom: 1rem;
-}
-
-.section-desc {
-  color: var(--text-dim);
-  font-size: 1.05rem;
-  max-width: 550px;
-  font-weight: 300;
-  line-height: 1.65;
-}
-
-/* --- Features --- */
-.features-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
-  background: var(--border);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  overflow: hidden;
-  margin-top: 3.5rem;
-}
-
-.feature-card {
-  background: var(--bg-surface);
-  padding: 2.25rem;
-  transition: background 0.25s;
-}
-
-.feature-card:hover { background: var(--bg-card); }
-
-.feature-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: var(--teal-glow);
-  border: 1px solid rgba(45, 212, 168, 0.15);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 1.25rem;
-  font-size: 1.1rem;
-}
-
-.feature-card h3 {
-  font-size: 1.05rem;
+.pillar h3 {
+  font-size: 1.15rem;
   font-weight: 600;
+  color: var(--text);
   margin-bottom: 0.6rem;
-  color: var(--white);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
 }
 
-.feature-card p {
+.pillar p {
   font-size: 0.88rem;
-  color: var(--text-dim);
+  color: var(--text-muted);
   line-height: 1.6;
   font-weight: 300;
 }
 
-/* --- Architecture --- */
-.arch-section { background: var(--bg-surface); }
-
-.arch-flow {
-  margin-top: 3.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
-  flex-wrap: wrap;
+/* --- How it works --- */
+.how-section {
+  padding: 5rem 0;
 }
 
-.arch-node {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 1.5rem 1.75rem;
-  position: relative;
-}
-
-.arch-node-box {
-  padding: 0.9rem 1.5rem;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--white);
+.how-header {
   text-align: center;
-  min-width: 100px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  margin-bottom: 3rem;
 }
 
-.arch-node-box:hover {
-  border-color: var(--teal-dim);
-  box-shadow: 0 0 20px var(--teal-glow);
+.how-header h2 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin-bottom: 0.5rem;
 }
 
-.arch-node-label {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-weight: 500;
+.how-header p {
+  color: var(--text-secondary);
+  font-size: 1rem;
+  font-weight: 300;
 }
 
-.arch-node.landing .arch-node-box { border-color: var(--border-light); }
-.arch-node.bronze .arch-node-box { border-left: 3px solid var(--bronze); }
-.arch-node.silver .arch-node-box { border-left: 3px solid var(--silver-color); }
-.arch-node.gold .arch-node-box { border-left: 3px solid var(--gold-color); }
-
-.arch-arrow {
-  color: var(--text-muted);
-  font-size: 1.3rem;
-  padding: 0 0.25rem;
-  user-select: none;
-}
-
-/* --- Quick start --- */
-.quickstart-cols {
+.how-cols {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 2.5rem;
-  margin-top: 3.5rem;
   align-items: start;
 }
 
-.code-block {
+.code-window {
   background: var(--code-bg);
-  border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.12);
 }
 
-.code-header {
+.code-titlebar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem 1.25rem;
-  border-bottom: 1px solid var(--border);
-  background: rgba(15, 25, 33, 0.5);
-}
-
-.code-dots {
-  display: flex;
   gap: 6px;
+  padding: 0.85rem 1.15rem;
+  background: rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
-.code-dots span {
+.code-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--border-light);
+  background: rgba(255,255,255,0.12);
 }
 
-.code-lang {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.code-block pre {
-  padding: 1.5rem;
+.code-window pre {
+  padding: 1.25rem 1.35rem;
   overflow-x: auto;
 }
 
-.code-block code {
+.code-window code {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.85rem;
-  line-height: 1.85;
-  color: var(--text-dim);
+  font-size: 0.82rem;
+  line-height: 1.9;
+  color: var(--code-text);
 }
 
-.code-block code .cmd { color: var(--teal); }
-.code-block code .comment { color: var(--text-muted); }
-.code-block code .flag { color: var(--silver-color); }
-.code-block code .string { color: var(--gold-color); }
+.code-window .c { color: var(--code-comment); }
+.code-window .t { color: var(--code-teal); }
+.code-window .s { color: var(--code-string); }
 
-.quickstart-info h3 {
-  font-size: 1.3rem;
-  font-weight: 600;
-  color: var(--white);
-  margin-bottom: 1rem;
-  letter-spacing: -0.01em;
-}
-
-.quickstart-steps {
+.how-steps {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 1.75rem;
+  padding-top: 0.5rem;
 }
 
-.quickstart-steps li {
+.how-steps li {
   display: flex;
   gap: 1rem;
-  align-items: flex-start;
 }
 
-.step-num {
+.how-step-marker {
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--teal-light);
+  color: var(--teal);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   font-weight: 600;
-  color: var(--teal);
-  margin-top: 0.1rem;
+  margin-top: 0.15rem;
 }
 
-.step-text {
-  font-size: 0.92rem;
-  color: var(--text-dim);
-  line-height: 1.55;
-}
-
-.step-text strong {
+.how-step-body h4 {
+  font-size: 0.95rem;
+  font-weight: 600;
   color: var(--text);
-  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+.how-step-body p {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+  font-weight: 300;
 }
 
 /* --- Install section --- */
-.install-grid {
+.install-section {
+  padding: 5rem 0;
+}
+
+.install-cards {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1.5rem;
-  margin-top: 3.5rem;
+  margin-top: 2.5rem;
 }
 
 .install-card {
-  background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 2.25rem;
+  background: var(--surface);
+  padding: 2rem;
+  transition: border-color 0.2s;
+}
+
+.install-card:hover { border-color: var(--border-hover); }
+
+.install-card-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-bottom: 0.25rem;
 }
 
 .install-card h3 {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 600;
-  color: var(--white);
-  margin-bottom: 0.4rem;
+  color: var(--text);
+  margin-bottom: 0.3rem;
 }
 
-.install-card .install-desc {
-  font-size: 0.85rem;
+.install-card .install-note {
+  font-size: 0.82rem;
   color: var(--text-muted);
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.25rem;
   font-weight: 300;
 }
 
 .install-cmd {
   background: var(--code-bg);
-  border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 1rem 1.25rem;
+  padding: 1rem 1.15rem;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.84rem;
-  color: var(--text-dim);
+  font-size: 0.8rem;
+  color: var(--code-text);
+  line-height: 1.75;
   overflow-x: auto;
   white-space: pre;
-  line-height: 1.7;
 }
 
-.install-cmd .cmd { color: var(--teal); }
-.install-cmd .flag { color: var(--silver-color); }
-
-/* --- Comparison --- */
-.compare-table-wrap {
-  margin-top: 3.5rem;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  overflow: hidden;
-}
-
-.compare-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.88rem;
-}
-
-.compare-table th,
-.compare-table td {
-  padding: 1rem 1.5rem;
-  text-align: left;
-  border-bottom: 1px solid var(--border);
-}
-
-.compare-table thead th {
-  background: var(--bg-card);
-  font-weight: 600;
-  color: var(--text-dim);
-  font-size: 0.82rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.compare-table thead th:first-child { color: var(--teal); }
-
-.compare-table tbody td {
-  background: var(--bg-surface);
-  color: var(--text-dim);
-  font-weight: 300;
-}
-
-.compare-table tbody td:first-child {
-  color: var(--text);
-  font-weight: 500;
-}
-
-.compare-table tbody tr:last-child td { border-bottom: none; }
-
-.compare-table .highlight {
-  color: var(--teal);
-  font-weight: 500;
-}
+.install-cmd .t { color: var(--code-teal); }
+.install-cmd .c { color: var(--code-comment); }
+.install-cmd .s { color: var(--code-string); }
 
 /* --- CTA --- */
-.cta-section {
+.cta {
+  padding: 5rem 0 6rem;
   text-align: center;
-  position: relative;
 }
 
-.cta-section::before {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 600px;
-  height: 400px;
-  background: radial-gradient(ellipse, var(--teal-glow) 0%, transparent 70%);
-  pointer-events: none;
+.cta-box {
+  background: var(--teal-bg);
+  border: 1px solid rgba(13, 147, 115, 0.12);
+  border-radius: 18px;
+  padding: 4rem 2rem;
 }
 
-.cta-section .section-title {
-  margin-bottom: 1.5rem;
+.cta-box h2 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin-bottom: 0.6rem;
 }
 
-.cta-section .section-desc {
-  margin: 0 auto 2.5rem;
+.cta-box p {
+  color: var(--text-secondary);
+  font-size: 1rem;
+  margin-bottom: 2rem;
+  font-weight: 300;
 }
 
 /* --- Footer --- */
 footer {
-  padding: 3rem 2rem;
+  padding: 2rem;
   border-top: 1px solid var(--border);
-  text-align: center;
 }
 
 .footer-inner {
-  max-width: 1100px;
+  max-width: 980px;
   margin: 0 auto;
   display: flex;
   align-items: center;
@@ -641,7 +476,7 @@ footer {
 }
 
 .footer-left {
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   color: var(--text-muted);
   font-weight: 300;
 }
@@ -655,35 +490,37 @@ footer {
 .footer-links a {
   color: var(--text-muted);
   text-decoration: none;
-  font-size: 0.85rem;
-  transition: color 0.2s;
+  font-size: 0.82rem;
+  transition: color 0.15s;
 }
 
-.footer-links a:hover { color: var(--teal); }
+.footer-links a:hover { color: var(--text); }
+
+/* --- Divider --- */
+.divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0 auto;
+  max-width: 980px;
+}
 
 /* --- Responsive --- */
 @media (max-width: 768px) {
-  nav { padding: 1rem 1.25rem; }
-  .nav-links { gap: 1rem; }
-  section { padding: 4rem 1.25rem; }
-  .hero { padding: 8rem 1.25rem 4rem; }
-  .features-grid { grid-template-columns: 1fr; }
-  .quickstart-cols { grid-template-columns: 1fr; }
-  .install-grid { grid-template-columns: 1fr; }
-  .arch-flow { gap: 0.25rem; }
-  .arch-node { padding: 0.75rem; }
-  .arch-arrow { font-size: 1rem; }
+  nav { padding: 0 1.25rem; }
+  .container { padding: 0 1.25rem; }
+  .hero { padding: 7rem 0 3.5rem; }
+  .pillars-grid { grid-template-columns: 1fr; }
+  .how-cols { grid-template-columns: 1fr; }
+  .install-cards { grid-template-columns: 1fr; }
   .footer-inner { flex-direction: column; gap: 1rem; }
-  .install-bar { flex-direction: column; padding: 1rem; gap: 0.5rem; }
-  .compare-table { font-size: 0.78rem; }
-  .compare-table th, .compare-table td { padding: 0.75rem 0.75rem; }
+  .nav-right a.hide-mobile { display: none; }
 }
 
-/* --- Fade-in on scroll --- */
+/* --- Fade-in --- */
 .fade-up {
   opacity: 0;
-  transform: translateY(20px);
-  transition: opacity 0.6s ease, transform 0.6s ease;
+  transform: translateY(16px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
 }
 
 .fade-up.visible {
@@ -694,296 +531,190 @@ footer {
 </head>
 <body>
 
-<div class="waterline"></div>
-
 <nav>
   <div class="nav-logo">havn<span>.</span></div>
-  <ul class="nav-links">
-    <li><a href="#features">Features</a></li>
-    <li><a href="#quickstart">Quick Start</a></li>
-    <li><a href="#install">Install</a></li>
-    <li><a href="./docs/">Docs</a></li>
-    <li>
-      <a href="https://github.com/chraltro/db" class="gh-link" target="_blank" rel="noopener">
-        <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-        GitHub
-      </a>
-    </li>
-  </ul>
+  <div class="nav-right">
+    <a href="#how" class="hide-mobile">How It Works</a>
+    <a href="#install">Install</a>
+    <a href="./docs/">Docs</a>
+    <a href="https://github.com/chraltro/havn" class="gh-link" target="_blank" rel="noopener">
+      <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+    </a>
+    <a href="#install" class="nav-cta">Get Started</a>
+  </div>
 </nav>
 
 <!-- Hero -->
 <section class="hero">
   <div class="container">
-    <div class="hero-badge">Open source &middot; <strong>v0.1</strong></div>
-    <h1>Data in <em>safe waters</em></h1>
+    <h1>Data in safe waters</h1>
     <p class="hero-sub">
-      A self-hosted data platform powered by DuckDB. Plain SQL transforms, Python ingest,
-      single-file database. No data leaves your machine.
+      A self-hosted data platform powered by DuckDB.
+      Plain SQL transforms, Python ingest, single-file warehouse.
+      Your data never leaves your machine.
     </p>
     <div class="hero-actions">
       <a href="#install" class="btn btn-primary">Get Started</a>
-      <a href="./docs/" class="btn btn-secondary">Documentation</a>
+      <a href="./docs/" class="btn btn-ghost">Read the Docs</a>
     </div>
-    <div class="install-bar">
-      <code>$ <strong>pip install havn</strong></code>
-      <button class="copy-btn" onclick="navigator.clipboard.writeText('pip install havn').then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)})">Copy</button>
+    <div class="install-snippet">
+      <code><span class="prompt">$</span> <span class="cmd">pip install havn</span></code>
+      <button onclick="navigator.clipboard.writeText('pip install havn').then(()=>{this.textContent='copied';setTimeout(()=>this.textContent='copy',1500)})">copy</button>
     </div>
   </div>
 </section>
 
-<!-- Features -->
-<section id="features">
+<!-- Three pillars -->
+<section class="pillars">
   <div class="container">
-    <div class="section-label fade-up">Capabilities</div>
-    <h2 class="section-title fade-up">Everything you need,<br>nothing you don't</h2>
-    <p class="section-desc fade-up">No clusters, no cloud accounts, no vendor lock-in. Just your data, your SQL, your machine.</p>
-
-    <div class="features-grid fade-up">
-      <div class="feature-card">
-        <div class="feature-icon">&#9638;</div>
-        <h3>Transform Engine</h3>
-        <p>Plain SQL with automatic DAG resolution. Change detection via SHA256 hashing. No Jinja, no templating — just SQL.</p>
+    <div class="pillars-grid fade-up">
+      <div class="pillar">
+        <div class="pillar-label">Engine</div>
+        <h3>DuckDB</h3>
+        <p>Blazing-fast OLAP analytics in a single embedded file. No servers, no clusters.</p>
       </div>
-      <div class="feature-card">
-        <div class="feature-icon">&#10003;</div>
-        <h3>Data Quality</h3>
-        <p>Inline assertions, YAML contracts, column profiling, and freshness monitoring built into your pipeline.</p>
+      <div class="pillar">
+        <div class="pillar-label">Transforms</div>
+        <h3>Plain SQL</h3>
+        <p>Write standard SQL with dependency comments. Automatic DAG ordering with change detection.</p>
       </div>
-      <div class="feature-card">
-        <div class="feature-icon">&#8644;</div>
-        <h3>Connectors</h3>
-        <p>PostgreSQL, MySQL, Stripe, Shopify, Google Sheets, REST APIs, S3/GCS, CSV, and webhooks out of the box.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">&#9707;</div>
-        <h3>Web UI</h3>
-        <p>React SPA with Monaco code editor, interactive DAG visualization, table browser, and query runner.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">&#9776;</div>
-        <h3>Single-File Database</h3>
-        <p>Everything in one warehouse.duckdb file. Back up with cp. No servers, no clusters, no infra.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">&#9672;</div>
-        <h3>AI-Native</h3>
-        <p>Ships with CLAUDE.md, Cursor rules, and Copilot instructions. Run havn context for an AI-ready summary.</p>
+      <div class="pillar">
+        <div class="pillar-label">Pipeline</div>
+        <h3>Python</h3>
+        <p>Ingest and export with plain Python scripts. Pre-built connectors for databases, APIs, and files.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- Architecture -->
-<section class="arch-section" id="architecture">
-  <div class="container">
-    <div class="section-label fade-up">Architecture</div>
-    <h2 class="section-title fade-up">Layered by design</h2>
-    <p class="section-desc fade-up">Data flows through four stages — from raw ingestion to consumption-ready tables.</p>
+<hr class="divider">
 
-    <div class="arch-flow fade-up">
-      <div class="arch-node">
-        <div class="arch-node-box">Ingest</div>
-        <span class="arch-node-label">Python / .dpnb</span>
-      </div>
-      <span class="arch-arrow">&#8594;</span>
-      <div class="arch-node landing">
-        <div class="arch-node-box">landing</div>
-        <span class="arch-node-label">Raw data</span>
-      </div>
-      <span class="arch-arrow">&#8594;</span>
-      <div class="arch-node bronze">
-        <div class="arch-node-box">bronze</div>
-        <span class="arch-node-label">Cleaned</span>
-      </div>
-      <span class="arch-arrow">&#8594;</span>
-      <div class="arch-node silver">
-        <div class="arch-node-box">silver</div>
-        <span class="arch-node-label">Business logic</span>
-      </div>
-      <span class="arch-arrow">&#8594;</span>
-      <div class="arch-node gold">
-        <div class="arch-node-box">gold</div>
-        <span class="arch-node-label">Consumption</span>
-      </div>
-      <span class="arch-arrow">&#8594;</span>
-      <div class="arch-node">
-        <div class="arch-node-box">Export</div>
-        <span class="arch-node-label">Reports / APIs</span>
-      </div>
+<!-- How it works -->
+<section class="how-section" id="how">
+  <div class="container">
+    <div class="how-header fade-up">
+      <h2>Up and running in four commands</h2>
+      <p>From install to a live web dashboard — under a minute.</p>
     </div>
-  </div>
-</section>
 
-<!-- Quick Start -->
-<section id="quickstart">
-  <div class="container">
-    <div class="section-label fade-up">Quick Start</div>
-    <h2 class="section-title fade-up">Running in under a minute</h2>
-
-    <div class="quickstart-cols fade-up">
-      <div class="code-block">
-        <div class="code-header">
-          <div class="code-dots"><span></span><span></span><span></span></div>
-          <span class="code-lang">Terminal</span>
+    <div class="how-cols fade-up">
+      <div class="code-window">
+        <div class="code-titlebar">
+          <div class="code-dot"></div>
+          <div class="code-dot"></div>
+          <div class="code-dot"></div>
         </div>
-        <pre><code><span class="comment"># Install havn</span>
-$ <span class="cmd">pip install havn</span>
+        <pre><code><span class="c"># Install from PyPI</span>
+<span class="t">pip install</span> havn
 
-<span class="comment"># Scaffold a new project</span>
-$ <span class="cmd">havn init</span> <span class="string">my-project</span>
-$ <span class="cmd">cd</span> my-project
+<span class="c"># Create a new project</span>
+<span class="t">havn init</span> <span class="s">my-project</span>
+<span class="t">cd</span> my-project
 
-<span class="comment"># Run the full pipeline</span>
-$ <span class="cmd">havn stream</span> <span class="flag">full-refresh</span>
+<span class="c"># Run the full pipeline</span>
+<span class="t">havn stream</span> full-refresh
 
-<span class="comment"># Start the web UI</span>
-$ <span class="cmd">havn serve</span>
-<span class="comment"># → http://localhost:3000</span></code></pre>
+<span class="c"># Open the web UI</span>
+<span class="t">havn serve</span>
+<span class="c"># → http://localhost:3000</span></code></pre>
       </div>
 
-      <div class="quickstart-info">
-        <h3>Four commands to a working pipeline</h3>
-        <ul class="quickstart-steps">
-          <li>
-            <span class="step-num">1</span>
-            <span class="step-text"><strong>Install</strong> from PyPI with a single pip command. No system dependencies beyond Python 3.10+.</span>
-          </li>
-          <li>
-            <span class="step-num">2</span>
-            <span class="step-text"><strong>Scaffold</strong> a project with ingest, transform, and export directories plus a project.yml config.</span>
-          </li>
-          <li>
-            <span class="step-num">3</span>
-            <span class="step-text"><strong>Run</strong> the full pipeline — ingest scripts pull data, SQL transforms build the warehouse layer by layer.</span>
-          </li>
-          <li>
-            <span class="step-num">4</span>
-            <span class="step-text"><strong>Explore</strong> your data in the browser with the built-in web UI, query runner, and DAG visualizer.</span>
-          </li>
-        </ul>
-      </div>
+      <ul class="how-steps">
+        <li>
+          <span class="how-step-marker">1</span>
+          <div class="how-step-body">
+            <h4>Install</h4>
+            <p>One pip command. No system dependencies beyond Python 3.10+.</p>
+          </div>
+        </li>
+        <li>
+          <span class="how-step-marker">2</span>
+          <div class="how-step-body">
+            <h4>Scaffold</h4>
+            <p>Creates ingest, transform, and export directories with a project.yml config.</p>
+          </div>
+        </li>
+        <li>
+          <span class="how-step-marker">3</span>
+          <div class="how-step-body">
+            <h4>Run</h4>
+            <p>Ingest scripts pull data, SQL transforms build the warehouse — landing through gold.</p>
+          </div>
+        </li>
+        <li>
+          <span class="how-step-marker">4</span>
+          <div class="how-step-body">
+            <h4>Explore</h4>
+            <p>Browse tables, run queries, and visualize the DAG in the built-in web UI.</p>
+          </div>
+        </li>
+      </ul>
     </div>
   </div>
 </section>
+
+<hr class="divider">
 
 <!-- Install -->
-<section id="install" class="arch-section">
+<section class="install-section" id="install">
   <div class="container">
-    <div class="section-label fade-up">Install</div>
-    <h2 class="section-title fade-up">Choose your path</h2>
-    <p class="section-desc fade-up">PyPI for local development, Docker for isolated or production deployments.</p>
-
-    <div class="install-grid fade-up">
-      <div class="install-card">
-        <h3>PyPI</h3>
-        <p class="install-desc">Install with pip. Python 3.10+ required.</p>
-        <div class="install-cmd"><span class="cmd">pip install</span> havn
-
-<span class="comment"># Start a project</span>
-<span class="cmd">havn init</span> my-project
-<span class="cmd">cd</span> my-project
-<span class="cmd">havn serve</span></div>
-      </div>
-      <div class="install-card">
-        <h3>Docker</h3>
-        <p class="install-desc">Run in a container. No Python install needed.</p>
-        <div class="install-cmd"><span class="cmd">docker run</span> <span class="flag">-v</span> $(pwd):/project \
-  <span class="flag">-p</span> 3000:3000 \
-  ghcr.io/chraltro/havn <span class="cmd">serve</span></div>
-      </div>
+    <div class="how-header fade-up">
+      <h2>Install</h2>
+      <p>PyPI for local development. Docker for isolated deployments.</p>
     </div>
-  </div>
-</section>
 
-<!-- Comparison -->
-<section id="compare">
-  <div class="container">
-    <div class="section-label fade-up">Comparison</div>
-    <h2 class="section-title fade-up">How havn stacks up</h2>
-
-    <div class="compare-table-wrap fade-up">
-      <table class="compare-table">
-        <thead>
-          <tr>
-            <th>havn</th>
-            <th>Databricks</th>
-            <th>dbt + Airflow</th>
-            <th>Snowflake</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td class="highlight">Your machine</td>
-            <td>Cloud</td>
-            <td>Cloud / self-hosted</td>
-            <td>Cloud</td>
-          </tr>
-          <tr>
-            <td class="highlight">Data stays local</td>
-            <td>Vendor cloud</td>
-            <td>Depends</td>
-            <td>Vendor cloud</td>
-          </tr>
-          <tr>
-            <td class="highlight">1 minute setup</td>
-            <td>Hours</td>
-            <td>Hours</td>
-            <td>Hours</td>
-          </tr>
-          <tr>
-            <td class="highlight">Free &amp; open source</td>
-            <td>$$$</td>
-            <td>$ — $$$</td>
-            <td>$$$</td>
-          </tr>
-          <tr>
-            <td class="highlight">Plain SQL</td>
-            <td>Spark SQL</td>
-            <td>Jinja SQL</td>
-            <td>Snowflake SQL</td>
-          </tr>
-          <tr>
-            <td class="highlight">DuckDB (Postgres-compat)</td>
-            <td>Spark engine</td>
-            <td>Varies</td>
-            <td>Proprietary engine</td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="install-cards fade-up">
+      <div class="install-card">
+        <div class="install-card-label">Recommended</div>
+        <h3>PyPI</h3>
+        <p class="install-note">Python 3.10+ required</p>
+        <div class="install-cmd"><span class="t">pip install</span> havn
+<span class="t">havn init</span> <span class="s">my-project</span>
+<span class="t">cd</span> my-project && <span class="t">havn serve</span></div>
+      </div>
+      <div class="install-card">
+        <div class="install-card-label">Alternative</div>
+        <h3>Docker</h3>
+        <p class="install-note">No Python required</p>
+        <div class="install-cmd"><span class="t">docker run</span> \
+  -v $(pwd):/project \
+  -p 3000:3000 \
+  ghcr.io/chraltro/havn <span class="t">serve</span></div>
+      </div>
     </div>
   </div>
 </section>
 
 <!-- CTA -->
-<section class="cta-section">
+<section class="cta">
   <div class="container">
-    <h2 class="section-title fade-up">Start building your warehouse</h2>
-    <p class="section-desc fade-up">One pip install away from a complete data platform. No cloud account required.</p>
-    <div class="hero-actions fade-up">
-      <a href="#install" class="btn btn-primary">Install havn</a>
-      <a href="https://github.com/chraltro/db" class="btn btn-secondary" target="_blank" rel="noopener">View on GitHub</a>
+    <div class="cta-box fade-up">
+      <h2>Your data, your machine</h2>
+      <p>Free, open-source, and built for privacy. No cloud account needed.</p>
+      <div class="hero-actions">
+        <a href="./docs/getting-started/" class="btn btn-primary">Read the Guide</a>
+        <a href="https://github.com/chraltro/havn" class="btn btn-ghost" target="_blank" rel="noopener">View on GitHub</a>
+      </div>
     </div>
   </div>
 </section>
 
 <footer>
   <div class="footer-inner">
-    <span class="footer-left">havn &mdash; Data in safe waters</span>
+    <span class="footer-left">havn — Data in safe waters</span>
     <ul class="footer-links">
       <li><a href="./docs/">Docs</a></li>
-      <li><a href="https://github.com/chraltro/db" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="https://github.com/chraltro/havn" target="_blank" rel="noopener">GitHub</a></li>
       <li><a href="https://pypi.org/project/havn/" target="_blank" rel="noopener">PyPI</a></li>
     </ul>
   </div>
 </footer>
 
 <script>
-// Fade-in on scroll
-const observer = new IntersectionObserver((entries) => {
-  entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); observer.unobserve(e.target); } });
-}, { threshold: 0.15 });
-document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
+const obs = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); obs.unobserve(e.target); } });
+}, { threshold: 0.1 });
+document.querySelectorAll('.fade-up').forEach(el => obs.observe(el));
 </script>
 
 </body>
