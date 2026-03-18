@@ -539,6 +539,73 @@ SAMPLE_EXPLORE_NOTEBOOK = json.dumps({
 # CLAUDE.md — agent instructions
 # ---------------------------------------------------------------------------
 
+CURSORRULES_TEMPLATE = """\
+You are working on a havn data platform project. havn uses DuckDB + plain SQL transforms + Python ingest/export. All data in a single warehouse.duckdb file.
+
+# SQL models go in transform/ with comment-based config:
+# -- config: materialized=table, schema=silver
+# -- depends_on: bronze.customers
+# Folder name = default schema. No Jinja — plain SQL only.
+
+# Python scripts go in ingest/ or export/:
+# A DuckDB connection is available as `db` — just write top-level code.
+# Legacy `def run(db)` scripts are also supported.
+
+# Key commands:
+# havn transform        — build SQL models in dependency order
+# havn run <script>     — run an ingest or export script
+# havn stream <name>    — run a full pipeline
+# havn query "<sql>"    — run ad-hoc SQL queries
+# havn tables           — list warehouse tables
+# havn lint             — lint SQL (SQLFluff, DuckDB dialect)
+# havn serve            — start web UI on :3000
+
+# Code patterns:
+# - from __future__ import annotations in all Python files
+# - DuckDB connections: always try/finally with conn.close()
+# - Tests: pytest tests/ — uses real temp DuckDB, no mocks
+
+# Don't:
+# - Add Jinja/templating to SQL
+# - Mock DuckDB in tests
+# - Modify _dp_internal schema from user-facing code
+"""
+
+COPILOT_INSTRUCTIONS_TEMPLATE = """\
+## havn — Self-Hosted Data Platform
+
+havn uses DuckDB + plain SQL transforms + Python ingest/export. All data in a single `warehouse.duckdb` file. Data in safe waters.
+
+### SQL models go in `transform/` with comment-based config:
+
+```sql
+-- config: materialized=table, schema=silver
+-- depends_on: bronze.customers
+SELECT * FROM bronze.customers WHERE active = true
+```
+
+Folder name = default schema. No Jinja — plain SQL only.
+
+### Python scripts go in `ingest/` or `export/`:
+
+```python
+# A DuckDB connection is available as `db` — just write top-level code
+db.execute("CREATE OR REPLACE TABLE landing.x AS SELECT * FROM ...")
+```
+
+### Key commands: `havn transform`, `havn run <script>`, `havn query "<sql>"`, `havn lint`, `havn tables`, `havn serve`
+
+### Code patterns:
+- `from __future__ import annotations` in all Python files
+- DuckDB connections: always `try/finally` with `conn.close()`
+- Tests: `pytest tests/` — uses real temp DuckDB, no mocks
+
+### Don't:
+- Add Jinja/templating to SQL
+- Mock DuckDB in tests
+- Modify `_dp_internal` schema from user-facing code
+"""
+
 CLAUDE_MD_TEMPLATE = """\
 # CLAUDE.md — Agent Instructions for {name}
 

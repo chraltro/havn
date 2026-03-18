@@ -54,6 +54,9 @@ havn = "havn.cli:app"
 [tool.hatch.build.targets.wheel]
 packages = ["src/havn"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"frontend/dist" = "havn/static"
+
 [tool.sqlfluff.core]
 dialect = "duckdb"
 templater = "raw"
