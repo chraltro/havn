@@ -42,7 +42,7 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
       const overview = await api.getOverview();
       setData(overview);
       if (overview.project_name) {
-        document.title = `${overview.project_name} — havn`;
+        document.title = `${overview.project_name} | havn`;
       }
       // Set hint trigger if warehouse has data but no runs
       const runs = overview.recent_runs || [];
