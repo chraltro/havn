@@ -221,10 +221,19 @@ async def run_stream_sse(
             dag_deps[nid] = set()
             ingest_node_ids.add(nid)
 
+        # Build a mapping from landing table names to their likely ingest script.
+        # Convention: landing.customers -> ingest:customers.py (match by table name)
+        # If no specific match, fall back to depending on ALL ingests.
+        _landing_to_ingest = {}
+        for ingest_nid in ingest_node_ids:
+            # "ingest:customers.py" -> stem "customers"
+            stem = nodes[ingest_nid]["path"].stem
+            _landing_to_ingest[f"landing.{stem}"] = ingest_nid
+
         # Transform nodes depend on:
         #   - Other transform nodes (if depends_on references a model in the DAG)
-        #   - ALL ingest nodes (since landing.* tables come from ingest scripts)
-        #     But only if the model references landing.* in depends_on
+        #   - Specific ingest scripts (mapped by landing table name)
+        #   - ALL ingests as fallback if a landing dep can't be mapped
         for model in ordered:
             nid = f"transform:{model.full_name}"
             nodes[nid] = {"type": "transform", "model": model, "name": model.full_name}
@@ -234,8 +243,13 @@ async def run_stream_sse(
                 if dep_nid in nodes:
                     deps.add(dep_nid)
                 elif dep.startswith("landing."):
-                    # This model depends on landing data — depends on ALL ingests
-                    deps.update(ingest_node_ids)
+                    # Try to map to specific ingest script
+                    mapped = _landing_to_ingest.get(dep)
+                    if mapped:
+                        deps.add(mapped)
+                    elif ingest_node_ids:
+                        # Can't determine which ingest — depend on all as fallback
+                        deps.update(ingest_node_ids)
             dag_deps[nid] = deps
 
         # Export nodes depend on all transforms
