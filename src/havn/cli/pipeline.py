@@ -126,7 +126,7 @@ def transform(
     console.print(f"[bold]Transform[/bold] [dim]({mode})[/dim]:")
 
     db_path = project_dir / config.database.path
-    conn = connect(db_path)
+    conn = connect(db_path, memory_limit=config.database.memory_limit, threads=config.database.threads)
 
     # Schema Sentinel: check for upstream schema changes before executing
     if config.sentinel.enabled:
