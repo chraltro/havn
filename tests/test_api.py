@@ -461,3 +461,31 @@ def test_run_cell_ingest_rejects_injection(client):
     data = resp.json()
     assert any(o["type"] == "error" for o in data["outputs"])
     assert any("Invalid" in o.get("text", "") for o in data["outputs"])
+
+
+# --- Validate endpoint tests ---
+
+
+def test_validate_endpoint_passes(client):
+    """POST /api/validate returns passed for valid models."""
+    resp = client.post("/api/validate")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "models_checked" in data
+    assert "errors" in data
+    assert "passed" in data
+    assert data["passed"] is True
+
+
+def test_validate_endpoint_catches_landing_schema(client, project):
+    """POST /api/validate catches models writing to landing schema."""
+    (project / "transform" / "landing").mkdir(parents=True, exist_ok=True)
+    (project / "transform" / "landing" / "bad.sql").write_text(
+        "-- config: materialized=table, schema=landing\n\nSELECT 1 AS id\n"
+    )
+    resp = client.post("/api/validate")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["passed"] is False
+    landing_errors = [e for e in data["errors"] if "landing" in e["message"] and e["severity"] == "error"]
+    assert len(landing_errors) >= 1

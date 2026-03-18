@@ -209,6 +209,22 @@ export default function QueryPanel({ addOutput }) {
     }
   }
 
+  async function explainQuery() {
+    if (!sql.trim()) return;
+    setQueryRunning(true);
+    setError(null);
+    try {
+      const data = await api.explainQuery(sql);
+      setResults({ columns: ["Query Plan"], rows: data.plan.split("\n").map((line) => [line]) });
+      addOutput("info", "EXPLAIN plan generated");
+    } catch (e) {
+      setError(e.message);
+      addOutput("error", `Explain error: ${e.message}`);
+    } finally {
+      setQueryRunning(false);
+    }
+  }
+
   function formatQuery() {
     if (!sql.trim()) return;
     setSql(fmt(sql));
@@ -405,6 +421,9 @@ export default function QueryPanel({ addOutput }) {
           <div style={st.toolbar}>
             <button onClick={runQuery} disabled={queryRunning || !sql.trim()} style={st.runBtn}>
               {queryRunning ? "Running..." : "Run"} <span style={st.shortcut}>Ctrl+Enter</span>
+            </button>
+            <button onClick={explainQuery} disabled={queryRunning || !sql.trim()} style={st.fmtBtn} title="Show query execution plan">
+              Explain
             </button>
             <button onClick={formatQuery} disabled={!sql.trim()} style={st.fmtBtn} title="Format SQL (Ctrl+Shift+F)">
               Format <span style={st.shortcut}>Ctrl+Shift+F</span>

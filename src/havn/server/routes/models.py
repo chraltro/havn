@@ -362,6 +362,61 @@ def create_model_endpoint(request: Request, req: CreateModelRequest) -> dict:
     }
 
 
+# --- Pre-build validation ---
+
+
+@router.post("/api/validate")
+def run_validate(request: Request, conn_opt: DbConnReadOnlyOptional = None) -> dict:
+    """Validate SQL models: dependencies, incremental config, schema conflicts.
+
+    Returns validation errors and warnings as JSON. Does not execute any SQL.
+    """
+    _require_permission(request, "read")
+    from havn.engine.seeds import discover_seeds
+    from havn.engine.transform import discover_models, validate_models
+
+    project_dir = _get_project_dir()
+    transform_dir = project_dir / "transform"
+    models = discover_models(transform_dir)
+    config = _get_config()
+
+    known_tables: set[str] = set()
+    seeds = discover_seeds(project_dir / "seeds")
+    for s in seeds:
+        known_tables.add(s["full_name"])
+    for src in config.sources:
+        for t in src.tables:
+            known_tables.add(f"{src.schema}.{t.name}")
+
+    source_columns: dict[str, set[str]] = {}
+    for src in config.sources:
+        for t in src.tables:
+            full = f"{src.schema}.{t.name}"
+            source_columns[full] = {c.name for c in t.columns}
+
+    landing_schemas: set[str] = {"landing"}
+    for src in config.sources:
+        landing_schemas.add(src.schema.lower())
+
+    errors = validate_models(
+        conn_opt, models,
+        known_tables=known_tables,
+        source_columns=source_columns,
+        landing_schemas=landing_schemas,
+    )
+
+    error_count = sum(1 for e in errors if e.severity == "error")
+
+    return {
+        "models_checked": len(models),
+        "errors": [
+            {"model": e.model, "severity": e.severity, "message": e.message}
+            for e in errors
+        ],
+        "passed": error_count == 0,
+    }
+
+
 # --- Compile-time validation ---
 
 

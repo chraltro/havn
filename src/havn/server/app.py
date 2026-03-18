@@ -64,10 +64,13 @@ from havn.server.routes.masking import router as masking_router  # noqa: E402
 from havn.server.routes.wiki import router as wiki_router  # noqa: E402
 from havn.server.routes.rewind import router as rewind_router  # noqa: E402
 from havn.server.routes.sentinel import router as sentinel_router  # noqa: E402
+from havn.server.routes.metrics import router as metrics_router  # noqa: E402
+from havn.server.routes.audit import router as audit_router  # noqa: E402
 from havn.server.routes.agent import (  # noqa: E402
     register_agent_websocket,
     router as agent_router,
 )
+from havn.server.routes.circuits import router as circuits_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(files_router)
@@ -85,7 +88,10 @@ app.include_router(masking_router)
 app.include_router(wiki_router)
 app.include_router(rewind_router)
 app.include_router(sentinel_router)
+app.include_router(metrics_router)
 app.include_router(agent_router)
+app.include_router(audit_router)
+app.include_router(circuits_router)
 
 # Register WebSocket endpoints (can't use APIRouter for WebSocket)
 register_websocket(app)

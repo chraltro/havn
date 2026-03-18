@@ -1,4 +1,4 @@
-"""Model analysis commands: promote, debug, impact, lineage."""
+"""Model analysis commands: validate, promote, debug, impact, lineage."""
 
 from __future__ import annotations
 
@@ -9,6 +9,118 @@ import typer
 from rich.table import Table
 
 from havn.cli import _resolve_project, app, console
+
+
+# --- validate ---
+
+
+@app.command()
+def validate(
+    project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+) -> None:
+    """Validate all SQL models before building. Catches errors at compile time.
+
+    Checks SQL syntax, dependency resolution, incremental model config,
+    and schema conflicts. Returns exit code 1 if any errors are found.
+    """
+    import json as json_mod
+
+    from havn.config import load_project
+    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.seeds import discover_seeds
+    from havn.engine.transform import discover_models, validate_models
+
+    project_dir = _resolve_project(project_dir)
+    config = load_project(project_dir)
+    transform_dir = project_dir / "transform"
+    db_path = project_dir / config.database.path
+
+    models = discover_models(transform_dir)
+    if not models:
+        console.print("[yellow]No models found in transform/[/yellow]")
+        raise typer.Exit(0)
+
+    # Build known tables from seeds and sources
+    known_tables: set[str] = set()
+    seeds = discover_seeds(project_dir / "seeds")
+    for s in seeds:
+        known_tables.add(s["full_name"])
+    for src in config.sources:
+        for t in src.tables:
+            known_tables.add(f"{src.schema}.{t.name}")
+
+    # Build source column info
+    source_columns: dict[str, set[str]] = {}
+    for src in config.sources:
+        for t in src.tables:
+            full = f"{src.schema}.{t.name}"
+            source_columns[full] = {c.name for c in t.columns}
+
+    # Collect landing schemas from source declarations
+    landing_schemas: set[str] = {"landing"}
+    for src in config.sources:
+        landing_schemas.add(src.schema.lower())
+
+    conn = None
+    if db_path.exists():
+        conn = connect(db_path)
+        ensure_meta_table(conn)
+
+    try:
+        errors = validate_models(
+            conn, models,
+            known_tables=known_tables,
+            source_columns=source_columns,
+            landing_schemas=landing_schemas,
+        )
+    finally:
+        if conn:
+            conn.close()
+
+    error_count = sum(1 for e in errors if e.severity == "error")
+    warning_count = sum(1 for e in errors if e.severity == "warning")
+
+    if json_output:
+        console.print(json_mod.dumps({
+            "models_checked": len(models),
+            "errors": [
+                {"model": e.model, "severity": e.severity, "message": e.message}
+                for e in errors
+            ],
+            "passed": error_count == 0,
+        }, indent=2))
+        if error_count > 0:
+            raise typer.Exit(1)
+        return
+
+    # Rich table output
+    console.print(f"\n[bold]Validating {len(models)} model(s)...[/bold]\n")
+
+    if errors:
+        table = Table(title="Validation Results")
+        table.add_column("Severity", style="bold", width=10)
+        table.add_column("Model", style="cyan")
+        table.add_column("Message")
+
+        for e in errors:
+            sev_style = "red" if e.severity == "error" else "yellow"
+            table.add_row(
+                f"[{sev_style}]{e.severity.upper()}[/{sev_style}]",
+                e.model,
+                e.message,
+            )
+        console.print(table)
+        console.print()
+
+    if error_count > 0:
+        console.print(f"[red bold]{error_count} error(s)[/red bold], {warning_count} warning(s)")
+        console.print("[dim]Fix errors before running transforms.[/dim]")
+        raise typer.Exit(1)
+    elif warning_count > 0:
+        console.print(f"[green]Validation passed[/green] with {warning_count} warning(s)")
+    else:
+        console.print(f"[green]Validation passed[/green] — {len(models)} model(s) OK")
 
 
 # --- promote ---

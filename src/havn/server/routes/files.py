@@ -10,6 +10,37 @@ from pydantic import BaseModel, Field
 
 from havn.server.deps import _detect_language, _get_project_dir, _require_permission
 
+import logging
+
+logger = logging.getLogger("havn.server")
+
+
+def _audit_file_action(request: Request, user: dict, action: str, resource: str, detail: str | None = None) -> None:
+    """Helper to log a file audit entry without failing the main operation."""
+    try:
+        from havn.engine.audit import log_audit
+        from havn.server.deps import _get_db_path
+        from havn.engine.database import connect as _audit_connect
+
+        db_path = _get_db_path()
+        if not db_path.exists():
+            return
+        conn = _audit_connect(db_path)
+        try:
+            client_ip = request.client.host if request.client else None
+            log_audit(
+                conn,
+                user=user.get("username", "anonymous"),
+                action=action,
+                resource=resource,
+                detail=detail,
+                ip_address=client_ip,
+            )
+        finally:
+            conn.close()
+    except Exception:
+        logger.debug("Failed to write audit log for %s", action, exc_info=True)
+
 router = APIRouter()
 
 
@@ -95,7 +126,7 @@ def read_file(request: Request, file_path: str) -> dict:
 @router.put("/api/files/{file_path:path}")
 def save_file(request: Request, file_path: str, req: SaveFileRequest) -> dict:
     """Save a file (creates it if it doesn't exist)."""
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
     project_dir = _get_project_dir()
     full_path = (project_dir / file_path).resolve()
     # Path traversal protection
@@ -106,6 +137,7 @@ def save_file(request: Request, file_path: str, req: SaveFileRequest) -> dict:
         raise HTTPException(400, f"Unsupported file type: {full_path.suffix}")
     full_path.parent.mkdir(parents=True, exist_ok=True)
     full_path.write_text(req.content, encoding="utf-8")
+    _audit_file_action(request, user, "file_edit", file_path)
     return {"path": file_path, "status": "saved"}
 
 
@@ -143,7 +175,7 @@ def delete_file(
     drop_object: bool = Query(False),
 ) -> dict:
     """Delete a file, optionally dropping the corresponding database object."""
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
     project_dir = _get_project_dir()
     full_path = (project_dir / file_path).resolve()
     # Path traversal protection
@@ -171,6 +203,7 @@ def delete_file(
     ):
         parent.rmdir()
         parent = parent.parent
+    _audit_file_action(request, user, "file_delete", file_path)
     result: dict = {"path": file_path, "status": "deleted"}
     if dropped:
         result["dropped"] = dropped
