@@ -7,13 +7,87 @@ from pathlib import Path
 import duckdb
 
 
-def connect(db_path: str | Path, read_only: bool = False) -> duckdb.DuckDBPyConnection:
-    """Open a DuckDB connection to the given path."""
+def connect(
+    db_path: str | Path,
+    read_only: bool = False,
+    memory_limit: str | None = None,
+    threads: int | None = None,
+) -> duckdb.DuckDBPyConnection:
+    """Open a DuckDB connection to the given path.
+
+    Args:
+        db_path: Path to the DuckDB database file.
+        read_only: Open in read-only mode.
+        memory_limit: Max memory DuckDB can use (e.g. "4GB", "75%", "512MB").
+                      Percentage values are resolved to a fraction of system RAM.
+        threads: Max number of DuckDB threads (default: all cores).
+    """
     db_path = str(db_path)
     conn = duckdb.connect(db_path, read_only=read_only)
     # Enable progress bar for long-running queries
     conn.execute("SET enable_progress_bar = true")
+
+    if memory_limit:
+        resolved = _resolve_memory_limit(memory_limit)
+        conn.execute(f"SET memory_limit = '{resolved}'")
+
+    if threads is not None and threads > 0:
+        conn.execute(f"SET threads = {threads}")
+
     return conn
+
+
+def _resolve_memory_limit(limit: str) -> str:
+    """Resolve a memory limit string. Supports percentage of system RAM."""
+    limit = limit.strip()
+    if limit.endswith("%"):
+        try:
+            import psutil
+            pct = float(limit[:-1]) / 100.0
+            total_bytes = psutil.virtual_memory().total
+            limit_bytes = int(total_bytes * pct)
+            return f"{limit_bytes // (1024 * 1024)}MB"
+        except ImportError:
+            # psutil not available — fall back to a conservative estimate
+            # or try platform-specific methods
+            try:
+                import os
+                if hasattr(os, "sysconf"):
+                    pages = os.sysconf("SC_PHYS_PAGES")
+                    page_size = os.sysconf("SC_PAGE_SIZE")
+                    total_bytes = pages * page_size
+                else:
+                    # Windows fallback
+                    import ctypes
+                    kernel32 = ctypes.windll.kernel32
+                    c_ulonglong = ctypes.c_ulonglong
+
+                    class MEMORYSTATUSEX(ctypes.Structure):
+                        _fields_ = [
+                            ("dwLength", ctypes.c_ulong),
+                            ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", c_ulonglong),
+                            ("ullAvailPhys", c_ulonglong),
+                            ("ullTotalPageFile", c_ulonglong),
+                            ("ullAvailPageFile", c_ulonglong),
+                            ("ullTotalVirtual", c_ulonglong),
+                            ("ullAvailVirtual", c_ulonglong),
+                            ("ullAvailExtendedVirtual", c_ulonglong),
+                        ]
+
+                    stat = MEMORYSTATUSEX()
+                    stat.dwLength = ctypes.sizeof(stat)
+                    kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+                    total_bytes = stat.ullTotalPhys
+
+                pct = float(limit[:-1]) / 100.0
+                limit_bytes = int(total_bytes * pct)
+                return f"{limit_bytes // (1024 * 1024)}MB"
+            except Exception:
+                # Last resort: assume 8GB system
+                pct = float(limit[:-1]) / 100.0
+                return f"{int(8192 * pct)}MB"
+    return limit
 
 
 def ensure_schemas(conn: duckdb.DuckDBPyConnection, schemas: list[str]) -> None:

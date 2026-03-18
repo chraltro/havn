@@ -14,6 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 class DatabaseConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     path: str = "warehouse.duckdb"
+    memory_limit: str | None = None  # e.g. "4GB", "75%", "512MB"
+    threads: int | None = None  # max DuckDB threads (default: all cores)
 
 
 class ConnectionConfig(BaseModel):
