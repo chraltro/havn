@@ -154,6 +154,7 @@ async def run_stream_sse(
 
         from havn.engine.database import log_run as _lr
         from havn.engine.runner import run_script as _run_script
+        from havn.server.deps import _get_db_resource_limits, _get_shared_conn
         from havn.engine.transform import discover_models as _dm, build_dag as _bd, validate_models as _vm
         from havn.engine.transform.discovery import _compute_upstream_hash as _cuh, _has_changed as _hc, _update_state as _us
         from havn.engine.transform.execution import execute_model as _em
@@ -271,7 +272,6 @@ async def run_stream_sse(
 
         # Use the server's shared connection (all endpoints share one connection,
         # each thread gets a cursor — this prevents file lock contention on Windows)
-        from havn.server.deps import _get_shared_conn
         conn = _get_shared_conn()
 
         # 5. Pre-build validation for transform models
@@ -298,7 +298,8 @@ async def run_stream_sse(
         result_q = _queue.Queue()
         sorter = TopologicalSorter(dag_deps)
         sorter.prepare()
-        max_workers = _threads or 4
+        _, _threads_cfg = _get_db_resource_limits()
+        max_workers = _threads_cfg or 4
         executor = ThreadPoolExecutor(max_workers=max_workers)
         active = 0  # number of in-flight tasks
 
