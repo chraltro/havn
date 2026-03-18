@@ -179,8 +179,11 @@ streams:
 @pytest.fixture
 def no_db_client(no_warehouse_project):
     import havn.server.app as server_app
+    from havn.server.deps import reset_shared_conn
+    reset_shared_conn()
     server_app.PROJECT_DIR = no_warehouse_project
-    return TestClient(server_app.app)
+    yield TestClient(server_app.app)
+    reset_shared_conn()
 
 
 def test_query_no_warehouse(no_db_client):
