@@ -131,11 +131,19 @@ def register_agent_websocket(app) -> None:
                         )
 
             except WebSocketDisconnect:
-                pass
+                log.debug("WebSocket %s disconnected", ws_id)
             except json.JSONDecodeError:
                 try:
                     await websocket.send_json(
                         {"type": "error", "message": "Invalid JSON"}
+                    )
+                except Exception:
+                    pass
+            except Exception as exc:
+                log.exception("WebSocket %s unhandled error: %s", ws_id, exc)
+                try:
+                    await websocket.send_json(
+                        {"type": "error", "message": str(exc)}
                     )
                 except Exception:
                     pass
@@ -187,6 +195,8 @@ async def _handle_start(
         permission_mode = "auto"
 
     model = _sanitize_model(data.get("model", ""))
+    log.info("Starting agent session: agent=%s, project=%s, mode=%s, model=%s",
+             agent_name, project_path, permission_mode, model)
     try:
         adapter.permission_mode = permission_mode
         adapter.model = model
