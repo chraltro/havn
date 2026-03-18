@@ -172,46 +172,82 @@ def _get_db_resource_limits() -> tuple[str | None, int | None]:
         return None, None
 
 
+# ---------------------------------------------------------------------------
+# Shared connection singleton
+# ---------------------------------------------------------------------------
+# DuckDB on Windows only allows one connection per file. All endpoints and
+# the SSE pipeline share a single connection, using .cursor() for thread-safe
+# concurrent access (per DuckDB docs).
+
+import threading
+
+_shared_conn: duckdb.DuckDBPyConnection | None = None
+_shared_conn_lock = threading.Lock()
+
+
+def _get_shared_conn() -> duckdb.DuckDBPyConnection:
+    """Get or create the shared DuckDB connection singleton."""
+    global _shared_conn
+    with _shared_conn_lock:
+        if _shared_conn is None:
+            db_path = _get_db_path()
+            if not db_path.exists():
+                raise HTTPException(404, "Warehouse database not found. Run a pipeline first.")
+            mem, threads = _get_db_resource_limits()
+            _shared_conn = connect(db_path, memory_limit=mem, threads=threads)
+            from havn.engine.database import ensure_meta_table
+            ensure_meta_table(_shared_conn)
+        return _shared_conn
+
+
+def reset_shared_conn() -> None:
+    """Close and reset the shared connection (e.g. after DB file changes)."""
+    global _shared_conn
+    with _shared_conn_lock:
+        if _shared_conn is not None:
+            try:
+                _shared_conn.close()
+            except Exception:
+                pass
+            _shared_conn = None
+
+
 def get_db() -> Generator[duckdb.DuckDBPyConnection, None, None]:
-    """FastAPI dependency: yields a read-write DuckDB connection."""
+    """FastAPI dependency: yields a cursor from the shared connection."""
     db_path = _get_db_path()
     _require_db(db_path)
-    mem, threads = _get_db_resource_limits()
-    conn = connect(db_path, memory_limit=mem, threads=threads)
+    conn = _get_shared_conn()
+    cursor = conn.cursor()
     try:
-        yield conn
+        yield cursor
     finally:
-        conn.close()
+        cursor.close()
 
 
 def get_db_readonly() -> Generator[duckdb.DuckDBPyConnection, None, None]:
-    """FastAPI dependency: yields a DuckDB connection for read operations.
-
-    Note: we intentionally avoid ``read_only=True`` because DuckDB's file
-    locking on Windows prevents opening a read-only connection while a
-    read-write connection is active (even within the same process).
-    """
+    """FastAPI dependency: yields a cursor for read operations."""
     db_path = _get_db_path()
     _require_db(db_path)
-    mem, threads = _get_db_resource_limits()
-    conn = connect(db_path, memory_limit=mem, threads=threads)
+    conn = _get_shared_conn()
+    cursor = conn.cursor()
     try:
-        yield conn
+        yield cursor
     finally:
-        conn.close()
+        cursor.close()
 
 
 def get_db_readonly_optional() -> Generator[duckdb.DuckDBPyConnection | None, None, None]:
-    """FastAPI dependency: yields a DuckDB connection, or None if DB doesn't exist."""
+    """FastAPI dependency: yields a cursor, or None if DB doesn't exist."""
     db_path = _get_db_path()
     if not db_path.exists():
         yield None
         return
-    conn = connect(db_path)
+    conn = _get_shared_conn()
+    cursor = conn.cursor()
     try:
-        yield conn
+        yield cursor
     finally:
-        conn.close()
+        cursor.close()
 
 
 DbConn = Annotated[duckdb.DuckDBPyConnection, Depends(get_db)]
