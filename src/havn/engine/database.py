@@ -89,6 +89,32 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
             created_at       TIMESTAMP DEFAULT current_timestamp
         )
     """)
+    # Audit log
+    try:
+        conn.execute("CREATE SEQUENCE IF NOT EXISTS _dp_internal.audit_log_seq START 1")
+    except Exception:
+        pass  # sequence already exists
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS _dp_internal.audit_log (
+            id INTEGER PRIMARY KEY DEFAULT nextval('_dp_internal.audit_log_seq'),
+            "user" VARCHAR NOT NULL,
+            action VARCHAR NOT NULL,
+            resource VARCHAR,
+            detail VARCHAR,
+            ip_address VARCHAR,
+            "timestamp" TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
+    # Slow query tracking
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS _dp_internal.slow_queries (
+            id           VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
+            query_text   VARCHAR NOT NULL,
+            duration_ms  BIGINT NOT NULL,
+            row_count    BIGINT DEFAULT 0,
+            executed_at  TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
     # Alert/notification log
     conn.execute("""
         CREATE TABLE IF NOT EXISTS _dp_internal.alert_log (
@@ -100,6 +126,20 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
             status      VARCHAR NOT NULL,
             sent_at     TIMESTAMP DEFAULT current_timestamp,
             error       VARCHAR
+        )
+    """)
+
+
+def ensure_circuit_state_table(conn: duckdb.DuckDBPyConnection) -> None:
+    """Create the circuit breaker state table if it doesn't exist."""
+    conn.execute("CREATE SCHEMA IF NOT EXISTS _dp_internal")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS _dp_internal.circuit_state (
+            name            VARCHAR PRIMARY KEY,
+            state           VARCHAR NOT NULL,
+            failure_count   INTEGER NOT NULL DEFAULT 0,
+            last_failure_at DOUBLE,
+            opens_at        DOUBLE
         )
     """)
 

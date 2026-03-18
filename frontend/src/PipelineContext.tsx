@@ -111,6 +111,7 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
     let hasError = false;
     let totalItems = 0;
     let currentItem = 0;
+    let startItem = 0;
 
     return new Promise<void>((resolve) => {
       const { abort } = api.runStreamSSE(name, force, (event, data) => {
@@ -121,11 +122,12 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
           case "step_start":
             break;
           case "model_start": {
+            startItem++;
             const action = data.action as string;
             const mName = data.name as string;
             const verb = action === "ingest" ? "Ingesting" : action === "export" ? "Exporting" : "Building";
-            const prefix = totalItems ? `(${currentItem + 1}/${totalItems}) ` : "";
-            addOutput("info", `${prefix}${verb} ${mName}...`);
+            const prefix = totalItems ? `(${startItem}/${totalItems}) ` : "";
+            addOutput("log", `${prefix}${verb} ${mName}...`);
             break;
           }
           case "model_end": {
@@ -157,7 +159,9 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
             }
 
             if (rowCount) totalRows += rowCount;
-            const level = status === "error" || status === "assertion_failed" ? "error" : "info";
+            const level = status === "error" || status === "assertion_failed" ? "error"
+              : status === "skipped" ? "log"
+              : "success";
             addOutput(level as OutputEntry["type"], msg);
 
             if (status !== "skipped") {

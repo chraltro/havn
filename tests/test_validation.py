@@ -115,6 +115,94 @@ class TestValidation:
         assert len(errors) == 0
 
 
+    def test_validate_depends_on_missing_from_dag_and_catalog(self, db, transform_dir):
+        """depends_on references that don't exist in DAG or catalog should error."""
+        (transform_dir / "bronze" / "orphan.sql").write_text(textwrap.dedent("""\
+            -- config: materialized=table, schema=bronze
+            -- depends_on: staging.ghost_table
+
+            SELECT 1 AS id
+        """))
+        models = discover_models(transform_dir)
+        errors = validate_models(db, models)
+        dep_errors = [e for e in errors if "ghost_table" in e.message and e.severity == "error"]
+        assert len(dep_errors) >= 1
+
+    def test_validate_incremental_no_unique_key_warns(self):
+        """Incremental model with delete+insert but no unique_key should warn."""
+        model = SQLModel(
+            path=Path("inc.sql"), name="inc", schema="silver", full_name="silver.inc",
+            sql="", query="SELECT 1 AS id", materialized="incremental",
+            depends_on=[], incremental_strategy="delete+insert", unique_key=None,
+        )
+        errors = validate_models(None, [model])
+        warnings = [e for e in errors if e.severity == "warning" and "unique_key" in e.message]
+        assert len(warnings) == 1
+
+    def test_validate_incremental_merge_no_unique_key_warns(self):
+        """Incremental model with merge strategy but no unique_key should warn."""
+        model = SQLModel(
+            path=Path("inc.sql"), name="inc", schema="silver", full_name="silver.inc",
+            sql="", query="SELECT 1 AS id", materialized="incremental",
+            depends_on=[], incremental_strategy="merge", unique_key=None,
+        )
+        errors = validate_models(None, [model])
+        warnings = [e for e in errors if e.severity == "warning" and "unique_key" in e.message]
+        assert len(warnings) == 1
+
+    def test_validate_incremental_with_unique_key_ok(self):
+        """Incremental model with unique_key set should not warn."""
+        model = SQLModel(
+            path=Path("inc.sql"), name="inc", schema="silver", full_name="silver.inc",
+            sql="", query="SELECT 1 AS id", materialized="incremental",
+            depends_on=[], incremental_strategy="delete+insert", unique_key="id",
+        )
+        errors = validate_models(None, [model])
+        warnings = [e for e in errors if "unique_key" in e.message]
+        assert len(warnings) == 0
+
+    def test_validate_incremental_append_no_unique_key_ok(self):
+        """Incremental model with append strategy needs no unique_key."""
+        model = SQLModel(
+            path=Path("inc.sql"), name="inc", schema="silver", full_name="silver.inc",
+            sql="", query="SELECT 1 AS id", materialized="incremental",
+            depends_on=[], incremental_strategy="append", unique_key=None,
+        )
+        errors = validate_models(None, [model])
+        warnings = [e for e in errors if "unique_key" in e.message]
+        assert len(warnings) == 0
+
+    def test_validate_model_writes_to_landing_schema_errors(self):
+        """Model targeting a landing schema should produce an error."""
+        model = SQLModel(
+            path=Path("bad.sql"), name="bad", schema="landing", full_name="landing.bad",
+            sql="", query="SELECT 1 AS id", materialized="table", depends_on=[],
+        )
+        errors = validate_models(None, [model])
+        landing_errors = [e for e in errors if e.severity == "error" and "landing" in e.message]
+        assert len(landing_errors) >= 1
+
+    def test_validate_model_writes_to_custom_landing_schema_errors(self):
+        """Model targeting a custom landing schema should error."""
+        model = SQLModel(
+            path=Path("bad.sql"), name="bad", schema="raw_data", full_name="raw_data.bad",
+            sql="", query="SELECT 1 AS id", materialized="table", depends_on=[],
+        )
+        errors = validate_models(None, [model], landing_schemas={"raw_data"})
+        landing_errors = [e for e in errors if e.severity == "error" and "raw_data" in e.message]
+        assert len(landing_errors) >= 1
+
+    def test_validate_model_in_bronze_schema_ok(self):
+        """Model in bronze schema should not trigger landing-schema error."""
+        model = SQLModel(
+            path=Path("ok.sql"), name="ok", schema="bronze", full_name="bronze.ok",
+            sql="", query="SELECT 1 AS id", materialized="table", depends_on=[],
+        )
+        errors = validate_models(None, [model])
+        landing_errors = [e for e in errors if "landing" in e.message.lower() and "overwrite" in e.message.lower()]
+        assert len(landing_errors) == 0
+
+
 class TestImpactAnalysis:
     def test_basic_impact(self):
         models = [
