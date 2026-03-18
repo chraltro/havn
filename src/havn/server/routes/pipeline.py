@@ -304,6 +304,11 @@ async def run_stream_sse(
             # See: https://duckdb.org/docs/stable/guides/python/multiple_threads
             local = conn.cursor()
             info = nodes[node_id]
+            # Emit start event NOW — when execution actually begins, not when queued
+            start_data = {"name": info["name"], "action": info["type"], "num": _node_number.get(node_id, 0)}
+            if info["type"] == "transform":
+                start_data["materialized"] = info["model"].materialized
+            result_q.put(("__start__", start_data))
             try:
                 if info["type"] == "ingest":
                     result = _run_script(local, info["path"], "ingest")
@@ -347,24 +352,6 @@ async def run_stream_sse(
             finally:
                 local.close()
 
-        def _submit_ready():
-            """Submit all ready nodes to the executor."""
-            nonlocal active
-            ready = list(sorter.get_ready())
-            for nid in ready:
-                if _is_cancelled():
-                    break
-                info = nodes[nid]
-                action = info["type"]
-                name = info["name"]
-                yield_data = {"nid": nid, "name": name, "action": action}
-                if action == "transform":
-                    yield_data["materialized"] = info["model"].materialized
-                result_q.put(("__start__", yield_data))
-                executor.submit(_exec_node, nid)
-                active += 1
-            return ready
-
         # Pending queue: nodes that are ready but not yet submitted
         pending = []
 
@@ -373,14 +360,10 @@ async def run_stream_sse(
             nonlocal active
             while pending and active < max_workers:
                 nid = pending.pop(0)
-                ni = nodes[nid]
+                # Assign number now (worker will use it for the start event)
                 if nid not in _node_number:
                     _node_number[nid] = _next_num[0]
                     _next_num[0] += 1
-                start_data = {"name": ni["name"], "action": ni["type"], "num": _node_number[nid]}
-                if ni["type"] == "transform":
-                    start_data["materialized"] = ni["model"].materialized
-                result_q.put(("__start__", start_data))
                 executor.submit(_exec_node, nid)
                 active += 1
 
