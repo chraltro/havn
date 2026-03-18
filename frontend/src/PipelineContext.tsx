@@ -1,15 +1,17 @@
-import React, { createContext, useContext, useState, useCallback } from "react";
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from "react";
 import { api, type OutputEntry, type RunSummary } from "./api";
 
 interface PipelineState {
   running: boolean;
   output: OutputEntry[];
   runSummary: RunSummary | null;
+  progress: number;
   addOutput: (type: OutputEntry["type"], message: string) => void;
   clearOutput: () => void;
   setRunSummary: (summary: RunSummary | null) => void;
   runTransformAll: (force?: boolean) => Promise<void>;
   runStream: (name: string, force?: boolean) => Promise<void>;
+  cancelPipeline: () => Promise<void>;
   runLint: (fix?: boolean) => Promise<void>;
   runCurrentScript: (scriptPath: string) => Promise<void>;
   runSingleModel: (modelName: string) => Promise<void>;
@@ -28,6 +30,33 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
   const [running, setRunning] = useState(false);
   const [output, setOutput] = useState<OutputEntry[]>([]);
   const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
+  const [progress, setProgress] = useState(0);
+
+  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimeRef = useRef<number>(0);
+  const firstLineMsgRef = useRef<string>("");
+
+  // Elapsed timer: update the first output line every second while running
+  useEffect(() => {
+    if (running && firstLineMsgRef.current) {
+      startTimeRef.current = Date.now();
+      elapsedRef.current = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+        setOutput((prev) => {
+          if (prev.length === 0) return prev;
+          const first = prev[0];
+          const updated = { ...first, message: `${firstLineMsgRef.current} ${elapsed}s` };
+          return [updated, ...prev.slice(1)];
+        });
+      }, 1000);
+    }
+    return () => {
+      if (elapsedRef.current) {
+        clearInterval(elapsedRef.current);
+        elapsedRef.current = null;
+      }
+    };
+  }, [running]);
 
   const addOutput = useCallback((type: OutputEntry["type"], message: string) => {
     const ts = new Date().toLocaleTimeString();
@@ -39,7 +68,9 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
   const runTransformAll = useCallback(async (force: boolean = false) => {
     setRunning(true);
     setRunSummary(null);
-    addOutput("info", `Running transform (force=${force})...`);
+    const firstMsg = `Running transform (force=${force})...`;
+    firstLineMsgRef.current = firstMsg;
+    addOutput("info", firstMsg);
     try {
       const data = await api.runTransform(null, force);
       const models: { name: string; result: string }[] = [];
@@ -62,6 +93,7 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
     } catch (e: unknown) {
       addOutput("error", (e as Error).message);
     } finally {
+      firstLineMsgRef.current = "";
       setRunning(false);
     }
   }, [addOutput, onTablesChanged, onPipelineComplete]);
@@ -69,74 +101,123 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
   const runStream = useCallback(async (name: string, force: boolean = false) => {
     setRunning(true);
     setRunSummary(null);
-    addOutput("info", `Running pipeline${force ? " (full refresh)" : ""}...`);
-    try {
-      const data = await api.runStream(name, force);
-      const models: { name: string; result: string }[] = [];
-      let totalRows = 0;
-      let totalDuration = 0;
-      let hasError = false;
+    setProgress(0);
+    const firstMsg = `Running pipeline${force ? " (full refresh)" : ""}...`;
+    firstLineMsgRef.current = firstMsg;
+    addOutput("info", firstMsg);
 
-      for (const step of data.steps || []) {
-        addOutput("info", `--- ${step.action} ---`);
-        if (step.action === "transform" || step.action === "seed") {
-          const results = step.results as Record<string, string>;
-          for (const [model, status] of Object.entries(results || {})) {
-            addOutput(status === "error" ? "error" : "info", `${model}: ${status}`);
-            models.push({ name: model, result: status });
-            if (status === "error") hasError = true;
+    const models: { name: string; result: string }[] = [];
+    let totalRows = 0;
+    let hasError = false;
+    let totalItems = 0;
+    let currentItem = 0;
+
+    return new Promise<void>((resolve) => {
+      const { abort } = api.runStreamSSE(name, force, (event, data) => {
+        switch (event) {
+          case "start":
+            totalItems = (data.total as number) || 0;
+            break;
+          case "step_start":
+            break;
+          case "model_start": {
+            const action = data.action as string;
+            const mName = data.name as string;
+            const verb = action === "ingest" ? "Ingesting" : action === "export" ? "Exporting" : "Building";
+            const prefix = totalItems ? `(${currentItem + 1}/${totalItems}) ` : "";
+            addOutput("info", `${prefix}${verb} ${mName}...`);
+            break;
           }
-        } else {
-          const results = step.results as Array<{
-            script?: string;
-            status: string;
-            error?: string;
-            log_output?: string;
-            rows_affected?: number;
-            duration_ms?: number;
-          }>;
-          for (const r of results || []) {
-            const label = r.script || step.action;
-            const msg = r.status === "error" ? `${label}: error — ${r.error}` : `${label}: success (${r.duration_ms}ms)`;
-            addOutput(r.status === "error" ? "error" : "info", msg);
-            if (r.log_output?.trim()) {
-              r.log_output.split("\n").filter((l: string) => l.trim()).forEach((l: string) => addOutput("log", l.trim()));
+          case "model_end": {
+            currentItem++;
+            if (totalItems > 0) setProgress(currentItem / totalItems);
+            const status = data.status as string;
+            const mName = data.name as string;
+            const action = data.action as string;
+            const dur = data.duration_ms as number | undefined;
+            const rows = data.row_count as number | undefined;
+            const rowsAff = data.rows_affected as number | undefined;
+            const err = data.error as string | undefined;
+
+            const prefix = totalItems ? `(${currentItem}/${totalItems}) ` : "";
+            let msg = "";
+            const durStr = dur ? `(${(dur / 1000).toFixed(1)}s)` : "";
+            const verb = action === "ingest" ? "Ingested" : action === "export" ? "Exported" : "Built";
+            const rowCount = rows || rowsAff || 0;
+            const rowStr = rowCount ? `${rowCount.toLocaleString()} rows` : "";
+            const details = [rowStr, durStr].filter(Boolean).join(" ");
+
+            if (status === "skipped") {
+              msg = `${prefix}Skipped ${mName} (no changes)`;
+            } else if (status === "error" || status === "assertion_failed") {
+              const cleanErr = err?.replace(/[\x00]/g, ".").replace(/\.+/g, ".") || "";
+              msg = `${prefix}Failed ${mName}${cleanErr ? ` — ${cleanErr}` : ""}`;
+            } else {
+              msg = `${prefix}${verb} ${mName}${details ? ` — ${details}` : ""}`;
             }
-            if (r.rows_affected) totalRows += r.rows_affected;
-            if (r.duration_ms) totalDuration += r.duration_ms;
-            if (r.status === "error") hasError = true;
+
+            if (rowCount) totalRows += rowCount;
+            const level = status === "error" || status === "assertion_failed" ? "error" : "info";
+            addOutput(level as OutputEntry["type"], msg);
+
+            if (status !== "skipped") {
+              models.push({ name: mName, result: status });
+            }
+            if (status === "error" || status === "assertion_failed") hasError = true;
+            break;
+          }
+          case "complete": {
+            const durS = (data.duration_seconds as number) || 0;
+            const pipelineStatus = data.status as string;
+            const isCancelled = pipelineStatus === "cancelled";
+            const level = isCancelled ? "warn" : "info";
+            addOutput(level as OutputEntry["type"], `Pipeline ${pipelineStatus} in ${durS}s`);
+            setProgress(1);
+            firstLineMsgRef.current = "";
+            onTablesChanged();
+
+            const summary: RunSummary = {
+              type: "stream",
+              status: isCancelled ? "failed" : hasError ? "failed" : "success",
+              models,
+              totalRows,
+              duration: Math.round(durS * 1000),
+              errors: models.filter((m) => m.result === "error").length,
+            };
+            setRunSummary(summary);
+            if (!hasError && !isCancelled) onPipelineComplete?.();
+            setRunning(false);
+            resolve();
+            break;
+          }
+          case "error": {
+            const errMsg = data.message as string;
+            firstLineMsgRef.current = "";
+            if (errMsg && (errMsg.includes("network error") || errMsg.includes("Failed to fetch") || errMsg.includes("AbortError"))) {
+              addOutput("warn", "Connection to server lost. The server may have been restarted.");
+            } else {
+              addOutput("error", errMsg || "An unknown error occurred");
+            }
+            setRunning(false);
+            resolve();
+            break;
           }
         }
-      }
+      });
 
-      const durationS = data.duration_seconds ? data.duration_seconds * 1000 : totalDuration;
-      addOutput("info", "Pipeline completed.");
-      onTablesChanged();
+      // Store abort for potential cancellation
+      void abort;
+    });
+  }, [addOutput, onTablesChanged, onPipelineComplete]);
 
-      const summary: RunSummary = {
-        type: "stream",
-        status: hasError ? "failed" : "success",
-        models,
-        totalRows,
-        duration: Math.round(durationS),
-        errors: models.filter((m) => m.result === "error").length,
-      };
-      setRunSummary(summary);
-      if (!hasError) onPipelineComplete?.();
+  const cancelPipeline = useCallback(async () => {
+    try {
+      await api.cancelStream();
+      addOutput("warn", "Cancellation requested...");
     } catch (e: unknown) {
       addOutput("error", (e as Error).message);
-      setRunSummary({
-        type: "stream",
-        status: "failed",
-        models: [],
-        totalRows: 0,
-        duration: 0,
-        errors: 1,
-      });
-    } finally {
-      setRunning(false);
     }
-  }, [addOutput, onTablesChanged, onPipelineComplete]);
+  }, [addOutput]);
 
   const runLint = useCallback(async (fix: boolean = false) => {
     setRunning(true);
@@ -263,11 +344,13 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
         running,
         output,
         runSummary,
+        progress,
         addOutput,
         clearOutput,
         setRunSummary,
         runTransformAll,
         runStream,
+        cancelPipeline,
         runLint,
         runCurrentScript,
         runSingleModel,

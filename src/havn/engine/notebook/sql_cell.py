@@ -93,13 +93,17 @@ def execute_sql_cell(
             # For queries that return results, render as table
             if result.description:
                 columns = [desc[0] for desc in result.description]
-                rows = result.fetchall()
+                display_limit = 500
+                rows = result.fetchmany(display_limit + 1)
+                truncated = len(rows) > display_limit
+                if truncated:
+                    rows = rows[:display_limit]
                 outputs.append({
                     "type": "table",
                     "columns": columns,
                     "rows": [[_serialize(v) for v in row] for row in rows],
                     "total_rows": len(rows),
-                    "truncated": False,
+                    "truncated": truncated,
                 })
             else:
                 # DDL/DML: report what happened

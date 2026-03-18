@@ -14,6 +14,9 @@ frontend/package-lock.json
 .pytest_cache/
 .env
 
+# Stress test project (generated, not part of package)
+stress_project/
+
 # LLM/agent artifacts
 .aider*
 .continue/

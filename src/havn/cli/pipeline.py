@@ -103,7 +103,7 @@ def seed(
 def transform(
     targets: Annotated[Optional[list[str]], typer.Argument(help="Specific models to run")] = None,
     force: Annotated[bool, typer.Option("--force", "-f", help="Force rebuild all models")] = False,
-    parallel: Annotated[bool, typer.Option("--parallel", help="Run independent models in parallel")] = False,
+    sequential: Annotated[bool, typer.Option("--sequential", help="Disable parallel execution; run models one at a time")] = False,
     workers: Annotated[int, typer.Option("--workers", "-w", help="Max parallel workers")] = 4,
     env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use (e.g. dev, prod)")] = None,
     skip_check: Annotated[bool, typer.Option("--skip-check", help="Skip pre-transform validation")] = False,
@@ -121,6 +121,7 @@ def transform(
     config = _load_config(project_dir, env)
     transform_dir = project_dir / "transform"
 
+    parallel = not sequential
     mode = "parallel" if parallel else "sequential"
     console.print(f"[bold]Transform[/bold] [dim]({mode})[/dim]:")
 

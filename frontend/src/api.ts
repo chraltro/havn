@@ -228,6 +228,56 @@ export const api = {
   listStreams: () => request<Record<string, StreamConfig>>("/streams"),
   runStream: (name: string, force: boolean = false) =>
     request<StreamResult>(`/stream/${name}?force=${force}`, { method: "POST" }),
+  cancelStream: () => request("/stream/cancel", { method: "POST" }),
+  runStreamSSE: (
+    name: string,
+    force: boolean = false,
+    onEvent: (event: string, data: Record<string, unknown>) => void,
+  ): { abort: () => void } => {
+    const controller = new AbortController();
+    const url = `${BASE}/stream/${name}/events?force=${force}`;
+    const headers: Record<string, string> = {};
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+
+    fetch(url, { signal: controller.signal, headers })
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text();
+          onEvent("error", { message: text || res.statusText });
+          return;
+        }
+        const reader = res.body?.getReader();
+        if (!reader) return;
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          let currentEvent = "";
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              currentEvent = line.slice(7).trim();
+            } else if (line.startsWith("data: ") && currentEvent) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                onEvent(currentEvent, data);
+              } catch { /* skip malformed */ }
+              currentEvent = "";
+            }
+          }
+        }
+      })
+      .catch((err) => {
+        if (err.name !== "AbortError") {
+          onEvent("error", { message: String(err) });
+        }
+      });
+
+    return { abort: () => controller.abort() };
+  },
 
   // Query
   runQuery: (sql: string) =>
