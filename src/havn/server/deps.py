@@ -84,6 +84,13 @@ def _get_config():
     return _get_config_cached()
 
 
+def _clear_config_cache():
+    """Clear the config cache so next call reloads from disk."""
+    _config_cache["config"] = None
+    _config_cache["mtime"] = 0.0
+    _config_cache["path"] = None
+
+
 def _get_db_path() -> Path:
     config = _get_config()
     return _get_project_dir() / config.database.path
