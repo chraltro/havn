@@ -34,6 +34,7 @@ def validate_models(
     models: list[SQLModel],
     known_tables: set[str] | None = None,
     source_columns: dict[str, set[str]] | None = None,
+    landing_schemas: set[str] | None = None,
 ) -> list[ValidationError]:
     """Validate all models without executing them.
 
@@ -42,12 +43,16 @@ def validate_models(
     - Referenced tables exist (in DAG, DuckDB catalog, sources.yml, or seeds)
     - Column references exist in upstream tables (when resolvable)
     - Ambiguous column references (column in multiple upstream tables without qualifier)
+    - All depends_on references resolve to DAG models or existing catalog objects
+    - Incremental models have a unique_key when using merge/delete+insert strategy
+    - No model writes to a landing schema (would overwrite raw data)
 
     Args:
         conn: DuckDB connection for catalog lookups.
         models: List of SQL models to validate.
         known_tables: Additional known table names (e.g. from seeds, sources).
         source_columns: Column sets declared in sources.yml, keyed by table name.
+        landing_schemas: Schema names reserved for raw/landing data.
     """
     import sqlglot
     from sqlglot import exp
@@ -151,6 +156,45 @@ def validate_models(
                         severity="warning",
                         message=f"Ambiguous column '{col_name}' found in multiple tables: {', '.join(found_in)}",
                     ))
+
+    # --- Additional pre-build validations ---
+
+    # Default landing schemas if not provided
+    _landing = {s.lower() for s in landing_schemas} if landing_schemas else {"landing"}
+
+    for model in models:
+        # 4. Check all depends_on references resolve
+        for dep in model.depends_on:
+            dep_lower = dep.lower()
+            if dep_lower not in all_known_tables:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=f"Dependency '{dep}' not found in DAG or database catalog",
+                ))
+
+        # 5. Incremental models should have unique_key for merge/delete+insert
+        if model.materialized == "incremental":
+            if model.incremental_strategy in ("merge", "delete+insert") and not model.unique_key:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="warning",
+                    message=(
+                        f"Incremental model uses '{model.incremental_strategy}' strategy "
+                        "but has no unique_key set — this may cause duplicate rows"
+                    ),
+                ))
+
+        # 6. Model must not write to a landing schema
+        if model.schema.lower() in _landing:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Model writes to landing schema '{model.schema}' — "
+                    "transforms must not overwrite raw data"
+                ),
+            ))
 
     return errors
 

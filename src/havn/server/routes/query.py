@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from havn.server.deps import (
+    DbConn,
     DbConnReadOnly,
     _require_permission,
     _serialize,
@@ -20,6 +22,10 @@ logger = logging.getLogger("havn.server")
 
 router = APIRouter()
 
+# --- Constants ---
+
+_SLOW_QUERY_THRESHOLD_MS = 5000
+
 
 # --- Pydantic models ---
 
@@ -30,9 +36,71 @@ class QueryRequest(BaseModel):
     offset: int = Field(default=0, ge=0)
 
 
-# --- Constants ---
+class ExplainRequest(BaseModel):
+    sql: str = Field(..., min_length=1, max_length=100_000)
+
 
 _QUERY_TIMEOUT_SECONDS = 30
+
+
+# --- Explain / Profile endpoints ---
+
+
+@router.post("/api/query/explain")
+def explain_query(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
+    """Run EXPLAIN on a SQL query and return the query plan as text."""
+    _require_permission(request, "read")
+    try:
+        result = conn.execute(f"EXPLAIN {req.sql}")
+        rows = result.fetchall()
+        plan = "\n".join(str(row[1]) if len(row) > 1 else str(row[0]) for row in rows)
+        return {"plan": plan}
+    except Exception as e:
+        logger.warning("EXPLAIN failed: %s", e)
+        raise HTTPException(400, str(e))
+
+
+@router.post("/api/query/profile")
+def profile_query(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
+    """Run EXPLAIN ANALYZE on a SQL query and return the profiled plan."""
+    _require_permission(request, "read")
+    try:
+        result = conn.execute(f"EXPLAIN ANALYZE {req.sql}")
+        rows = result.fetchall()
+        plan = "\n".join(str(row[1]) if len(row) > 1 else str(row[0]) for row in rows)
+        return {"plan": plan}
+    except Exception as e:
+        logger.warning("EXPLAIN ANALYZE failed: %s", e)
+        raise HTTPException(400, str(e))
+
+
+# --- Slow query metrics ---
+
+
+@router.get("/api/metrics/slow-queries")
+def get_slow_queries(request: Request, conn: DbConnReadOnly, limit: int = 50) -> list[dict]:
+    """Return recent slow queries from _dp_internal.slow_queries."""
+    _require_permission(request, "read")
+    try:
+        from havn.engine.database import ensure_meta_table
+        ensure_meta_table(conn)
+        rows = conn.execute(
+            "SELECT query_text, duration_ms, row_count, executed_at "
+            "FROM _dp_internal.slow_queries ORDER BY executed_at DESC LIMIT ?",
+            [min(limit, 500)],
+        ).fetchall()
+        return [
+            {
+                "query_text": r[0],
+                "duration_ms": r[1],
+                "row_count": r[2],
+                "executed_at": _serialize(r[3]),
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.warning("Failed to fetch slow queries: %s", e)
+        raise HTTPException(400, str(e))
 
 
 # --- Query endpoint ---
@@ -43,6 +111,27 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
     """Run an ad-hoc SQL query with a timeout."""
     user = _require_permission(request, "read")
     sql = req.sql
+
+    # Audit log the query execution
+    try:
+        from havn.engine.audit import log_audit
+        from havn.server.deps import _get_db_path
+        from havn.engine.database import connect as _audit_connect
+
+        _audit_conn = _audit_connect(_get_db_path())
+        try:
+            client_ip = request.client.host if request.client else None
+            log_audit(
+                _audit_conn,
+                user=user.get("username", "anonymous"),
+                action="query",
+                resource=sql[:500],
+                ip_address=client_ip,
+            )
+        finally:
+            _audit_conn.close()
+    except Exception:
+        logger.debug("Failed to write audit log for query", exc_info=True)
 
     # --- Masking SQL command interception ---
     sql_stripped = sql.strip()
@@ -136,6 +225,7 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
             except Exception as e:
                 query_error.append(e)
 
+        t_start = time.monotonic()
         thread = threading.Thread(target=_exec_query, daemon=True)
         thread.start()
         thread.join(timeout=_QUERY_TIMEOUT_SECONDS)
@@ -145,12 +235,32 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
             raise HTTPException(
                 408, f"Query timed out after {_QUERY_TIMEOUT_SECONDS}s"
             )
+        duration_ms = int((time.monotonic() - t_start) * 1000)
+
         if query_error:
             raise query_error[0]
         data = query_result["data"]
         data["rows"] = apply_masking(
             data["columns"], data["rows"], user["role"], conn,
         )
+
+        # Log slow queries
+        if duration_ms >= _SLOW_QUERY_THRESHOLD_MS:
+            try:
+                from havn.server.deps import _get_db_path
+                from havn.engine.database import connect as _connect, ensure_meta_table
+                conn_rw = _connect(_get_db_path())
+                try:
+                    ensure_meta_table(conn_rw)
+                    conn_rw.execute(
+                        "INSERT INTO _dp_internal.slow_queries (query_text, duration_ms, row_count) VALUES (?, ?, ?)",
+                        [req.sql[:10_000], duration_ms, len(data["rows"])],
+                    )
+                finally:
+                    conn_rw.close()
+            except Exception:
+                logger.debug("Failed to log slow query", exc_info=True)
+
         return data
     except HTTPException:
         raise
