@@ -254,8 +254,10 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
   const textareaRef = useRef(null);
   const isOpenRef = useRef(isOpen);
   const onFileChangedRef = useRef(onFileChanged);
+  const agentStatesRef = useRef(agentStates);
   isOpenRef.current = isOpen;
   onFileChangedRef.current = onFileChanged;
+  agentStatesRef.current = agentStates;
 
   // Helpers to update per-agent state
   const updateAgent = useCallback((agentId, updater) => {
@@ -284,7 +286,7 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
     socketsRef.current[agentId] = ws;
 
     ws.onopen = () => {
-      const st = agentStates[agentId] || {};
+      const st = agentStatesRef.current[agentId] || {};
       ws.send(JSON.stringify({ type: "start", agent: agentId, model: st.selectedModel || "" }));
     };
 
@@ -350,7 +352,7 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
     ws.onerror = () => {
       updateAgent(agentId, { isConnected: false });
     };
-  }, [agentStates, updateAgent]);
+  }, [updateAgent]);
 
   // Connect all available agents when sidebar opens
   useEffect(() => {
