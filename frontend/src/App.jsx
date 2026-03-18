@@ -131,7 +131,7 @@ function PipelineMenu({ running, streams, onRunStream, onTransform, onLint, onCo
   return (
     <div ref={ref} style={pmStyles.wrapper}>
       {running ? (
-        <button onClick={onCancel} style={{...pmStyles.btn, background: "var(--havn-error, #c0392b)", color: "#fff"}}>
+        <button onClick={onCancel} style={{...pmStyles.btn, background: "var(--havn-error, #c0392b)", color: "#fff", borderColor: "var(--havn-error, #c0392b)", borderRadius: "var(--havn-radius-lg)"}}>
           {"\u25A0"} Cancel
         </button>
       ) : (

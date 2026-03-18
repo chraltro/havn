@@ -104,10 +104,12 @@ def cancel_stream(request: Request) -> dict:
 
 @router.get("/api/stream/{stream_name}/events")
 async def run_stream_sse(
-    request: Request, stream_name: str, conn: DbConn, force: bool = False
+    request: Request, stream_name: str, force: bool = False
 ):
     """Run a stream with Server-Sent Events for real-time progress."""
     from fastapi.responses import StreamingResponse
+    from havn.engine.database import connect as _connect
+    from havn.server.deps import _get_db_path
 
     user = _require_permission(request, "execute")
     _cancel_flag.clear()
@@ -117,15 +119,19 @@ async def run_stream_sse(
     try:
         from havn.engine.audit import log_audit
 
-        client_ip = request.client.host if request.client else None
-        log_audit(
-            conn,
-            user=user.get("username", "anonymous"),
-            action="transform",
-            resource=stream_name,
-            detail=f"stream started (force={force})",
-            ip_address=client_ip,
-        )
+        audit_conn = _connect(_get_db_path())
+        try:
+            client_ip = request.client.host if request.client else None
+            log_audit(
+                audit_conn,
+                user=user.get("username", "anonymous"),
+                action="transform",
+                resource=stream_name,
+                detail=f"stream started (force={force})",
+                ip_address=client_ip,
+            )
+        finally:
+            audit_conn.close()
     except Exception:
         logger.debug("Failed to write audit log for stream start", exc_info=True)
 
@@ -134,13 +140,29 @@ async def run_stream_sse(
         raise HTTPException(404, f"Stream '{stream_name}' not found")
     stream_config = config.streams[stream_name]
 
+    # Resolve db_path before entering the generator
+    db_path_str = str(_get_db_path())
+
     def _generate():
         import json as _json
         import time as _time
+        import traceback as _tb
 
         def emit(event_type: str, data: dict):
             payload = _json.dumps(data)
             return f"event: {event_type}\ndata: {payload}\n\n"
+
+        # Create own connection — FastAPI dependency scope ends before generator runs
+        try:
+            from havn.engine.database import connect as _gen_connect, ensure_meta_table as _gen_emt
+            logger.info("SSE generator: opening connection to %s", db_path_str)
+            conn = _gen_connect(db_path_str)
+            _gen_emt(conn)
+            logger.info("SSE generator: connection opened successfully")
+        except Exception as e:
+            logger.error("SSE generator: failed to open connection: %s", e, exc_info=True)
+            yield emit("error", {"message": f"Failed to open database: {e}"})
+            return
 
         start = _time.perf_counter()
         has_error = False
@@ -190,23 +212,33 @@ async def run_stream_sse(
 
                 scripts = [s for s in scripts if not s.name.startswith("_")]
 
-                # Get db path for parallel connections
-                from havn.server.deps import _get_db_path
-                db_path_str = str(_get_db_path())
-
-                # Pre-create common schemas on the main connection so parallel
-                # scripts don't race on CREATE SCHEMA IF NOT EXISTS
+                # Pre-create common schemas so parallel scripts don't race
                 for schema in ("landing", "bronze", "silver", "gold"):
                     conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
 
+                # Close the main connection before parallel ingest to avoid
+                # DuckDB file lock contention on Windows
+                logger.info("Closing main connection for parallel ingest (%d scripts)", len(scripts))
+                conn.close()
+
                 def _run_ingest_script(script_path):
                     """Run a single ingest script with its own connection."""
+                    logger.info("Ingest worker opening connection for %s", script_path.name)
                     script_conn = _connect(db_path_str)
                     try:
                         result = _run_script(script_conn, script_path, "ingest")
+                        logger.info("Ingest worker finished %s: %s (%dms)",
+                                    script_path.name, result.get("status"), result.get("duration_ms", 0))
                         return script_path.name, result
+                    except Exception as e:
+                        logger.error("Ingest worker crashed on %s: %s", script_path.name, e, exc_info=True)
+                        return script_path.name, {
+                            "script": script_path.name, "status": "error",
+                            "duration_ms": 0, "log_output": "", "error": str(e),
+                        }
                     finally:
                         script_conn.close()
+                        logger.info("Ingest worker closed connection for %s", script_path.name)
 
                 # Emit start for all scripts
                 for script in scripts:
@@ -218,15 +250,25 @@ async def run_stream_sse(
                 step_error = False
 
                 def _run_and_enqueue(script_path):
-                    name, result = _run_ingest_script(script_path)
-                    result_queue.put((name, result))
+                    try:
+                        name, result = _run_ingest_script(script_path)
+                        result_queue.put((name, result))
+                    except Exception as e:
+                        logger.error("Ingest enqueue failed for %s: %s", script_path.name, e, exc_info=True)
+                        result_queue.put((script_path.name, {
+                            "script": script_path.name, "status": "error",
+                            "duration_ms": 0, "log_output": "", "error": str(e),
+                        }))
 
-                with ThreadPoolExecutor(max_workers=min(len(scripts), 4)) as executor:
+                max_w = min(len(scripts), 4)
+                logger.info("Starting parallel ingest: %d scripts, %d workers", len(scripts), max_w)
+                with ThreadPoolExecutor(max_workers=max_w) as executor:
                     for script in scripts:
                         executor.submit(_run_and_enqueue, script)
 
                     # Yield results as they arrive, with short poll to keep SSE alive
                     remaining = len(scripts)
+                    logger.info("Waiting for %d ingest results...", remaining)
                     while remaining > 0:
                         if _is_cancelled():
                             cancelled = True
@@ -235,10 +277,11 @@ async def run_stream_sse(
                         try:
                             script_name, result = result_queue.get(timeout=2)
                         except queue.Empty:
-                            # Send SSE comment as keepalive
                             yield ": keepalive\n\n"
                             continue
                         remaining -= 1
+                        logger.info("Ingest result received: %s (%s) — %d remaining",
+                                    script_name, result.get("status"), remaining)
                         if result.get("log_output"):
                             from havn.engine.secrets import mask_output
                             result["log_output"] = mask_output(result["log_output"], _get_project_dir())
@@ -254,6 +297,12 @@ async def run_stream_sse(
                             ingest_ran = True
                         if result["status"] == "error":
                             step_error = True
+
+                # Re-open the main connection for subsequent steps
+                logger.info("Reopening main connection after parallel ingest")
+                from havn.engine.database import connect as _reconnect
+                conn = _reconnect(db_path_str)
+                logger.info("Main connection reopened successfully")
 
                 if cancelled:
                     break
@@ -317,12 +366,15 @@ async def run_stream_sse(
                     model.upstream_hash = _cuh(model, model_map)
 
                 tiers = _bdt(models)
-                db_path_str = str(_get_db_path())
+                logger.info("Transform: %d models in %d tiers", len(ordered), len(tiers))
 
                 step_error = False
                 model_results = {}
 
                 for tier_idx, tier in enumerate(tiers):
+                    logger.info("Transform tier %d/%d: %d models (%s)",
+                                tier_idx + 1, len(tiers), len(tier),
+                                ", ".join(m.full_name for m in tier))
                     if _is_cancelled():
                         cancelled = True
                         break
@@ -513,6 +565,12 @@ async def run_stream_sse(
                 )
             finally:
                 _audit_conn.close()
+        except Exception:
+            pass
+
+        # Close the generator's connection
+        try:
+            conn.close()
         except Exception:
             pass
 
