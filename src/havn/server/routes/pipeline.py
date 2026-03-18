@@ -253,16 +253,10 @@ async def run_stream_sse(
 
         total_items = len(nodes)
 
-        # Assign persistent numbering to each node (topological order)
-        # so start and end messages use the same number
-        from graphlib import TopologicalSorter as _TS2
-        _numbering_sorter = _TS2(dag_deps)
+        # Numbering assigned at runtime as nodes START (not pre-computed).
+        # Each node gets a number when it begins, and keeps it when it ends.
         _node_number = {}
-        _n = 1
-        for nid in _numbering_sorter.static_order():
-            if nid in nodes:
-                _node_number[nid] = _n
-                _n += 1
+        _next_num = [1]  # mutable so closures can increment
 
         yield emit("start", {"stream": stream_name, "steps": 1, "total": total_items})
 
@@ -363,7 +357,7 @@ async def run_stream_sse(
                 info = nodes[nid]
                 action = info["type"]
                 name = info["name"]
-                yield_data = {"name": name, "action": action}
+                yield_data = {"nid": nid, "name": name, "action": action}
                 if action == "transform":
                     yield_data["materialized"] = info["model"].materialized
                 result_q.put(("__start__", yield_data))
@@ -375,7 +369,7 @@ async def run_stream_sse(
         initial = list(sorter.get_ready())
         for nid in initial:
             info = nodes[nid]
-            result_q.put(("__start__", {"name": info["name"], "action": info["type"], "num": _node_number.get(nid, 0)}))
+            result_q.put(("__start__", {"nid": nid, "name": info["name"], "action": info["type"]}))
             executor.submit(_exec_node, nid)
             active += 1
 
@@ -392,14 +386,24 @@ async def run_stream_sse(
                 yield ": keepalive\n\n"
                 continue
 
-            # Handle start events (emitted before execution)
+            # Handle start events — assign number at start time
             if node_id == "__start__":
+                nid = result.pop("nid", None)
+                if nid and nid not in _node_number:
+                    _node_number[nid] = _next_num[0]
+                    _next_num[0] += 1
+                result["num"] = _node_number.get(nid, 0)
                 yield emit("model_start", result)
                 continue
 
             active -= 1
             info = nodes[node_id]
             status = result.get("status", "error")
+
+            # Assign number if not already assigned (skipped nodes skip __start__)
+            if node_id not in _node_number:
+                _node_number[node_id] = _next_num[0]
+                _next_num[0] += 1
 
             # Emit result
             yield emit("model_end", {
@@ -411,7 +415,7 @@ async def run_stream_sse(
                 "rows_affected": result.get("rows_affected", 0),
                 "error": result.get("error"),
                 "materialized": info["model"].materialized if info["type"] == "transform" else None,
-                "num": _node_number.get(node_id, 0),
+                "num": _node_number[node_id],
             })
 
             if status in ("error", "assertion_failed"):
@@ -427,7 +431,7 @@ async def run_stream_sse(
                     if _is_cancelled():
                         break
                     ni = nodes[nid]
-                    start_data = {"name": ni["name"], "action": ni["type"], "num": _node_number.get(nid, 0)}
+                    start_data = {"nid": nid, "name": ni["name"], "action": ni["type"]}
                     if ni["type"] == "transform":
                         start_data["materialized"] = ni["model"].materialized
                     yield emit("model_start", start_data)
