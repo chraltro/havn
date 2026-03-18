@@ -101,7 +101,17 @@ from havn.server.routes.notebooks import _resolve_notebook  # noqa: E402, F401
 # Serve frontend
 # ---------------------------------------------------------------------------
 
-_FRONTEND_DIR = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
+def _find_frontend_dir() -> Path:
+    """Resolve the frontend static directory from the installed package."""
+    # 1. Check inside the installed package (pip install havn)
+    pkg_static = Path(__file__).resolve().parent.parent / "static"
+    if pkg_static.is_dir():
+        return pkg_static
+    # 2. Fallback to source tree layout (pip install -e . / development)
+    return Path(__file__).resolve().parent.parent.parent.parent / "frontend" / "dist"
+
+
+_FRONTEND_DIR = _find_frontend_dir()
 
 # Reserved paths that should NOT be caught by the SPA catch-all.
 _RESERVED_PATHS = {"docs", "redoc", "openapi.json"}

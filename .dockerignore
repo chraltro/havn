@@ -1,0 +1,12 @@
+.git
+__pycache__
+*.pyc
+.venv
+node_modules
+frontend/node_modules
+*.duckdb
+*.duckdb.wal
+.env
+dist/
+build/
+*.egg-info
