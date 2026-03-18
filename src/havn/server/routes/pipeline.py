@@ -403,22 +403,52 @@ async def run_stream_sse(
                             "materialized": model.materialized,
                         })
 
-                    # Run all models via _execute_single_model (each opens its own connection)
-                    # Use queue pattern so results stream as they complete
+                    # Run models in parallel using cursors on a shared connection
+                    # (DuckDB on Windows only allows one file connection, but
+                    #  multiple cursors on that connection run truly in parallel)
                     result_q = _queue.Queue()
+                    from havn.engine.transform.execution import execute_model as _em
+                    from havn.engine.transform.discovery import _update_state as _us
+                    from havn.engine.transform.quality import (
+                        run_assertions as _ra, _save_assertions as _sa,
+                        profile_model as _pm, _save_profile as _sp,
+                    )
+                    from havn.engine.transform.models import ModelResult as _MR
+                    from havn.engine.database import log_run as _lr
 
-                    def _run_and_enqueue_model(m):
+                    _shared_conn = _gen_connect(db_path_str, memory_limit=_mem_limit, threads=_threads)
+                    _gen_emt(_shared_conn)
+
+                    def _run_model_on_cursor(m):
                         try:
-                            name, result = _esm(db_path_str, m, force_transform, model_map)
-                            result_q.put((name, result))
+                            duration_ms, row_count = _em(_shared_conn, m)
+                            _us(_shared_conn, m, duration_ms, row_count)
+                            _lr(_shared_conn, "transform", m.full_name, "success", duration_ms, row_count)
+
+                            status = "built"
+                            if m.assertions:
+                                ar = _ra(_shared_conn, m)
+                                _sa(_shared_conn, m, ar)
+                                if any(not a.passed for a in ar):
+                                    status = "assertion_failed"
+
+                            if m.materialized in ("table", "incremental"):
+                                prof = _pm(_shared_conn, m)
+                                _sp(_shared_conn, m, prof)
+
+                            result_q.put((m.full_name, _MR(
+                                status=status, duration_ms=duration_ms, row_count=row_count,
+                            )))
                         except Exception as e:
-                            logger.error("Transform worker crashed on %s: %s", m.full_name, e)
-                            from havn.engine.transform.models import ModelResult
-                            result_q.put((m.full_name, ModelResult(status="error", error=str(e))))
+                            try:
+                                _lr(_shared_conn, "transform", m.full_name, "error", error=str(e))
+                            except Exception:
+                                pass
+                            result_q.put((m.full_name, _MR(status="error", error=str(e))))
 
                     with ThreadPoolExecutor(max_workers=min(len(to_build), 4)) as executor:
                         for model in to_build:
-                            executor.submit(_run_and_enqueue_model, model)
+                            executor.submit(_run_model_on_cursor, model)
 
                         remaining = len(to_build)
                         while remaining > 0:
@@ -444,6 +474,12 @@ async def run_stream_sse(
                             model_results[model_name] = mr.status
                             if mr.status in ("error", "assertion_failed"):
                                 step_error = True
+
+                    # Close shared connection after tier completes
+                    try:
+                        _shared_conn.close()
+                    except Exception:
+                        pass
 
                 if cancelled:
                     break
