@@ -111,6 +111,7 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
     let hasError = false;
     let totalItems = 0;
     let completedItems = 0;
+    const nodeStartTimes: Record<string, number> = {};
 
     return new Promise<void>((resolve) => {
       const { abort } = api.runStreamSSE(name, force, (event, data) => {
@@ -126,6 +127,7 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
             const num = data.num as number || 0;
             const verb = action === "ingest" ? "Ingesting" : action === "export" ? "Exporting" : "Building";
             const prefix = totalItems && num ? `(${num}/${totalItems}) ` : "";
+            nodeStartTimes[mName] = Date.now();
             addOutput("log", `${prefix}${verb} ${mName}...`);
             break;
           }
@@ -143,7 +145,10 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
 
             const prefix = totalItems && num ? `(${num}/${totalItems}) ` : "";
             let msg = "";
-            const durStr = dur ? `(${(dur / 1000).toFixed(1)}s)` : "";
+            // Use wall-clock time from when "Building..." was shown
+            const wallMs = nodeStartTimes[mName] ? Date.now() - nodeStartTimes[mName] : dur;
+            const durVal = wallMs || dur || 0;
+            const durStr = durVal ? `(${(durVal / 1000).toFixed(1)}s)` : "";
             const verb = action === "ingest" ? "Ingested" : action === "export" ? "Exported" : "Built";
             const rowCount = rows || rowsAff || 0;
             const rowStr = rowCount ? `${rowCount.toLocaleString()} rows` : "";
