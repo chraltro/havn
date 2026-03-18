@@ -110,8 +110,7 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
     let totalRows = 0;
     let hasError = false;
     let totalItems = 0;
-    let currentItem = 0;
-    let startItem = 0;
+    let completedItems = 0;
 
     return new Promise<void>((resolve) => {
       const { abort } = api.runStreamSSE(name, force, (event, data) => {
@@ -122,17 +121,17 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
           case "step_start":
             break;
           case "model_start": {
-            startItem++;
             const action = data.action as string;
             const mName = data.name as string;
+            const num = data.num as number || 0;
             const verb = action === "ingest" ? "Ingesting" : action === "export" ? "Exporting" : "Building";
-            const prefix = totalItems ? `(${startItem}/${totalItems}) ` : "";
+            const prefix = totalItems && num ? `(${num}/${totalItems}) ` : "";
             addOutput("log", `${prefix}${verb} ${mName}...`);
             break;
           }
           case "model_end": {
-            currentItem++;
-            if (totalItems > 0) setProgress(currentItem / totalItems);
+            completedItems++;
+            if (totalItems > 0) setProgress(completedItems / totalItems);
             const status = data.status as string;
             const mName = data.name as string;
             const action = data.action as string;
@@ -140,8 +139,9 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
             const rows = data.row_count as number | undefined;
             const rowsAff = data.rows_affected as number | undefined;
             const err = data.error as string | undefined;
+            const num = data.num as number || 0;
 
-            const prefix = totalItems ? `(${currentItem}/${totalItems}) ` : "";
+            const prefix = totalItems && num ? `(${num}/${totalItems}) ` : "";
             let msg = "";
             const durStr = dur ? `(${(dur / 1000).toFixed(1)}s)` : "";
             const verb = action === "ingest" ? "Ingested" : action === "export" ? "Exported" : "Built";
