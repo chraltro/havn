@@ -111,14 +111,14 @@ havn seed [--force] [--schema NAME] [--env NAME] [--project PATH]
 Build SQL models in dependency order.
 
 ```bash
-havn transform [TARGETS...] [--force] [--parallel] [--workers N] [--env NAME] [--skip-check] [--project PATH]
+havn transform [TARGETS...] [--force] [--sequential] [--workers N] [--env NAME] [--skip-check] [--project PATH]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `TARGETS` | all | Specific models to build |
 | `--force, -f` | false | Rebuild all (ignore change detection) |
-| `--parallel` | false | Run independent models concurrently |
+| `--sequential` | false | Disable parallel execution; run models one at a time |
 | `--workers, -w` | 4 | Max parallel workers |
 | `--env, -e` | none | Environment override |
 | `--skip-check` | false | Skip pre-transform validation |

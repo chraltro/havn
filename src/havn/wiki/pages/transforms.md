@@ -151,11 +151,17 @@ Builds only the specified models (and their upstream dependencies if needed).
 
 ### Parallel Execution
 
+Parallel execution is enabled by default. Models at the same level in the DAG (no dependencies between them) execute concurrently. To control the number of workers:
+
 ```bash
-havn transform --parallel --workers 4
+havn transform --workers 8
 ```
 
-Runs independent models concurrently. Models at the same level in the DAG (no dependencies between them) execute in parallel.
+To disable parallel execution and run models sequentially:
+
+```bash
+havn transform --sequential
+```
 
 ### Environment Override
 

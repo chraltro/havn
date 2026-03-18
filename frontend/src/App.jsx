@@ -109,7 +109,7 @@ for (const s of SECTIONS) {
 /* Pipeline Run Menu (replaces 5 separate action buttons)              */
 /* ------------------------------------------------------------------ */
 
-function PipelineMenu({ running, streams, onRunStream, onTransform, onLint, onContracts, addOutput }) {
+function PipelineMenu({ running, streams, onRunStream, onTransform, onLint, onContracts, onCancel, addOutput }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -130,16 +130,24 @@ function PipelineMenu({ running, streams, onRunStream, onTransform, onLint, onCo
 
   return (
     <div ref={ref} style={pmStyles.wrapper}>
-      <button onClick={defaultRun} disabled={running} style={pmStyles.btn}>
-        {"\u25B6"} Run
-      </button>
-      <button
-        onClick={() => setOpen(!open)}
-        disabled={running}
-        style={pmStyles.chevron}
-      >
-        {"\u25BE"}
-      </button>
+      {running ? (
+        <button onClick={onCancel} style={{...pmStyles.btn, background: "var(--havn-error, #c0392b)", color: "#fff"}}>
+          {"\u25A0"} Cancel
+        </button>
+      ) : (
+        <>
+          <button onClick={defaultRun} disabled={running} style={pmStyles.btn}>
+            {"\u25B6"} Run
+          </button>
+          <button
+            onClick={() => setOpen(!open)}
+            disabled={running}
+            style={pmStyles.chevron}
+          >
+            {"\u25BE"}
+          </button>
+        </>
+      )}
       {open && (
         <div style={pmStyles.menu}>
           <div style={pmStyles.groupLabel}>Pipeline</div>
@@ -322,7 +330,7 @@ const stStyles = {
 function AppContent() {
   const { currentUser, handleLogout } = useAuth();
   const { tables, files, streams, loadFiles, refreshAll } = useWarehouse();
-  const { running, output, runSummary, addOutput, clearOutput, setRunSummary, runTransformAll, runStream, runLint, runCurrentScript, runSingleModel, runContracts } = usePipeline();
+  const { running, output, runSummary, progress, addOutput, clearOutput, setRunSummary, runTransformAll, runStream, cancelPipeline, runLint, runCurrentScript, runSingleModel, runContracts } = usePipeline();
 
   // Editor state
   const [activeFile, setActiveFile] = useState(null);
@@ -752,6 +760,7 @@ function AppContent() {
             onTransform={runTransformAll}
             onLint={handleRunLintWithReload}
             onContracts={runContracts}
+            onCancel={cancelPipeline}
             addOutput={addOutput}
           />
           <button onClick={() => setShowNewDialog(true)} style={styles.btn}>+ New</button>
@@ -938,6 +947,11 @@ function AppContent() {
             onResizeStart={onOutputResizeStart}
           />
           <div data-havn-guide="output" style={{ flexShrink: 0 }}>
+            {running && progress > 0 && (
+              <div style={{ height: 3, background: "#1a1a2e", width: "100%" }}>
+                <div style={{ height: 3, background: "#2dd4bf", width: `${Math.round(progress * 100)}%`, transition: "width 0.3s ease" }} />
+              </div>
+            )}
             <OutputPanel output={output} onClear={clearOutput} height={outputHeight} onOpenFile={openFileAtLine} />
           </div>
         </div>
