@@ -118,20 +118,20 @@ async def run_stream_sse(
     # Audit pipeline start
     try:
         from havn.engine.audit import log_audit
+        from havn.server.deps import _get_shared_conn
 
-        audit_conn = _connect(_get_db_path())
-        try:
-            client_ip = request.client.host if request.client else None
-            log_audit(
-                audit_conn,
-                user=user.get("username", "anonymous"),
-                action="transform",
-                resource=stream_name,
-                detail=f"stream started (force={force})",
-                ip_address=client_ip,
-            )
-        finally:
-            audit_conn.close()
+        shared = _get_shared_conn()
+        audit_cur = shared.cursor()
+        client_ip = request.client.host if request.client else None
+        log_audit(
+            audit_cur,
+            user=user.get("username", "anonymous"),
+            action="transform",
+            resource=stream_name,
+            detail=f"stream started (force={force})",
+            ip_address=client_ip,
+        )
+        audit_cur.close()
     except Exception:
         logger.debug("Failed to write audit log for stream start", exc_info=True)
 
@@ -150,27 +150,18 @@ async def run_stream_sse(
         from concurrent.futures import ThreadPoolExecutor
         from graphlib import TopologicalSorter
 
-        from havn.engine.database import connect as _connect, ensure_meta_table as _emt, log_run as _lr
+        start = _time.perf_counter()
+
+        from havn.engine.database import log_run as _lr
         from havn.engine.runner import run_script as _run_script
         from havn.engine.transform import discover_models as _dm, build_dag as _bd, validate_models as _vm
         from havn.engine.transform.discovery import _compute_upstream_hash as _cuh, _has_changed as _hc, _update_state as _us
         from havn.engine.transform.execution import execute_model as _em
         from havn.engine.transform.quality import run_assertions as _ra, _save_assertions as _sa, profile_model as _pm, _save_profile as _sp
-        from havn.engine.transform.models import ModelResult as _MR
-        from havn.server.deps import _get_db_resource_limits
-
-        _mem_limit, _threads = _get_db_resource_limits()
-
-        def emit(event_type: str, data: dict):
-            return f"event: {_json.dumps(event_type)}\ndata: {_json.dumps(data)}\n\n".replace(
-                f"event: {_json.dumps(event_type)}", f"event: {event_type}"
-            )
 
         def emit(event_type: str, data: dict):
             payload = _json.dumps(data)
             return f"event: {event_type}\ndata: {payload}\n\n"
-
-        start = _time.perf_counter()
         has_error = False
         cancelled = False
         project_dir = _get_project_dir()
@@ -266,14 +257,18 @@ async def run_stream_sse(
             yield emit("complete", {"stream": stream_name, "status": "success", "duration_seconds": 0})
             return
 
+        # Use the server's shared connection (all endpoints share one connection,
+        # each thread gets a cursor — this prevents file lock contention on Windows)
+        from havn.server.deps import _get_shared_conn
+        conn = _get_shared_conn()
+
         # 5. Pre-build validation for transform models
         if models:
-            conn_val = _connect(db_path_str, memory_limit=_mem_limit, threads=_threads)
-            _emt(conn_val)
+            val_cur = conn.cursor()
             try:
-                _val_errors = _vm(conn_val, models)
+                _val_errors = _vm(val_cur, models)
             finally:
-                conn_val.close()
+                val_cur.close()
             for _ve in _val_errors:
                 yield emit("validation", {"model": _ve.model, "severity": _ve.severity, "message": _ve.message})
                 if _ve.severity == "error":
@@ -283,16 +278,10 @@ async def run_stream_sse(
                 return
 
         # 6. Pre-create schemas
-        conn_setup = _connect(db_path_str, memory_limit=_mem_limit, threads=_threads)
-        _emt(conn_setup)
+        schema_cur = conn.cursor()
         for schema in ("landing", "bronze", "silver", "gold"):
-            conn_setup.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
-        conn_setup.close()
-
-        # 7. Streaming DAG execution
-        # Open a single shared connection for all operations
-        conn = _connect(db_path_str, memory_limit=_mem_limit, threads=_threads)
-        _emt(conn)
+            schema_cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+        schema_cur.close()
 
         result_q = _queue.Queue()
         sorter = TopologicalSorter(dag_deps)
@@ -433,8 +422,11 @@ async def run_stream_sse(
             except Exception:
                 pass  # sorter exhausted
 
-        executor.shutdown(wait=False)
-        conn.close()
+        # Shut down executor (don't close conn — it's the shared singleton)
+        try:
+            executor.shutdown(wait=False)
+        except Exception:
+            pass
 
         duration_s = round(_time.perf_counter() - start, 1)
         if cancelled:
@@ -447,13 +439,11 @@ async def run_stream_sse(
         # Audit
         try:
             from havn.engine.audit import log_audit
-            audit_conn = _connect(db_path_str)
-            try:
-                log_audit(audit_conn, user=user.get("username", "anonymous"),
-                          action="transform", resource=stream_name,
-                          detail=f"stream completed: {status} in {duration_s}s")
-            finally:
-                audit_conn.close()
+            audit_cur = conn.cursor()
+            log_audit(audit_cur, user=user.get("username", "anonymous"),
+                      action="transform", resource=stream_name,
+                      detail=f"stream completed: {status} in {duration_s}s")
+            audit_cur.close()
         except Exception:
             pass
 
