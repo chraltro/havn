@@ -28,6 +28,18 @@ from havn.engine.database import ensure_meta_table, log_run
 console = Console()
 logger = logging.getLogger("havn.runner")
 
+# Lazy import to avoid circular deps; actual instance lives in circuit_breaker module
+_circuit_breaker = None
+
+
+def _get_circuit_breaker():
+    """Return the default CircuitBreaker instance (lazy import)."""
+    global _circuit_breaker
+    if _circuit_breaker is None:
+        from havn.engine.circuit_breaker import default_breaker
+        _circuit_breaker = default_breaker
+    return _circuit_breaker
+
 # Default script execution timeout in seconds (5 minutes)
 SCRIPT_TIMEOUT_SECONDS = 300
 
@@ -133,6 +145,7 @@ def run_script(
     script_path: Path,
     script_type: str = "ingest",
     timeout: int = SCRIPT_TIMEOUT_SECONDS,
+    use_circuit_breaker: bool = True,
 ) -> dict:
     """Run a single script (.py or .dpnb).
 
@@ -141,11 +154,36 @@ def run_script(
         script_path: Path to the .py or .dpnb file
         script_type: "ingest" or "export" (for logging)
         timeout: Maximum execution time in seconds
+        use_circuit_breaker: If True, wrap execution with the default circuit breaker
 
     Returns:
         Dict with keys: script, status, duration_ms, log_output, error
     """
     ensure_meta_table(conn)
+
+    # --- Circuit breaker guard ---
+    if use_circuit_breaker:
+        from havn.engine.circuit_breaker import CircuitOpenError
+        breaker = _get_circuit_breaker()
+        circuit_name = script_path.name
+        try:
+            state = breaker.get_state(circuit_name)
+        except Exception:
+            state = None
+
+        if state is not None:
+            from havn.engine.circuit_breaker import CircuitState
+            if state == CircuitState.OPEN:
+                msg = f"Circuit breaker OPEN for '{circuit_name}' — skipping execution"
+                console.print(f"  [yellow]circuit open[/yellow] [bold]{circuit_name}[/bold] — skipped")
+                logger.warning(msg)
+                return {
+                    "script": script_path.name,
+                    "status": "skipped",
+                    "duration_ms": 0,
+                    "log_output": msg,
+                    "error": msg,
+                }
 
     if not script_path.exists():
         raise FileNotFoundError(f"Script not found: {script_path}")
@@ -167,14 +205,20 @@ def run_script(
             )
             if result["status"] == "success":
                 console.print(f"  [green]done[/green] {label} ({duration_ms}ms)")
+                if use_circuit_breaker:
+                    _get_circuit_breaker()._record_success(script_path.name)
             else:
                 console.print(f"  [red]fail[/red] {label}: {result['error']}")
+                if use_circuit_breaker:
+                    _get_circuit_breaker()._record_failure(script_path.name)
             return result
         except Exception as e:
             duration_ms = int((time.perf_counter() - start) * 1000)
             error_msg = traceback.format_exc()
             log_run(conn, script_type, script_path.name, "error", duration_ms, error=str(e), log_output=error_msg)
             console.print(f"  [red]fail[/red] {label}: {e}")
+            if use_circuit_breaker:
+                _get_circuit_breaker()._record_failure(script_path.name)
             return {"script": script_path.name, "status": "error", "duration_ms": duration_ms, "log_output": error_msg, "error": str(e)}
 
     # .py scripts
@@ -222,6 +266,8 @@ def run_script(
         logger.warning("Script %s timed out after %ds", script_path.name, timeout)
         log_run(conn, script_type, script_path.name, "error", duration_ms, error=error_msg, log_output=log_output or None)
         console.print(f"  [red]timeout[/red] {label}: exceeded {timeout}s limit")
+        if use_circuit_breaker:
+            _get_circuit_breaker()._record_failure(script_path.name)
         return {"script": script_path.name, "status": "error", "duration_ms": duration_ms, "log_output": log_output, "error": error_msg}
 
     if exec_error:
@@ -234,6 +280,8 @@ def run_script(
         log_run(conn, script_type, script_path.name, "error", duration_ms, error=str(e), log_output=log_output)
         console.print(f"  [red]fail[/red] {label}: {e}")
 
+        if use_circuit_breaker:
+            _get_circuit_breaker()._record_failure(script_path.name)
         return {"script": script_path.name, "status": "error", "duration_ms": duration_ms, "log_output": log_output, "error": str(e)}
 
     duration_ms = int((time.perf_counter() - start) * 1000)
@@ -246,6 +294,8 @@ def run_script(
     rows_msg = f", {rows_affected} rows" if rows_affected else ""
     console.print(f"  [green]done[/green] {label} ({duration_ms}ms{rows_msg})")
 
+    if use_circuit_breaker:
+        _get_circuit_breaker()._record_success(script_path.name)
     return {"script": script_path.name, "status": "success", "duration_ms": duration_ms, "log_output": log_output, "error": None, "rows_affected": rows_affected}
 
 

@@ -112,6 +112,7 @@ export default function OutputPanel({ output, onClear, height = 180, onOpenFile 
               ...styles.indicator,
               background: entry.type === "error" ? "var(--havn-red)"
                 : entry.type === "warn" ? "var(--havn-yellow)"
+                : entry.type === "success" ? "var(--havn-accent)"
                 : "var(--havn-accent)",
             }} />
             {renderMessage(entry.message, typeStyles[entry.type] || typeStyles.info, onOpenFile)}
@@ -125,6 +126,7 @@ export default function OutputPanel({ output, onClear, height = 180, onOpenFile 
 
 const typeStyles = {
   info: { color: "var(--havn-text)" },
+  success: { color: "var(--havn-accent)" },
   error: { color: "var(--havn-red)" },
   warn: { color: "var(--havn-yellow)" },
   log: { color: "var(--havn-text-secondary)" },

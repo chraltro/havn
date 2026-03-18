@@ -95,7 +95,7 @@ export interface FileContent {
 }
 
 export interface OutputEntry {
-  type: "info" | "error" | "warn" | "log";
+  type: "info" | "error" | "warn" | "log" | "success";
   message: string;
   ts: string;
 }
@@ -282,6 +282,12 @@ export const api = {
   // Query
   runQuery: (sql: string) =>
     request<QueryResult>("/query", { method: "POST", body: JSON.stringify({ sql }) }),
+  explainQuery: (sql: string) =>
+    request<{ plan: string }>("/query/explain", { method: "POST", body: JSON.stringify({ sql }) }),
+  profileQuery: (sql: string) =>
+    request<{ plan: string }>("/query/profile", { method: "POST", body: JSON.stringify({ sql }) }),
+  getSlowQueries: (limit: number = 50) =>
+    request("/metrics/slow-queries?limit=" + limit),
 
   // Tables
   listTables: (schema: string | null = null) =>

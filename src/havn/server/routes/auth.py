@@ -59,6 +59,20 @@ def login(request: Request, req: LoginRequest, conn: DbConn) -> dict:
     from havn.engine.auth import authenticate
 
     token = authenticate(conn, req.username, req.password)
+    # Audit login attempt
+    try:
+        from havn.engine.audit import log_audit
+
+        log_audit(
+            conn,
+            user=req.username,
+            action="login",
+            resource="auth",
+            detail="success" if token else "failed",
+            ip_address=client_ip,
+        )
+    except Exception:
+        pass  # don't break login on audit failure
     if not token:
         raise HTTPException(401, "Invalid credentials")
     return {"token": token, "username": req.username}

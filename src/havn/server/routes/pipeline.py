@@ -109,9 +109,26 @@ async def run_stream_sse(
     """Run a stream with Server-Sent Events for real-time progress."""
     from fastapi.responses import StreamingResponse
 
-    _require_permission(request, "execute")
+    user = _require_permission(request, "execute")
     _cancel_flag.clear()
     logger.info("Stream SSE requested: %s (force=%s)", stream_name, force)
+
+    # Audit pipeline start
+    try:
+        from havn.engine.audit import log_audit
+
+        client_ip = request.client.host if request.client else None
+        log_audit(
+            conn,
+            user=user.get("username", "anonymous"),
+            action="transform",
+            resource=stream_name,
+            detail=f"stream started (force={force})",
+            ip_address=client_ip,
+        )
+    except Exception:
+        logger.debug("Failed to write audit log for stream start", exc_info=True)
+
     config = _get_config()
     if stream_name not in config.streams:
         raise HTTPException(404, f"Stream '{stream_name}' not found")
@@ -248,7 +265,7 @@ async def run_stream_sse(
             elif step.action == "transform":
                 from concurrent.futures import ThreadPoolExecutor, as_completed
                 from havn.engine.database import ensure_meta_table as _emt, connect as _connect
-                from havn.engine.transform import discover_models as _dm, build_dag as _bd
+                from havn.engine.transform import discover_models as _dm, build_dag as _bd, validate_models as _vm
                 from havn.engine.transform.discovery import (
                     _compute_upstream_hash as _cuh,
                     _has_changed as _hc,
@@ -268,6 +285,27 @@ async def run_stream_sse(
                 transform_dir = _get_project_dir() / "transform"
                 force_transform = force or ingest_ran
                 models = _dm(transform_dir)
+
+                # --- Pre-build validation ---
+                _val_errors = _vm(conn, models)
+                _val_has_error = False
+                for _ve in _val_errors:
+                    yield emit("validation", {
+                        "model": _ve.model,
+                        "severity": _ve.severity,
+                        "message": _ve.message,
+                    })
+                    if _ve.severity == "error":
+                        _val_has_error = True
+                if _val_has_error:
+                    yield emit("step_end", {
+                        "action": "transform",
+                        "results": {},
+                        "error": True,
+                        "validation_failed": True,
+                    })
+                    has_error = True
+                    break
 
                 if step.targets and step.targets != ["all"]:
                     target_set = set(step.targets)
@@ -458,6 +496,26 @@ async def run_stream_sse(
             status = "failed"
         else:
             status = "success"
+        # Audit pipeline completion
+        try:
+            from havn.engine.audit import log_audit
+            from havn.server.deps import _get_db_path
+            from havn.engine.database import connect as _audit_connect
+
+            _audit_conn = _audit_connect(_get_db_path())
+            try:
+                log_audit(
+                    _audit_conn,
+                    user=user.get("username", "anonymous"),
+                    action="transform",
+                    resource=stream_name,
+                    detail=f"stream completed: {status} in {duration_s}s",
+                )
+            finally:
+                _audit_conn.close()
+        except Exception:
+            pass
+
         yield emit("complete", {
             "stream": stream_name,
             "status": status,
@@ -479,8 +537,24 @@ def run_stream_endpoint(
     request: Request, stream_name: str, conn: DbConn, force: bool = False
 ) -> dict:
     """Run a full stream with retry support."""
-    _require_permission(request, "execute")
+    user = _require_permission(request, "execute")
     logger.info("Stream run requested: %s (force=%s)", stream_name, force)
+
+    # Audit pipeline start
+    try:
+        from havn.engine.audit import log_audit
+
+        client_ip = request.client.host if request.client else None
+        log_audit(
+            conn,
+            user=user.get("username", "anonymous"),
+            action="transform",
+            resource=stream_name,
+            detail=f"stream started (force={force})",
+            ip_address=client_ip,
+        )
+    except Exception:
+        logger.debug("Failed to write audit log for stream start", exc_info=True)
     config = _get_config()
     if stream_name not in config.streams:
         raise HTTPException(404, f"Stream '{stream_name}' not found")
