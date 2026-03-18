@@ -18,6 +18,8 @@ def init(
     """Scaffold a new data platform project."""
     from havn.templates import (
         CLAUDE_MD_TEMPLATE,
+        COPILOT_INSTRUCTIONS_TEMPLATE,
+        CURSORRULES_TEMPLATE,
         PROJECT_YML_TEMPLATE,
         SAMPLE_BRONZE_SQL,
         SAMPLE_CONTRACTS_YML,
@@ -66,8 +68,11 @@ def init(
     (target / ".gitignore").write_text(
         "warehouse.duckdb\nwarehouse.duckdb.wal\n__pycache__/\n*.pyc\n.venv/\n.env\noutput/\n_snapshots/\n"
     )
-    # Agent instructions for LLM tools (Claude Code, Cursor, etc.)
+    # Agent instructions for LLM tools (Claude Code, Cursor, GitHub Copilot)
     (target / "CLAUDE.md").write_text(CLAUDE_MD_TEMPLATE.format(name=name))
+    (target / ".cursorrules").write_text(CURSORRULES_TEMPLATE)
+    (target / ".github").mkdir(parents=True, exist_ok=True)
+    (target / ".github" / "copilot-instructions.md").write_text(COPILOT_INSTRUCTIONS_TEMPLATE)
 
     console.print(f"[green]Project '{name}' created at {target}[/green]")
     console.print()

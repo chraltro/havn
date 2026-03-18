@@ -1,0 +1,39 @@
+site_name: havn
+site_description: The open-source data platform that runs on your machine. DuckDB + SQL transforms + Python. Data in safe waters.
+site_url: https://chraltro.github.io/db
+repo_url: https://github.com/chraltro/db
+repo_name: chraltro/db
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: teal
+      accent: teal
+  font:
+    text: Outfit
+    code: JetBrains Mono
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - search.suggest
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Configuration: configuration.md
+  - Transforms: transforms.md
+  - Data Quality: quality.md
+  - Connectors: connectors.md
+  - Notebooks: notebooks.md
+  - Pipelines: pipelines.md
+  - CLI Reference: cli-reference.md
+  - API Reference: api-reference.md
+
+markdown_extensions:
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - admonition
+  - toc:
+      permalink: true

@@ -372,6 +372,8 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
 
 from havn.templates import (  # noqa: E402, F401
     CLAUDE_MD_TEMPLATE,
+    COPILOT_INSTRUCTIONS_TEMPLATE,
+    CURSORRULES_TEMPLATE,
     PROJECT_YML_TEMPLATE,
     SAMPLE_BRONZE_SQL,
     SAMPLE_CONTRACTS_YML,
