@@ -431,7 +431,10 @@ async def run_stream_sse(
                     if _is_cancelled():
                         break
                     ni = nodes[nid]
-                    start_data = {"nid": nid, "name": ni["name"], "action": ni["type"]}
+                    if nid not in _node_number:
+                        _node_number[nid] = _next_num[0]
+                        _next_num[0] += 1
+                    start_data = {"name": ni["name"], "action": ni["type"], "num": _node_number[nid]}
                     if ni["type"] == "transform":
                         start_data["materialized"] = ni["model"].materialized
                     yield emit("model_start", start_data)
