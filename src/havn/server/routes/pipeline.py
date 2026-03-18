@@ -288,11 +288,15 @@ async def run_stream_sse(
         active = 0  # number of in-flight tasks
 
         def _exec_node(node_id):
-            """Execute a single node and put result on queue."""
+            """Execute a single node on a thread-local cursor."""
+            # Each thread gets its own cursor from the shared connection
+            # This is DuckDB's recommended pattern for multi-threaded access
+            # See: https://duckdb.org/docs/stable/guides/python/multiple_threads
+            local = conn.cursor()
             info = nodes[node_id]
             try:
                 if info["type"] == "ingest":
-                    result = _run_script(conn, info["path"], "ingest")
+                    result = _run_script(local, info["path"], "ingest")
                     result_q.put((node_id, {
                         "status": result["status"],
                         "duration_ms": result.get("duration_ms", 0),
@@ -301,27 +305,27 @@ async def run_stream_sse(
                     }))
                 elif info["type"] == "transform":
                     m = info["model"]
-                    if not force and not _hc(conn, m):
+                    if not force and not _hc(local, m):
                         result_q.put((node_id, {"status": "skipped"}))
                         return
-                    duration_ms, row_count = _em(conn, m)
-                    _us(conn, m, duration_ms, row_count)
-                    _lr(conn, "transform", m.full_name, "success", duration_ms, row_count)
+                    duration_ms, row_count = _em(local, m)
+                    _us(local, m, duration_ms, row_count)
+                    _lr(local, "transform", m.full_name, "success", duration_ms, row_count)
                     status = "built"
                     if m.assertions:
-                        ar = _ra(conn, m)
-                        _sa(conn, m, ar)
+                        ar = _ra(local, m)
+                        _sa(local, m, ar)
                         if any(not a.passed for a in ar):
                             status = "assertion_failed"
                     if m.materialized in ("table", "incremental"):
-                        prof = _pm(conn, m)
-                        _sp(conn, m, prof)
+                        prof = _pm(local, m)
+                        _sp(local, m, prof)
                     result_q.put((node_id, {
                         "status": status, "duration_ms": duration_ms,
                         "row_count": row_count,
                     }))
                 elif info["type"] == "export":
-                    result = _run_script(conn, info["path"], "export")
+                    result = _run_script(local, info["path"], "export")
                     result_q.put((node_id, {
                         "status": result["status"],
                         "duration_ms": result.get("duration_ms", 0),
@@ -330,6 +334,8 @@ async def run_stream_sse(
             except Exception as e:
                 logger.error("Node %s failed: %s", node_id, e, exc_info=True)
                 result_q.put((node_id, {"status": "error", "error": str(e)}))
+            finally:
+                local.close()
 
         def _submit_ready():
             """Submit all ready nodes to the executor."""
