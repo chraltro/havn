@@ -19,6 +19,8 @@ description: "Earthquake analytics pipeline — a havn sample project"
 
 database:
   path: warehouse.duckdb
+  memory_limit: 75%
+  threads: 4
 
 connections: {{}}
   # Example: connect to a PostgreSQL database

@@ -555,6 +555,75 @@ function GuideSection({ onShowGuide }) {
   );
 }
 
+function ResourcesSection() {
+  const [memLimit, setMemLimit] = useState("");
+  const [threads, setThreads] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/config/database")
+      .then((r) => r.json())
+      .then((data) => {
+        setMemLimit(data.memory_limit || "");
+        setThreads(data.threads != null ? String(data.threads) : "");
+      })
+      .catch(() => {});
+  }, []);
+
+  const save = () => {
+    fetch("/api/config/database", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        memory_limit: memLimit || null,
+        threads: threads ? parseInt(threads, 10) : null,
+      }),
+    })
+      .then((r) => r.json())
+      .then(() => {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      })
+      .catch(() => {});
+  };
+
+  return (
+    <div style={sec.section}>
+      <h3 style={sec.heading}>Resources</h3>
+      <p style={sec.desc}>
+        Limit how much memory and CPU DuckDB can use. Useful for shared machines or large pipelines.
+        Accepts absolute values (<span style={sec.code}>4GB</span>, <span style={sec.code}>512MB</span>) or a
+        percentage of system RAM (<span style={sec.code}>75%</span>).
+      </p>
+      <div style={{ display: "flex", gap: "12px", alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div>
+          <label style={sec.label}>Memory limit</label>
+          <input
+            style={{ ...sec.input, width: "140px" }}
+            value={memLimit}
+            onChange={(e) => setMemLimit(e.target.value)}
+            placeholder="e.g. 75% or 4GB"
+          />
+        </div>
+        <div>
+          <label style={sec.label}>Max threads</label>
+          <input
+            style={{ ...sec.input, width: "80px" }}
+            type="number"
+            min="1"
+            value={threads}
+            onChange={(e) => setThreads(e.target.value)}
+            placeholder="auto"
+          />
+        </div>
+        <button onClick={save} style={sec.addBtn}>
+          {saved ? "Saved" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsPanel({ onShowGuide, showConfirm }) {
   return (
     <div style={sec.container}>
@@ -567,6 +636,7 @@ export default function SettingsPanel({ onShowGuide, showConfirm }) {
         <SecretsSection showConfirm={showConfirm} />
         <UsersSection showConfirm={showConfirm} />
         <AlertsSection />
+        <ResourcesSection />
       </div>
     </div>
   );

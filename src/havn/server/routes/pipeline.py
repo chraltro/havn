@@ -365,13 +365,28 @@ async def run_stream_sse(
                 active += 1
             return ready
 
+        # Pending queue: nodes that are ready but not yet submitted
+        pending = []
+
+        def _submit_batch():
+            """Submit pending nodes up to max_workers active limit."""
+            nonlocal active
+            while pending and active < max_workers:
+                nid = pending.pop(0)
+                ni = nodes[nid]
+                if nid not in _node_number:
+                    _node_number[nid] = _next_num[0]
+                    _next_num[0] += 1
+                start_data = {"name": ni["name"], "action": ni["type"], "num": _node_number[nid]}
+                if ni["type"] == "transform":
+                    start_data["materialized"] = ni["model"].materialized
+                result_q.put(("__start__", start_data))
+                executor.submit(_exec_node, nid)
+                active += 1
+
         # Kick off initial ready nodes (roots with no deps)
-        initial = list(sorter.get_ready())
-        for nid in initial:
-            info = nodes[nid]
-            result_q.put(("__start__", {"nid": nid, "name": info["name"], "action": info["type"]}))
-            executor.submit(_exec_node, nid)
-            active += 1
+        pending.extend(sorter.get_ready())
+        _submit_batch()
 
         # Process results as they arrive, submit newly ready nodes
         while sorter.is_active() or active > 0:
@@ -386,13 +401,8 @@ async def run_stream_sse(
                 yield ": keepalive\n\n"
                 continue
 
-            # Handle start events — assign number at start time
+            # Handle start events (numbering already assigned in _submit_batch)
             if node_id == "__start__":
-                nid = result.pop("nid", None)
-                if nid and nid not in _node_number:
-                    _node_number[nid] = _next_num[0]
-                    _next_num[0] += 1
-                result["num"] = _node_number.get(nid, 0)
                 yield emit("model_start", result)
                 continue
 
@@ -424,24 +434,12 @@ async def run_stream_sse(
             # Mark node as done — this may release dependent nodes
             sorter.done(node_id)
 
-            # Submit any newly ready nodes
+            # Add newly ready nodes to pending and submit up to max_workers
             try:
-                newly_ready = list(sorter.get_ready())
-                for nid in newly_ready:
-                    if _is_cancelled():
-                        break
-                    ni = nodes[nid]
-                    if nid not in _node_number:
-                        _node_number[nid] = _next_num[0]
-                        _next_num[0] += 1
-                    start_data = {"name": ni["name"], "action": ni["type"], "num": _node_number[nid]}
-                    if ni["type"] == "transform":
-                        start_data["materialized"] = ni["model"].materialized
-                    yield emit("model_start", start_data)
-                    executor.submit(_exec_node, nid)
-                    active += 1
+                pending.extend(sorter.get_ready())
             except Exception:
                 pass  # sorter exhausted
+            _submit_batch()
 
         # Shut down executor (don't close conn — it's the shared singleton)
         try:

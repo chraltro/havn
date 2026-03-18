@@ -191,6 +191,62 @@ def list_exposures_endpoint(request: Request) -> list[dict]:
 # --- Environment management ---
 
 
+# --- Database resource settings ---
+
+
+@router.get("/api/config/database")
+def get_database_config(request: Request) -> dict:
+    """Get database resource settings."""
+    _require_permission(request, "read")
+    config = _get_config()
+    return {
+        "memory_limit": config.database.memory_limit or "",
+        "threads": config.database.threads,
+    }
+
+
+class DatabaseConfigUpdate(BaseModel):
+    memory_limit: str | None = None
+    threads: int | None = None
+
+
+@router.put("/api/config/database")
+def update_database_config(request: Request, body: DatabaseConfigUpdate) -> dict:
+    """Update database resource settings in project.yml."""
+    _require_permission(request, "write")
+    import yaml
+
+    project_dir = _get_project_dir()
+    yml_path = project_dir / "project.yml"
+    if not yml_path.exists():
+        raise HTTPException(404, "project.yml not found")
+
+    raw = yaml.safe_load(yml_path.read_text()) or {}
+    if "database" not in raw:
+        raw["database"] = {}
+
+    if body.memory_limit is not None:
+        if body.memory_limit.strip():
+            raw["database"]["memory_limit"] = body.memory_limit.strip()
+        elif "memory_limit" in raw["database"]:
+            del raw["database"]["memory_limit"]
+
+    if body.threads is not None:
+        if body.threads > 0:
+            raw["database"]["threads"] = body.threads
+        elif "threads" in raw["database"]:
+            del raw["database"]["threads"]
+
+    yml_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False))
+
+    # Reset shared connection so new settings take effect
+    from havn.server.deps import reset_shared_conn, _clear_config_cache
+    reset_shared_conn()
+    _clear_config_cache()
+
+    return {"status": "ok", "memory_limit": body.memory_limit, "threads": body.threads}
+
+
 @router.get("/api/environment")
 def get_environment(request: Request) -> dict:
     """Get current environment and available environments."""

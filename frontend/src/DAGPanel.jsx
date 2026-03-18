@@ -447,13 +447,41 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, width, height);
 
+    // Compute full transitive lineage for hovered node
+    let lineageSet = null;
+    if (hovered) {
+      lineageSet = new Set([hovered]);
+      // Upstream (ancestors): follow edges backwards
+      const upQueue = [hovered];
+      while (upQueue.length > 0) {
+        const cur = upQueue.pop();
+        for (const e of edges) {
+          if (e.target === cur && !lineageSet.has(e.source)) {
+            lineageSet.add(e.source);
+            upQueue.push(e.source);
+          }
+        }
+      }
+      // Downstream (descendants): follow edges forwards
+      const downQueue = [hovered];
+      while (downQueue.length > 0) {
+        const cur = downQueue.pop();
+        for (const e of edges) {
+          if (e.source === cur && !lineageSet.has(e.target)) {
+            lineageSet.add(e.target);
+            downQueue.push(e.target);
+          }
+        }
+      }
+    }
+
     // Draw edges
     for (const e of edges) {
       const from = positions[e.source];
       const to = positions[e.target];
       if (!from || !to) continue;
 
-      const isHighlighted = hovered === e.source || hovered === e.target;
+      const isHighlighted = lineageSet ? (lineageSet.has(e.source) && lineageSet.has(e.target)) : false;
       ctx.strokeStyle = isHighlighted ? getCV("--havn-accent") : getCV("--havn-border-light");
       ctx.lineWidth = isHighlighted ? 2 : 1.5;
       ctx.globalAlpha = isHighlighted ? 1 : (hovered ? 0.3 : 0.8);
@@ -517,11 +545,8 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
       const snap = rewindMode ? currentSnaps[n.id] : null;
       const prevSnap = rewindMode ? prevSnaps[n.id] : null;
 
-      if (hovered && !isHovered) {
-        const connected = dag.edges.some(
-          (e) => (e.source === hovered && e.target === n.id) || (e.target === hovered && e.source === n.id)
-        );
-        ctx.globalAlpha = connected ? 1 : 0.35;
+      if (lineageSet && !isHovered) {
+        ctx.globalAlpha = lineageSet.has(n.id) ? 1 : 0.25;
       } else {
         ctx.globalAlpha = 1;
       }
