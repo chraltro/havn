@@ -1,4 +1,4 @@
-name: Docs
+name: Deploy Site
 
 on:
   push:
@@ -6,12 +6,19 @@ on:
     paths:
       - docs/**
       - mkdocs.yml
+      - landing/**
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,5 +30,24 @@ jobs:
       - name: Install MkDocs Material
         run: pip install mkdocs-material
 
+      - name: Build MkDocs
+        run: mkdocs build --site-dir _site/docs
+
+      - name: Copy landing page to root
+        run: cp landing/index.html _site/index.html
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
-        run: mkdocs gh-deploy --force
+        id: deploy
+        uses: actions/deploy-pages@v4
