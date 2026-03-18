@@ -163,11 +163,21 @@ def _require_db(db_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _get_db_resource_limits() -> tuple[str | None, int | None]:
+    """Get memory_limit and threads from project config."""
+    try:
+        config = _get_config()
+        return config.database.memory_limit, config.database.threads
+    except Exception:
+        return None, None
+
+
 def get_db() -> Generator[duckdb.DuckDBPyConnection, None, None]:
     """FastAPI dependency: yields a read-write DuckDB connection."""
     db_path = _get_db_path()
     _require_db(db_path)
-    conn = connect(db_path)
+    mem, threads = _get_db_resource_limits()
+    conn = connect(db_path, memory_limit=mem, threads=threads)
     try:
         yield conn
     finally:
@@ -183,7 +193,8 @@ def get_db_readonly() -> Generator[duckdb.DuckDBPyConnection, None, None]:
     """
     db_path = _get_db_path()
     _require_db(db_path)
-    conn = connect(db_path)
+    mem, threads = _get_db_resource_limits()
+    conn = connect(db_path, memory_limit=mem, threads=threads)
     try:
         yield conn
     finally:

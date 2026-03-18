@@ -152,17 +152,20 @@ async def run_stream_sse(
             payload = _json.dumps(data)
             return f"event: {event_type}\ndata: {payload}\n\n"
 
-        # Create own connection — FastAPI dependency scope ends before generator runs
-        try:
-            from havn.engine.database import connect as _gen_connect, ensure_meta_table as _gen_emt
-            logger.info("SSE generator: opening connection to %s", db_path_str)
-            conn = _gen_connect(db_path_str)
-            _gen_emt(conn)
-            logger.info("SSE generator: connection opened successfully")
-        except Exception as e:
-            logger.error("SSE generator: failed to open connection: %s", e, exc_info=True)
-            yield emit("error", {"message": f"Failed to open database: {e}"})
-            return
+        from contextlib import contextmanager
+        from havn.engine.database import connect as _gen_connect, ensure_meta_table as _gen_emt
+        from havn.server.deps import _get_db_resource_limits
+        _mem_limit, _threads = _get_db_resource_limits()
+
+        @contextmanager
+        def _db():
+            """Short-lived connection — open, use, close. Prevents file lock contention."""
+            c = _gen_connect(db_path_str, memory_limit=_mem_limit, threads=_threads)
+            _gen_emt(c)
+            try:
+                yield c
+            finally:
+                c.close()
 
         start = _time.perf_counter()
         has_error = False
@@ -213,13 +216,9 @@ async def run_stream_sse(
                 scripts = [s for s in scripts if not s.name.startswith("_")]
 
                 # Pre-create common schemas so parallel scripts don't race
-                for schema in ("landing", "bronze", "silver", "gold"):
-                    conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
-
-                # Close the main connection before parallel ingest to avoid
-                # DuckDB file lock contention on Windows
-                logger.info("Closing main connection for parallel ingest (%d scripts)", len(scripts))
-                conn.close()
+                with _db() as _schema_conn:
+                    for schema in ("landing", "bronze", "silver", "gold"):
+                        _schema_conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
 
                 def _run_ingest_script(script_path):
                     """Run a single ingest script with its own connection."""
@@ -298,12 +297,6 @@ async def run_stream_sse(
                         if result["status"] == "error":
                             step_error = True
 
-                # Re-open the main connection for subsequent steps
-                logger.info("Reopening main connection after parallel ingest")
-                from havn.engine.database import connect as _reconnect
-                conn = _reconnect(db_path_str)
-                logger.info("Main connection reopened successfully")
-
                 if cancelled:
                     break
                 yield emit("step_end", {"action": "ingest", "error": step_error})
@@ -312,31 +305,23 @@ async def run_stream_sse(
                     break
 
             elif step.action == "transform":
-                from concurrent.futures import ThreadPoolExecutor, as_completed
-                from havn.engine.database import ensure_meta_table as _emt, connect as _connect
+                from concurrent.futures import ThreadPoolExecutor
                 from havn.engine.transform import discover_models as _dm, build_dag as _bd, validate_models as _vm
                 from havn.engine.transform.discovery import (
                     _compute_upstream_hash as _cuh,
                     _has_changed as _hc,
-                    _update_state as _us,
                     build_dag_tiers as _bdt,
                 )
-                from havn.engine.transform.execution import execute_model as _em, _execute_single_model as _esm
-                from havn.engine.transform.quality import (
-                    run_assertions as _ra,
-                    _save_assertions as _sa,
-                    profile_model as _pm,
-                    _save_profile as _sp,
-                )
-                from havn.server.deps import _get_db_path
+                from havn.engine.transform.execution import _execute_single_model as _esm
+                import queue as _queue
 
-                _emt(conn)
                 transform_dir = _get_project_dir() / "transform"
                 force_transform = force or ingest_ran
                 models = _dm(transform_dir)
 
-                # --- Pre-build validation ---
-                _val_errors = _vm(conn, models)
+                # --- Pre-build validation (short-lived connection) ---
+                with _db() as _val_conn:
+                    _val_errors = _vm(_val_conn, models)
                 _val_has_error = False
                 for _ve in _val_errors:
                     yield emit("validation", {
@@ -393,18 +378,19 @@ async def run_stream_sse(
 
                     # Partition tier into skipped (unchanged) and needs-build
                     to_build = []
-                    for model in tier:
-                        changed = force_transform or _hc(conn, model)
-                        if not changed:
-                            yield emit("model_end", {
-                                "name": model.full_name,
-                                "action": "transform",
-                                "status": "skipped",
-                                "materialized": model.materialized,
-                            })
-                            model_results[model.full_name] = "skipped"
-                        else:
-                            to_build.append(model)
+                    with _db() as _chk_conn:
+                        for model in tier:
+                            changed = force_transform or _hc(_chk_conn, model)
+                            if not changed:
+                                yield emit("model_end", {
+                                    "name": model.full_name,
+                                    "action": "transform",
+                                    "status": "skipped",
+                                    "materialized": model.materialized,
+                                })
+                                model_results[model.full_name] = "skipped"
+                            else:
+                                to_build.append(model)
 
                     if not to_build:
                         continue
@@ -417,80 +403,45 @@ async def run_stream_sse(
                             "materialized": model.materialized,
                         })
 
-                    if len(to_build) == 1:
-                        # Single model — run on main connection
-                        model = to_build[0]
+                    # Run all models via _execute_single_model (each opens its own connection)
+                    # Use queue pattern so results stream as they complete
+                    result_q = _queue.Queue()
+
+                    def _run_and_enqueue_model(m):
                         try:
-                            duration_ms, row_count = _em(conn, model)
-                            _us(conn, model, duration_ms, row_count)
-                            from havn.engine.database import log_run as _lr
-                            _lr(conn, "transform", model.full_name, "success", duration_ms, row_count)
-
-                            assertion_status = "built"
-                            if model.assertions:
-                                ar_results = _ra(conn, model)
-                                _sa(conn, model, ar_results)
-                                if any(not ar.passed for ar in ar_results):
-                                    assertion_status = "assertion_failed"
-
-                            if model.materialized in ("table", "incremental"):
-                                profile = _pm(conn, model)
-                                _sp(conn, model, profile)
-
-                            yield emit("model_end", {
-                                "name": model.full_name,
-                                "action": "transform",
-                                "status": assertion_status,
-                                "duration_ms": duration_ms,
-                                "row_count": row_count,
-                                "materialized": model.materialized,
-                            })
-                            model_results[model.full_name] = assertion_status
-                            if assertion_status == "assertion_failed":
-                                step_error = True
+                            name, result = _esm(db_path_str, m, force_transform, model_map)
+                            result_q.put((name, result))
                         except Exception as e:
-                            from havn.engine.database import log_run as _lr
-                            _lr(conn, "transform", model.full_name, "error", error=str(e))
-                            yield emit("model_end", {
-                                "name": model.full_name,
-                                "action": "transform",
-                                "status": "error",
-                                "error": str(e),
-                                "materialized": model.materialized,
-                            })
-                            model_results[model.full_name] = "error"
-                            step_error = True
-                    else:
-                        # Multiple models in tier — run in parallel
-                        tier_completed = {}
-                        with ThreadPoolExecutor(max_workers=min(len(to_build), 4)) as executor:
-                            futures = {
-                                executor.submit(_esm, db_path_str, model, force_transform, model_map): model
-                                for model in to_build
-                            }
-                            for future in as_completed(futures):
-                                if _is_cancelled():
-                                    cancelled = True
-                                    executor.shutdown(wait=False, cancel_futures=True)
-                                    break
-                                model_name, model_result = future.result()
-                                tier_completed[model_name] = model_result
+                            logger.error("Transform worker crashed on %s: %s", m.full_name, e)
+                            from havn.engine.transform.models import ModelResult
+                            result_q.put((m.full_name, ModelResult(status="error", error=str(e))))
 
-                        # Emit results in original tier order
+                    with ThreadPoolExecutor(max_workers=min(len(to_build), 4)) as executor:
                         for model in to_build:
-                            mr = tier_completed.get(model.full_name)
-                            if not mr:
+                            executor.submit(_run_and_enqueue_model, model)
+
+                        remaining = len(to_build)
+                        while remaining > 0:
+                            if _is_cancelled():
+                                cancelled = True
+                                executor.shutdown(wait=False, cancel_futures=True)
+                                break
+                            try:
+                                model_name, mr = result_q.get(timeout=2)
+                            except _queue.Empty:
+                                yield ": keepalive\n\n"
                                 continue
+                            remaining -= 1
                             yield emit("model_end", {
-                                "name": model.full_name,
+                                "name": model_name,
                                 "action": "transform",
                                 "status": mr.status,
                                 "duration_ms": mr.duration_ms,
                                 "row_count": mr.row_count,
                                 "error": mr.error,
-                                "materialized": model.materialized,
+                                "materialized": model_map[model_name].materialized if model_name in model_map else "table",
                             })
-                            model_results[model.full_name] = mr.status
+                            model_results[model_name] = mr.status
                             if mr.status in ("error", "assertion_failed"):
                                 step_error = True
 
@@ -522,7 +473,8 @@ async def run_stream_sse(
                         cancelled = True
                         break
                     yield emit("model_start", {"name": script.name, "action": "export"})
-                    result = _run_script(conn, script, "export")
+                    with _db() as _exp_conn:
+                        result = _run_script(_exp_conn, script, "export")
                     script_results.append(result)
                     yield emit("model_end", {
                         "name": script.name,
@@ -551,11 +503,7 @@ async def run_stream_sse(
         # Audit pipeline completion
         try:
             from havn.engine.audit import log_audit
-            from havn.server.deps import _get_db_path
-            from havn.engine.database import connect as _audit_connect
-
-            _audit_conn = _audit_connect(_get_db_path())
-            try:
+            with _db() as _audit_conn:
                 log_audit(
                     _audit_conn,
                     user=user.get("username", "anonymous"),
@@ -563,14 +511,6 @@ async def run_stream_sse(
                     resource=stream_name,
                     detail=f"stream completed: {status} in {duration_s}s",
                 )
-            finally:
-                _audit_conn.close()
-        except Exception:
-            pass
-
-        # Close the generator's connection
-        try:
-            conn.close()
         except Exception:
             pass
 
