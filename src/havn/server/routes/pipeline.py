@@ -251,6 +251,18 @@ async def run_stream_sse(
             dag_deps[nid] = transform_node_ids.copy()
 
         total_items = len(nodes)
+
+        # Assign persistent numbering to each node (topological order)
+        # so start and end messages use the same number
+        from graphlib import TopologicalSorter as _TS2
+        _numbering_sorter = _TS2(dag_deps)
+        _node_number = {}
+        _n = 1
+        for nid in _numbering_sorter.static_order():
+            if nid in nodes:
+                _node_number[nid] = _n
+                _n += 1
+
         yield emit("start", {"stream": stream_name, "steps": 1, "total": total_items})
 
         if not nodes:
@@ -362,7 +374,7 @@ async def run_stream_sse(
         initial = list(sorter.get_ready())
         for nid in initial:
             info = nodes[nid]
-            result_q.put(("__start__", {"name": info["name"], "action": info["type"]}))
+            result_q.put(("__start__", {"name": info["name"], "action": info["type"], "num": _node_number.get(nid, 0)}))
             executor.submit(_exec_node, nid)
             active += 1
 
@@ -398,6 +410,7 @@ async def run_stream_sse(
                 "rows_affected": result.get("rows_affected", 0),
                 "error": result.get("error"),
                 "materialized": info["model"].materialized if info["type"] == "transform" else None,
+                "num": _node_number.get(node_id, 0),
             })
 
             if status in ("error", "assertion_failed"):
@@ -413,7 +426,7 @@ async def run_stream_sse(
                     if _is_cancelled():
                         break
                     ni = nodes[nid]
-                    start_data = {"name": ni["name"], "action": ni["type"]}
+                    start_data = {"name": ni["name"], "action": ni["type"], "num": _node_number.get(nid, 0)}
                     if ni["type"] == "transform":
                         start_data["materialized"] = ni["model"].materialized
                     yield emit("model_start", start_data)
