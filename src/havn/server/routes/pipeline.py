@@ -146,388 +146,275 @@ async def run_stream_sse(
     def _generate():
         import json as _json
         import time as _time
-        import traceback as _tb
+        import queue as _queue
+        from concurrent.futures import ThreadPoolExecutor
+        from graphlib import TopologicalSorter
+
+        from havn.engine.database import connect as _connect, ensure_meta_table as _emt, log_run as _lr
+        from havn.engine.runner import run_script as _run_script
+        from havn.engine.transform import discover_models as _dm, build_dag as _bd, validate_models as _vm
+        from havn.engine.transform.discovery import _compute_upstream_hash as _cuh, _has_changed as _hc, _update_state as _us
+        from havn.engine.transform.execution import execute_model as _em
+        from havn.engine.transform.quality import run_assertions as _ra, _save_assertions as _sa, profile_model as _pm, _save_profile as _sp
+        from havn.engine.transform.models import ModelResult as _MR
+        from havn.server.deps import _get_db_resource_limits
+
+        _mem_limit, _threads = _get_db_resource_limits()
+
+        def emit(event_type: str, data: dict):
+            return f"event: {_json.dumps(event_type)}\ndata: {_json.dumps(data)}\n\n".replace(
+                f"event: {_json.dumps(event_type)}", f"event: {event_type}"
+            )
 
         def emit(event_type: str, data: dict):
             payload = _json.dumps(data)
             return f"event: {event_type}\ndata: {payload}\n\n"
 
-        from contextlib import contextmanager
-        from havn.engine.database import connect as _gen_connect, ensure_meta_table as _gen_emt
-        from havn.server.deps import _get_db_resource_limits
-        _mem_limit, _threads = _get_db_resource_limits()
-
-        @contextmanager
-        def _db():
-            """Short-lived connection — open, use, close. Prevents file lock contention."""
-            c = _gen_connect(db_path_str, memory_limit=_mem_limit, threads=_threads)
-            _gen_emt(c)
-            try:
-                yield c
-            finally:
-                c.close()
-
         start = _time.perf_counter()
         has_error = False
         cancelled = False
-        ingest_ran = False
+        project_dir = _get_project_dir()
 
         def _is_cancelled():
             return _cancel_flag.is_set()
 
-        # Pre-compute total item count for progress numbering
-        total_items = 0
-        for _step in stream_config.steps:
-            if _step.action in ("ingest", "export"):
-                _dir = _get_project_dir() / _step.action
-                if _dir.exists():
-                    _files = [f for f in sorted(list(_dir.glob("*.py")) + list(_dir.glob("*.dpnb"))) if not f.name.startswith("_")]
-                    total_items += len(_files)
-            elif _step.action == "transform":
-                from havn.engine.transform import discover_models as _dm_count
-                total_items += len(_dm_count(_get_project_dir() / "transform"))
+        # ── Build unified DAG ──
+        # Nodes: "ingest:customers.py", "transform:bronze.customers", "export:report.py"
+        # Edges: transform models depend on their declared deps; all transforms
+        #        implicitly depend on ingest completing (since ingest populates landing.*).
+        #        Exports depend on all transforms.
 
-        yield emit("start", {"stream": stream_name, "steps": len(stream_config.steps), "total": total_items})
+        # 1. Discover ingest scripts
+        ingest_dir = project_dir / "ingest"
+        ingest_scripts = []
+        if ingest_dir.exists():
+            py = list(ingest_dir.glob("*.py"))
+            nb = list(ingest_dir.glob("*.dpnb"))
+            ingest_scripts = sorted([s for s in py + nb if not s.name.startswith("_")], key=lambda p: p.name)
 
-        for step_idx, step in enumerate(stream_config.steps):
-            if _is_cancelled():
-                cancelled = True
-                break
+        # 2. Discover transform models
+        transform_dir = project_dir / "transform"
+        models = _dm(transform_dir) if transform_dir.exists() else []
+        ordered = _bd(models) if models else []
+        model_map = {m.full_name: m for m in ordered}
+        for model in ordered:
+            model.upstream_hash = _cuh(model, model_map)
 
-            yield emit("step_start", {"action": step.action, "index": step_idx})
+        # 3. Discover export scripts
+        export_dir = project_dir / "export"
+        export_scripts = []
+        if export_dir.exists():
+            py = list(export_dir.glob("*.py"))
+            nb = list(export_dir.glob("*.dpnb"))
+            export_scripts = sorted([s for s in py + nb if not s.name.startswith("_")], key=lambda p: p.name)
 
-            if step.action == "ingest":
-                from concurrent.futures import ThreadPoolExecutor, as_completed
-                from havn.engine.runner import run_script as _run_script
-                from havn.engine.database import connect as _connect
+        # 4. Build node registry and DAG
+        # Node info: {node_id: {type, action, path/model, ...}}
+        nodes = {}
+        dag_deps = {}  # node_id -> set of dependency node_ids
 
-                ingest_dir = _get_project_dir() / "ingest"
-                if not ingest_dir.exists():
-                    yield emit("step_end", {"action": "ingest", "results": [], "error": False})
-                    continue
+        # Ingest nodes have no dependencies (they're roots)
+        ingest_node_ids = set()
+        for script in ingest_scripts:
+            nid = f"ingest:{script.name}"
+            nodes[nid] = {"type": "ingest", "path": script, "name": script.name}
+            dag_deps[nid] = set()
+            ingest_node_ids.add(nid)
 
-                py_scripts = list(ingest_dir.glob("*.py"))
-                nb_scripts = list(ingest_dir.glob("*.dpnb"))
-                scripts = sorted(py_scripts + nb_scripts, key=lambda p: p.name)
-                if step.targets and step.targets != ["all"]:
-                    target_set = {t.removesuffix(".py").removesuffix(".dpnb") for t in step.targets}
-                    scripts = [s for s in scripts if s.stem in target_set]
+        # Transform nodes depend on:
+        #   - Other transform nodes (if depends_on references a model in the DAG)
+        #   - ALL ingest nodes (since landing.* tables come from ingest scripts)
+        #     But only if the model references landing.* in depends_on
+        for model in ordered:
+            nid = f"transform:{model.full_name}"
+            nodes[nid] = {"type": "transform", "model": model, "name": model.full_name}
+            deps = set()
+            for dep in model.depends_on:
+                dep_nid = f"transform:{dep}"
+                if dep_nid in nodes:
+                    deps.add(dep_nid)
+                elif dep.startswith("landing."):
+                    # This model depends on landing data — depends on ALL ingests
+                    deps.update(ingest_node_ids)
+            dag_deps[nid] = deps
 
-                scripts = [s for s in scripts if not s.name.startswith("_")]
+        # Export nodes depend on all transforms
+        transform_node_ids = {f"transform:{m.full_name}" for m in ordered}
+        for script in export_scripts:
+            nid = f"export:{script.name}"
+            nodes[nid] = {"type": "export", "path": script, "name": script.name}
+            dag_deps[nid] = transform_node_ids.copy()
 
-                # Pre-create common schemas so parallel scripts don't race
-                with _db() as _schema_conn:
-                    for schema in ("landing", "bronze", "silver", "gold"):
-                        _schema_conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+        total_items = len(nodes)
+        yield emit("start", {"stream": stream_name, "steps": 1, "total": total_items})
 
-                def _run_ingest_script(script_path):
-                    """Run a single ingest script with its own connection."""
-                    logger.info("Ingest worker opening connection for %s", script_path.name)
-                    script_conn = _connect(db_path_str)
-                    try:
-                        result = _run_script(script_conn, script_path, "ingest")
-                        logger.info("Ingest worker finished %s: %s (%dms)",
-                                    script_path.name, result.get("status"), result.get("duration_ms", 0))
-                        return script_path.name, result
-                    except Exception as e:
-                        logger.error("Ingest worker crashed on %s: %s", script_path.name, e, exc_info=True)
-                        return script_path.name, {
-                            "script": script_path.name, "status": "error",
-                            "duration_ms": 0, "log_output": "", "error": str(e),
-                        }
-                    finally:
-                        script_conn.close()
-                        logger.info("Ingest worker closed connection for %s", script_path.name)
+        if not nodes:
+            yield emit("complete", {"stream": stream_name, "status": "success", "duration_seconds": 0})
+            return
 
-                # Emit start for all scripts
-                for script in scripts:
-                    yield emit("model_start", {"name": script.name, "action": "ingest"})
-
-                # Run all ingest scripts in parallel, emitting results as they complete
-                import queue
-                result_queue = queue.Queue()
-                step_error = False
-
-                def _run_and_enqueue(script_path):
-                    try:
-                        name, result = _run_ingest_script(script_path)
-                        result_queue.put((name, result))
-                    except Exception as e:
-                        logger.error("Ingest enqueue failed for %s: %s", script_path.name, e, exc_info=True)
-                        result_queue.put((script_path.name, {
-                            "script": script_path.name, "status": "error",
-                            "duration_ms": 0, "log_output": "", "error": str(e),
-                        }))
-
-                max_w = min(len(scripts), 4)
-                logger.info("Starting parallel ingest: %d scripts, %d workers", len(scripts), max_w)
-                with ThreadPoolExecutor(max_workers=max_w) as executor:
-                    for script in scripts:
-                        executor.submit(_run_and_enqueue, script)
-
-                    # Yield results as they arrive, with short poll to keep SSE alive
-                    remaining = len(scripts)
-                    logger.info("Waiting for %d ingest results...", remaining)
-                    while remaining > 0:
-                        if _is_cancelled():
-                            cancelled = True
-                            executor.shutdown(wait=False, cancel_futures=True)
-                            break
-                        try:
-                            script_name, result = result_queue.get(timeout=2)
-                        except queue.Empty:
-                            yield ": keepalive\n\n"
-                            continue
-                        remaining -= 1
-                        logger.info("Ingest result received: %s (%s) — %d remaining",
-                                    script_name, result.get("status"), remaining)
-                        if result.get("log_output"):
-                            from havn.engine.secrets import mask_output
-                            result["log_output"] = mask_output(result["log_output"], _get_project_dir())
-                        yield emit("model_end", {
-                            "name": script_name,
-                            "action": "ingest",
-                            "status": result["status"],
-                            "duration_ms": result.get("duration_ms", 0),
-                            "rows_affected": result.get("rows_affected", 0),
-                            "error": result.get("error"),
-                        })
-                        if result["status"] == "success":
-                            ingest_ran = True
-                        if result["status"] == "error":
-                            step_error = True
-
-                if cancelled:
-                    break
-                yield emit("step_end", {"action": "ingest", "error": step_error})
-                if step_error:
+        # 5. Pre-build validation for transform models
+        if models:
+            conn_val = _connect(db_path_str, memory_limit=_mem_limit, threads=_threads)
+            _emt(conn_val)
+            try:
+                _val_errors = _vm(conn_val, models)
+            finally:
+                conn_val.close()
+            for _ve in _val_errors:
+                yield emit("validation", {"model": _ve.model, "severity": _ve.severity, "message": _ve.message})
+                if _ve.severity == "error":
                     has_error = True
-                    break
+            if has_error:
+                yield emit("complete", {"stream": stream_name, "status": "failed", "duration_seconds": 0})
+                return
 
-            elif step.action == "transform":
-                from concurrent.futures import ThreadPoolExecutor
-                from havn.engine.transform import discover_models as _dm, build_dag as _bd, validate_models as _vm
-                from havn.engine.transform.discovery import (
-                    _compute_upstream_hash as _cuh,
-                    _has_changed as _hc,
-                    build_dag_tiers as _bdt,
-                )
-                from havn.engine.transform.execution import _execute_single_model as _esm
-                import queue as _queue
+        # 6. Pre-create schemas
+        conn_setup = _connect(db_path_str, memory_limit=_mem_limit, threads=_threads)
+        _emt(conn_setup)
+        for schema in ("landing", "bronze", "silver", "gold"):
+            conn_setup.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+        conn_setup.close()
 
-                transform_dir = _get_project_dir() / "transform"
-                force_transform = force or ingest_ran
-                models = _dm(transform_dir)
+        # 7. Streaming DAG execution
+        # Open a single shared connection for all operations
+        conn = _connect(db_path_str, memory_limit=_mem_limit, threads=_threads)
+        _emt(conn)
 
-                # --- Pre-build validation (short-lived connection) ---
-                with _db() as _val_conn:
-                    _val_errors = _vm(_val_conn, models)
-                _val_has_error = False
-                for _ve in _val_errors:
-                    yield emit("validation", {
-                        "model": _ve.model,
-                        "severity": _ve.severity,
-                        "message": _ve.message,
-                    })
-                    if _ve.severity == "error":
-                        _val_has_error = True
-                if _val_has_error:
-                    yield emit("step_end", {
-                        "action": "transform",
-                        "results": {},
-                        "error": True,
-                        "validation_failed": True,
-                    })
-                    has_error = True
-                    break
+        result_q = _queue.Queue()
+        sorter = TopologicalSorter(dag_deps)
+        sorter.prepare()
+        max_workers = _threads or 4
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        active = 0  # number of in-flight tasks
 
-                if step.targets and step.targets != ["all"]:
-                    target_set = set(step.targets)
-                    models = [m for m in models if m.full_name in target_set or m.name in target_set]
-
-                ordered = _bd(models)
-                model_map = {m.full_name: m for m in ordered}
-                for model in ordered:
-                    model.upstream_hash = _cuh(model, model_map)
-
-                tiers = _bdt(models)
-                logger.info("Transform: %d models in %d tiers", len(ordered), len(tiers))
-
-                step_error = False
-                model_results = {}
-
-                for tier_idx, tier in enumerate(tiers):
-                    logger.info("Transform tier %d/%d: %d models (%s)",
-                                tier_idx + 1, len(tiers), len(tier),
-                                ", ".join(m.full_name for m in tier))
-                    if _is_cancelled():
-                        cancelled = True
-                        break
-
-                    # Check if previous tier had blocking failures
-                    if any(s in ("error", "assertion_failed") for s in model_results.values()):
-                        for model in tier:
-                            yield emit("model_end", {
-                                "name": model.full_name,
-                                "action": "transform",
-                                "status": "skipped",
-                                "materialized": model.materialized,
-                            })
-                            model_results[model.full_name] = "skipped"
-                        continue
-
-                    # Partition tier into skipped (unchanged) and needs-build
-                    to_build = []
-                    with _db() as _chk_conn:
-                        for model in tier:
-                            changed = force_transform or _hc(_chk_conn, model)
-                            if not changed:
-                                yield emit("model_end", {
-                                    "name": model.full_name,
-                                    "action": "transform",
-                                    "status": "skipped",
-                                    "materialized": model.materialized,
-                                })
-                                model_results[model.full_name] = "skipped"
-                            else:
-                                to_build.append(model)
-
-                    if not to_build:
-                        continue
-
-                    # Emit start for all models in this tier
-                    for model in to_build:
-                        yield emit("model_start", {
-                            "name": model.full_name,
-                            "action": "transform",
-                            "materialized": model.materialized,
-                        })
-
-                    # Run models in parallel using cursors on a shared connection
-                    # (DuckDB on Windows only allows one file connection, but
-                    #  multiple cursors on that connection run truly in parallel)
-                    result_q = _queue.Queue()
-                    from havn.engine.transform.execution import execute_model as _em
-                    from havn.engine.transform.discovery import _update_state as _us
-                    from havn.engine.transform.quality import (
-                        run_assertions as _ra, _save_assertions as _sa,
-                        profile_model as _pm, _save_profile as _sp,
-                    )
-                    from havn.engine.transform.models import ModelResult as _MR
-                    from havn.engine.database import log_run as _lr
-
-                    _shared_conn = _gen_connect(db_path_str, memory_limit=_mem_limit, threads=_threads)
-                    _gen_emt(_shared_conn)
-
-                    def _run_model_on_cursor(m):
-                        try:
-                            duration_ms, row_count = _em(_shared_conn, m)
-                            _us(_shared_conn, m, duration_ms, row_count)
-                            _lr(_shared_conn, "transform", m.full_name, "success", duration_ms, row_count)
-
-                            status = "built"
-                            if m.assertions:
-                                ar = _ra(_shared_conn, m)
-                                _sa(_shared_conn, m, ar)
-                                if any(not a.passed for a in ar):
-                                    status = "assertion_failed"
-
-                            if m.materialized in ("table", "incremental"):
-                                prof = _pm(_shared_conn, m)
-                                _sp(_shared_conn, m, prof)
-
-                            result_q.put((m.full_name, _MR(
-                                status=status, duration_ms=duration_ms, row_count=row_count,
-                            )))
-                        except Exception as e:
-                            try:
-                                _lr(_shared_conn, "transform", m.full_name, "error", error=str(e))
-                            except Exception:
-                                pass
-                            result_q.put((m.full_name, _MR(status="error", error=str(e))))
-
-                    with ThreadPoolExecutor(max_workers=min(len(to_build), 4)) as executor:
-                        for model in to_build:
-                            executor.submit(_run_model_on_cursor, model)
-
-                        remaining = len(to_build)
-                        while remaining > 0:
-                            if _is_cancelled():
-                                cancelled = True
-                                executor.shutdown(wait=False, cancel_futures=True)
-                                break
-                            try:
-                                model_name, mr = result_q.get(timeout=2)
-                            except _queue.Empty:
-                                yield ": keepalive\n\n"
-                                continue
-                            remaining -= 1
-                            yield emit("model_end", {
-                                "name": model_name,
-                                "action": "transform",
-                                "status": mr.status,
-                                "duration_ms": mr.duration_ms,
-                                "row_count": mr.row_count,
-                                "error": mr.error,
-                                "materialized": model_map[model_name].materialized if model_name in model_map else "table",
-                            })
-                            model_results[model_name] = mr.status
-                            if mr.status in ("error", "assertion_failed"):
-                                step_error = True
-
-                    # Close shared connection after tier completes
-                    try:
-                        _shared_conn.close()
-                    except Exception:
-                        pass
-
-                if cancelled:
-                    break
-                yield emit("step_end", {"action": "transform", "results": model_results, "error": step_error})
-                if step_error:
-                    has_error = True
-                    break
-
-            elif step.action == "export":
-                from havn.engine.runner import run_script as _run_script
-
-                export_dir = _get_project_dir() / "export"
-                if not export_dir.exists():
-                    yield emit("step_end", {"action": "export", "results": [], "error": False})
-                    continue
-
-                py_scripts = list(export_dir.glob("*.py"))
-                nb_scripts = list(export_dir.glob("*.dpnb"))
-                scripts = sorted(py_scripts + nb_scripts, key=lambda p: p.name)
-
-                script_results = []
-                step_error = False
-                for script in scripts:
-                    if script.name.startswith("_"):
-                        continue
-                    if _is_cancelled():
-                        cancelled = True
-                        break
-                    yield emit("model_start", {"name": script.name, "action": "export"})
-                    with _db() as _exp_conn:
-                        result = _run_script(_exp_conn, script, "export")
-                    script_results.append(result)
-                    yield emit("model_end", {
-                        "name": script.name,
-                        "action": "export",
+        def _exec_node(node_id):
+            """Execute a single node and put result on queue."""
+            info = nodes[node_id]
+            try:
+                if info["type"] == "ingest":
+                    result = _run_script(conn, info["path"], "ingest")
+                    result_q.put((node_id, {
+                        "status": result["status"],
+                        "duration_ms": result.get("duration_ms", 0),
+                        "rows_affected": result.get("rows_affected", 0),
+                        "error": result.get("error"),
+                    }))
+                elif info["type"] == "transform":
+                    m = info["model"]
+                    if not force and not _hc(conn, m):
+                        result_q.put((node_id, {"status": "skipped"}))
+                        return
+                    duration_ms, row_count = _em(conn, m)
+                    _us(conn, m, duration_ms, row_count)
+                    _lr(conn, "transform", m.full_name, "success", duration_ms, row_count)
+                    status = "built"
+                    if m.assertions:
+                        ar = _ra(conn, m)
+                        _sa(conn, m, ar)
+                        if any(not a.passed for a in ar):
+                            status = "assertion_failed"
+                    if m.materialized in ("table", "incremental"):
+                        prof = _pm(conn, m)
+                        _sp(conn, m, prof)
+                    result_q.put((node_id, {
+                        "status": status, "duration_ms": duration_ms,
+                        "row_count": row_count,
+                    }))
+                elif info["type"] == "export":
+                    result = _run_script(conn, info["path"], "export")
+                    result_q.put((node_id, {
                         "status": result["status"],
                         "duration_ms": result.get("duration_ms", 0),
                         "error": result.get("error"),
-                    })
-                    if result["status"] == "error":
-                        step_error = True
+                    }))
+            except Exception as e:
+                logger.error("Node %s failed: %s", node_id, e, exc_info=True)
+                result_q.put((node_id, {"status": "error", "error": str(e)}))
 
-                if cancelled:
+        def _submit_ready():
+            """Submit all ready nodes to the executor."""
+            nonlocal active
+            ready = list(sorter.get_ready())
+            for nid in ready:
+                if _is_cancelled():
                     break
-                yield emit("step_end", {"action": "export", "error": step_error})
-                if step_error:
-                    has_error = True
-                    break
+                info = nodes[nid]
+                action = info["type"]
+                name = info["name"]
+                yield_data = {"name": name, "action": action}
+                if action == "transform":
+                    yield_data["materialized"] = info["model"].materialized
+                result_q.put(("__start__", yield_data))
+                executor.submit(_exec_node, nid)
+                active += 1
+            return ready
+
+        # Kick off initial ready nodes (roots with no deps)
+        initial = list(sorter.get_ready())
+        for nid in initial:
+            info = nodes[nid]
+            result_q.put(("__start__", {"name": info["name"], "action": info["type"]}))
+            executor.submit(_exec_node, nid)
+            active += 1
+
+        # Process results as they arrive, submit newly ready nodes
+        while sorter.is_active() or active > 0:
+            if _is_cancelled():
+                cancelled = True
+                executor.shutdown(wait=False, cancel_futures=True)
+                break
+
+            try:
+                node_id, result = result_q.get(timeout=2)
+            except _queue.Empty:
+                yield ": keepalive\n\n"
+                continue
+
+            # Handle start events (emitted before execution)
+            if node_id == "__start__":
+                yield emit("model_start", result)
+                continue
+
+            active -= 1
+            info = nodes[node_id]
+            status = result.get("status", "error")
+
+            # Emit result
+            yield emit("model_end", {
+                "name": info["name"],
+                "action": info["type"],
+                "status": status,
+                "duration_ms": result.get("duration_ms", 0),
+                "row_count": result.get("row_count", 0),
+                "rows_affected": result.get("rows_affected", 0),
+                "error": result.get("error"),
+                "materialized": info["model"].materialized if info["type"] == "transform" else None,
+            })
+
+            if status in ("error", "assertion_failed"):
+                has_error = True
+
+            # Mark node as done — this may release dependent nodes
+            sorter.done(node_id)
+
+            # Submit any newly ready nodes
+            try:
+                newly_ready = list(sorter.get_ready())
+                for nid in newly_ready:
+                    if _is_cancelled():
+                        break
+                    ni = nodes[nid]
+                    start_data = {"name": ni["name"], "action": ni["type"]}
+                    if ni["type"] == "transform":
+                        start_data["materialized"] = ni["model"].materialized
+                    yield emit("model_start", start_data)
+                    executor.submit(_exec_node, nid)
+                    active += 1
+            except Exception:
+                pass  # sorter exhausted
+
+        executor.shutdown(wait=False)
+        conn.close()
 
         duration_s = round(_time.perf_counter() - start, 1)
         if cancelled:
@@ -536,17 +423,17 @@ async def run_stream_sse(
             status = "failed"
         else:
             status = "success"
-        # Audit pipeline completion
+
+        # Audit
         try:
             from havn.engine.audit import log_audit
-            with _db() as _audit_conn:
-                log_audit(
-                    _audit_conn,
-                    user=user.get("username", "anonymous"),
-                    action="transform",
-                    resource=stream_name,
-                    detail=f"stream completed: {status} in {duration_s}s",
-                )
+            audit_conn = _connect(db_path_str)
+            try:
+                log_audit(audit_conn, user=user.get("username", "anonymous"),
+                          action="transform", resource=stream_name,
+                          detail=f"stream completed: {status} in {duration_s}s")
+            finally:
+                audit_conn.close()
         except Exception:
             pass
 
