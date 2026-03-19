@@ -244,13 +244,33 @@ Run an ingest or export script.
 {"script_path": "ingest/customers.py"}
 ```
 
-### POST /api/stream/{stream_name}
+### POST /api/stream/{stream_name}/start
 
-Run a full stream. Optional `?force=true`.
+Start a pipeline stream in the background. Returns immediately.
+
+```json
+{"force": false}
+```
+
+Returns: `{status, stream, run_id, timestamp}`
+
+### GET /api/stream/events
+
+Server-Sent Events (SSE) for real-time pipeline execution progress. Reads from event buffer instead of executing.
+
+Query params: `?from_event=0` (resume from event number)
+
+Each event includes step type, target, status, row count, duration, and error messages.
+
+### GET /api/stream/active
+
+Get current pipeline running state, total events emitted, and completion status.
+
+Returns: `{running, total_events, finished, current_task?, error?}`
 
 ### GET /api/stream/{stream_name}/events
 
-Server-Sent Events (SSE) for real-time pipeline execution progress. Each event includes step type, target, status, row count, duration, and error messages.
+(Legacy) Server-Sent Events endpoint. Starts pipeline immediately and streams progress. Use `/api/stream/{stream_name}/start` + `/api/stream/events` for decoupled flow.
 
 ### POST /api/stream/cancel
 
@@ -853,7 +873,9 @@ Generate a debug notebook for a failed model.
 
 ### GET /api/health
 
-Server health check. Returns status and uptime.
+Server health check. Returns status, uptime, and server boot timestamp.
+
+Returns: `{status, uptime_seconds, boot}`
 
 ### GET /api/metrics
 
