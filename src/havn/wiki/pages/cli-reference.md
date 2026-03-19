@@ -65,7 +65,7 @@ Create a backup of the warehouse database.
 havn backup [--output PATH] [--project PATH]
 ```
 
-Flushes the DuckDB WAL and copies the database file.
+Flushes the DuckDB WAL and copies the database file with a timestamped name.
 
 ### havn restore
 
@@ -116,7 +116,7 @@ havn transform [TARGETS...] [--force] [--sequential] [--workers N] [--env NAME] 
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `TARGETS` | all | Specific models to build |
+| `TARGETS` | all | Specific models to build (e.g., `gold.summary`) |
 | `--force, -f` | false | Rebuild all (ignore change detection) |
 | `--sequential` | false | Disable parallel execution; run models one at a time |
 | `--workers, -w` | 4 | Max parallel workers |
@@ -130,6 +130,11 @@ Run a full stream from project.yml.
 ```bash
 havn stream NAME [--force] [--env NAME] [--project PATH]
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--force, -f` | false | Force rebuild all transforms |
+| `--env, -e` | none | Environment override |
 
 ### havn lint
 
@@ -186,7 +191,7 @@ Validate SQL models, run assertions, and run contracts.
 havn check [TARGETS...] [--env NAME] [--project PATH]
 ```
 
-Runs model validation, inline assertions, and YAML contracts.
+Runs model validation, inline assertions, and YAML contracts. Exit code 1 on any failure.
 
 ### havn freshness
 
@@ -200,14 +205,15 @@ havn freshness [--hours N] [--alert] [--sources] [--env NAME] [--project PATH]
 |------|---------|-------------|
 | `--hours, -h` | 24.0 | Max age before a model is stale |
 | `--alert` | false | Send alerts for stale models |
-| `--sources` | false | Check source freshness from sources.yml |
+| `--sources` | false | Check source freshness from project.yml |
+| `--env, -e` | none | Environment override |
 
 ### havn profile
 
 Show model profile statistics.
 
 ```bash
-havn profile [MODEL] [--project PATH]
+havn profile [MODEL] [--env NAME] [--project PATH]
 ```
 
 Without a model name, shows summary for all models. With a model name, shows detailed column statistics.
@@ -225,13 +231,14 @@ havn assertions [--project PATH]
 Run data contracts from the contracts/ directory.
 
 ```bash
-havn contracts [TARGETS...] [--history] [--project PATH]
+havn contracts [TARGETS...] [--history] [--env NAME] [--project PATH]
 ```
 
 | Flag | Description |
 |------|-------------|
 | `TARGETS` | Contract names or model names to run |
 | `--history` | Show contract history instead of running |
+| `--env, -e` | Environment override |
 
 ## Model Analysis
 
@@ -258,6 +265,15 @@ Promote SQL to a transform model file.
 ```bash
 havn promote SQL_SOURCE [--name NAME] [--schema NAME] [--desc TEXT] [--file PATH] [--overwrite] [--project PATH]
 ```
+
+| Flag | Description |
+|------|-------------|
+| `SQL_SOURCE` | SQL string, .sql file path, or .dpnb notebook path |
+| `--name, -n` | Model name |
+| `--schema, -s` | Target schema |
+| `--desc, -d` | Model description |
+| `--file, -f` | Output file path (auto-generated if omitted) |
+| `--overwrite` | Overwrite existing file |
 
 ### havn debug
 
@@ -289,6 +305,78 @@ havn diff [TARGETS...] [--target SCHEMA] [--format FMT] [--rows] [--full] [--aga
 | `--against` | none | Git-aware: only diff models changed vs a branch |
 | `--snapshot` | none | Compare against a named snapshot |
 
+### havn snapshot
+
+Create and manage project snapshots.
+
+```bash
+havn snapshot create [--name NAME] [--project PATH]
+havn snapshot list [--project PATH]
+havn snapshot delete SNAPSHOT_ID [--project PATH]
+```
+
+### havn version
+
+Manage warehouse versions (Parquet-based snapshots).
+
+```bash
+havn version <ACTION> [OPTIONS]
+```
+
+Actions:
+- `create [--desc TEXT]` -- Create a named version with Parquet snapshots
+- `list` -- Show all versions
+- `diff [--id VERSION_ID] [--from FROM_ID]` -- Compare versions
+- `restore --id VERSION_ID` -- Restore from version
+- `timeline --table TABLE_NAME` -- Show table's version history
+- `cleanup [--keep N]` -- Remove old versions keeping last N
+
+## Pipeline Rewind
+
+### havn rewind
+
+Manage pipeline run snapshots and time travel.
+
+```bash
+havn rewind <ACTION> [OPTIONS]
+```
+
+Actions:
+- `runs [--limit N] [--env NAME]` -- List recent pipeline runs
+- `snapshot --run RUN_ID [--env NAME]` -- View snapshots for a run
+- `sample --run RUN_ID --model MODEL [--env NAME]` -- Preview snapshot data
+- `gc [--env NAME]` -- Run garbage collection on expired snapshots
+
+### havn restore (model)
+
+Restore a model from a pipeline snapshot.
+
+```bash
+havn restore MODEL --run RUN_ID [--cascade] [--no-cascade] [--env NAME] [--project PATH]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--run, -r` | required | Run ID to restore from |
+| `--cascade` | true | Re-build downstream models after restore |
+| `--no-cascade` | false | Only restore the specified model |
+
+## Schema Sentinel
+
+### havn sentinel
+
+Monitor and manage schema changes.
+
+```bash
+havn sentinel <ACTION> [OPTIONS]
+```
+
+Actions:
+- `check [--env NAME]` -- Detect upstream schema changes
+- `diffs [--limit N] [--env NAME]` -- Show recent schema diffs
+- `impacts --diff DIFF_ID [--env NAME]` -- Analyze impact for a diff
+- `history --source SOURCE_NAME [--limit N] [--env NAME]` -- Show schema history for a source
+
 ## Connectors
 
 ### havn connect
@@ -296,56 +384,34 @@ havn diff [TARGETS...] [--target SCHEMA] [--format FMT] [--rows] [--full] [--aga
 Set up a data connector.
 
 ```bash
-havn connect TYPE [--name NAME] [--tables LIST] [--schema NAME] [--schedule CRON] [--test] [--discover] [--config JSON] [--set KEY=VALUE] [--host H] [--port P] [--database D] [--user U] [--password P] [--url U] [--api-key K] [--token T] [--path P] [--project PATH]
+havn connect TYPE [OPTIONS]
 ```
 
-Use `havn connect list` to show available connector types.
+| Flag | Description |
+|------|-------------|
+| `--name, -n` | Connection name (default: auto-generated) |
+| `--tables, -t` | Comma-separated tables to sync |
+| `--schema, -s` | Target schema (default: landing) |
+| `--schedule` | Cron schedule for automatic sync |
+| `--test` | Only test the connection |
+| `--discover` | Only list available resources |
+| `--config, -c` | JSON string or file path with params |
+| `--set key=value` | Set individual parameters (repeatable) |
+| `--host`, `--port`, `--database`, `--user`, `--password` | Common connection params |
+| `--url`, `--api-key`, `--token`, `--path` | Additional connection params |
 
-### havn connectors list
+Available types: `postgres`, `mysql`, `csv`, `stripe`, `shopify`, `hubspot`, `google_sheets`, `rest_api`, `s3_gcs`, `webhook`
 
-List configured connectors.
+### havn connectors
+
+Manage configured connectors.
 
 ```bash
 havn connectors list [--project PATH]
-```
-
-### havn connectors test
-
-Test a configured connector.
-
-```bash
 havn connectors test CONNECTION_NAME [--project PATH]
-```
-
-### havn connectors sync
-
-Run sync for a connector.
-
-```bash
 havn connectors sync CONNECTION_NAME [--project PATH]
-```
-
-### havn connectors regenerate
-
-Regenerate the ingest script for a connector.
-
-```bash
 havn connectors regenerate CONNECTION_NAME [--project PATH]
-```
-
-### havn connectors remove
-
-Remove a connector (script and config).
-
-```bash
 havn connectors remove CONNECTION_NAME [--project PATH]
-```
-
-### havn connectors available
-
-List all available connector types.
-
-```bash
 havn connectors available
 ```
 
@@ -362,6 +428,20 @@ havn cdc ACTION [--connector NAME] [--table NAME] [--project PATH]
 Actions:
 - `status` -- Show CDC state for all connectors
 - `reset` -- Reset watermarks (requires `--connector`)
+
+## Data Masking
+
+### havn mask
+
+Manage data masking policies.
+
+```bash
+havn mask add --schema S --table T --column C --method M [--exempt ROLES]
+havn mask list
+havn mask remove POLICY_ID
+```
+
+Methods: `hash`, `redact`, `null`, `partial`
 
 ## Scheduling
 
@@ -381,30 +461,41 @@ Watch for file changes and auto-rebuild.
 havn watch [--project PATH]
 ```
 
-## Masking
+## Secrets Management
 
-### havn masking create
+### havn secrets
 
-Create a masking policy.
+Manage `.env` secrets.
 
 ```bash
-havn masking create --schema S --table T --column C --method M [--exempt ROLES] [--project PATH]
+havn secrets list [--project PATH]
+havn secrets set KEY VALUE [--project PATH]
+havn secrets delete KEY [--project PATH]
 ```
 
-### havn masking list
+## User Management
 
-List all masking policies.
+### havn users
+
+Manage platform users (requires auth enabled).
 
 ```bash
-havn masking list [--project PATH]
+havn users create --username NAME --password PASS --role ROLE [--project PATH]
+havn users list [--project PATH]
+havn users delete USERNAME [--project PATH]
 ```
 
-### havn masking delete
+Roles: `admin`, `editor`, `viewer`
 
-Delete a masking policy.
+## CI/CD Integration
+
+### havn ci
+
+Generate CI/CD configuration.
 
 ```bash
-havn masking delete POLICY_ID [--project PATH]
+havn ci generate [--project PATH]    # Generate GitHub Actions workflow
+havn ci diff-comment [--project PATH] # Post formatted diff to PR
 ```
 
 ## Server
@@ -414,7 +505,7 @@ havn masking delete POLICY_ID [--project PATH]
 Start the web UI server.
 
 ```bash
-havn serve [--port PORT] [--host HOST] [--auth] [--env NAME] [--project PATH]
+havn serve [--port PORT] [--host HOST] [--auth] [--watch] [--schedule] [--env NAME] [--project PATH]
 ```
 
 | Flag | Default | Description |
@@ -422,6 +513,8 @@ havn serve [--port PORT] [--host HOST] [--auth] [--env NAME] [--project PATH]
 | `--port` | 3000 | Server port |
 | `--host` | 127.0.0.1 | Server host |
 | `--auth` | false | Enable authentication |
+| `--watch, -w` | false | Enable file watcher for auto-rebuild |
+| `--schedule, -s` | false | Enable cron scheduler |
 | `--env` | none | Environment to use |
 
 ## Version

@@ -2,6 +2,32 @@
 
 CDC enables incremental data extraction from external sources. Instead of re-fetching all data on every sync, havn tracks what has changed and only fetches new or modified records. This reduces load on source systems and speeds up pipelines.
 
+## Web UI Experience
+
+### CDC Status in Data Sources Panel
+
+1. Go to **Explore** > **Data Sources**
+2. Connectors with CDC enabled show their sync mode and watermark status
+3. Each CDC-tracked table displays:
+   - CDC mode (high_watermark, file_tracking, full_refresh)
+   - Current watermark value
+   - Last sync timestamp
+   - Rows synced in the last run
+4. **Reset Watermark** -- Click to reset a table's watermark and force a full re-sync on the next run
+
+### CDC Status via API
+
+```bash
+# View all CDC state
+curl http://localhost:3000/api/cdc
+
+# View state for a specific connector
+curl http://localhost:3000/api/cdc/prod_users
+
+# Reset watermarks
+curl -X POST http://localhost:3000/api/cdc/prod_users/reset
+```
+
 ## CDC Modes
 
 havn supports three CDC modes:
@@ -148,19 +174,6 @@ Reset a specific table:
 havn cdc reset --connector prod_users --table users
 ```
 
-### API Access
-
-```bash
-# View all CDC state
-curl http://localhost:3000/api/cdc
-
-# View state for a specific connector
-curl http://localhost:3000/api/cdc/prod_users
-
-# Reset watermarks
-curl -X POST http://localhost:3000/api/cdc/prod_users/reset
-```
-
 ## Sync Results
 
 Each sync returns a `CDCSyncResult` with:
@@ -176,6 +189,28 @@ Each sync returns a `CDCSyncResult` with:
 | `watermark_after` | Watermark value after sync |
 | `error` | Error message (if failed) |
 
+## Common Workflows
+
+### Set Up Incremental Sync for a New Table
+
+1. Configure the connector in `project.yml` with `high_watermark` mode
+2. Run the first sync: `havn connectors sync prod_users` (fetches all rows)
+3. Verify the watermark: `havn cdc status --connector prod_users`
+4. Set a schedule for ongoing syncs (e.g., every 30 minutes)
+
+### Force a Full Re-Sync
+
+1. Reset the watermark: `havn cdc reset --connector prod_users --table users`
+2. Run the sync: `havn connectors sync prod_users`
+3. The table is fully replaced with fresh data
+
+### Investigate Sync Issues
+
+1. Check CDC status: `havn cdc status`
+2. Look for tables where `last_sync_at` is old or `rows_synced` is 0
+3. Verify the watermark column exists and is indexed in the source database
+4. Check `havn history` for error messages from failed syncs
+
 ## Best Practices
 
 1. **Use `high_watermark` for large, append-heavy tables** -- Only new rows are fetched, reducing query time and network transfer.
@@ -188,9 +223,12 @@ Each sync returns a `CDCSyncResult` with:
 
 5. **Monitor CDC state** -- Use `havn cdc status` regularly to verify syncs are completing and watermarks are advancing.
 
+6. **Combine with Sentinel** -- Use Schema Sentinel to detect when source schemas change, so you know when a watermark reset may be needed. See [Sentinel](sentinel).
+
 ## Related Pages
 
 - [Connectors](connectors) -- Setting up data connectors
 - [Pipelines](pipelines) -- Running CDC as part of pipelines
 - [Configuration](configuration) -- Connector configuration in project.yml
 - [Scheduler](scheduler) -- Automating CDC syncs on a schedule
+- [Sentinel](sentinel) -- Schema change detection for upstream sources

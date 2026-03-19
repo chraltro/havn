@@ -35,71 +35,83 @@ The havn web interface is a React SPA (Single Page Application) built with Vite 
 - Project health dashboard with recent runs and pipeline status
 - Quick actions for triggering transforms, ingest, and export steps
 - Run history summary with success/failure counts and execution times
+- Connector health and active data source status
 
 ### Develop
-- **Editor** -- Monaco code editor with SQL syntax highlighting, formatting, and validation for transforms and scripts
-- **Notebooks** -- Interactive `.dpnb` notebook editor with code, SQL, and markdown cells for exploratory analysis
-- **DAG** -- Visual dependency graph showing all models and their relationships; supports Rewind to restore tables from snapshots
+- **Editor** -- Monaco code editor with SQL syntax highlighting, formatting, autocomplete, and validation for transforms and scripts. See [Transforms](transforms).
+- **Notebooks** -- Interactive `.dpnb` notebook editor with code, SQL, and markdown cells for exploratory analysis. See [Notebooks](notebooks).
+- **DAG** -- Visual dependency graph showing all models, seeds, sources, and exposures with their relationships; supports Rewind to restore tables from snapshots. See [Lineage](lineage).
 
 ### Explore
-- **Query** -- Interactive SQL runner with result pagination, download, and query history
-- **Tables** -- Warehouse browser showing all schemas, tables, and column metadata with profiling stats
-- **Data Sources** -- Connector management and monitoring of external data sources with freshness indicators
+- **Query** -- Interactive SQL runner with result pagination, CSV/JSON export, query history, EXPLAIN PLAN, and query profiling. See [Quality](quality).
+- **Tables** -- Warehouse browser showing all schemas, tables, and column metadata with profiling stats and sample data. See [Transforms](transforms).
+- **Data Sources** -- Connector management, import wizard for CSV/Parquet uploads, external database imports, and freshness monitoring. See [Connectors](connectors).
 
 ### Observe
-- **Quality** -- Data quality dashboard with freshness status, column profiles, assertion results, and contract violations
-- **Sentinel** -- Schema change detection alerting on unexpected column additions, removals, or type changes
-- **Diff** -- Preview and compare changes before transforms are applied
-- **History** -- Complete run log with execution times, error messages, and lineage visualization
+- **Quality** -- Data quality dashboard with freshness status, column profiles, assertion results, and contract violations. See [Quality](quality).
+- **Sentinel** -- Schema change detection alerting on unexpected column additions, removals, or type changes with impact analysis. See [Sentinel](sentinel).
+- **Diff** -- Preview and compare changes before transforms are applied. See [Versioning](versioning).
+- **History** -- Complete run log with execution times, error messages, and pipeline status.
 
 ### Configure
-- **Masking** -- Column-level data masking policies with role-based exemptions (hash, redact, null, partial)
-- **Wiki** -- Documentation editor for project-specific knowledge base
-- **Docs** -- Auto-generated documentation from SQL comments and metadata
-- **Settings** -- Theme preferences, scheduler configuration, secrets management, user/role management, alerts, and resource limits
+- **Masking** -- Column-level data masking policies with role-based exemptions (hash, redact, null, partial). See [Masking](masking).
+- **Wiki** -- Documentation editor for project-specific knowledge base.
+- **Docs** -- Auto-generated documentation from SQL comments and metadata.
+- **Settings** -- Theme preferences, scheduler configuration, secrets management, user/role management, alerts, resource limits, and environment switching. See [Auth](auth), [Environments](environments).
 
 ## Key Features
 
 ### Data Pipeline
-- **SQL Transforms** -- Plain SQL with `-- config:` and `-- depends_on:` comments; no Jinja or templating. See [Transforms](transforms).
-- **DAG Engine** -- Automatic dependency resolution and topological ordering with change detection via SHA256 hashing.
-- **Streams** -- Multi-step pipelines (ingest, transform, export) defined in `project.yml`. See [Pipelines](pipelines).
+- **SQL Transforms** -- Plain SQL with `-- config:` and `-- depends_on:` comments; no Jinja or templating. Supports table, view, and incremental materializations. See [Transforms](transforms).
+- **DAG Engine** -- Automatic dependency resolution and topological ordering with parallel execution and change detection via SHA256 hashing. See [Transforms](transforms).
+- **Streams** -- Multi-step pipelines (ingest, seed, transform, export) defined in `project.yml` with retries, webhook notifications, and real-time SSE streaming. See [Pipelines](pipelines).
 - **Seeds** -- CSV files loaded as reference tables with change detection. See [Seeds](seeds).
 
 ### Connectors and Integration
 - **Data Connectors** -- Pre-built connectors for PostgreSQL, MySQL, Stripe, Shopify, HubSpot, Google Sheets, REST APIs, S3/GCS, CSV files, and webhooks. See [Connectors](connectors).
 - **CDC** -- Change Data Capture with high-watermark tracking, file modification tracking, and full-refresh modes. See [CDC](cdc).
 - **Sources** -- Declared external source metadata with freshness SLAs. See [Sources](sources).
+- **Import Wizard** -- Upload CSV/Parquet files or import from external databases through the web UI. See [Connectors](connectors).
 
 ### Data Quality
-- **Inline Assertions** -- `-- assert:` comments in SQL files for row_count, no_nulls, unique, and custom expressions. See [Quality](quality).
+- **Inline Assertions** -- `-- assert:` comments in SQL files for row_count, no_nulls, unique, accepted_values, and custom expressions. See [Quality](quality).
 - **YAML Contracts** -- Standalone data quality rules in `contracts/` with severity levels and history tracking. See [Contracts](contracts).
 - **Profiling** -- Automatic column-level statistics: null percentages, distinct counts, min/max values.
-- **Freshness Monitoring** -- Detect stale models and sources against configured SLAs.
+- **Freshness Monitoring** -- Detect stale models and sources against configured SLAs with alerting support.
+- **Alerts** -- Slack and webhook notifications for pipeline failures, assertion failures, and stale data. See [Quality](quality).
 
 ### Security
 - **Authentication** -- Token-based auth with RBAC roles: admin, editor, viewer. See [Auth](auth).
-- **Data Masking** -- Column-level masking policies (hash, redact, null, partial) with role exemptions. See [Masking](masking).
+- **Data Masking** -- Column-level masking policies (hash, redact, null, partial) with role exemptions and conditional application. See [Masking](masking).
+- **Audit Logging** -- Track user actions including logins, queries, pipeline runs, and file edits.
+- **Secrets Management** -- Encrypted `.env` variable management via CLI, web UI, and API. See [Configuration](configuration).
 
 ### Development Tools
 - **Column-Level Lineage** -- AST-based SQL analysis via sqlglot tracing columns through CTEs, subqueries, and joins. See [Lineage](lineage).
+- **Impact Analysis** -- Analyze downstream effects of model or column changes. See [Lineage](lineage).
 - **Notebooks** -- Interactive `.dpnb` notebooks with code, SQL, and markdown cells. See [Notebooks](notebooks).
-- **Versioning** -- Parquet-based snapshots with time travel, diff, and restore. See [Versioning](versioning).
-- **Rewind** -- Time travel and restore tables to previous snapshots from the DAG view. See [Versioning](versioning).
+- **Debug Notebooks** -- Auto-generated notebooks for investigating failed models. See [Notebooks](notebooks).
+- **SQL Promotion** -- Convert ad-hoc queries or notebook cells into proper transform models. See [Notebooks](notebooks).
 - **Agent Sidebar** -- AI coding assistant embedded in the UI for code generation, debugging, and optimization.
+- **Collaboration** -- Real-time collaborative editing sessions with live cursor sync.
 
-### Data Quality and Monitoring
-- **Schema Sentinel** -- Automated schema change detection with alerts on unexpected column changes. See [Sentinel](sentinel).
+### Versioning and Time Travel
+- **Versioning** -- Parquet-based snapshots with time travel, diff, and restore. See [Versioning](versioning).
+- **Rewind** -- Time travel through pipeline runs from the DAG view with row deltas and restore capability. See [Versioning](versioning).
+- **Schema Sentinel** -- Automated schema change detection with alerts on unexpected column changes and impact analysis. See [Sentinel](sentinel).
 
 ### Operations
 - **Scheduler** -- Cron-based scheduling with file watcher for auto-rebuild. See [Scheduler](scheduler).
 - **SQL Linting** -- SQLFluff integration with DuckDB dialect support.
-- **Environments** -- Multi-environment support with variable expansion from `.env`. See [Environments](environments).
+- **Environments** -- Multi-environment support (dev/staging/prod) with per-environment database paths. See [Environments](environments).
+- **CI/CD** -- Generate GitHub Actions workflows, post diff comments to PRs. See [CLI Reference](cli-reference).
+- **Circuit Breakers** -- Prevent cascading failures in pipeline execution.
+- **Query Profiling** -- EXPLAIN PLAN and slow query logging for performance tuning. See [Quality](quality).
 
 ## Quick Start
 
 ```bash
-pip install -e .
+pip install havn
 havn init my-project
 cd my-project
 havn stream full-refresh

@@ -1,6 +1,38 @@
 # Data Quality
 
-havn provides a comprehensive data quality framework with three complementary systems: inline assertions in SQL models, automatic profiling, and freshness monitoring. For standalone quality rules, see [Contracts](contracts).
+havn provides a comprehensive data quality framework with four complementary systems: inline assertions in SQL models, automatic profiling, freshness monitoring, and alerting. For standalone quality rules, see [Contracts](contracts).
+
+## Web UI Experience
+
+### Quality Panel in Observe Tab
+
+1. Go to the **Observe** tab and click **Quality**
+2. The Quality panel has several sections:
+
+**Freshness Status** -- Shows each model with its last build time and a green/red indicator for whether it's within the freshness threshold. Stale models are highlighted in red.
+
+**Column Profiles** -- Browse auto-computed statistics for all models. Click a model to see per-column stats: null percentages, distinct counts, and data distribution.
+
+**Assertion Results** -- View the most recent assertion results across all models. Each assertion shows:
+- Model name
+- Assertion expression (e.g., `row_count > 0`)
+- Pass/fail status with a green checkmark or red X
+- Timestamp of last evaluation
+- Failure detail (for failed assertions)
+
+**Contract Results** -- If YAML contracts are configured, their results appear here too. See [Contracts](contracts).
+
+### Tables Browser Profiling
+
+1. Go to **Explore** > **Tables**
+2. Click any table to see column metadata
+3. The profile stats (null %, distinct count, min/max, sample values) are displayed alongside each column
+
+### Running Quality Checks from the UI
+
+Use the **Run menu** dropdown in the Develop tab:
+- **Check** -- Runs model validation, inline assertions, and YAML contracts
+- Results appear in the Output Panel with pass/fail indicators
 
 ## Inline Assertions
 
@@ -204,6 +236,12 @@ This executes:
 2. **Inline assertions** -- `-- assert:` comments against live data
 3. **YAML contracts** -- Rules from `contracts/` directory
 
+### Target-Specific Checks
+
+```bash
+havn check gold.customer_summary silver.orders
+```
+
 ### CI/CD Integration
 
 Use `havn check` in your CI/CD pipeline:
@@ -216,7 +254,7 @@ Exit code 1 if any validation or assertion fails, making it suitable for automat
 
 ## Alerts
 
-havn supports alerting for pipeline events:
+havn supports alerting for pipeline and data quality events.
 
 ### Configuration
 
@@ -248,8 +286,42 @@ curl -X POST http://localhost:3000/api/alerts/test \
 ### Alert History
 
 ```bash
-curl http://localhost:3000/api/alerts
+curl http://localhost:3000/api/alerts?limit=50
 ```
+
+## Query Profiling and Slow Queries
+
+havn tracks query performance to help identify expensive operations:
+
+### Explain a Query
+
+```bash
+POST /api/query/explain
+Content-Type: application/json
+
+{"sql": "SELECT * FROM gold.summary WHERE region = 'US'"}
+```
+
+Returns the DuckDB EXPLAIN PLAN for the query.
+
+### Profile a Query
+
+```bash
+POST /api/query/profile
+Content-Type: application/json
+
+{"sql": "SELECT * FROM gold.summary WHERE region = 'US'"}
+```
+
+Returns detailed profiling information including execution time and resource usage.
+
+### Slow Query Log
+
+```bash
+GET /api/metrics/slow-queries
+```
+
+Returns queries that exceeded performance thresholds, sorted by execution time.
 
 ## Related Pages
 
@@ -257,4 +329,5 @@ curl http://localhost:3000/api/alerts
 - [Transforms](transforms) -- Adding assertions to SQL models
 - [Sources](sources) -- Source freshness SLAs
 - [Lineage](lineage) -- Understanding data dependencies
+- [Sentinel](sentinel) -- Schema change detection
 - [CLI Reference](cli-reference) -- Quality-related commands

@@ -1,6 +1,22 @@
 # Configuration
 
-All havn project settings live in `project.yml` at the project root. This page documents every configuration option.
+All havn project settings live in `project.yml` at the project root. This page documents every configuration option, including database resources, pipeline streams, connectors, environments, alerts, Sentinel, and Rewind.
+
+## Web UI Experience
+
+### Settings Panel
+
+1. Go to the **Configure** tab and click **Settings**
+2. The Settings panel lets you manage:
+   - **Secrets** -- View, add, and delete `.env` variables (keys are shown, values are masked)
+   - **Users** -- Create, update, and delete users with role assignments (when auth is enabled)
+   - **Alerts** -- Configure Slack and webhook notification channels
+   - **Resource Limits** -- View and update database memory_limit and threads settings
+   - **Theme** -- Toggle between light and dark modes
+
+### Environment Switcher
+
+The web UI shows the active environment and lets you switch between configured environments via the API. See [Environments](environments).
 
 ## Minimal Configuration
 
@@ -18,16 +34,24 @@ database:
 name: my-project
 ```
 
-Human-readable project name. Used in logging and documentation.
+Human-readable project name. Used in logging, documentation, and the web UI header.
 
 ### Database
 
 ```yaml
 database:
   path: warehouse.duckdb
+  threads: 4
+  memory_limit: "2GB"
 ```
 
-- `path` -- Path to the DuckDB database file, relative to the project root.
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `path` | string | required | Path to the DuckDB file, relative to the project root |
+| `threads` | int | DuckDB default | Number of threads for query parallelism |
+| `memory_limit` | string | DuckDB default | Maximum memory per query (e.g., "2GB", "512MB") |
+
+The `threads` and `memory_limit` settings are applied when connecting to DuckDB and control resource usage for transforms and queries.
 
 ### Connections
 
@@ -102,8 +126,18 @@ lint:
     - L003
 ```
 
-- `dialect` -- SQL dialect for SQLFluff. Default: `duckdb`.
-- `rules` -- List of SQLFluff rules to enable. Default: all rules.
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `dialect` | string | `duckdb` | SQL dialect for SQLFluff |
+| `rules` | list | all rules | SQLFluff rules to enable |
+
+Lint configuration can also be managed via API:
+
+```bash
+GET /api/lint/config     # View current config
+PUT /api/lint/config     # Update config
+DELETE /api/lint/config  # Reset to defaults
+```
 
 ### Sources
 
@@ -147,7 +181,7 @@ exposures:
       - gold.customer_summary
 ```
 
-Exposures appear in the DAG visualization and documentation.
+Exposures appear in the DAG visualization and documentation. They represent systems outside havn that consume your data (dashboards, APIs, reports).
 
 ### Environments
 
@@ -190,11 +224,61 @@ alerts:
   on_failure: true
 ```
 
-- `channels` -- List of alert channels: `slack`, `webhook`, `log`
-- `slack_webhook_url` -- Slack incoming webhook URL
-- `webhook_url` -- Custom webhook URL for alerts
-- `on_success` -- Send alerts on pipeline success (default: false)
-- `on_failure` -- Send alerts on pipeline failure (default: true)
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `channels` | list | `[]` | Alert channels: `slack`, `webhook`, `log` |
+| `slack_webhook_url` | string | `null` | Slack incoming webhook URL |
+| `webhook_url` | string | `null` | Custom webhook URL for alerts |
+| `on_success` | bool | `false` | Send alerts on pipeline success |
+| `on_failure` | bool | `true` | Send alerts on pipeline failure |
+
+### Sentinel (Schema Monitoring)
+
+Configure Schema Sentinel for upstream schema change detection:
+
+```yaml
+sentinel:
+  enabled: true
+  on_change: warn
+  track_ordering: false
+  rename_inference: true
+  auto_fix: false
+  select_star_warning: true
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | bool | `true` | Enable schema monitoring |
+| `on_change` | string | `warn` | Action on schema change: `warn`, `error`, `ignore` |
+| `track_ordering` | bool | `false` | Treat column reordering as breaking |
+| `rename_inference` | bool | `true` | Suggest renames for deleted+added column pairs |
+| `auto_fix` | bool | `false` | Auto-apply obvious rename fixes |
+| `select_star_warning` | bool | `true` | Flag `SELECT *` as high-risk for schema changes |
+
+See [Sentinel](sentinel) for full documentation.
+
+### Rewind (Pipeline Snapshots)
+
+Configure automatic pipeline snapshots and time travel:
+
+```yaml
+rewind:
+  enabled: true
+  retention: 30
+  max_storage: 10GB
+  dedup: true
+  exclude: [temp_table, scratch]
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | bool | `true` | Enable automatic snapshots |
+| `retention` | int | `30` | Days to keep snapshots |
+| `max_storage` | string | unlimited | Maximum snapshot storage (e.g., "10GB") |
+| `dedup` | bool | `true` | Skip snapshots when data is identical to previous |
+| `exclude` | list | `[]` | Tables to exclude from snapshots |
+
+See [Versioning](versioning) for full documentation.
 
 ### Connectors (CDC)
 
@@ -238,20 +322,49 @@ DB_PASSWORD=s3cure_p@ssw0rd
 
 The `.env` file is included in `.gitignore` by default and should never be committed.
 
-### Managing Secrets
+## Managing Secrets
+
+### Via CLI
 
 ```bash
-# Via the CLI (not yet available as a standalone command)
-# Secrets are managed through the web UI or by editing .env directly
+havn secrets list                    # List secret keys
+havn secrets set DB_PASSWORD value   # Set a secret
+havn secrets delete DB_PASSWORD      # Remove a secret
 ```
 
-Via the API (when auth is enabled):
+### Via Web UI
+
+Go to **Configure** > **Settings** > **Secrets** to view and manage secrets. Keys are shown but values are always masked.
+
+### Via API
 
 ```bash
+# List secrets (keys with masked values)
+curl http://localhost:3000/api/secrets \
+  -H "Authorization: Bearer <admin-token>"
+
+# Set a secret
 curl -X POST http://localhost:3000/api/secrets \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{"key": "DB_PASSWORD", "value": "new_password"}'
+
+# Delete a secret
+curl -X DELETE http://localhost:3000/api/secrets/DB_PASSWORD \
+  -H "Authorization: Bearer <admin-token>"
+```
+
+## Database Configuration via API
+
+```bash
+# View current database config
+GET /api/config/database
+
+# Update database config
+PUT /api/config/database
+Content-Type: application/json
+
+{"threads": 8, "memory_limit": "4GB"}
 ```
 
 ## Related Pages
@@ -261,3 +374,5 @@ curl -X POST http://localhost:3000/api/secrets \
 - [Environments](environments) -- Multi-environment support
 - [Connectors](connectors) -- Connection types and parameters
 - [Scheduler](scheduler) -- Cron scheduling reference
+- [Sentinel](sentinel) -- Schema monitoring configuration
+- [Versioning](versioning) -- Rewind and snapshot configuration
