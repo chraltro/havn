@@ -1,6 +1,44 @@
 # Pipelines
 
-Pipelines in havn are called **streams**. A stream is an ordered sequence of steps (ingest, seed, transform, export) defined in `project.yml`. Streams provide a single command to run your entire data pipeline or any subset of it.
+Pipelines in havn are called **streams**. A stream is an ordered sequence of steps (ingest, seed, transform, export) defined in `project.yml`. Streams provide a single command to run your entire data pipeline or any subset of it, with real-time streaming output, retry logic, and webhook notifications.
+
+## Web UI Experience
+
+### Running Streams from the UI
+
+1. In the **Develop** tab, use the **Run menu** dropdown in the toolbar
+2. Select a stream name (e.g., "full-refresh") to start it
+3. The **Output Panel** shows real-time streaming results as each step executes
+4. Each step displays numbered progress messages with status indicators:
+   - **start** -- Step is beginning execution
+   - **done** -- Step completed successfully (with row count and duration)
+   - **skip** -- Step was skipped (no changes detected)
+   - **fail** -- Step failed (with error message)
+
+### Streaming Pipeline Output (SSE)
+
+The web UI uses Server-Sent Events (SSE) to stream pipeline execution in real time:
+
+```bash
+GET /api/stream/{stream_name}/events
+```
+
+Each event includes the step type, target, status, row count, duration, and any error messages. The UI renders these as a numbered list with color-coded status badges.
+
+### Cancelling a Running Pipeline
+
+Click the **Cancel** button in the Output Panel toolbar, or via API:
+
+```bash
+POST /api/stream/cancel
+```
+
+### Overview Tab Pipeline Health
+
+The **Overview** tab displays:
+
+- **Pipeline Health** -- Recent pipeline runs with status, affected table/file, row counts, and duration
+- **Failed Runs Detail** -- Click the stats card to expand a list of recent failures with error messages
 
 ## Defining Streams
 
@@ -105,7 +143,7 @@ Uses the production database and environment settings.
 Streams have built-in error handling:
 
 - **Ingest failures stop the pipeline** -- If an ingest script fails, subsequent steps (transform, export) are not executed. This prevents building models on incomplete data.
-- **Transform failures are reported** -- Failed models are logged but other independent models continue.
+- **Transform failures are reported** -- Failed models are logged but other independent models continue (parallel execution).
 - **Export failures are logged** -- Export errors do not affect upstream data.
 
 ### Retry Support
@@ -123,8 +161,10 @@ streams:
       - transform: [all]
 ```
 
-- `retries` -- Number of retry attempts per failed step (default: 0)
-- `retry_delay` -- Seconds to wait between retries (default: 5)
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `retries` | int | `0` | Number of retry attempts per failed step |
+| `retry_delay` | int | `5` | Seconds to wait between retries |
 
 ### Webhook Notifications
 
@@ -149,6 +189,32 @@ The webhook receives a JSON POST with:
   "timestamp": "2025-01-15T06:00:00"
 }
 ```
+
+## Pipeline Integration with Rewind
+
+When Rewind is enabled, every pipeline run automatically creates **snapshots** of your data. This means you can:
+
+- Browse historical pipeline runs in the DAG Rewind timeline
+- Compare row counts and schema changes across runs
+- Restore any model to a previous pipeline run's state
+
+See [Versioning](versioning) for Rewind details.
+
+## Pipeline Integration with Sentinel
+
+When Sentinel is enabled, schema checks can run before pipeline execution to detect breaking upstream changes. Configure this behavior:
+
+```yaml
+sentinel:
+  enabled: true
+  on_change: warn    # warn | error | ignore
+```
+
+- `warn` -- Log warnings but continue the pipeline
+- `error` -- Halt the pipeline if breaking schema changes are detected
+- `ignore` -- Skip schema checks entirely
+
+See [Sentinel](sentinel) for details.
 
 ## Scheduling
 
@@ -209,6 +275,7 @@ You can run steps independently without a stream:
 
 ```bash
 havn run ingest/customers.py       # Run a single script
+havn run ingest/earthquakes.dpnb   # Run a notebook
 havn seed                          # Load all seeds
 havn transform                     # Build all models
 havn run export/daily_report.py    # Run a single export
@@ -223,6 +290,15 @@ havn history
 ```
 
 Shows all pipeline runs with type, target, status, duration, and row counts.
+
+### History in the Web UI
+
+Go to the **Observe** tab and click **History** to see all recent pipeline runs sorted by timestamp. Each run shows:
+- Run type (ingest, seed, transform, export)
+- Affected target (table name or file)
+- Status (success or failure with error message)
+- Duration and rows affected
+- Timestamp
 
 ### Freshness
 
@@ -240,10 +316,65 @@ havn status
 
 Shows project health: git info, warehouse stats, and last run status.
 
+## API Reference
+
+### Run a Stream
+
+```bash
+POST /api/stream/{stream_name}
+```
+
+Optional query param: `?force=true`
+
+### Stream Events (SSE)
+
+```bash
+GET /api/stream/{stream_name}/events
+```
+
+Real-time Server-Sent Events for pipeline execution progress.
+
+### Cancel a Stream
+
+```bash
+POST /api/stream/cancel
+```
+
+### List Streams
+
+```bash
+GET /api/streams
+```
+
+Returns all configured streams with their steps and schedules.
+
+### Run a Script
+
+```bash
+POST /api/run
+Content-Type: application/json
+
+{"script_path": "ingest/customers.py"}
+```
+
+### Run History
+
+```bash
+GET /api/history?limit=50
+```
+
+### Scheduler Status
+
+```bash
+GET /api/scheduler
+```
+
 ## Related Pages
 
 - [Transforms](transforms) -- SQL model details
 - [Configuration](configuration) -- Full `project.yml` reference
 - [Scheduler](scheduler) -- Cron scheduling details
 - [Connectors](connectors) -- Automated data ingestion
+- [Versioning](versioning) -- Pipeline snapshots and Rewind
+- [Sentinel](sentinel) -- Schema change detection before pipeline runs
 - [CLI Reference](cli-reference) -- All pipeline-related commands

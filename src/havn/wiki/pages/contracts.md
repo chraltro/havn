@@ -2,6 +2,25 @@
 
 Data contracts are standalone YAML files that define data quality rules. They complement inline `-- assert:` comments in SQL models by providing reusable, centralized quality definitions with severity levels and historical tracking.
 
+## Web UI Experience
+
+### Contracts in the Quality Panel
+
+1. Go to the **Observe** tab and click **Quality**
+2. The **Contract Results** section shows the most recent contract evaluations:
+   - Contract name and target model
+   - Pass/fail status with green checkmark or red X for each assertion
+   - Severity level (error or warn)
+   - Evaluation timestamp and duration
+3. Click **Run Contracts** to execute all contracts on demand
+4. Click any contract result to expand and see per-assertion details
+
+### Running Contracts from the UI
+
+Use the **Run menu** dropdown in the Develop tab:
+- **Check** -- Runs model validation, inline assertions, AND YAML contracts all at once
+- Results appear in the Output Panel with pass/fail indicators
+
 ## Contract Format
 
 Contracts live in the `contracts/` directory as YAML files:
@@ -146,6 +165,12 @@ havn contracts orders_not_empty
 havn contracts gold.orders
 ```
 
+### With Environment Override
+
+```bash
+havn contracts --env prod
+```
+
 ### View Contract History
 
 ```bash
@@ -167,12 +192,6 @@ Every contract evaluation is recorded in `_dp_internal.contract_results`:
 | `severity` | VARCHAR | `error` or `warn` |
 | `detail` | JSON | Per-assertion results |
 | `checked_at` | TIMESTAMP | Evaluation timestamp |
-
-### History via API
-
-```bash
-curl http://localhost:3000/api/contracts/history
-```
 
 ## Contracts via API
 
@@ -213,6 +232,14 @@ Returns:
 }
 ```
 
+### Contract History via API
+
+```bash
+curl http://localhost:3000/api/contracts/history
+```
+
+Returns all historical contract evaluations with timestamps and results.
+
 ## Contracts in havn check
 
 The `havn check` command includes contract evaluation:
@@ -251,6 +278,8 @@ Use inline assertions for model-specific quality checks that should run on every
 4. **Organize by domain** -- Group related contracts in the same YAML file: `contracts/finance.yml`, `contracts/customers.yml`, etc.
 
 5. **Run in CI/CD** -- Add `havn contracts` to your CI/CD pipeline to catch quality regressions before deployment.
+
+6. **Track history** -- Use `havn contracts --history` to monitor quality trends over time.
 
 ## Related Pages
 

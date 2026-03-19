@@ -2,6 +2,33 @@
 
 Seeds are CSV files that are loaded into DuckDB as reference tables. They provide a simple way to include static or slowly-changing data (lookup tables, configuration data, reference codes) in your data warehouse without writing ingest scripts.
 
+## Web UI Experience
+
+### Seeds in the DAG
+
+1. Go to the **Develop** tab and click **DAG**
+2. Seeds appear as special nodes in the dependency graph with a distinct icon
+3. Seeds are linked to downstream models that reference them via `-- depends_on:`
+4. This shows how reference data flows into your transforms
+
+### Seeds in the File Tree
+
+1. In the **Develop** tab, expand the `seeds/` directory in the file tree
+2. Click any `.csv` file to view and edit its contents in the Monaco editor
+3. Changes are auto-saved, and the next `havn seed` run will reload the modified file
+
+### Browsing Seed Data
+
+1. Go to **Explore** > **Tables**
+2. Expand the `seeds` schema to see all loaded seed tables
+3. Click a table to see its columns, data types, and a preview of the data
+4. Use **Explore** > **Query** to write SQL against seed tables
+
+### Loading Seeds from the UI
+
+Use the **Run menu** dropdown in the Develop tab:
+- Seeds are loaded as part of the pipeline when you run a stream that includes a `seed: [all]` step
+
 ## Directory Structure
 
 Place CSV files in the `seeds/` directory at the project root:
@@ -59,6 +86,12 @@ havn seed --schema reference_data
 
 Loads seeds into a schema other than the default `seeds`.
 
+### With Environment Override
+
+```bash
+havn seed --env prod
+```
+
 ### As Part of a Stream
 
 ```yaml
@@ -102,25 +135,13 @@ LEFT JOIN seeds.magnitude_scale m
 
 Add seeds to your `-- depends_on:` comment so havn knows about the dependency and includes seeds in the DAG visualization.
 
-## Seed Status in the DAG
-
-Seeds appear as special nodes in the DAG visualization (web UI). They are shown with a distinct icon to differentiate them from SQL models and ingest scripts.
-
 ## Empty CSVs
 
 If a CSV file is empty (contains only whitespace or newlines), havn creates an empty table with a single `empty_file BOOLEAN` column. This prevents errors in downstream models that reference the seed.
 
-## Discovering Seeds
+## API Reference
 
-### CLI
-
-```bash
-havn seed
-```
-
-Lists all discovered CSV files and their load status (built, skipped, or error).
-
-### API
+### List Seeds
 
 ```bash
 curl http://localhost:3000/api/seeds
@@ -128,7 +149,7 @@ curl http://localhost:3000/api/seeds
 
 Returns a list of seed files with their names, schemas, and file paths.
 
-### Loading via API
+### Load Seeds
 
 ```bash
 curl -X POST http://localhost:3000/api/seeds \
@@ -147,6 +168,8 @@ curl -X POST http://localhost:3000/api/seeds \
 4. **Version control seeds** -- CSV seed files should be committed to git. They are part of your project definition.
 
 5. **Declare dependencies** -- Always add seed tables to `-- depends_on:` in your SQL models for correct DAG ordering.
+
+6. **Use seeds for test fixtures** -- In the `test` environment with `:memory:` databases, seeds provide consistent reference data for testing.
 
 ## Related Pages
 
