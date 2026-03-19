@@ -2,6 +2,34 @@
 
 Sources are declarations of external data that your havn project depends on. They document where data comes from, define freshness SLAs, and provide metadata for column-level validation and documentation.
 
+## Web UI Experience
+
+### Sources in the DAG
+
+1. Go to the **Develop** tab and click **DAG**
+2. Sources appear as special nodes at the left edge of the graph with a "source" icon
+3. Edges from source nodes connect to the models that read from them
+4. Hovering over a source node shows its description, connection, and freshness status
+
+### Sources in the Data Sources Panel
+
+1. Go to **Explore** > **Data Sources**
+2. Configured sources are listed alongside connectors
+3. Each source shows its freshness status (green = fresh, red = stale)
+4. Click a source to see its table list, column metadata, and freshness details
+
+### Sources in the Tables Browser
+
+1. Go to **Explore** > **Tables**
+2. Source tables appear in their declared schema (e.g., `landing`)
+3. Column descriptions from source declarations appear alongside the column metadata
+
+### Source Freshness in Quality Panel
+
+1. Go to **Observe** > **Quality**
+2. The freshness section shows source freshness alongside model freshness
+3. Stale sources (exceeding their `freshness_hours` SLA) are highlighted in red
+
 ## Declaring Sources
 
 Sources are defined in `project.yml` under the `sources:` key:
@@ -144,34 +172,61 @@ The full DAG view (`/api/dag/full`) includes sources, seeds, models, and exposur
 curl http://localhost:3000/api/dag/full
 ```
 
+## Exposures
+
+Exposures are the opposite of sources -- they declare downstream consumers of your data:
+
+```yaml
+exposures:
+  - name: sales_dashboard
+    description: "Executive sales dashboard"
+    owner: analytics-team
+    type: dashboard
+    url: "https://dashboard.internal/sales"
+    depends_on:
+      - gold.daily_revenue
+      - gold.customer_summary
+```
+
+Exposures appear at the right edge of the DAG, showing what systems consume your gold-layer data.
+
+### Listing Exposures via API
+
+```bash
+curl http://localhost:3000/api/exposures
+```
+
 ## Sources in Documentation
 
 Source metadata appears in the auto-generated documentation:
 
 ```bash
-# Via API
 curl http://localhost:3000/api/docs/markdown
 ```
 
 This generates Markdown documentation that includes source tables, their descriptions, column definitions, and freshness status.
 
-## Listing Sources
+## API Reference
 
-### CLI
-
-Sources are displayed as part of the project context:
-
-```bash
-havn context
-```
-
-### API
+### List Sources
 
 ```bash
 curl http://localhost:3000/api/sources
 ```
 
 Returns all declared sources with their tables and columns.
+
+### Source Freshness
+
+```bash
+curl http://localhost:3000/api/sources/freshness
+```
+
+### List Exposures
+
+```bash
+curl http://localhost:3000/api/exposures
+```
 
 ## Best Practices
 
@@ -183,9 +238,12 @@ Returns all declared sources with their tables and columns.
 
 4. **Use loaded_at_column** -- When available, specify the timestamp column for more accurate freshness checks.
 
+5. **Declare exposures** -- Document downstream consumers so the team knows what depends on the data warehouse.
+
 ## Related Pages
 
 - [Quality](quality) -- Data quality overview including freshness
 - [Configuration](configuration) -- Full project.yml reference
 - [Lineage](lineage) -- Sources in the dependency graph
 - [Transforms](transforms) -- Referencing sources in SQL models
+- [Sentinel](sentinel) -- Schema change detection for sources

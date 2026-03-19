@@ -2,6 +2,46 @@
 
 havn supports multiple environments so you can maintain separate databases for development, staging, and production. Environments are defined in `project.yml` and selected at runtime via the `--env` flag or the web UI.
 
+## Web UI Experience
+
+### Environment Switcher
+
+The web UI supports environment selection:
+
+1. Start the server with a specific environment: `havn serve --env staging`
+2. The current environment is shown in the UI
+3. Switch environments at runtime via the API:
+
+```bash
+curl -X PUT http://localhost:3000/api/environment/prod \
+  -H "Authorization: Bearer <token>"
+```
+
+### Viewing the Active Environment
+
+```bash
+curl http://localhost:3000/api/environment
+```
+
+Returns:
+
+```json
+{
+  "active": "staging",
+  "available": ["dev", "staging", "prod", "test"],
+  "database_path": "staging_warehouse.duckdb"
+}
+```
+
+### Impact on All Panels
+
+When you switch environments:
+- **Tables** shows tables from the new database
+- **Query** runs against the new database
+- **History** shows run history from the new database
+- **Quality** shows profiles and assertions from the new database
+- **DAG** reflects model states in the new database
+
 ## Defining Environments
 
 Add an `environments:` section to your `project.yml`:
@@ -52,6 +92,15 @@ havn seed --env dev
 
 # Check freshness in production
 havn freshness --env prod
+
+# Run contracts against staging
+havn contracts --env staging
+
+# Run quality checks against test
+havn check --env test
+
+# Run Sentinel checks against production
+havn sentinel check --env prod
 ```
 
 ### Web UI
@@ -60,29 +109,6 @@ Start the server with a specific environment:
 
 ```bash
 havn serve --env staging
-```
-
-You can also switch environments at runtime through the API:
-
-```bash
-curl -X PUT http://localhost:3000/api/environment/prod \
-  -H "Authorization: Bearer <token>"
-```
-
-The current environment is shown in the API response:
-
-```bash
-curl http://localhost:3000/api/environment
-```
-
-Returns:
-
-```json
-{
-  "active": "staging",
-  "available": ["dev", "staging", "prod", "test"],
-  "database_path": "staging_warehouse.duckdb"
-}
 ```
 
 ## Environment Variable Expansion
@@ -152,6 +178,8 @@ havn transform --env test
 havn check --env test
 ```
 
+This is ideal for CI/CD pipelines where you want to validate transforms without persisting data.
+
 ### Isolated Feature Development
 
 Create a per-branch database to avoid conflicts:
@@ -172,6 +200,24 @@ When you specify `--env <name>`:
 4. The merged config is used for all operations
 
 Currently, only `database.path` can be overridden per environment. All other settings (connections, streams, lint config) are shared across environments.
+
+## API Reference
+
+### Get Current Environment
+
+```bash
+GET /api/environment
+```
+
+Returns the active environment, available environments, and the database path.
+
+### Switch Environment
+
+```bash
+PUT /api/environment/{env_name}
+```
+
+Switches the active database to the specified environment. Requires write permission when auth is enabled.
 
 ## Related Pages
 
