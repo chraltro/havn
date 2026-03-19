@@ -1,6 +1,48 @@
 # Lineage
 
-havn provides column-level lineage tracking using AST-based SQL analysis. Lineage traces how each output column in a model maps back to its source columns in upstream tables, through CTEs, joins, subqueries, and expressions.
+havn provides column-level lineage tracking using AST-based SQL analysis. Lineage traces how each output column in a model maps back to its source columns in upstream tables, through CTEs, joins, subqueries, and expressions. The DAG visualization in the web UI makes this lineage interactive and visual.
+
+## Web UI Experience
+
+### DAG Visualization in Develop Tab
+
+1. Go to the **Develop** tab and click **DAG**
+2. The interactive dependency graph shows all your models as nodes, connected by directed edges representing dependencies
+3. **Hover** over any node to highlight:
+   - Upstream dependencies (models this one reads from) in one color
+   - Downstream dependents (models that read from this one) in another color
+   - The full lineage chain from source to consumption
+4. **Click** a node to see model details in a side panel:
+   - Model name and schema
+   - Materialization type (table/view)
+   - Row count
+   - Column list with lineage annotations
+   - Upstream and downstream model lists
+
+### Full DAG View
+
+The full DAG view shows not just SQL models but the entire data lineage:
+
+- **Sources** -- External data sources declared in `project.yml`
+- **Ingest scripts** -- Python scripts that load data into landing
+- **Seeds** -- CSV reference tables
+- **SQL models** -- Bronze, silver, and gold transforms
+- **Exposures** -- Downstream consumers (dashboards, APIs, reports)
+
+Each node type has a distinct visual style so you can see data flow from external sources through transforms to consumption endpoints.
+
+### DAG with Rewind
+
+When you click **Rewind** in the DAG panel, the visualization adds historical data:
+- Row counts at each pipeline run
+- Row deltas (added/removed) between runs
+- Schema change indicators
+
+See [Versioning](versioning) for full Rewind documentation.
+
+### Lineage Hover in Tables Browser
+
+In the **Explore** > **Tables** panel, hovering over a table shows its upstream and downstream dependencies in a tooltip. This provides quick lineage context without switching to the DAG view.
 
 ## How Lineage Works
 
@@ -85,16 +127,7 @@ Table-level dependencies are declared explicitly in SQL model headers:
 
 havn also auto-detects table references from SQL using AST parsing. Explicit declarations are recommended for clarity and are used for DAG ordering.
 
-### DAG Visualization
-
-The web UI displays an interactive dependency graph:
-
-```bash
-havn serve
-# Navigate to the DAG tab
-```
-
-Or via API:
+### DAG API
 
 ```bash
 # Basic DAG (models only)
@@ -230,6 +263,14 @@ curl http://localhost:3000/api/models/gold.earthquake_summary/notebook-view
 
 Returns the SQL source, sample data rows, column lineage, upstream dependencies, and downstream consumers in a single response.
 
+## Downstream Dependencies (Rewind)
+
+Get all downstream models for a given model (used by Rewind for cascade rebuilds):
+
+```bash
+curl http://localhost:3000/api/rewind/downstream/silver.customers
+```
+
 ## Limitations
 
 - **Dynamic SQL** -- Lineage cannot trace through SQL built dynamically in Python ingest scripts.
@@ -242,4 +283,6 @@ Returns the SQL source, sample data rows, column lineage, upstream dependencies,
 - [Quality](quality) -- Using lineage for data quality
 - [Sources](sources) -- Sources in the DAG
 - [Seeds](seeds) -- Seeds in the DAG
+- [Versioning](versioning) -- Rewind uses the DAG for cascade rebuilds
+- [Sentinel](sentinel) -- Schema change impact analysis uses lineage
 - [API Reference](api-reference) -- Lineage and impact API endpoints
