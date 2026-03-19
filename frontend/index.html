@@ -122,6 +122,9 @@
         background-color: color-mix(in srgb, var(--havn-accent, #3ECFB4) 8%, transparent) !important;
       }
 
+      /* ── Spinner animation ── */
+      @keyframes havn-spin { to { transform: rotate(360deg); } }
+
       /* ── Resize handle ── */
       [data-havn-resize-handle] {
         transition: background-color 0.12s ease;
