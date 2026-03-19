@@ -229,6 +229,55 @@ export const api = {
   runStream: (name: string, force: boolean = false) =>
     request<StreamResult>(`/stream/${name}?force=${force}`, { method: "POST" }),
   cancelStream: () => request("/stream/cancel", { method: "POST" }),
+  getActiveStream: () => request<{ running: boolean; stream_name?: string; started_at?: number; status?: string }>("/stream/active"),
+  reconnectStreamSSE: (
+    fromEvent: number,
+    onEvent: (event: string, data: Record<string, unknown>) => void,
+  ): { abort: () => void } => {
+    const controller = new AbortController();
+    const url = `${BASE}/stream/reconnect/events?from_event=${fromEvent}`;
+    const headers: Record<string, string> = {};
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+
+    fetch(url, { signal: controller.signal, headers })
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text();
+          onEvent("error", { message: text || res.statusText });
+          return;
+        }
+        const reader = res.body?.getReader();
+        if (!reader) return;
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          let currentEvent = "";
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              currentEvent = line.slice(7).trim();
+            } else if (line.startsWith("data: ") && currentEvent) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                onEvent(currentEvent, data);
+              } catch { /* skip malformed */ }
+              currentEvent = "";
+            }
+          }
+        }
+      })
+      .catch((err) => {
+        if (err.name !== "AbortError") {
+          onEvent("error", { message: String(err) });
+        }
+      });
+
+    return { abort: () => controller.abort() };
+  },
   runStreamSSE: (
     name: string,
     force: boolean = false,
@@ -403,8 +452,41 @@ export const api = {
       body: JSON.stringify({ targets, target_schema, full }),
     }),
 
-  // Git status
+  // Git operations
   getGitStatus: () => request("/git/status"),
+  getGitLog: (limit: number = 20) => request(`/git/log?limit=${limit}`),
+  getGitDiff: (file?: string, staged?: boolean) => {
+    const params = new URLSearchParams();
+    if (file) params.set("file", file);
+    if (staged) params.set("staged", "true");
+    const qs = params.toString();
+    return request(`/git/diff${qs ? "?" + qs : ""}`);
+  },
+  getGitBranches: () => request("/git/branches"),
+  getGitStash: () => request("/git/stash"),
+  getGitRemote: () => request("/git/remote"),
+  gitStage: (files: string[]) =>
+    request("/git/stage", { method: "POST", body: JSON.stringify({ files }) }),
+  gitUnstage: (files: string[]) =>
+    request("/git/unstage", { method: "POST", body: JSON.stringify({ files }) }),
+  gitCommit: (message: string) =>
+    request("/git/commit", { method: "POST", body: JSON.stringify({ message }) }),
+  gitPull: (remote?: string, branch?: string) =>
+    request("/git/pull", { method: "POST", body: JSON.stringify({ remote: remote || "origin", branch }) }),
+  gitPush: (remote?: string, branch?: string) =>
+    request("/git/push", { method: "POST", body: JSON.stringify({ remote: remote || "origin", branch }) }),
+  gitCreateBranch: (name: string, checkout: boolean = true) =>
+    request("/git/branch", { method: "POST", body: JSON.stringify({ name, checkout }) }),
+  gitCheckout: (branch: string) =>
+    request("/git/checkout", { method: "POST", body: JSON.stringify({ branch }) }),
+  gitDeleteBranch: (name: string) =>
+    request(`/git/branch?name=${encodeURIComponent(name)}`, { method: "DELETE" }),
+  gitStashSave: (message?: string) =>
+    request("/git/stash", { method: "POST", body: JSON.stringify({ message }) }),
+  gitStashPop: () =>
+    request("/git/stash/pop", { method: "POST", body: JSON.stringify({}) }),
+  gitDiscard: (files: string[]) =>
+    request("/git/discard", { method: "POST", body: JSON.stringify({ files }) }),
 
   // Upload
   uploadFile: async (file: File) => {
@@ -474,6 +556,7 @@ export const api = {
     request(`/cdc/${encodeURIComponent(name)}/reset`, { method: "POST" }),
 
   // Masking
+  getMaskingMethods: () => request<any>("/masking/methods"),
   listMaskingPolicies: () => request("/masking/policies"),
   createMaskingPolicy: (policy: unknown) =>
     request("/masking/policies", { method: "POST", body: JSON.stringify(policy) }),

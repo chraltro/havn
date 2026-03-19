@@ -54,7 +54,7 @@ The havn web interface is a React SPA (Single Page Application) built with Vite 
 - **History** -- Complete run log with execution times, error messages, and pipeline status.
 
 ### Configure
-- **Masking** -- Column-level data masking policies with role-based exemptions (hash, redact, null, partial). See [Masking](masking).
+- **Masking** -- Column-level data masking with 14 methods across general, PII, financial, and analytics categories. See [Masking](masking).
 - **Wiki** -- Documentation editor for project-specific knowledge base.
 - **Docs** -- Auto-generated documentation from SQL comments and metadata.
 - **Settings** -- Theme preferences, scheduler configuration, secrets management, user/role management, alerts, resource limits, and environment switching. See [Auth](auth), [Environments](environments).
@@ -82,7 +82,7 @@ The havn web interface is a React SPA (Single Page Application) built with Vite 
 
 ### Security
 - **Authentication** -- Token-based auth with RBAC roles: admin, editor, viewer. See [Auth](auth).
-- **Data Masking** -- Column-level masking policies (hash, redact, null, partial) with role exemptions and conditional application. See [Masking](masking).
+- **Data Masking** -- Column-level masking with 14 methods (hash, redact, null, partial, email, phone, credit_card, first_initial, ip_address, range, noise, date_shift, truncate, consistent_hash) with role exemptions and conditional application. See [Masking](masking).
 - **Audit Logging** -- Track user actions including logins, queries, pipeline runs, and file edits.
 - **Secrets Management** -- Encrypted `.env` variable management via CLI, web UI, and API. See [Configuration](configuration).
 

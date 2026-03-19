@@ -423,13 +423,34 @@ Get contract evaluation history.
 
 ## Masking
 
+### GET /api/masking/methods
+
+List all available masking methods with descriptions, categories, example input/output, and config schemas. No authentication required.
+
+Returns:
+
+```json
+[
+  {
+    "id": "hash",
+    "name": "SHA-256 Hash",
+    "description": "One-way hash, first 8 hex chars. Irreversible.",
+    "category": "general",
+    "example": {"input": "john@example.com", "output": "a1b2c3d4"},
+    "config": []
+  }
+]
+```
+
+Categories: `general`, `pii`, `financial`, `analytics`.
+
 ### GET /api/masking/policies
 
 List all masking policies.
 
 ### POST /api/masking/policies
 
-Create a new masking policy.
+Create a new masking policy. The `method` field must be one of: `hash`, `redact`, `null`, `partial`, `email`, `phone`, `credit_card`, `first_initial`, `ip_address`, `range`, `noise`, `date_shift`, `truncate`, `consistent_hash`.
 
 ```json
 {
@@ -646,11 +667,145 @@ Update lint configuration.
 
 Reset lint configuration to defaults.
 
-## Git
+## Git Operations
 
 ### GET /api/git/status
 
 Get git status: branch, dirty flag, changed files, last commit.
+
+Returns: `{is_git_repo, branch, dirty, changed_files, files, last_commit, last_message}`
+
+If the project is not a git repository, returns `{is_git_repo: false}`.
+
+### GET /api/git/log
+
+Get commit history.
+
+Query params: `?limit=20`
+
+Returns: `[{hash, message, author, date}]`
+
+### GET /api/git/diff
+
+Get diff text for working directory or staged changes.
+
+Query params: `?file=path/to/file&staged=false`
+
+Returns: `{diff: "..."}`
+
+### GET /api/git/branches
+
+List all branches.
+
+Returns: `[{name, current}]`
+
+### GET /api/git/stash
+
+List stashed changes.
+
+Returns: `[{index, message}]`
+
+### GET /api/git/remote
+
+Get the remote URL.
+
+Returns: `{url: "..." | null}`
+
+### POST /api/git/stage
+
+Stage files for commit. Requires `write` permission.
+
+```json
+{"files": ["transform/silver/customers.sql", "ingest/load.py"]}
+```
+
+Returns: `{status: "staged", files: [...]}`
+
+### POST /api/git/unstage
+
+Unstage files. Requires `write` permission.
+
+```json
+{"files": ["transform/silver/customers.sql"]}
+```
+
+Returns: `{status: "unstaged", files: [...]}`
+
+### POST /api/git/commit
+
+Create a commit from staged changes. Requires `write` permission.
+
+```json
+{"message": "Add customer transform"}
+```
+
+Returns the commit result, or 500 if no staged changes.
+
+### POST /api/git/pull
+
+Pull from a remote. Requires `write` permission.
+
+```json
+{"remote": "origin", "branch": null}
+```
+
+### POST /api/git/push
+
+Push to a remote. Requires `write` permission.
+
+```json
+{"remote": "origin", "branch": null}
+```
+
+### POST /api/git/branch
+
+Create a new branch. Requires `write` permission.
+
+```json
+{"name": "feature/new-model", "checkout": true}
+```
+
+Returns: `{status: "created", name: "...", checked_out: true}`
+
+### POST /api/git/checkout
+
+Switch to a branch. Requires `write` permission.
+
+```json
+{"branch": "main"}
+```
+
+Returns: `{status: "checked_out", branch: "main"}`
+
+### DELETE /api/git/branch
+
+Delete a branch. Requires `write` permission.
+
+Query params: `?name=feature/old-branch`
+
+Returns: `{status: "deleted", name: "..."}`
+
+### POST /api/git/stash
+
+Stash working directory changes. Requires `write` permission.
+
+```json
+{"message": "WIP: customer model"}
+```
+
+### POST /api/git/stash/pop
+
+Pop the latest stash entry. Requires `write` permission.
+
+### POST /api/git/discard
+
+Discard working directory changes for specific files. Requires `write` permission.
+
+```json
+{"files": ["transform/silver/customers.sql"]}
+```
+
+Returns: `{status: "discarded", files: [...]}`
 
 ## Notebooks
 

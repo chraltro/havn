@@ -20,7 +20,7 @@ havn provides a comprehensive data quality framework with four complementary sys
 - Timestamp of last evaluation
 - Failure detail (for failed assertions)
 
-**Contract Results** -- If YAML contracts are configured, their results appear here too. See [Contracts](contracts).
+**Contract Results** -- If YAML contracts are configured, their results appear here with a **Last Result** column showing PASS/FAIL/NOT RUN badges and a **Level** column displaying "must pass" or "warning". Click any contract row to expand and see per-rule PASS/FAIL details with messages (e.g., "5 duplicate(s) — 95 distinct out of 100 rows"). Toggle **Show Run History** to browse all historical contract evaluations. See [Contracts](contracts).
 
 ### Tables Browser Profiling
 

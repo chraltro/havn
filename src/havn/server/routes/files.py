@@ -1,4 +1,4 @@
-"""File browsing, editing, and git status endpoints."""
+"""File browsing and editing endpoints."""
 
 from __future__ import annotations
 
@@ -65,6 +65,12 @@ class MoveFileRequest(BaseModel):
 # --- Helpers ---
 
 
+_SKIP_DIRS = {
+    "__pycache__", "node_modules", ".venv", ".pytest_cache",
+    ".dp", "dist", "build",
+}
+
+
 def _scan_dir(base: Path, rel: Path | None = None) -> list[FileInfo]:
     """Scan a directory and return file tree."""
     target = base / rel if rel else base
@@ -72,7 +78,10 @@ def _scan_dir(base: Path, rel: Path | None = None) -> list[FileInfo]:
         return []
     items = []
     for entry in sorted(target.iterdir()):
-        if entry.name.startswith(".") or entry.name == "__pycache__":
+        if entry.name.startswith(".") or entry.name in _SKIP_DIRS:
+            continue
+        # Skip DuckDB temp/WAL dirs and binary artifacts
+        if ".duckdb" in entry.name:
             continue
         rel_path = str(entry.relative_to(base))
         if entry.is_dir():
@@ -276,36 +285,3 @@ def _drop_db_object(full_path: Path, file_path: str) -> str | None:
         return f"{schema}.{name}"
     finally:
         conn.close()
-
-
-# --- Git status ---
-
-
-@router.get("/api/git/status")
-def get_git_status(request: Request) -> dict:
-    """Get git status for the project (branch, dirty, changed files)."""
-    _require_permission(request, "read")
-    try:
-        from havn.engine.git import (
-            changed_files,
-            current_branch,
-            is_dirty,
-            is_git_repo,
-            last_commit_hash,
-            last_commit_message,
-        )
-
-        project_dir = _get_project_dir()
-        if not is_git_repo(project_dir):
-            return {"is_git_repo": False}
-
-        return {
-            "is_git_repo": True,
-            "branch": current_branch(project_dir),
-            "dirty": is_dirty(project_dir),
-            "changed_files": changed_files(project_dir),
-            "last_commit": last_commit_hash(project_dir),
-            "last_message": last_commit_message(project_dir),
-        }
-    except Exception:
-        return {"is_git_repo": False}

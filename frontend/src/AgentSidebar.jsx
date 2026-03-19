@@ -242,7 +242,15 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
   // Per-agent state: { messages, isConnected, isStreaming, permissionMode, selectedModel }
   const [agentStates, setAgentStates] = useState(() => {
     const init = {};
-    for (const a of AGENTS) init[a.id] = { messages: [], isConnected: false, isStreaming: false, permissionMode: "auto", selectedModel: "" };
+    let saved = {};
+    try {
+      const raw = sessionStorage.getItem('havn_agent_messages');
+      if (raw) saved = JSON.parse(raw);
+    } catch {}
+    for (const a of AGENTS) {
+      const savedMessages = (saved[a.id] && saved[a.id].messages) || [];
+      init[a.id] = { messages: savedMessages, isConnected: false, isStreaming: false, permissionMode: "auto", selectedModel: "" };
+    }
     return init;
   });
   const [input, setInput] = useState("");
@@ -263,6 +271,18 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
   const updateAgent = useCallback((agentId, updater) => {
     setAgentStates((prev) => ({ ...prev, [agentId]: typeof updater === "function" ? updater(prev[agentId]) : { ...prev[agentId], ...updater } }));
   }, []);
+
+  // Persist agent messages to sessionStorage
+  useEffect(() => {
+    try {
+      const toSave = {};
+      for (const [id, state] of Object.entries(agentStates)) {
+        const msgs = state.messages || [];
+        toSave[id] = { messages: msgs.length > 200 ? msgs.slice(-200) : msgs };
+      }
+      sessionStorage.setItem('havn_agent_messages', JSON.stringify(toSave));
+    } catch { /* storage full - ignore */ }
+  }, [agentStates]);
 
   // Current agent shorthand
   const cur = agentStates[selectedAgent] || { messages: [], isConnected: false, isStreaming: false, permissionMode: "auto", selectedModel: "" };
@@ -294,11 +314,15 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
       const data = JSON.parse(event.data);
 
       if (data.type === "ready") {
-        updateAgent(agentId, (s) => ({
-          ...s,
-          isConnected: true,
-          messages: [...s.messages, { role: "system", content: `${AGENTS.find((a) => a.id === data.agent)?.name || data.agent} connected`, ts: timestamp() }],
-        }));
+        updateAgent(agentId, (s) => {
+          // Only show "connected" on first connection, not on reconnects after refresh
+          const hasHistory = s.messages.length > 0;
+          return {
+            ...s,
+            isConnected: true,
+            messages: hasHistory ? s.messages : [...s.messages, { role: "system", content: `${AGENTS.find((a) => a.id === data.agent)?.name || data.agent} connected`, ts: timestamp() }],
+          };
+        });
       } else if (data.type === "mode_changed") {
         updateAgent(agentId, { permissionMode: data.mode });
       } else if (data.type === "model_changed") {

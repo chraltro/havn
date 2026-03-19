@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { schemaCompare } from "./schemaOrder";
 
 function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, onMoveFile }) {
   const [expanded, setExpanded] = useState(depth < 2);
@@ -73,7 +74,7 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
           </div>
         )}
         {expanded &&
-          node.children?.map((child) => (
+          (node.path === "transform" ? [...(node.children || [])].sort((a, b) => a.type === "dir" && b.type === "dir" ? schemaCompare(a.name, b.name) : 0) : node.children)?.map((child) => (
             <FileNode
               key={child.path}
               node={child}

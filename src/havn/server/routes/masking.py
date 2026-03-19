@@ -13,11 +13,18 @@ router = APIRouter()
 # --- Pydantic models ---
 
 
+_VALID_METHODS = (
+    "hash|redact|null|partial|email|phone|credit_card|first_initial"
+    "|ip_address|range|noise|date_shift|truncate|consistent_hash"
+)
+_METHOD_RE = rf"^({_VALID_METHODS})$"
+
+
 class PolicyCreate(BaseModel):
     schema_name: str = Field(..., min_length=1)
     table_name: str = Field(..., min_length=1)
     column_name: str = Field(..., min_length=1)
-    method: str = Field(..., pattern=r"^(hash|redact|null|partial)$")
+    method: str = Field(..., pattern=_METHOD_RE)
     method_config: dict | None = None
     condition_column: str | None = None
     condition_value: str | None = None
@@ -28,7 +35,7 @@ class PolicyUpdate(BaseModel):
     schema_name: str | None = None
     table_name: str | None = None
     column_name: str | None = None
-    method: str | None = Field(default=None, pattern=r"^(hash|redact|null|partial)$")
+    method: str | None = Field(default=None, pattern=_METHOD_RE)
     method_config: dict | None = None
     condition_column: str | None = None
     condition_value: str | None = None
@@ -36,6 +43,14 @@ class PolicyUpdate(BaseModel):
 
 
 # --- Endpoints ---
+
+
+@router.get("/api/masking/methods")
+def list_methods() -> list[dict]:
+    """Return available masking methods with descriptions and config schemas."""
+    from havn.engine.masking import list_masking_methods
+
+    return list_masking_methods()
 
 
 @router.get("/api/masking/policies")
