@@ -19,25 +19,18 @@ def _audit_file_action(request: Request, user: dict, action: str, resource: str,
     """Helper to log a file audit entry without failing the main operation."""
     try:
         from havn.engine.audit import log_audit
-        from havn.server.deps import _get_db_path
-        from havn.engine.database import connect as _audit_connect
+        from havn.server.deps import _get_shared_conn
 
-        db_path = _get_db_path()
-        if not db_path.exists():
-            return
-        conn = _audit_connect(db_path)
-        try:
-            client_ip = request.client.host if request.client else None
-            log_audit(
-                conn,
-                user=user.get("username", "anonymous"),
-                action=action,
-                resource=resource,
-                detail=detail,
-                ip_address=client_ip,
-            )
-        finally:
-            conn.close()
+        conn = _get_shared_conn()
+        client_ip = request.client.host if request.client else None
+        log_audit(
+            conn,
+            user=user.get("username", "anonymous"),
+            action=action,
+            resource=resource,
+            detail=detail,
+            ip_address=client_ip,
+        )
     except Exception:
         logger.debug("Failed to write audit log for %s", action, exc_info=True)
 

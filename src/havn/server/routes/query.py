@@ -115,21 +115,17 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
     # Audit log the query execution
     try:
         from havn.engine.audit import log_audit
-        from havn.server.deps import _get_db_path
-        from havn.engine.database import connect as _audit_connect
+        from havn.server.deps import _get_shared_conn
 
-        _audit_conn = _audit_connect(_get_db_path())
-        try:
-            client_ip = request.client.host if request.client else None
-            log_audit(
-                _audit_conn,
-                user=user.get("username", "anonymous"),
-                action="query",
-                resource=sql[:500],
-                ip_address=client_ip,
-            )
-        finally:
-            _audit_conn.close()
+        _audit_conn = _get_shared_conn()
+        client_ip = request.client.host if request.client else None
+        log_audit(
+            _audit_conn,
+            user=user.get("username", "anonymous"),
+            action="query",
+            resource=sql[:500],
+            ip_address=client_ip,
+        )
     except Exception:
         logger.debug("Failed to write audit log for query", exc_info=True)
 
