@@ -30,9 +30,11 @@ import { useHintTriggerFn } from "./HintSystem";
 import EnvironmentSwitcher from "./EnvironmentSwitcher";
 import ModelNotebookView from "./ModelNotebookView";
 import NewModelDialog from "./NewModelDialog";
+import GitPanel from "./GitPanel";
 import AgentSidebar from "./AgentSidebar";
 import { useAuth } from "./AuthContext";
 import { WarehouseProvider, useWarehouse } from "./WarehouseContext";
+import { schemaCompare } from "./schemaOrder";
 import { PipelineProvider, usePipeline } from "./PipelineContext";
 
 const GUIDE_STEPS = [
@@ -86,7 +88,7 @@ const GUIDE_STEPS = [
 
 const SECTIONS = [
   { id: "Overview", label: "Overview", tabs: [] },
-  { id: "Develop", label: "Develop", tabs: ["Editor", "Notebooks", "DAG"] },
+  { id: "Develop", label: "Develop", tabs: ["Editor", "Notebooks", "DAG", "Git"] },
   { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "Data Sources"] },
   { id: "Observe", label: "Observe", tabs: ["Quality", "Sentinel", "Diff", "History"] },
   { id: "Configure", label: "Configure", tabs: ["Masking", "Wiki", "Docs", "Settings"] },
@@ -240,15 +242,7 @@ function groupBySchema(tables) {
 
 function SchemaTree({ tables, selectedTable, onSelectTable }) {
   const schemas = groupBySchema(tables);
-  const SCHEMA_ORDER = ["seeds", "landing", "bronze", "silver", "gold"];
-  const schemaNames = Object.keys(schemas).sort((a, b) => {
-    const ai = SCHEMA_ORDER.indexOf(a);
-    const bi = SCHEMA_ORDER.indexOf(b);
-    if (ai !== -1 && bi !== -1) return ai - bi;
-    if (ai !== -1) return -1;
-    if (bi !== -1) return 1;
-    return a.localeCompare(b);
-  });
+  const schemaNames = Object.keys(schemas).sort(schemaCompare);
   const [expanded, setExpanded] = useState(() => {
     const m = {};
     for (const s of schemaNames) m[s] = true;
@@ -414,8 +408,25 @@ function AppContent() {
     setGuideOpen(true);
   }
 
+  const pendingSubTabRef = useRef(null);
+
   function navigateToTab(tab) {
-    setActiveTab(tab);
+    // Support "Quality:Contracts:filterValue" format to navigate to a sub-tab with filter
+    if (tab.includes(":")) {
+      const parts = tab.split(":");
+      const mainTab = parts[0];
+      const subTab = parts[1];
+      const filter = parts[2] || null;
+      pendingSubTabRef.current = { tab: mainTab, subTab, filter };
+      setActiveTab(mainTab);
+      // Dispatch after React render so the target panel is mounted
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("havn-subtab", { detail: { tab: mainTab, subTab, filter } }));
+        pendingSubTabRef.current = null;
+      }, 100);
+    } else {
+      setActiveTab(tab);
+    }
     tabSwitchCountRef.current += 1;
     setHintTrigger("tabSwitchCount", tabSwitchCountRef.current);
   }
@@ -919,6 +930,7 @@ function AppContent() {
             {activeTab === "Data Sources" && <ErrorBoundary name="Data Sources"><DataSourcesPanel addOutput={addOutput} showConfirm={showConfirm} /></ErrorBoundary>}
             {activeTab === "Notebooks" && <ErrorBoundary name="Notebooks"><NotebookPanel openPath={notebookPath} /></ErrorBoundary>}
             {activeTab === "DAG" && <ErrorBoundary name="DAG"><DAGPanel onOpenFile={openFile} showConfirm={showConfirm} /></ErrorBoundary>}
+            {activeTab === "Git" && <ErrorBoundary name="Git"><GitPanel /></ErrorBoundary>}
             {activeTab === "Sentinel" && <ErrorBoundary name="Sentinel"><SentinelPanel /></ErrorBoundary>}
             {activeTab === "Diff" && <ErrorBoundary name="Diff"><DiffPanel api={api} addOutput={addOutput} /></ErrorBoundary>}
             {activeTab === "Docs" && <ErrorBoundary name="Docs"><DocsPanel /></ErrorBoundary>}

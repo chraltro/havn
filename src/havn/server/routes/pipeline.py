@@ -89,14 +89,90 @@ import threading
 
 _cancel_flag = threading.Event()
 
+# --- Active pipeline tracking (for reconnect after page refresh) ---
+
+_active_stream: dict | None = None  # {"stream_name": str, "started_at": float, "status": "running"}
+_event_buffer: list[str] = []  # Buffer of recent SSE events (last 200)
+_buffer_lock = threading.Lock()
+
 
 @router.post("/api/stream/cancel")
 def cancel_stream(request: Request) -> dict:
     """Cancel the currently running stream."""
+    global _active_stream
     _require_permission(request, "execute")
     _cancel_flag.set()
     logger.info("Stream cancellation requested")
+    # Give the generator 5s to clean up, then force-clear
+    def _force_clear():
+        import time as _t
+        _t.sleep(5)
+        global _active_stream
+        if _active_stream and _cancel_flag.is_set():
+            logger.info("Force-clearing stale active stream after cancel")
+            _active_stream = None
+    threading.Thread(target=_force_clear, daemon=True).start()
     return {"status": "cancelling"}
+
+
+_STALE_TIMEOUT = 600  # 10 minutes — if pipeline runs longer than this, it's likely stuck
+
+
+@router.get("/api/stream/active")
+def get_active_stream(request: Request) -> dict:
+    """Check if a pipeline is currently running."""
+    global _active_stream
+    _require_permission(request, "read")
+    if _active_stream:
+        import time as _t
+        elapsed = _t.time() - _active_stream.get("started_at", 0)
+        if elapsed > _STALE_TIMEOUT:
+            logger.warning("Clearing stale active stream (%.0fs old)", elapsed)
+            _active_stream = None
+            return {"running": False}
+        with _buffer_lock:
+            buffered = len(_event_buffer)
+        return {"running": True, "buffered_events": buffered, **_active_stream}
+    return {"running": False}
+
+
+@router.get("/api/stream/reconnect/events")
+async def reconnect_stream_sse(request: Request, from_event: int = 0):
+    """Reconnect to an active pipeline stream. Replays buffered events from `from_event` index."""
+    from fastapi.responses import StreamingResponse
+
+    _require_permission(request, "read")
+    if not _active_stream:
+        raise HTTPException(404, "No active pipeline")
+
+    def _replay():
+        # First replay buffered events the client missed
+        with _buffer_lock:
+            for evt in _event_buffer[from_event:]:
+                yield evt
+
+        # Then follow live events by tailing the buffer
+        last_seen = len(_event_buffer)
+        while _active_stream:
+            time.sleep(0.3)
+            with _buffer_lock:
+                if len(_event_buffer) > last_seen:
+                    for evt in _event_buffer[last_seen:]:
+                        yield evt
+                    last_seen = len(_event_buffer)
+            # Keepalive
+            yield ": keepalive\n\n"
+
+        # Pipeline finished — send any remaining events
+        with _buffer_lock:
+            for evt in _event_buffer[last_seen:]:
+                yield evt
+
+    return StreamingResponse(
+        _replay(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # --- Stream execution (SSE) ---
@@ -144,6 +220,7 @@ async def run_stream_sse(
     db_path_str = str(_get_db_path())
 
     def _generate():
+        global _active_stream, _event_buffer
         import json as _json
         import time as _time
         import queue as _queue
@@ -151,6 +228,11 @@ async def run_stream_sse(
         from graphlib import TopologicalSorter
 
         start = _time.perf_counter()
+
+        # Track active pipeline for reconnect support
+        with _buffer_lock:
+            _active_stream = {"stream_name": stream_name, "started_at": _time.time(), "status": "running"}
+            _event_buffer = []
 
         from havn.engine.database import log_run as _lr
         from havn.engine.runner import run_script as _run_script
@@ -162,7 +244,13 @@ async def run_stream_sse(
 
         def emit(event_type: str, data: dict):
             payload = _json.dumps(data)
-            return f"event: {event_type}\ndata: {payload}\n\n"
+            sse_str = f"event: {event_type}\ndata: {payload}\n\n"
+            with _buffer_lock:
+                _event_buffer.append(sse_str)
+                # Cap buffer at 200 events
+                if len(_event_buffer) > 200:
+                    _event_buffer[:] = _event_buffer[-200:]
+            return sse_str
         has_error = False
         cancelled = False
         project_dir = _get_project_dir()
@@ -262,11 +350,16 @@ async def run_stream_sse(
 
         if not nodes:
             yield emit("complete", {"stream": stream_name, "status": "success", "duration_seconds": 0})
+            _active_stream = None
             return
 
         # Use the server's shared connection (all endpoints share one connection,
         # each thread gets a cursor — this prevents file lock contention on Windows)
         conn = _get_shared_conn()
+
+        # Ensure metadata tables exist (assertion_results, model_profiles, etc.)
+        from havn.engine.database import ensure_meta_table as _emt
+        _emt(conn)
 
         # 5. Pre-build validation for transform models
         if models:
@@ -281,6 +374,7 @@ async def run_stream_sse(
                     has_error = True
             if has_error:
                 yield emit("complete", {"stream": stream_name, "status": "failed", "duration_seconds": 0})
+                _active_stream = None
                 return
 
         # 6. Pre-create schemas
@@ -454,6 +548,9 @@ async def run_stream_sse(
             "status": status,
             "duration_seconds": duration_s,
         })
+
+        # Mark pipeline as no longer active (buffer stays for late reconnectors)
+        _active_stream = None
 
     return StreamingResponse(
         _generate(),

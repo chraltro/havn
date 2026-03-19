@@ -9,7 +9,7 @@ havn provides column-level data masking to protect sensitive data. Masking polic
 1. Go to the **Configure** tab and click **Masking**
 2. The Masking panel shows all active masking policies in a table:
    - Schema, table, and column for each policy
-   - Masking method (hash, redact, null, partial)
+   - Masking method (14 methods across general, PII, financial, and analytics categories)
    - Exempted roles
    - Conditional rules (if any)
 3. **Add Policy** -- Click to create a new masking policy by selecting the schema, table, column, method, and exempted roles
@@ -42,42 +42,46 @@ When you browse tables in the **Explore** > **Tables** panel, masked columns dis
 
 ## Masking Methods
 
-### hash
+havn provides 14 masking methods organized into four categories. Each method can be used when creating a masking policy via the API, CLI, or SQL commands.
 
-Replaces the value with the first 8 characters of its SHA-256 hash:
+### General
+
+#### hash
+
+SHA-256 hash, first 8 hex chars. Irreversible. Same input always produces the same output.
 
 ```
 "john@example.com" -> "a1b2c3d4"
 "Jane Smith"       -> "e5f6g7h8"
 ```
 
-Useful for maintaining referential integrity (same input always produces same hash) while hiding actual values.
+No configuration options.
 
-### redact
+#### redact
 
-Replaces the value with `***`:
+Replace the entire value with `***`. The simplest and most secure method.
 
 ```
 "john@example.com" -> "***"
 "555-1234"         -> "***"
 ```
 
-The simplest and most secure method -- completely hides the original value.
+No configuration options.
 
-### null
+#### null
 
-Replaces the value with NULL:
+Replace the value with NULL. Use when the column should be completely hidden from non-exempt roles.
 
 ```
 "john@example.com" -> NULL
 "555-1234"         -> NULL
 ```
 
-Useful when downstream systems need to handle the column but shouldn't see any data.
+No configuration options.
 
-### partial
+#### partial
 
-Shows the first and/or last N characters, masking the rest with `*`:
+Show first and/or last N characters, mask the middle with `*`.
 
 ```
 # show_first=2, show_last=5
@@ -90,6 +94,181 @@ Shows the first and/or last N characters, masking the rest with `*`:
 Configuration:
 - `show_first` -- Number of characters to show from the beginning (default: 0)
 - `show_last` -- Number of characters to show from the end (default: 0)
+
+```json
+{"method": "partial", "method_config": {"show_first": 2, "show_last": 4}}
+```
+
+#### truncate
+
+Show first N characters followed by ellipsis. Simple partial visibility.
+
+```
+# length=3
+"John Smith" -> "Joh..."
+```
+
+Configuration:
+- `length` -- Number of visible characters (default: 3)
+
+```json
+{"method": "truncate", "method_config": {"length": 5}}
+```
+
+### PII
+
+#### email
+
+Hide the local part of an email address, keep the domain. Useful for analytics by email provider.
+
+```
+"john.doe@company.com" -> "***@company.com"
+```
+
+No configuration options.
+
+#### phone
+
+Keep last N digits of a phone number, mask the rest. Useful for verification use cases.
+
+```
+# show_last=4
+"+1-555-123-4567" -> "**-***-***-4567"
+```
+
+Configuration:
+- `show_last` -- Number of visible digits (default: 4)
+
+```json
+{"method": "phone", "method_config": {"show_last": 4}}
+```
+
+#### first_initial
+
+Reduce names to initials. Semi-anonymous but still groupable.
+
+```
+"John Smith" -> "J. S."
+```
+
+No configuration options.
+
+#### ip_address
+
+Mask host octets of an IPv4 address, keep network prefix for geo-analytics.
+
+```
+# keep_octets=2
+"192.168.1.42" -> "192.168.x.x"
+```
+
+Configuration:
+- `keep_octets` -- Number of visible octets, 0-3 (default: 2)
+
+```json
+{"method": "ip_address", "method_config": {"keep_octets": 2}}
+```
+
+### Financial
+
+#### credit_card
+
+PCI-DSS compliant: mask all but last 4 digits.
+
+```
+# show_last=4
+"4111111111111111" -> "************1111"
+```
+
+Configuration:
+- `show_last` -- Number of visible digits (default: 4)
+
+```json
+{"method": "credit_card", "method_config": {"show_last": 4}}
+```
+
+### Analytics
+
+These methods preserve analytical properties (distributions, relationships, time intervals) while masking exact values.
+
+#### range
+
+Bucket numeric values into ranges. Preserves distribution for aggregation-safe analytics.
+
+```
+# bucket_size=10000
+47382 -> "40000-50000"
+```
+
+Configuration:
+- `bucket_size` -- Size of each bucket (default: 10000)
+
+```json
+{"method": "range", "method_config": {"bucket_size": 5000}}
+```
+
+#### noise
+
+Add deterministic random noise within +/- percentage. Same input always gets the same noise (seeded), so results are reproducible.
+
+```
+# percentage=10
+47382 -> ~45200
+```
+
+Configuration:
+- `percentage` -- Noise range as a percentage, +/- (default: 10.0)
+- `seed_key` -- Seed string for deterministic noise (default: "")
+
+```json
+{"method": "noise", "method_config": {"percentage": 5.0, "seed_key": "revenue"}}
+```
+
+#### date_shift
+
+Shift dates by a consistent random offset. Preserves time intervals for time-series analytics where relative ordering matters but exact dates are sensitive.
+
+```
+# max_days=30
+"2024-03-15" -> "2024-03-28"
+```
+
+Supports `datetime` objects and common string formats (`YYYY-MM-DD`, `YYYY-MM-DD HH:MM:SS`).
+
+Configuration:
+- `max_days` -- Maximum shift in days, +/- (default: 30)
+- `seed_key` -- Seed string for deterministic shifts (default: "")
+
+```json
+{"method": "date_shift", "method_config": {"max_days": 14, "seed_key": "orders"}}
+```
+
+#### consistent_hash
+
+Deterministic pseudonym: same input always maps to the same output. Unlike `hash`, this is designed for JOIN-safe masking -- if two tables both have `user_id` masked with `consistent_hash` using the same config, the masked values will match and JOINs still work.
+
+```
+# prefix="usr_", length=8
+"john@example.com" -> "usr_a1b2c3d4"
+```
+
+Configuration:
+- `prefix` -- String prefix for the pseudonym (default: "")
+- `length` -- Hash length in hex characters (default: 8)
+
+```json
+{"method": "consistent_hash", "method_config": {"prefix": "usr_", "length": 8}}
+```
+
+## Discovering Methods Programmatically
+
+Use the `GET /api/masking/methods` endpoint to list all available methods with their descriptions, categories, example transformations, and config schemas:
+
+```bash
+curl http://localhost:3000/api/masking/methods
+```
+
+This returns the full method catalog, useful for building dynamic UIs or validating method names before creating policies.
 
 ## Creating Masking Policies
 
@@ -136,7 +315,7 @@ havn mask remove <policy_id>
 | `schema_name` | string | yes | Table schema |
 | `table_name` | string | yes | Table name |
 | `column_name` | string | yes | Column to mask |
-| `method` | string | yes | `hash`, `redact`, `null`, or `partial` |
+| `method` | string | yes | One of 14 methods: `hash`, `redact`, `null`, `partial`, `email`, `phone`, `credit_card`, `first_initial`, `ip_address`, `range`, `noise`, `date_shift`, `truncate`, `consistent_hash` |
 | `method_config` | object | no | Method-specific config (e.g., `{"show_first": 2}`) |
 | `condition_column` | string | no | Column to check for conditional masking |
 | `condition_value` | string | no | Value that triggers masking |
@@ -248,15 +427,17 @@ Policies are stored in `_dp_internal.masking_policies` in DuckDB:
 
 ## Best Practices
 
-1. **Start with sensitive columns** -- Mask PII (email, phone, SSN, address) and financial data (credit card, bank account) first.
+1. **Start with sensitive columns** -- Mask PII (email, phone, SSN, address) and financial data (credit card, bank account) first. Use the dedicated `email`, `phone`, and `credit_card` methods for domain-specific masking.
 
-2. **Use hash for join keys** -- If masked data needs to be joined across tables, use `hash` to maintain referential integrity while hiding actual values.
+2. **Use consistent_hash for join keys** -- If masked data needs to be joined across tables, use `consistent_hash` with the same config. Same input always produces the same output, so JOINs still work across masked tables.
 
 3. **Use redact for display-only fields** -- For columns that never need to be joined or filtered, `redact` is the simplest and most secure choice.
 
-4. **Set appropriate exemptions** -- Only exempt roles that genuinely need to see unmasked data. Most analysts can work with hashed or partial values.
+4. **Use analytics methods for aggregation columns** -- For numeric values that need approximate analytics, use `range` (bucketing) or `noise` (random perturbation). For dates, use `date_shift` to preserve time intervals.
 
-5. **Test with viewer role** -- After setting up masking, test queries as a viewer to verify that sensitive data is properly hidden.
+5. **Set appropriate exemptions** -- Only exempt roles that genuinely need to see unmasked data. Most analysts can work with masked or bucketed values.
+
+6. **Test with viewer role** -- After setting up masking, test queries as a viewer to verify that sensitive data is properly hidden.
 
 ## Related Pages
 
