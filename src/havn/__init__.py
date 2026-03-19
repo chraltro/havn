@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 def setup_logging(level: str = "INFO") -> None:
