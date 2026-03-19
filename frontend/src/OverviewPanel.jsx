@@ -161,11 +161,15 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
                   style={st.failedTarget}
                   onClick={() => {
                     const target = run.target || "";
-                    if (run.run_type === "transform" && target.includes(".")) {
+                    if (run.run_type === "contract") {
+                      // Pass contract name or model as filter, e.g. "daily_sales_positive:silver.fct_daily_sales"
+                      const filterVal = target.includes(":") ? target.split(":")[0] : target;
+                      onNavigate("Quality:Contracts:" + filterVal);
+                    } else if (run.run_type === "transform" && target.includes(".")) {
                       const [s, t] = target.split(".", 2);
                       onSelectTable(s, t);
                     } else if (run.run_type === "ingest" || run.run_type === "export") {
-                      onOpenFile(target);
+                      onOpenFile(run.run_type + "/" + target);
                     }
                   }}
                 >{run.target}</span>
@@ -222,11 +226,14 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
                         style={{ ...st.runTarget, cursor: "pointer" }}
                         onClick={() => {
                           const target = run.target || "";
-                          if (run.run_type === "transform" && target.includes(".")) {
+                          if (run.run_type === "contract") {
+                            const filterVal = target.includes(":") ? target.split(":")[0] : target;
+                            onNavigate("Quality:Contracts:" + filterVal);
+                          } else if (run.run_type === "transform" && target.includes(".")) {
                             const [s, t] = target.split(".", 2);
                             onSelectTable(s, t);
                           } else if (run.run_type === "ingest" || run.run_type === "export") {
-                            onOpenFile(target);
+                            onOpenFile("ingest/" + target);
                           }
                         }}
                       >{run.target}</span>
@@ -352,7 +359,7 @@ const st = {
   // Stats
   statsRow: {
     display: "grid",
-    gridTemplateColumns: "repeat(4, 1fr)",
+    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
     gap: "12px",
     marginBottom: "20px",
   },

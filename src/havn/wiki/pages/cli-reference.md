@@ -441,7 +441,7 @@ havn mask list
 havn mask remove POLICY_ID
 ```
 
-Methods: `hash`, `redact`, `null`, `partial`
+Methods: `hash`, `redact`, `null`, `partial`, `email`, `phone`, `credit_card`, `first_initial`, `ip_address`, `range`, `noise`, `date_shift`, `truncate`, `consistent_hash`
 
 ## Scheduling
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { api } from './api';
+import { schemaWeight } from './schemaOrder';
 
 const SUB_TABS = ['Freshness', 'Profiles', 'Assertions', 'Contracts'];
 
@@ -47,6 +48,8 @@ export default function QualityPanel() {
   const [showHistory, setShowHistory] = useState(false);
   const [runningContracts, setRunningContracts] = useState(false);
   const [expandedProfile, setExpandedProfile] = useState(null);
+  const [expandedContract, setExpandedContract] = useState(null);
+  const [expandedAssertionModel, setExpandedAssertionModel] = useState(null);
 
   // Filters
   const [freshnessFilter, setFreshnessFilter] = useState('');
@@ -61,9 +64,31 @@ export default function QualityPanel() {
   const freshSort = useSortable('model');
   const profileSort = useSortable('model');
   const assertionSort = useSortable('model');
-  const contractSort = useSortable('model');
+  const contractSort = useSortable('name');
+  const historySort = useSortable('checked_at', 'desc');
 
   useEffect(() => { loadAll(); }, []);
+
+  // Listen for sub-tab navigation (e.g., "Quality:Contracts:daily_sales" from OverviewPanel)
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.detail?.tab === 'Quality' && e.detail?.subTab) {
+        const target = SUB_TABS.find(t => t.toLowerCase() === e.detail.subTab.toLowerCase());
+        if (target) {
+          setTab(target);
+          // Pre-fill the filter if provided
+          if (e.detail.filter) {
+            if (target === 'Contracts') setContractFilter(e.detail.filter);
+            else if (target === 'Freshness') setFreshnessFilter(e.detail.filter);
+            else if (target === 'Profiles') setProfileFilter(e.detail.filter);
+            else if (target === 'Assertions') setAssertionFilter(e.detail.filter);
+          }
+        }
+      }
+    };
+    window.addEventListener('havn-subtab', handler);
+    return () => window.removeEventListener('havn-subtab', handler);
+  }, []);
 
   const loadAll = async () => {
     setLoading(true);
@@ -97,9 +122,9 @@ export default function QualityPanel() {
   const totalModels = freshness.length;
   const staleModels = freshness.filter(m => m.is_stale).length;
   const passedAssertions = assertions.filter(a => a.passed === true).length;
-  const assertionRate = assertions.length > 0 ? Math.round((passedAssertions / assertions.length) * 100) : 100;
+  const assertionRate = assertions.length > 0 ? Math.round((passedAssertions / assertions.length) * 100) : null;
   const passedContracts = contractHistory.filter(c => c.passed === true).length;
-  const contractRate = contractHistory.length > 0 ? Math.round((passedContracts / contractHistory.length) * 100) : 100;
+  const contractRate = contractHistory.length > 0 ? Math.round((passedContracts / contractHistory.length) * 100) : null;
 
   // --- Freshness: fields are model, last_run_at, hours_since_run, is_stale, row_count ---
   const filteredFreshness = useMemo(() => {
@@ -107,6 +132,13 @@ export default function QualityPanel() {
     if (freshnessFilter) data = data.filter(m => (m.model || '').toLowerCase().includes(freshnessFilter.toLowerCase()));
     if (freshnessStatus === 'stale') data = data.filter(m => m.is_stale);
     if (freshnessStatus === 'fresh') data = data.filter(m => !m.is_stale);
+    data = data.slice().sort((a, b) => {
+      const sa = (a.model || '').split('.')[0];
+      const sb = (b.model || '').split('.')[0];
+      const w = schemaWeight(sa) - schemaWeight(sb);
+      if (w !== 0) return w;
+      return (a.model || '').localeCompare(b.model || '');
+    });
     return sortData(data, freshSort.sortKey, freshSort.sortDir, (item, key) => {
       if (key === 'model') return item.model || '';
       if (key === 'hours_since_run') return item.hours_since_run ?? 9999;
@@ -120,6 +152,13 @@ export default function QualityPanel() {
   const filteredProfiles = useMemo(() => {
     let data = profiles;
     if (profileFilter) data = data.filter(p => (p.model || '').toLowerCase().includes(profileFilter.toLowerCase()));
+    data = data.slice().sort((a, b) => {
+      const sa = (a.model || '').split('.')[0];
+      const sb = (b.model || '').split('.')[0];
+      const w = schemaWeight(sa) - schemaWeight(sb);
+      if (w !== 0) return w;
+      return (a.model || '').localeCompare(b.model || '');
+    });
     return sortData(data, profileSort.sortKey, profileSort.sortDir, (item, key) => {
       if (key === 'model') return item.model || '';
       if (key === 'row_count') return item.row_count ?? 0;
@@ -134,6 +173,13 @@ export default function QualityPanel() {
     if (assertionFilter) data = data.filter(a => (a.model || '').toLowerCase().includes(assertionFilter.toLowerCase()) || (a.expression || '').toLowerCase().includes(assertionFilter.toLowerCase()));
     if (assertionStatus === 'pass') data = data.filter(a => a.passed === true);
     if (assertionStatus === 'fail') data = data.filter(a => a.passed === false);
+    data = data.slice().sort((a, b) => {
+      const sa = (a.model || '').split('.')[0];
+      const sb = (b.model || '').split('.')[0];
+      const w = schemaWeight(sa) - schemaWeight(sb);
+      if (w !== 0) return w;
+      return (a.model || '').localeCompare(b.model || '');
+    });
     return sortData(data, assertionSort.sortKey, assertionSort.sortDir, (item, key) => {
       if (key === 'model') return item.model || '';
       if (key === 'passed') return item.passed ? 0 : 1;
@@ -142,22 +188,69 @@ export default function QualityPanel() {
     });
   }, [assertions, assertionFilter, assertionStatus, assertionSort.sortKey, assertionSort.sortDir]);
 
-  // --- Contracts list: name, model, description, severity, assertions (string[]), path ---
-  // --- Contract history: contract_name, model, passed (bool), severity, detail (JSON string), checked_at ---
+  // Group assertions by model for the collapsible view
+  const groupedAssertions = useMemo(() => {
+    const groups = {};
+    for (const a of filteredAssertions) {
+      const model = a.model || 'unknown';
+      if (!groups[model]) groups[model] = { model, assertions: [], passed: 0, failed: 0, latest: null };
+      groups[model].assertions.push(a);
+      if (a.passed) groups[model].passed++;
+      else groups[model].failed++;
+      if (!groups[model].latest || (a.checked_at || '') > (groups[model].latest || '')) groups[model].latest = a.checked_at;
+    }
+    return Object.values(groups).sort((a, b) => {
+      // Failed models first, then by schema weight
+      if (a.failed > 0 && b.failed === 0) return -1;
+      if (a.failed === 0 && b.failed > 0) return 1;
+      const sa = (a.model || '').split('.')[0];
+      const sb = (b.model || '').split('.')[0];
+      const w = schemaWeight(sa) - schemaWeight(sb);
+      if (w !== 0) return w;
+      return (a.model || '').localeCompare(b.model || '');
+    });
+  }, [filteredAssertions]);
+
+  // --- Merge contract definitions with latest history results ---
+  // Each contract gets its latest run result (passed, detail, checked_at) attached
+  const mergedContracts = useMemo(() => {
+    // Build lookup: contract_name -> latest history entry
+    const latestByName = {};
+    for (const h of contractHistory) {
+      const key = h.contract_name;
+      if (!latestByName[key] || (h.checked_at || '') > (latestByName[key].checked_at || '')) {
+        latestByName[key] = h;
+      }
+    }
+    return contracts.map(c => {
+      const latest = latestByName[c.name];
+      return {
+        ...c,
+        passed: latest ? latest.passed : null,
+        detail: latest ? latest.detail : null,
+        checked_at: latest ? latest.checked_at : null,
+        _hasResult: !!latest,
+      };
+    });
+  }, [contracts, contractHistory]);
+
   const filteredContracts = useMemo(() => {
-    const source = showHistory ? contractHistory : contracts;
+    const source = showHistory ? contractHistory : mergedContracts;
+    const activeSort = showHistory ? historySort : contractSort;
     let data = source;
     if (contractFilter) data = data.filter(c => (c.model || '').toLowerCase().includes(contractFilter.toLowerCase()) || (c.name || c.contract_name || '').toLowerCase().includes(contractFilter.toLowerCase()));
     if (contractStatus === 'pass') data = data.filter(c => c.passed === true);
     if (contractStatus === 'fail') data = data.filter(c => c.passed === false);
-    return sortData(data, contractSort.sortKey, contractSort.sortDir, (item, key) => {
+    if (contractStatus === 'not_run') data = data.filter(c => c.passed == null);
+    return sortData(data, activeSort.sortKey, activeSort.sortDir, (item, key) => {
       if (key === 'model') return item.model || '';
       if (key === 'name') return item.name || item.contract_name || '';
       if (key === 'severity') return item.severity || '';
-      if (key === 'passed') return item.passed ? 0 : 1;
+      if (key === 'passed') return item.passed == null ? 2 : item.passed ? 0 : 1;
+      if (key === 'checked_at') return item.checked_at || '';
       return item[key];
     });
-  }, [contracts, contractHistory, showHistory, contractFilter, contractStatus, contractSort.sortKey, contractSort.sortDir]);
+  }, [mergedContracts, contractHistory, showHistory, contractFilter, contractStatus, contractSort.sortKey, contractSort.sortDir, historySort.sortKey, historySort.sortDir]);
 
   // Build column detail rows for a profile's null_percentages + distinct_counts
   const profileColumns = (p) => {
@@ -185,11 +278,11 @@ export default function QualityPanel() {
           </div>
           <div style={s.card}>
             <div style={s.cardLabel}>Assertion Pass Rate</div>
-            <div style={{ ...s.cardValue, color: assertionRate === 100 ? 'var(--havn-green)' : assertionRate >= 80 ? 'var(--havn-yellow)' : 'var(--havn-red)' }}>{assertionRate}%</div>
+            <div style={{ ...s.cardValue, color: assertionRate == null ? 'var(--havn-text-dim)' : assertionRate === 100 ? 'var(--havn-green)' : assertionRate >= 80 ? 'var(--havn-yellow)' : 'var(--havn-red)' }}>{assertionRate != null ? `${assertionRate}%` : '\u2014'}</div>
           </div>
           <div style={s.card}>
             <div style={s.cardLabel}>Contract Pass Rate</div>
-            <div style={{ ...s.cardValue, color: contractRate === 100 ? 'var(--havn-green)' : contractRate >= 80 ? 'var(--havn-yellow)' : 'var(--havn-red)' }}>{contractRate}%</div>
+            <div style={{ ...s.cardValue, color: contractRate == null ? 'var(--havn-text-dim)' : contractRate === 100 ? 'var(--havn-green)' : contractRate >= 80 ? 'var(--havn-yellow)' : 'var(--havn-red)' }}>{contractRate != null ? `${contractRate}%` : '\u2014'}</div>
           </div>
         </div>
         <div style={s.tabs}>
@@ -222,7 +315,7 @@ export default function QualityPanel() {
                     <SortTh label="Status" sortKey="is_stale" current={freshSort.sortKey} dir={freshSort.sortDir} onToggle={freshSort.toggle} style={s.th} />
                   </tr></thead>
                   <tbody>
-                    {filteredFreshness.length === 0 ? <tr><td colSpan={5} style={{ ...s.td, color: 'var(--havn-text-dim)', textAlign: 'center' }}>No freshness data available</td></tr> :
+                    {filteredFreshness.length === 0 ? <tr><td colSpan={5} style={s.emptyCell}><div style={s.emptyState}>No freshness data available. Run a transform to generate freshness info.</div></td></tr> :
                     filteredFreshness.map((m, i) => (
                       <tr key={i}>
                         <td style={s.td}>{m.model}</td>
@@ -252,7 +345,7 @@ export default function QualityPanel() {
                     <th style={s.th}>Profiled At</th>
                   </tr></thead>
                   <tbody>
-                    {filteredProfiles.length === 0 ? <tr><td colSpan={4} style={{ ...s.td, color: 'var(--havn-text-dim)', textAlign: 'center' }}>No profiles available. Run profiling first.</td></tr> :
+                    {filteredProfiles.length === 0 ? <tr><td colSpan={4} style={s.emptyCell}><div style={s.emptyState}>No profiles available. Run profiling to see column statistics.</div></td></tr> :
                     filteredProfiles.map((p, i) => {
                       const cols = profileColumns(p);
                       return (
@@ -269,14 +362,26 @@ export default function QualityPanel() {
                             <td style={s.td}>{p.column_count || '\u2014'}</td>
                             <td style={s.td}>{p.profiled_at || '\u2014'}</td>
                           </tr>
-                          {expandedProfile === i && cols.map((col, ci) => (
-                            <tr key={`${i}-${ci}`} style={{ background: 'var(--havn-bg-tertiary)' }}>
-                              <td style={{ ...s.td, paddingLeft: 32, fontFamily: 'monospace', fontSize: 12 }}>{col.name}</td>
-                              <td style={s.td}>{col.null_pct != null ? `${col.null_pct.toFixed(1)}% null` : '\u2014'}</td>
-                              <td style={s.td}>{col.distinct != null ? `${col.distinct.toLocaleString()} distinct` : '\u2014'}</td>
-                              <td style={s.td}></td>
+                          {expandedProfile === i && (
+                            <tr>
+                              <td colSpan={4} style={{ padding: 0 }}>
+                                <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                                  <table style={{ ...s.table, margin: 0 }}>
+                                    <tbody>
+                                      {cols.map((col, ci) => (
+                                        <tr key={`${i}-${ci}`} style={{ background: 'var(--havn-bg-tertiary)' }}>
+                                          <td style={{ ...s.td, paddingLeft: 32, fontFamily: 'monospace', fontSize: 12 }}>{col.name}</td>
+                                          <td style={s.td}>{col.null_pct != null ? `${col.null_pct.toFixed(1)}% null` : '\u2014'}</td>
+                                          <td style={s.td}>{col.distinct != null ? `${col.distinct.toLocaleString()} distinct` : '\u2014'}</td>
+                                          <td style={s.td}></td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </td>
                             </tr>
-                          ))}
+                          )}
                         </React.Fragment>
                       );
                     })}
@@ -295,27 +400,64 @@ export default function QualityPanel() {
                     <option value="pass">Pass Only</option>
                     <option value="fail">Fail Only</option>
                   </select>
-                  <span style={s.count}>{filteredAssertions.length} of {assertions.length}</span>
+                  <span style={s.count}>{groupedAssertions.length} model{groupedAssertions.length !== 1 ? 's' : ''}, {filteredAssertions.length} assertion{filteredAssertions.length !== 1 ? 's' : ''}</span>
                 </div>
                 <table style={s.table}>
                   <thead><tr>
-                    <SortTh label="Model" sortKey="model" current={assertionSort.sortKey} dir={assertionSort.sortDir} onToggle={assertionSort.toggle} style={s.th} />
-                    <th style={s.th}>Expression</th>
-                    <SortTh label="Status" sortKey="passed" current={assertionSort.sortKey} dir={assertionSort.sortDir} onToggle={assertionSort.toggle} style={s.th} />
-                    <th style={s.th}>Detail</th>
-                    <SortTh label="Checked At" sortKey="checked_at" current={assertionSort.sortKey} dir={assertionSort.sortDir} onToggle={assertionSort.toggle} style={s.th} />
+                    <th style={s.th}>Model</th>
+                    <th style={s.th}>Result</th>
+                    <th style={s.th}>Assertions</th>
+                    <th style={s.th}>Last Checked</th>
                   </tr></thead>
                   <tbody>
-                    {filteredAssertions.length === 0 ? <tr><td colSpan={5} style={{ ...s.td, color: 'var(--havn-text-dim)', textAlign: 'center' }}>No assertion results</td></tr> :
-                    filteredAssertions.map((a, i) => (
-                      <tr key={i}>
-                        <td style={s.td}>{a.model}</td>
-                        <td style={s.td}><code style={{ fontSize: 12 }}>{a.expression}</code></td>
-                        <td style={s.td}><span style={s.badge(a.passed)}>{a.passed ? 'PASS' : 'FAIL'}</span></td>
-                        <td style={s.td}>{a.detail || '\u2014'}</td>
-                        <td style={s.td}>{a.checked_at || '\u2014'}</td>
-                      </tr>
-                    ))}
+                    {groupedAssertions.length === 0 ? <tr><td colSpan={4} style={s.emptyCell}><div style={s.emptyState}>No assertion results. Add <code style={{ fontSize: 12 }}>-- assert:</code> comments to your SQL models and run a transform.</div></td></tr> :
+                    groupedAssertions.map((g) => {
+                      const isExpanded = expandedAssertionModel === g.model;
+                      const allPassed = g.failed === 0;
+                      return (
+                        <React.Fragment key={g.model}>
+                          <tr>
+                            <td style={s.td}>
+                              <span style={{ cursor: 'pointer', color: 'var(--havn-accent)' }} onClick={() => setExpandedAssertionModel(isExpanded ? null : g.model)}>
+                                {isExpanded ? '\u25BE' : '\u25B8'} {g.model}
+                              </span>
+                            </td>
+                            <td style={s.td}>
+                              <span style={s.badge(allPassed)}>{allPassed ? 'PASS' : 'FAIL'}</span>
+                            </td>
+                            <td style={s.td}>
+                              {allPassed ? (
+                                <span style={{ fontSize: 12, color: 'var(--havn-green)' }}>{g.passed} of {g.passed} passed</span>
+                              ) : (
+                                <span style={{ fontSize: 12, color: 'var(--havn-red)' }}>{g.failed} of {g.passed + g.failed} failed</span>
+                              )}
+                            </td>
+                            <td style={s.td}>{g.latest || '\u2014'}</td>
+                          </tr>
+                          {isExpanded && (
+                            <tr>
+                              <td colSpan={4} style={{ padding: 0 }}>
+                                <div style={{ maxHeight: 300, overflowY: 'auto', background: 'var(--havn-bg-tertiary)' }}>
+                                  <table style={{ ...s.table, margin: 0 }}>
+                                    <tbody>
+                                      {g.assertions.map((a, ai) => (
+                                        <tr key={ai}>
+                                          <td style={{ ...s.td, paddingLeft: 32, width: 60 }}>
+                                            <span style={s.badge(a.passed)}>{a.passed ? 'PASS' : 'FAIL'}</span>
+                                          </td>
+                                          <td style={{ ...s.td, fontFamily: 'var(--havn-font-mono)', fontSize: 12 }}>{a.expression}</td>
+                                          <td style={{ ...s.td, fontSize: 12, color: a.passed ? 'var(--havn-text-dim)' : 'var(--havn-red)' }}>{a.detail || '\u2014'}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </>
@@ -328,67 +470,164 @@ export default function QualityPanel() {
                   <button style={s.btnPrimary} onClick={handleRunContracts} disabled={runningContracts}>
                     {runningContracts ? 'Running...' : 'Run Contracts'}
                   </button>
-                  <button style={s.btn} onClick={() => setShowHistory(!showHistory)}>
-                    {showHistory ? 'Show Definitions' : 'Show History'}
+                  <button style={s.btn} onClick={() => { setShowHistory(!showHistory); setExpandedContract(null); }}>
+                    {showHistory ? 'Show Current' : 'Show Run History'}
                   </button>
                   <input style={s.filterInput} placeholder="Filter by model or name..." value={contractFilter} onChange={e => setContractFilter(e.target.value)} />
-                  {showHistory && (
-                    <select style={s.filterSelect} value={contractStatus} onChange={e => setContractStatus(e.target.value)}>
-                      <option value="all">All</option>
-                      <option value="pass">Pass Only</option>
-                      <option value="fail">Fail Only</option>
-                    </select>
-                  )}
-                  <span style={s.count}>{filteredContracts.length} of {(showHistory ? contractHistory : contracts).length}</span>
+                  <select style={s.filterSelect} value={contractStatus} onChange={e => setContractStatus(e.target.value)}>
+                    <option value="all">All</option>
+                    <option value="pass">Pass Only</option>
+                    <option value="fail">Fail Only</option>
+                    {!showHistory && <option value="not_run">Not Run</option>}
+                  </select>
+                  <span style={s.count}>{filteredContracts.length} of {(showHistory ? contractHistory : mergedContracts).length}</span>
                 </div>
                 {showHistory ? (
                   <table style={s.table}>
                     <thead><tr>
-                      <SortTh label="Contract" sortKey="name" current={contractSort.sortKey} dir={contractSort.sortDir} onToggle={contractSort.toggle} style={s.th} />
-                      <SortTh label="Model" sortKey="model" current={contractSort.sortKey} dir={contractSort.sortDir} onToggle={contractSort.toggle} style={s.th} />
-                      <SortTh label="Status" sortKey="passed" current={contractSort.sortKey} dir={contractSort.sortDir} onToggle={contractSort.toggle} style={s.th} />
-                      <SortTh label="Severity" sortKey="severity" current={contractSort.sortKey} dir={contractSort.sortDir} onToggle={contractSort.toggle} style={s.th} />
-                      <th style={s.th}>Checked At</th>
+                      <SortTh label="Contract" sortKey="name" current={historySort.sortKey} dir={historySort.sortDir} onToggle={historySort.toggle} style={s.th} />
+                      <SortTh label="Model" sortKey="model" current={historySort.sortKey} dir={historySort.sortDir} onToggle={historySort.toggle} style={s.th} />
+                      <SortTh label="Result" sortKey="passed" current={historySort.sortKey} dir={historySort.sortDir} onToggle={historySort.toggle} style={s.th} />
+                      <SortTh label="Level" sortKey="severity" current={historySort.sortKey} dir={historySort.sortDir} onToggle={historySort.toggle} style={s.th} />
+                      <th style={s.th}>Detail</th>
+                      <SortTh label="Checked At" sortKey="checked_at" current={historySort.sortKey} dir={historySort.sortDir} onToggle={historySort.toggle} style={s.th} />
                     </tr></thead>
                     <tbody>
                       {filteredContracts.length === 0 ? (
-                        <tr><td colSpan={5} style={{ ...s.td, color: 'var(--havn-text-dim)', textAlign: 'center' }}>No contract history. Run contracts first.</td></tr>
-                      ) : filteredContracts.map((c, i) => (
-                        <tr key={i}>
-                          <td style={s.td}>{c.contract_name}</td>
-                          <td style={s.td}>{c.model}</td>
-                          <td style={s.td}><span style={s.badge(c.passed)}>{c.passed ? 'PASS' : 'FAIL'}</span></td>
-                          <td style={s.td}>
-                            <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: c.severity === 'warn' ? 'color-mix(in srgb, var(--havn-yellow) 15%, transparent)' : 'color-mix(in srgb, var(--havn-red) 15%, transparent)', color: c.severity === 'warn' ? 'var(--havn-yellow)' : 'var(--havn-red)' }}>{c.severity}</span>
-                          </td>
-                          <td style={s.td}>{c.checked_at || '\u2014'}</td>
-                        </tr>
-                      ))}
+                        <tr><td colSpan={6} style={s.emptyCell}><div style={s.emptyState}>No contract history.<br /><button style={s.btnPrimary} onClick={handleRunContracts} disabled={runningContracts}>{runningContracts ? 'Running...' : 'Run Contracts Now'}</button></div></td></tr>
+                      ) : filteredContracts.map((c, i) => {
+                        const detail = (() => { try { return typeof c.detail === 'string' ? JSON.parse(c.detail) : (c.detail || []); } catch { return []; } })();
+                        const hasDetail = detail.length > 0;
+                        const failedRules = detail.filter(d => !d.passed);
+                        const isExpanded = expandedContract === `h-${i}`;
+                        return (
+                          <React.Fragment key={i}>
+                            <tr>
+                              <td style={s.td}>
+                                {hasDetail ? (
+                                  <span style={{ cursor: 'pointer', color: 'var(--havn-accent)' }} onClick={() => setExpandedContract(isExpanded ? null : `h-${i}`)}>
+                                    {isExpanded ? '\u25BE' : '\u25B8'} {c.contract_name}
+                                  </span>
+                                ) : c.contract_name}
+                              </td>
+                              <td style={s.td}>{c.model}</td>
+                              <td style={s.td}><span style={s.badge(c.passed)}>{c.passed ? 'PASS' : 'FAIL'}</span></td>
+                              <td style={s.td}>
+                                <span style={s.severityBadge(c.severity)}>{c.severity === 'warn' ? 'warning' : 'must pass'}</span>
+                              </td>
+                              <td style={s.td}>
+                                {c.passed ? (
+                                  <span style={{ fontSize: 12, color: 'var(--havn-text-dim)' }}>{detail.length} rule{detail.length !== 1 ? 's' : ''} passed</span>
+                                ) : (
+                                  <span style={{ fontSize: 12, color: 'var(--havn-red)' }}>{failedRules.length} of {detail.length} rule{detail.length !== 1 ? 's' : ''} failed</span>
+                                )}
+                              </td>
+                              <td style={s.td}>{c.checked_at || '\u2014'}</td>
+                            </tr>
+                            {isExpanded && hasDetail && (
+                              <tr>
+                                <td colSpan={6} style={{ padding: 0 }}>
+                                  <div style={{ maxHeight: 300, overflowY: 'auto', background: 'var(--havn-bg-tertiary)' }}>
+                                    <table style={{ ...s.table, margin: 0 }}>
+                                      <tbody>
+                                        {detail.map((d, di) => (
+                                          <tr key={di}>
+                                            <td style={{ ...s.td, paddingLeft: 32, width: 24 }}>
+                                              <span style={s.badge(d.passed)}>{d.passed ? 'PASS' : 'FAIL'}</span>
+                                            </td>
+                                            <td style={{ ...s.td, fontFamily: 'var(--havn-font-mono)', fontSize: 12 }}>{d.expression}</td>
+                                            <td style={{ ...s.td, fontSize: 12, color: d.passed ? 'var(--havn-text-dim)' : 'var(--havn-red)' }}>{d.detail || '\u2014'}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
                 ) : (
                   <table style={s.table}>
                     <thead><tr>
-                      <SortTh label="Name" sortKey="name" current={contractSort.sortKey} dir={contractSort.sortDir} onToggle={contractSort.toggle} style={s.th} />
+                      <SortTh label="Contract" sortKey="name" current={contractSort.sortKey} dir={contractSort.sortDir} onToggle={contractSort.toggle} style={s.th} />
                       <SortTh label="Model" sortKey="model" current={contractSort.sortKey} dir={contractSort.sortDir} onToggle={contractSort.toggle} style={s.th} />
-                      <th style={s.th}>Description</th>
-                      <SortTh label="Severity" sortKey="severity" current={contractSort.sortKey} dir={contractSort.sortDir} onToggle={contractSort.toggle} style={s.th} />
-                      <th style={s.th}>Assertions</th>
+                      <SortTh label="Last Result" sortKey="passed" current={contractSort.sortKey} dir={contractSort.sortDir} onToggle={contractSort.toggle} style={s.th} />
+                      <SortTh label="Level" sortKey="severity" current={contractSort.sortKey} dir={contractSort.sortDir} onToggle={contractSort.toggle} style={s.th} />
+                      <th style={s.th}>Rules</th>
                     </tr></thead>
                     <tbody>
                       {filteredContracts.length === 0 ? (
-                        <tr><td colSpan={5} style={{ ...s.td, color: 'var(--havn-text-dim)', textAlign: 'center' }}>No contracts defined. Add YAML files in contracts/</td></tr>
-                      ) : filteredContracts.map((c, i) => (
-                        <tr key={i}>
-                          <td style={s.td}>{c.name}</td>
-                          <td style={s.td}>{c.model}</td>
-                          <td style={s.td}>{c.description || '\u2014'}</td>
-                          <td style={s.td}>
-                            <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: c.severity === 'warn' ? 'color-mix(in srgb, var(--havn-yellow) 15%, transparent)' : 'color-mix(in srgb, var(--havn-red) 15%, transparent)', color: c.severity === 'warn' ? 'var(--havn-yellow)' : 'var(--havn-red)' }}>{c.severity}</span>
-                          </td>
-                          <td style={s.td}>{(c.assertions || []).length} rule{(c.assertions || []).length !== 1 ? 's' : ''}</td>
-                        </tr>
-                      ))}
+                        <tr><td colSpan={5} style={s.emptyCell}><div style={s.emptyState}>No contracts defined. Add YAML files in <code style={{ fontSize: 12 }}>contracts/</code> to get started.</div></td></tr>
+                      ) : filteredContracts.map((c, i) => {
+                        const rules = c.assertions || [];
+                        const detail = (() => { try { return typeof c.detail === 'string' ? JSON.parse(c.detail) : (c.detail || []); } catch { return []; } })();
+                        const hasDetail = detail.length > 0;
+                        const isExpanded = expandedContract === `d-${i}`;
+                        return (
+                          <React.Fragment key={i}>
+                            <tr>
+                              <td style={s.td}>
+                                <span style={{ cursor: 'pointer', color: 'var(--havn-accent)' }} onClick={() => setExpandedContract(isExpanded ? null : `d-${i}`)}>
+                                  {isExpanded ? '\u25BE' : '\u25B8'} {c.name}
+                                </span>
+                                {c.description && <div style={{ fontSize: 11, color: 'var(--havn-text-dim)', marginTop: 2 }}>{c.description}</div>}
+                              </td>
+                              <td style={s.td}>{c.model}</td>
+                              <td style={s.td}>
+                                {c.passed == null ? (
+                                  <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text-dim)' }}>NOT RUN</span>
+                                ) : (
+                                  <span style={s.badge(c.passed)}>{c.passed ? 'PASS' : 'FAIL'}</span>
+                                )}
+                              </td>
+                              <td style={s.td}>
+                                <span style={s.severityBadge(c.severity)}>{c.severity === 'warn' ? 'warning' : 'must pass'}</span>
+                              </td>
+                              <td style={s.td}>
+                                {c.passed == null ? (
+                                  <span style={{ fontSize: 12, color: 'var(--havn-text-dim)' }}>{rules.length} rule{rules.length !== 1 ? 's' : ''}</span>
+                                ) : c.passed ? (
+                                  <span style={{ fontSize: 12, color: 'var(--havn-green)' }}>{detail.length} of {detail.length} passed</span>
+                                ) : (
+                                  <span style={{ fontSize: 12, color: 'var(--havn-red)' }}>{detail.filter(d => !d.passed).length} of {detail.length} failed</span>
+                                )}
+                              </td>
+                            </tr>
+                            {isExpanded && (
+                              <tr>
+                                <td colSpan={5} style={{ padding: 0 }}>
+                                  <div style={{ maxHeight: 300, overflowY: 'auto', background: 'var(--havn-bg-tertiary)' }}>
+                                    <table style={{ ...s.table, margin: 0 }}>
+                                      <tbody>
+                                        {hasDetail ? detail.map((d, di) => (
+                                          <tr key={di}>
+                                            <td style={{ ...s.td, paddingLeft: 32, width: 60 }}>
+                                              <span style={s.badge(d.passed)}>{d.passed ? 'PASS' : 'FAIL'}</span>
+                                            </td>
+                                            <td style={{ ...s.td, fontFamily: 'var(--havn-font-mono)', fontSize: 12 }}>{d.expression}</td>
+                                            <td style={{ ...s.td, fontSize: 12, color: d.passed ? 'var(--havn-text-dim)' : 'var(--havn-red)' }}>{d.detail || '\u2014'}</td>
+                                          </tr>
+                                        )) : rules.map((rule, ri) => (
+                                          <tr key={ri}>
+                                            <td style={{ ...s.td, paddingLeft: 32, width: 60 }}>
+                                              <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: 'var(--havn-bg)', color: 'var(--havn-text-dim)' }}>--</span>
+                                            </td>
+                                            <td style={{ ...s.td, fontFamily: 'var(--havn-font-mono)', fontSize: 12 }} colSpan={2}>{rule}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}
@@ -421,6 +660,9 @@ const s = {
   th: { textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--havn-border-light)', color: 'var(--havn-text-secondary)', fontSize: 11, textTransform: 'uppercase' },
   td: { padding: '8px 12px', borderBottom: '1px solid var(--havn-border)', color: 'var(--havn-text)' },
   badge: (ok) => ({ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: ok ? 'color-mix(in srgb, var(--havn-green) 15%, transparent)' : 'color-mix(in srgb, var(--havn-red) 15%, transparent)', color: ok ? 'var(--havn-green)' : 'var(--havn-red)' }),
+  severityBadge: (sev) => ({ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: sev === 'warn' ? 'color-mix(in srgb, var(--havn-yellow) 15%, transparent)' : 'color-mix(in srgb, var(--havn-bg-tertiary) 100%, transparent)', color: sev === 'warn' ? 'var(--havn-yellow)' : 'var(--havn-text-secondary)' }),
   btn: { padding: '4px 12px', background: 'var(--havn-btn-bg)', color: 'var(--havn-text)', border: '1px solid var(--havn-btn-border)', borderRadius: 'var(--havn-radius-lg)', cursor: 'pointer', fontSize: 11, fontWeight: 500 },
   btnPrimary: { padding: '4px 12px', background: 'var(--havn-green)', color: '#fff', border: '1px solid var(--havn-green-border)', borderRadius: 'var(--havn-radius-lg)', cursor: 'pointer', fontSize: 11, fontWeight: 500 },
+  emptyCell: { padding: 0, borderBottom: '1px solid var(--havn-border)' },
+  emptyState: { padding: '32px 16px', color: 'var(--havn-text-dim)', textAlign: 'center', fontSize: 13, lineHeight: 1.8 },
 };

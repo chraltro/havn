@@ -25,6 +25,7 @@ export default function SentinelPanel() {
   const [diffs, setDiffs] = useState([]);
   const [selectedDiff, setSelectedDiff] = useState(null);
   const [impacts, setImpacts] = useState([]);
+  const [loadingImpacts, setLoadingImpacts] = useState(false);
 
   // History view state
   const [sources, setSources] = useState([]);
@@ -51,21 +52,39 @@ export default function SentinelPanel() {
     try {
       const d = await api.getSentinelDiffs();
       setDiffs(d);
+      // Pre-select first diff
+      if (d.length > 0 && !selectedDiff) {
+        const firstId = d[0].diff_id;
+        setSelectedDiff(firstId);
+        setLoadingImpacts(true);
+        try {
+          const i = await api.getSentinelImpacts(firstId);
+          setImpacts(i);
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          setLoadingImpacts(false);
+        }
+      }
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedDiff]);
 
   // Load impacts for a diff
   const loadImpacts = useCallback(async (diffId) => {
+    setSelectedDiff(diffId);
+    setLoadingImpacts(true);
+    setImpacts([]);
     try {
       const i = await api.getSentinelImpacts(diffId);
       setImpacts(i);
-      setSelectedDiff(diffId);
     } catch (e) {
       setError(e.message);
+    } finally {
+      setLoadingImpacts(false);
     }
   }, []);
 
@@ -260,7 +279,9 @@ export default function SentinelPanel() {
 
             {/* Impact detail */}
             <div style={st.rightPane}>
-              {selectedDiff && impacts.length > 0 ? (
+              {loadingImpacts ? (
+                <div style={st.dim}>Loading impacts...</div>
+              ) : selectedDiff && impacts.length > 0 ? (
                 <>
                   <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>
                     Impact Analysis
@@ -385,7 +406,7 @@ const st = {
   sevBadge: { color: "#fff", padding: "1px 5px", borderRadius: 3, fontSize: 10, fontWeight: 600 },
   impactSection: { padding: "8px 12px" },
   impactTitle: { fontWeight: 600, fontSize: 12, marginBottom: 6, color: "var(--havn-text-secondary)" },
-  impactRow: { padding: "6px 0", borderBottom: "1px solid var(--havn-border-light)", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 },
+  impactRow: { padding: "8px 0", borderBottom: "1px solid var(--havn-border-light)", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 12px", minHeight: 32 },
   impactBadge: { color: "#fff", padding: "1px 6px", borderRadius: 3, fontSize: 10, fontWeight: 600 },
   impactModel: { fontWeight: 600, fontSize: 12 },
   fixSuggestion: { width: "100%", fontSize: 11, color: "var(--havn-text-secondary)", marginTop: 2, paddingLeft: 4, borderLeft: "2px solid var(--havn-border-light)" },
