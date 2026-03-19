@@ -1,6 +1,47 @@
 # Scheduler
 
-havn includes a built-in scheduler for running streams on cron schedules. It also provides a file watcher that automatically rebuilds transforms when SQL files change.
+havn includes a built-in scheduler for running streams on cron schedules. It also provides a file watcher that automatically rebuilds transforms when SQL files change. Both can run alongside the web server.
+
+## Web UI Experience
+
+### Scheduler Status in Overview
+
+The **Overview** tab shows scheduled streams and their next expected run times. If a scheduled stream has failed recently, it appears in the Failed Runs section.
+
+### Starting Scheduler with the Server
+
+You can start the scheduler alongside the web server using the `--schedule` flag:
+
+```bash
+havn serve --schedule
+```
+
+This runs both the web UI and the cron scheduler in the same process. Scheduled streams execute in the background and their results appear in the History panel.
+
+### Starting File Watcher with the Server
+
+Similarly, start the file watcher alongside the server:
+
+```bash
+havn serve --watch
+```
+
+Or combine both:
+
+```bash
+havn serve --watch --schedule
+```
+
+With `--watch`, any changes to `.sql` files in `transform/` automatically trigger a rebuild, and the results stream to the Output Panel.
+
+### Viewing Scheduled Streams
+
+1. Go to **Configure** > **Settings** to see all configured schedules
+2. Or check the API:
+
+```bash
+curl http://localhost:3000/api/scheduler
+```
 
 ## Cron Scheduling
 
@@ -37,12 +78,12 @@ streams:
 havn uses standard 5-field cron expressions:
 
 ```
-┌───────────── minute (0 - 59)
-│ ┌───────────── hour (0 - 23)
-│ │ ┌───────────── day of month (1 - 31)
-│ │ │ ┌───────────── month (1 - 12)
-│ │ │ │ ┌───────────── day of week (0 - 6, 0 = Monday)
-│ │ │ │ │
++-------------- minute (0 - 59)
+| +------------ hour (0 - 23)
+| | +---------- day of month (1 - 31)
+| | | +-------- month (1 - 12)
+| | | | +------ day of week (0 - 6, 0 = Monday)
+| | | | |
 * * * * *
 ```
 
@@ -70,7 +111,7 @@ havn uses standard 5-field cron expressions:
 
 ## Starting the Scheduler
 
-### CLI
+### CLI (Standalone)
 
 ```bash
 havn schedule
@@ -89,6 +130,14 @@ Starting scheduler... (Ctrl+C to stop)
 
 The scheduler runs as a foreground process. Press Ctrl+C to stop it.
 
+### With the Web Server
+
+```bash
+havn serve --schedule
+```
+
+Starts the web UI and scheduler together. The scheduler runs in a background thread.
+
 ### How It Works
 
 1. The scheduler thread starts and reads schedules from `project.yml`
@@ -97,21 +146,11 @@ The scheduler runs as a foreground process. Press Ctrl+C to stop it.
 4. Each stream runs at most once per minute (deduplication)
 5. Config is re-read on each check, so schedule changes take effect without restart
 
-### With the Web Server
-
-When you run `havn serve`, the scheduler is not started automatically. Start it separately in another terminal:
-
-```bash
-havn schedule
-```
-
-Or configure your deployment to run both processes.
-
 ## File Watcher
 
 The file watcher monitors `transform/` and `ingest/` for changes and automatically triggers rebuilds.
 
-### Starting the Watcher
+### Starting the Watcher (Standalone)
 
 ```bash
 havn watch
@@ -123,6 +162,14 @@ Output:
 Watching for changes... (Ctrl+C to stop)
   transform/  -> auto-rebuild SQL models
 ```
+
+### With the Web Server
+
+```bash
+havn serve --watch
+```
+
+Starts the web UI and file watcher together.
 
 ### How It Works
 
@@ -144,6 +191,19 @@ Watcher: Running transform...
   done  gold.customer_summary (892 rows, 12ms)
 Watcher: Transform completed
 ```
+
+## Combined Mode
+
+For development, the most convenient setup is:
+
+```bash
+havn serve --watch --schedule
+```
+
+This gives you:
+- Web UI at localhost:3000
+- Automatic rebuilds when you save SQL files
+- Scheduled pipeline execution in the background
 
 ## Scheduler Architecture
 
@@ -209,6 +269,14 @@ For production deployments, run the scheduler as a background service:
 nohup havn schedule > /var/log/havn-scheduler.log 2>&1 &
 ```
 
+### Combined Server Deployment
+
+For simpler deployments, run everything together:
+
+```bash
+nohup havn serve --schedule --watch --auth --env prod > /var/log/havn.log 2>&1 &
+```
+
 ### Multiple Workers
 
 The scheduler runs streams sequentially within a single thread. For parallel execution of independent streams, consider running multiple scheduler instances or using external orchestration tools.
@@ -218,6 +286,7 @@ The scheduler runs streams sequentially within a single thread. For parallel exe
 - Check `havn history` to verify scheduled runs are completing
 - Use `havn freshness` to detect if scheduled pipelines have stopped running
 - Configure webhook notifications on streams for immediate failure alerts
+- Use the **Overview** tab in the web UI for at-a-glance monitoring
 
 ## Related Pages
 
