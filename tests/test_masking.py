@@ -304,9 +304,12 @@ streams:
 @pytest.fixture
 def client(project):
     import havn.server.app as server_app
+    from havn.server.deps import reset_shared_conn
 
+    reset_shared_conn()
     server_app.PROJECT_DIR = project
-    return TestClient(server_app.app)
+    yield TestClient(server_app.app)
+    reset_shared_conn()
 
 
 def test_api_create_policy(client):
