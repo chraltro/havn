@@ -53,7 +53,7 @@ src/havn/                       # Python package (the platform itself)
   lint/
     linter.py                 # SQLFluff integration
   server/
-    app.py                    # FastAPI backend (40+ endpoints)
+    app.py                    # FastAPI backend (150+ endpoints)
 
 frontend/                     # React + Vite SPA
   src/

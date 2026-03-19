@@ -6,6 +6,7 @@ import ChartPanel from "./ChartPanel";
 import { useHintTriggerFn } from "./HintSystem";
 import ResizeHandle from "./ResizeHandle";
 import useResizable from "./useResizable";
+import { schemaCompare } from "./schemaOrder";
 
 const MAX_HISTORY = 50;
 const FMT_OPTS = { language: "sql", keywordCase: "upper", indentStyle: "standard" };
@@ -33,15 +34,7 @@ function SchemaSidebar({ tables, onInsert }) {
     if (!schemas[t.schema]) schemas[t.schema] = [];
     schemas[t.schema].push(t);
   }
-  const SCHEMA_ORDER = ["landing", "bronze", "silver", "gold"];
-  const schemaNames = Object.keys(schemas).sort((a, b) => {
-    const ai = SCHEMA_ORDER.indexOf(a);
-    const bi = SCHEMA_ORDER.indexOf(b);
-    if (ai !== -1 && bi !== -1) return ai - bi;
-    if (ai !== -1) return -1;
-    if (bi !== -1) return 1;
-    return a.localeCompare(b);
-  });
+  const schemaNames = Object.keys(schemas).sort(schemaCompare);
 
   async function toggleExpand(key) {
     if (expanded[key]) {

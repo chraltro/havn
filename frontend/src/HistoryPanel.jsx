@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { api } from "./api";
 
+const PAGE_SIZE = 50;
+
 export default function HistoryPanel({ onOpenFile }) {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [targetFilter, setTargetFilter] = useState("");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   useEffect(() => {
     loadHistory();
@@ -14,7 +19,7 @@ export default function HistoryPanel({ onOpenFile }) {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.getHistory(100);
+      const data = await api.getHistory(500);
       setHistory(data);
     } catch (e) {
       setError(e.message || "Failed to load history");
@@ -22,9 +27,36 @@ export default function HistoryPanel({ onOpenFile }) {
     setLoading(false);
   }
 
+  const filtered = history.filter((row) => {
+    if (statusFilter !== "all" && row.status !== statusFilter) return false;
+    if (targetFilter && !(row.target || "").toLowerCase().includes(targetFilter.toLowerCase())) return false;
+    return true;
+  });
+
+  const visible = filtered.slice(0, visibleCount);
+  const hasMore = visibleCount < filtered.length;
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
+        <select
+          style={styles.filterSelect}
+          value={statusFilter}
+          onChange={(e) => { setStatusFilter(e.target.value); setVisibleCount(PAGE_SIZE); }}
+        >
+          <option value="all">All Statuses</option>
+          <option value="success">Success</option>
+          <option value="error">Error</option>
+        </select>
+        <input
+          style={styles.filterInput}
+          placeholder="Search target..."
+          value={targetFilter}
+          onChange={(e) => { setTargetFilter(e.target.value); setVisibleCount(PAGE_SIZE); }}
+        />
+        <span style={{ fontSize: "11px", color: "var(--havn-text-dim)", marginLeft: "auto", marginRight: 8 }}>
+          {filtered.length} run{filtered.length !== 1 ? "s" : ""}
+        </span>
         <button onClick={loadHistory} style={styles.refreshBtn}>
           Refresh
         </button>
@@ -51,8 +83,12 @@ export default function HistoryPanel({ onOpenFile }) {
               </tr>
             </thead>
             <tbody>
-              {history.map((row) => (
-                <tr key={row.run_id}>
+              {visible.map((row) => (
+                <tr
+                  key={row.run_id}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--havn-accent) 8%, transparent)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = ""; }}
+                >
                   <td style={styles.td}>
                     <span style={styles.typeBadge}>{row.run_type}</span>
                   </td>
@@ -94,6 +130,16 @@ export default function HistoryPanel({ onOpenFile }) {
               ))}
             </tbody>
           </table>
+          {hasMore && (
+            <div style={{ textAlign: "center", padding: "12px" }}>
+              <button
+                onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                style={styles.refreshBtn}
+              >
+                Load More ({filtered.length - visibleCount} remaining)
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -110,7 +156,9 @@ const styles = {
   error: { padding: "24px", color: "var(--havn-red)", textAlign: "center" },
   tableWrap: { flex: 1, overflow: "auto" },
   table: { width: "100%", borderCollapse: "collapse", fontSize: "12px" },
-  th: { textAlign: "left", padding: "6px 12px", borderBottom: "2px solid var(--havn-border-light)", color: "var(--havn-text-secondary)", fontWeight: 600, position: "sticky", top: 0, background: "var(--havn-bg)" },
+  filterSelect: { padding: "4px 8px", background: "var(--havn-bg-tertiary)", color: "var(--havn-text)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", fontSize: "11px" },
+  filterInput: { padding: "4px 10px", background: "var(--havn-bg-tertiary)", color: "var(--havn-text)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", fontSize: "11px", width: "180px" },
+  th: { textAlign: "left", padding: "6px 12px", borderBottom: "2px solid var(--havn-border-light)", color: "var(--havn-text-secondary)", fontWeight: 600, position: "sticky", top: 0, background: "var(--havn-bg-secondary)" },
   td: { padding: "5px 12px", borderBottom: "1px solid var(--havn-border)", color: "var(--havn-text)", fontSize: "12px" },
   typeBadge: { background: "var(--havn-btn-bg)", padding: "2px 8px", borderRadius: "var(--havn-radius)", fontSize: "11px", fontWeight: 500, textTransform: "capitalize" },
   statusBadge: { padding: "2px 8px", borderRadius: "var(--havn-radius)", fontSize: "11px", fontWeight: 600 },

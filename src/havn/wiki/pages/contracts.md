@@ -9,11 +9,12 @@ Data contracts are standalone YAML files that define data quality rules. They co
 1. Go to the **Observe** tab and click **Quality**
 2. The **Contract Results** section shows the most recent contract evaluations:
    - Contract name and target model
-   - Pass/fail status with green checkmark or red X for each assertion
-   - Severity level (error or warn)
+   - **Last Result** column with PASS/FAIL/NOT RUN badge
+   - Level column showing "must pass" or "warning"
    - Evaluation timestamp and duration
 3. Click **Run Contracts** to execute all contracts on demand
-4. Click any contract result to expand and see per-assertion details
+4. Click any contract result row to expand and see per-rule details with PASS/FAIL status and detail messages (e.g., "5 duplicate(s) — 95 distinct out of 100 rows")
+5. Toggle **Show Run History** to view all historical contract runs, sorted by checked timestamp descending
 
 ### Running Contracts from the UI
 
@@ -56,7 +57,7 @@ Each YAML file can contain multiple contracts under the `contracts:` key.
 | `name` | string | yes | file stem | Unique contract identifier |
 | `model` | string | yes | -- | Target model as `schema.table` |
 | `description` | string | no | `""` | Human-readable description |
-| `severity` | string | no | `error` | `error` or `warn` |
+| `severity` | string | no | `error` | `error` (must pass) or `warn` (warning) |
 | `assertions` | list | yes | -- | List of assertion expressions |
 
 ## Assertion Types
@@ -141,17 +142,13 @@ Discovers all YAML files in `contracts/`, evaluates each contract, and reports r
 ```
 Running 3 contract(s)...
 
-  PASS  orders_not_empty (gold.orders) [12ms]
-         pass  row_count > 0
-         pass  unique(order_id)
-         pass  no_nulls(order_id)
+  PASS orders_not_empty on gold.orders -- 3 rules passed [12ms]
 
-  FAIL  customers_fresh (silver.customers) [8ms]
-         pass  row_count > 0
-         FAIL  "MAX(updated_at) > CURRENT_DATE - INTERVAL '24 hours'" (value: false)
+  FAIL customers_fresh on silver.customers -- 1 of 2 rules failed [8ms]
+       row_count > 0 --> pass
+       MAX(updated_at) > CURRENT_DATE - INTERVAL '24 hours' --> max: 2025-01-10 12:30:00 (expected after 2025-01-17 00:00:00)
 
-  PASS  revenue_check (gold.daily_revenue) [5ms]
-         pass  row_count > 0
+  PASS revenue_check on gold.daily_revenue -- 1 rule passed [5ms]
 
 2 contract(s) passed, 1 failed.
 ```
