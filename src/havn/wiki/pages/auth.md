@@ -2,6 +2,35 @@
 
 havn includes built-in authentication with role-based access control (RBAC). When enabled, users must log in to access the web UI and API. Roles control what actions each user can perform.
 
+## Web UI Experience
+
+### Login Screen
+
+When auth is enabled, visiting `localhost:3000` shows a login screen. Enter your username and password to access the platform. The token is stored in the browser and used for all subsequent API requests.
+
+### Initial Setup Wizard
+
+On first launch with `--auth` and no users configured, the web UI shows a setup screen:
+
+1. Enter a username, password, and display name for the first admin user
+2. Click **Create Admin Account**
+3. You are automatically logged in and redirected to the Overview tab
+
+### User Management in Settings
+
+1. Go to **Configure** > **Settings** > **Users** (requires admin role)
+2. View all users with their roles, display names, and last login times
+3. **Create User** -- Add new users with username, password, role (admin/editor/viewer), and display name
+4. **Edit User** -- Change a user's role, display name, or password
+5. **Delete User** -- Remove a user and revoke all their active tokens
+
+### Secrets Management in Settings
+
+1. Go to **Configure** > **Settings** > **Secrets** (requires admin role)
+2. View all `.env` variable keys (values are always masked as `****`)
+3. **Add Secret** -- Set a new environment variable
+4. **Delete Secret** -- Remove an environment variable
+
 ## Enabling Authentication
 
 Start the server with the `--auth` flag:
@@ -46,11 +75,19 @@ havn defines three roles with cumulative permissions:
 
 ### Permission Details
 
-- **read** -- View tables, run SELECT queries, browse files, view DAG, view history
-- **write** -- Edit files, save models, create versions, manage masking policies
-- **execute** -- Run pipelines, execute scripts, trigger transforms, import data
+- **read** -- View tables, run SELECT queries, browse files, view DAG, view history, view wiki
+- **write** -- Edit files, save models, create versions, manage masking policies, edit wiki
+- **execute** -- Run pipelines, execute scripts, trigger transforms, import data, run contracts
 - **manage_users** -- Create, update, delete users
 - **manage_secrets** -- View, set, delete secrets in `.env`
+
+## Managing Users via CLI
+
+```bash
+havn users create --username analyst --password secure-pass --role viewer
+havn users list
+havn users delete analyst
+```
 
 ## Authentication Flow
 
@@ -116,7 +153,7 @@ Returns:
 }
 ```
 
-## User Management
+## User Management via API
 
 All user management operations require the `admin` role.
 
@@ -191,20 +228,28 @@ The login endpoint is rate-limited to prevent brute-force attacks. Each client I
 
 ## Secrets Management
 
-Admin users can manage secrets (`.env` variables) through the API:
+Admin users can manage secrets (`.env` variables) through the CLI, web UI, or API.
 
 ### List Secrets
 
 ```bash
+# CLI
+havn secrets list
+
+# API
 curl http://localhost:3000/api/secrets \
   -H "Authorization: Bearer <admin-token>"
 ```
 
-Returns keys with masked values (never exposes actual secret values in the API response).
+Returns keys with masked values (never exposes actual secret values).
 
 ### Set a Secret
 
 ```bash
+# CLI
+havn secrets set DB_PASSWORD new-password
+
+# API
 curl -X POST http://localhost:3000/api/secrets \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
@@ -214,6 +259,10 @@ curl -X POST http://localhost:3000/api/secrets \
 ### Delete a Secret
 
 ```bash
+# CLI
+havn secrets delete DB_PASSWORD
+
+# API
 curl -X DELETE http://localhost:3000/api/secrets/DB_PASSWORD \
   -H "Authorization: Bearer <admin-token>"
 ```
@@ -222,8 +271,26 @@ curl -X DELETE http://localhost:3000/api/secrets/DB_PASSWORD \
 
 Auth data is stored in the DuckDB database under `_dp_internal`:
 
-- `_dp_internal.users` -- User accounts (username, password hash, salt, role)
-- `_dp_internal.tokens` -- Active authentication tokens with expiration
+| Table | Contents |
+|-------|----------|
+| `_dp_internal.users` | User accounts (username, password hash, salt, role, display name, timestamps) |
+| `_dp_internal.tokens` | Active authentication tokens with expiration |
+
+## Audit Logging
+
+When auth is enabled, user actions are logged to `_dp_internal.audit_log`:
+
+- Login events
+- Query execution
+- Pipeline runs
+- File edits
+- User management operations
+
+View the audit log via API:
+
+```bash
+GET /api/audit?limit=100
+```
 
 ## Related Pages
 
