@@ -108,6 +108,34 @@ for (const s of SECTIONS) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Clear stale session data on server restart                          */
+/* ------------------------------------------------------------------ */
+// Phase 1 (sync): fetch boot time and update for NEXT page load.
+// We can't do a sync XHR for the current load, so we use a two-load strategy:
+// - On this load, fire async health check and store the boot time.
+// - If boot time changed since last stored value, clear session data NOW
+//   (the async response will be too late for useState inits, but we also
+//    clear synchronously by comparing what we stored last time).
+(() => {
+  // Async: fetch current boot time and store it for next load's comparison
+  fetch("/api/health").then(r => r.json()).then(d => {
+    const currentBoot = String(d.boot || "");
+    const lastBoot = sessionStorage.getItem("havn_server_boot");
+    if (currentBoot) {
+      sessionStorage.setItem("havn_server_boot", currentBoot);
+    }
+    // If this is a NEW boot we haven't seen, clear now (catches late loads)
+    if (lastBoot && lastBoot !== currentBoot) {
+      sessionStorage.removeItem("havn_pipeline_output");
+      sessionStorage.removeItem("havn_run_summary");
+      sessionStorage.removeItem("havn_agent_messages");
+      // Force reload so components pick up cleared state
+      window.location.reload();
+    }
+  }).catch(() => {});
+})();
+
+/* ------------------------------------------------------------------ */
 /* Pipeline Run Menu (replaces 5 separate action buttons)              */
 /* ------------------------------------------------------------------ */
 
@@ -964,7 +992,7 @@ function AppContent() {
                 <div style={{ height: 3, background: "#2dd4bf", width: `${Math.round(progress * 100)}%`, transition: "width 0.3s ease" }} />
               </div>
             )}
-            <OutputPanel output={output} onClear={clearOutput} height={outputHeight} onOpenFile={openFileAtLine} />
+            <OutputPanel output={output} onClear={clearOutput} height={outputHeight} onOpenFile={openFileAtLine} running={running} progress={progress} />
           </div>
         </div>
 

@@ -26,6 +26,130 @@ interface PipelineProviderProps {
   onPipelineComplete?: () => void;
 }
 
+/**
+ * Process SSE events from the pipeline event stream.
+ * Shared between runStream and reconnect-on-mount.
+ */
+function createEventProcessor(
+  addOutput: (type: OutputEntry["type"], message: string) => void,
+  setProgress: React.Dispatch<React.SetStateAction<number>>,
+  setRunning: React.Dispatch<React.SetStateAction<boolean>>,
+  setRunSummary: React.Dispatch<React.SetStateAction<RunSummary | null>>,
+  onTablesChanged: () => void,
+  onPipelineComplete?: () => void,
+  firstLineMsgRef?: React.MutableRefObject<string>,
+  resolve?: () => void,
+) {
+  const models: { name: string; result: string }[] = [];
+  let totalRows = 0;
+  let hasError = false;
+  let totalItems = 0;
+  let completedItems = 0;
+  const nodeStartTimes: Record<string, number> = {};
+
+  return (event: string, data: Record<string, unknown>) => {
+    switch (event) {
+      case "start":
+        totalItems = (data.total as number) || 0;
+        break;
+      case "step_start":
+        break;
+      case "model_start": {
+        const action = data.action as string;
+        const mName = data.name as string;
+        const num = data.num as number || 0;
+        const verb = action === "ingest" ? "Ingesting" : action === "export" ? "Exporting" : "Building";
+        const prefix = totalItems && num ? `(${num}/${totalItems}) ` : "";
+        nodeStartTimes[mName] = Date.now();
+        const displayName = (action === "ingest" || action === "export") && !mName.includes("/") ? `${action}/${mName}` : mName;
+        addOutput("log", `${prefix}${verb} ${displayName}...`);
+        break;
+      }
+      case "model_end": {
+        completedItems++;
+        if (totalItems > 0) setProgress(completedItems / totalItems);
+        const status = data.status as string;
+        const mName = data.name as string;
+        const action = data.action as string;
+        const dur = data.duration_ms as number | undefined;
+        const rows = data.row_count as number | undefined;
+        const rowsAff = data.rows_affected as number | undefined;
+        const err = data.error as string | undefined;
+        const num = data.num as number || 0;
+
+        const prefix = totalItems && num ? `(${num}/${totalItems}) ` : "";
+        let msg = "";
+        const wallMs = nodeStartTimes[mName] ? Date.now() - nodeStartTimes[mName] : dur;
+        const durVal = wallMs || dur || 0;
+        const durStr = durVal ? `(${(durVal / 1000).toFixed(1)}s)` : "";
+        const verb = action === "ingest" ? "Ingested" : action === "export" ? "Exported" : "Built";
+        const rowCount = rows || rowsAff || 0;
+        const rowStr = rowCount ? `${rowCount.toLocaleString()} rows` : "";
+        const details = [rowStr, durStr].filter(Boolean).join(" ");
+        const displayName = (action === "ingest" || action === "export") && !mName.includes("/") ? `${action}/${mName}` : mName;
+
+        if (status === "skipped") {
+          msg = `${prefix}Skipped ${displayName} (no changes)`;
+        } else if (status === "error" || status === "assertion_failed") {
+          const cleanErr = err?.replace(/[\x00]/g, ".").replace(/\.+/g, ".") || "";
+          msg = `${prefix}Failed ${displayName}${cleanErr ? ` — ${cleanErr}` : ""}`;
+        } else {
+          msg = `${prefix}${verb} ${displayName}${details ? ` — ${details}` : ""}`;
+        }
+
+        if (rowCount) totalRows += rowCount;
+        const level = status === "error" || status === "assertion_failed" ? "error"
+          : status === "skipped" ? "log"
+          : "success";
+        addOutput(level as OutputEntry["type"], msg);
+
+        if (status !== "skipped") {
+          models.push({ name: mName, result: status });
+        }
+        if (status === "error" || status === "assertion_failed") hasError = true;
+        break;
+      }
+      case "complete": {
+        const durS = (data.duration_seconds as number) || 0;
+        const pipelineStatus = data.status as string;
+        const isCancelled = pipelineStatus === "cancelled";
+        const level = isCancelled ? "warn" : "info";
+        const preposition = isCancelled ? "after" : "in";
+        addOutput(level as OutputEntry["type"], `Pipeline ${pipelineStatus} ${preposition} ${durS}s`);
+        setProgress(1);
+        if (firstLineMsgRef) firstLineMsgRef.current = "";
+        onTablesChanged();
+
+        const summary: RunSummary = {
+          type: "stream",
+          status: isCancelled ? "failed" : hasError ? "failed" : "success",
+          models,
+          totalRows,
+          duration: Math.round(durS * 1000),
+          errors: models.filter((m) => m.result === "error").length,
+        };
+        setRunSummary(summary);
+        if (!hasError && !isCancelled) onPipelineComplete?.();
+        setRunning(false);
+        resolve?.();
+        break;
+      }
+      case "error": {
+        const errMsg = data.message as string;
+        if (firstLineMsgRef) firstLineMsgRef.current = "";
+        if (errMsg && (errMsg.includes("network error") || errMsg.includes("Failed to fetch") || errMsg.includes("AbortError"))) {
+          addOutput("warn", "Connection to server lost. The server may have been restarted.");
+        } else {
+          addOutput("error", errMsg || "An unknown error occurred");
+        }
+        setRunning(false);
+        resolve?.();
+        break;
+      }
+    }
+  };
+}
+
 export function PipelineProvider({ children, onTablesChanged, onPipelineComplete }: PipelineProviderProps) {
   const [running, setRunning] = useState(false);
   const [output, setOutput] = useState<OutputEntry[]>(() => {
@@ -69,127 +193,33 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
     reconnectAttempted.current = true;
 
     api.getActiveStream().then((data) => {
-      if (!data.running) return;
+      // If pipeline is running OR has finished with events to replay
+      if (!data.running && !(data.finished && data.total_events > 0)) return;
 
-      setRunning(true);
+      if (data.running) {
+        setRunning(true);
+      }
       setRunSummary(null);
-      const firstMsg = "Reconnecting to running pipeline...";
-      firstLineMsgRef.current = firstMsg;
-      setOutput((prev) => {
-        // Keep existing output from sessionStorage, add reconnect message
-        return [...prev, { type: "info" as const, message: firstMsg, ts: new Date().toLocaleTimeString() }];
-      });
 
-      // Skip replaying old events — sessionStorage already has them.
-      // Use the server's buffered count to start from the current position.
-      const fromEvent = (data as any).buffered_events || 0;
+      // Clear existing output -- the fresh replay from the server replaces it
+      setOutput([]);
+      sessionStorage.removeItem('havn_pipeline_output');
+      sessionStorage.removeItem('havn_run_summary');
 
-      const models: { name: string; result: string }[] = [];
-      let totalRows = 0;
-      let hasError = false;
-      let totalItems = 0;
-      let completedItems = 0;
+      // No "Reconnecting" message -- seamless replay
+      const processor = createEventProcessor(
+        addOutput,
+        setProgress,
+        setRunning,
+        setRunSummary,
+        onTablesChanged,
+        onPipelineComplete,
+      );
 
-      api.reconnectStreamSSE(fromEvent, (event, data) => {
-        switch (event) {
-          case "start":
-            totalItems = (data.total as number) || 0;
-            break;
-          case "model_start": {
-            const action = data.action as string;
-            const mName = data.name as string;
-            const num = data.num as number || 0;
-            const verb = action === "ingest" ? "Ingesting" : action === "export" ? "Exporting" : "Building";
-            const prefix = totalItems && num ? `(${num}/${totalItems}) ` : "";
-            const displayName = (action === "ingest" || action === "export") && !mName.includes("/") ? `${action}/${mName}` : mName;
-            addOutput("log", `${prefix}${verb} ${displayName}...`);
-            break;
-          }
-          case "model_end": {
-            completedItems++;
-            if (totalItems > 0) setProgress(completedItems / totalItems);
-            const status = data.status as string;
-            const mName = data.name as string;
-            const action = data.action as string;
-            const dur = data.duration_ms as number | undefined;
-            const rows = data.row_count as number | undefined;
-            const rowsAff = data.rows_affected as number | undefined;
-            const err = data.error as string | undefined;
-            const num = data.num as number || 0;
-
-            const prefix = totalItems && num ? `(${num}/${totalItems}) ` : "";
-            const verb = action === "ingest" ? "Ingested" : action === "export" ? "Exported" : "Built";
-            const rowCount = rows || rowsAff || 0;
-            const durStr = dur ? `(${(dur / 1000).toFixed(1)}s)` : "";
-            const rowStr = rowCount ? `${rowCount.toLocaleString()} rows` : "";
-            const details = [rowStr, durStr].filter(Boolean).join(" ");
-            const displayName = (action === "ingest" || action === "export") && !mName.includes("/") ? `${action}/${mName}` : mName;
-
-            let msg = "";
-            if (status === "skipped") {
-              msg = `${prefix}Skipped ${displayName} (no changes)`;
-            } else if (status === "error" || status === "assertion_failed") {
-              const cleanErr = err?.replace(/[\x00]/g, ".").replace(/\.+/g, ".") || "";
-              msg = `${prefix}Failed ${displayName}${cleanErr ? ` — ${cleanErr}` : ""}`;
-            } else {
-              msg = `${prefix}${verb} ${displayName}${details ? ` — ${details}` : ""}`;
-            }
-
-            if (rowCount) totalRows += rowCount;
-            const level = status === "error" || status === "assertion_failed" ? "error"
-              : status === "skipped" ? "log"
-              : "success";
-            addOutput(level as OutputEntry["type"], msg);
-
-            if (status !== "skipped") {
-              models.push({ name: mName, result: status });
-            }
-            if (status === "error" || status === "assertion_failed") hasError = true;
-            break;
-          }
-          case "complete": {
-            const durS = (data.duration_seconds as number) || 0;
-            const pipelineStatus = data.status as string;
-            const isCancelled = pipelineStatus === "cancelled";
-            const level = isCancelled ? "warn" : "info";
-            addOutput(level as OutputEntry["type"], `Pipeline ${pipelineStatus} in ${durS}s`);
-            setProgress(1);
-            firstLineMsgRef.current = "";
-            onTablesChanged();
-
-            const summary: RunSummary = {
-              type: "stream",
-              status: isCancelled ? "failed" : hasError ? "failed" : "success",
-              models,
-              totalRows,
-              duration: Math.round(durS * 1000),
-              errors: models.filter((m) => m.result === "error").length,
-            };
-            setRunSummary(summary);
-            if (!hasError && !isCancelled) onPipelineComplete?.();
-            setRunning(false);
-            break;
-          }
-          case "error": {
-            const errMsg = data.message as string;
-            firstLineMsgRef.current = "";
-            // 404 means pipeline finished between our check and reconnect — not an error
-            if (errMsg && errMsg.includes("404")) {
-              setRunning(false);
-              return;
-            }
-            if (errMsg && (errMsg.includes("network error") || errMsg.includes("Failed to fetch"))) {
-              addOutput("warn", "Connection to server lost.");
-            } else {
-              addOutput("error", errMsg || "An unknown error occurred");
-            }
-            setRunning(false);
-            break;
-          }
-        }
-      });
+      // Connect from event 0 -- replay the entire buffer
+      api.connectToStreamEvents(0, processor);
     }).catch(() => {
-      // Server not reachable or auth issue — ignore
+      // Server not reachable or auth issue -- ignore
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -267,120 +297,38 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
     firstLineMsgRef.current = firstMsg;
     addOutput("info", firstMsg);
 
-    const models: { name: string; result: string }[] = [];
-    let totalRows = 0;
-    let hasError = false;
-    let totalItems = 0;
-    let completedItems = 0;
-    const nodeStartTimes: Record<string, number> = {};
-
-    return new Promise<void>((resolve) => {
-      const { abort } = api.runStreamSSE(name, force, (event, data) => {
-        switch (event) {
-          case "start":
-            totalItems = (data.total as number) || 0;
-            break;
-          case "step_start":
-            break;
-          case "model_start": {
-            const action = data.action as string;
-            const mName = data.name as string;
-            const num = data.num as number || 0;
-            const verb = action === "ingest" ? "Ingesting" : action === "export" ? "Exporting" : "Building";
-            const prefix = totalItems && num ? `(${num}/${totalItems}) ` : "";
-            nodeStartTimes[mName] = Date.now();
-            // Use full path for ingest/export scripts so they're clickable in output
-            const displayName = (action === "ingest" || action === "export") && !mName.includes("/") ? `${action}/${mName}` : mName;
-            addOutput("log", `${prefix}${verb} ${displayName}...`);
-            break;
-          }
-          case "model_end": {
-            completedItems++;
-            if (totalItems > 0) setProgress(completedItems / totalItems);
-            const status = data.status as string;
-            const mName = data.name as string;
-            const action = data.action as string;
-            const dur = data.duration_ms as number | undefined;
-            const rows = data.row_count as number | undefined;
-            const rowsAff = data.rows_affected as number | undefined;
-            const err = data.error as string | undefined;
-            const num = data.num as number || 0;
-
-            const prefix = totalItems && num ? `(${num}/${totalItems}) ` : "";
-            let msg = "";
-            // Use wall-clock time from when "Building..." was shown
-            const wallMs = nodeStartTimes[mName] ? Date.now() - nodeStartTimes[mName] : dur;
-            const durVal = wallMs || dur || 0;
-            const durStr = durVal ? `(${(durVal / 1000).toFixed(1)}s)` : "";
-            const verb = action === "ingest" ? "Ingested" : action === "export" ? "Exported" : "Built";
-            const rowCount = rows || rowsAff || 0;
-            const rowStr = rowCount ? `${rowCount.toLocaleString()} rows` : "";
-            const details = [rowStr, durStr].filter(Boolean).join(" ");
-            // Use full path for ingest/export scripts so they're clickable in output
-            const displayName = (action === "ingest" || action === "export") && !mName.includes("/") ? `${action}/${mName}` : mName;
-
-            if (status === "skipped") {
-              msg = `${prefix}Skipped ${displayName} (no changes)`;
-            } else if (status === "error" || status === "assertion_failed") {
-              const cleanErr = err?.replace(/[\x00]/g, ".").replace(/\.+/g, ".") || "";
-              msg = `${prefix}Failed ${displayName}${cleanErr ? ` — ${cleanErr}` : ""}`;
-            } else {
-              msg = `${prefix}${verb} ${displayName}${details ? ` — ${details}` : ""}`;
-            }
-
-            if (rowCount) totalRows += rowCount;
-            const level = status === "error" || status === "assertion_failed" ? "error"
-              : status === "skipped" ? "log"
-              : "success";
-            addOutput(level as OutputEntry["type"], msg);
-
-            if (status !== "skipped") {
-              models.push({ name: mName, result: status });
-            }
-            if (status === "error" || status === "assertion_failed") hasError = true;
-            break;
-          }
-          case "complete": {
-            const durS = (data.duration_seconds as number) || 0;
-            const pipelineStatus = data.status as string;
-            const isCancelled = pipelineStatus === "cancelled";
-            const level = isCancelled ? "warn" : "info";
-            addOutput(level as OutputEntry["type"], `Pipeline ${pipelineStatus} in ${durS}s`);
-            setProgress(1);
-            firstLineMsgRef.current = "";
-            onTablesChanged();
-
-            const summary: RunSummary = {
-              type: "stream",
-              status: isCancelled ? "failed" : hasError ? "failed" : "success",
-              models,
-              totalRows,
-              duration: Math.round(durS * 1000),
-              errors: models.filter((m) => m.result === "error").length,
-            };
-            setRunSummary(summary);
-            if (!hasError && !isCancelled) onPipelineComplete?.();
-            setRunning(false);
-            resolve();
-            break;
-          }
-          case "error": {
-            const errMsg = data.message as string;
-            firstLineMsgRef.current = "";
-            if (errMsg && (errMsg.includes("network error") || errMsg.includes("Failed to fetch") || errMsg.includes("AbortError"))) {
-              addOutput("warn", "Connection to server lost. The server may have been restarted.");
-            } else {
-              addOutput("error", errMsg || "An unknown error occurred");
-            }
-            setRunning(false);
-            resolve();
-            break;
-          }
+    return new Promise<void>(async (resolve) => {
+      try {
+        // 1. Start pipeline in background
+        const startResult = await api.startStream(name, force);
+        if (startResult.status === "already_running") {
+          addOutput("warn", "A pipeline is already running.");
+          setRunning(false);
+          resolve();
+          return;
         }
-      });
 
-      // Store abort for potential cancellation
-      void abort;
+        // 2. Connect to SSE event stream from the beginning
+        const processor = createEventProcessor(
+          addOutput,
+          setProgress,
+          setRunning,
+          setRunSummary,
+          onTablesChanged,
+          onPipelineComplete,
+          firstLineMsgRef,
+          resolve,
+        );
+
+        const { abort } = api.connectToStreamEvents(0, processor);
+        // Store abort for potential cancellation
+        void abort;
+      } catch (e: unknown) {
+        addOutput("error", (e as Error).message);
+        firstLineMsgRef.current = "";
+        setRunning(false);
+        resolve();
+      }
     });
   }, [addOutput, onTablesChanged, onPipelineComplete]);
 
@@ -520,7 +468,7 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
   return (
     <PipelineContext.Provider
       value={{
-        running,
+        running: !!running,
         output,
         runSummary,
         progress,
