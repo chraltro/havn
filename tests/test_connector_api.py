@@ -35,10 +35,13 @@ def project(tmp_path):
 @pytest.fixture
 def client(project):
     import havn.server.app as server_app
+    from havn.server.deps import reset_shared_conn
 
+    reset_shared_conn()
     server_app.PROJECT_DIR = project
     server_app.AUTH_ENABLED = False
-    return TestClient(server_app.app)
+    yield TestClient(server_app.app)
+    reset_shared_conn()
 
 
 def test_list_available_connectors(client):
@@ -166,13 +169,10 @@ def test_webhook_endpoint(client, project):
     assert data["status"] == "received"
     assert "test_events_inbox" in data["table"]
 
-    # Verify data was stored
-    conn = duckdb.connect(str(project / "warehouse.duckdb"))
-    count = conn.execute(
-        "SELECT COUNT(*) FROM landing.test_events_inbox"
-    ).fetchone()[0]
-    assert count == 1
-    conn.close()
+    # Verify data was stored (use API to avoid DuckDB file lock conflicts)
+    resp2 = client.post("/api/query", json={"sql": "SELECT COUNT(*) FROM landing.test_events_inbox"})
+    assert resp2.status_code == 200
+    assert resp2.json()["rows"][0][0] == 1
 
 
 def test_regenerate_connector(client, project):
