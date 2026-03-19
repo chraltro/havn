@@ -415,8 +415,6 @@ export default function QueryPanel({ addOutput }) {
               ))}
             </div>
           )}
-          <ResizeHandle direction="vertical" onResize={onEditorResize} onResizeStart={onEditorResizeStart} />
-
           {/* Toolbar */}
           <div style={st.toolbar}>
             <button onClick={runQuery} disabled={queryRunning || !sql.trim()} style={st.runBtn}>
@@ -463,6 +461,7 @@ export default function QueryPanel({ addOutput }) {
               </div>
             )}
           </div>
+          <ResizeHandle direction="vertical" onResize={onEditorResize} onResizeStart={onEditorResizeStart} />
 
           {/* Starter suggestions when textarea is empty */}
           {!sql.trim() && suggestions.length > 0 && (
