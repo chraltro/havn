@@ -20,7 +20,7 @@
 
 ---
 
-**havn** (Norwegian for *harbour*) is a self-hosted data platform — a Nordic alternative to Databricks and Snowflake for teams that want analytics without the complexity, cost, or data leaving their infrastructure.
+**havn** (Norwegian for *harbour*) is a self-hosted data platform - a Nordic alternative to Databricks and Snowflake for teams that want analytics without the complexity, cost, or data leaving their infrastructure.
 
 Your entire warehouse lives in a single DuckDB file. Transforms are plain SQL. Ingest and export scripts are Python. There's no Jinja, no compilation step, no profiles.yml, and no YAML spaghetti.
 
@@ -47,13 +47,13 @@ havn gives you the analytical power of a modern data stack in something you can 
 | Data leaving your infrastructure | **Self-hosted.** Your data stays on your hardware. Full stop. |
 | Jinja-templated SQL nobody understands | **Plain SQL.** Config is a comment. Dependencies are a comment. SQL is just SQL. |
 | 30-minute onboarding | **30-second onboarding.** Install from source and `havn init` gives you a working pipeline with sample data. |
-| Separate tools for ingest, transform, orchestration, UI | **One tool does it all.** CLI, web UI, scheduler, connectors — included. |
+| Separate tools for ingest, transform, orchestration, UI | **One tool does it all.** CLI, web UI, scheduler, connectors - included. |
 | LLMs can't write your DSL | **AI-native.** Plain SQL + simple conventions = LLMs write correct transforms on the first try. |
 
 ## Features
 
 ### SQL Transform Engine
-Write plain SQL with comment-based config. havn resolves dependencies, builds a DAG, and executes in the right order — with change detection that only rebuilds what changed.
+Write plain SQL with comment-based config. havn resolves dependencies, builds a DAG, and executes in the right order - with change detection that only rebuilds what changed.
 
 ```sql
 -- config: materialized=table, schema=gold
@@ -78,7 +78,7 @@ havn serve --auth   # with role-based access control
 ```
 
 ### 20+ Data Connectors
-Connect to Postgres, MySQL, SQLite, Stripe, HubSpot, Google Sheets, S3, REST APIs, and more — from the CLI or the web UI.
+Connect to Postgres, MySQL, SQLite, Stripe, HubSpot, Google Sheets, S3, REST APIs, and more - from the CLI or the web UI.
 
 ```bash
 havn connect postgres --host localhost --database mydb --user admin
@@ -193,7 +193,7 @@ landing/  →  bronze/  →  silver/  →  gold/
  (raw)      (cleaned)   (modeled)   (ready)
 ```
 
-The warehouse is a single DuckDB file. Copy it, back it up, version it — it's just a file.
+The warehouse is a single DuckDB file. Copy it, back it up, version it - it's just a file.
 
 ## All Commands
 
@@ -237,14 +237,14 @@ The warehouse is a single DuckDB file. Copy it, back it up, version it — it's 
 | AI-native | Yes | No | Partial | No |
 | Data stays on your machine | Yes | Depends | No | No |
 
-havn is the right choice when you want a complete data platform without the infrastructure overhead. It's not trying to replace Snowflake at 10TB scale — it's the best tool for teams working with data that fits on a single machine (which is most teams).
+havn is the right choice when you want a complete data platform without the infrastructure overhead. It's not trying to replace Snowflake at 10TB scale - it's the best tool for teams working with data that fits on a single machine (which is most teams).
 
 ## Documentation
 
-- **[CLAUDE.md](CLAUDE.md)** — Full technical reference (architecture, conventions, development workflow)
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** — How to contribute
-- `havn docs` — Auto-generate documentation from your warehouse schema
-- `havn context` — Generate a project summary to paste into any AI assistant
+- **[CLAUDE.md](CLAUDE.md)** - Full technical reference (architecture, conventions, development workflow)
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - How to contribute
+- `havn docs` - Auto-generate documentation from your warehouse schema
+- `havn context` - Generate a project summary to paste into any AI assistant
 
 ## Contributing
 
@@ -261,4 +261,4 @@ pytest tests/
 
 ## License
 
-[MIT](LICENSE) — use it however you want.
+[MIT](LICENSE) - use it however you want.
