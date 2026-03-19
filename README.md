@@ -1,10 +1,6 @@
 <p align="center">
   <br />
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/chraltro/db/main/.github/assets/logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/chraltro/db/main/.github/assets/logo-light.svg">
-    <img alt="havn" src="https://raw.githubusercontent.com/chraltro/db/main/.github/assets/logo-dark.svg" width="160">
-  </picture>
+  <img alt="havn" src="https://raw.githubusercontent.com/chraltro/db/main/.github/assets/logo-dark.svg" width="160">
   <br />
   <strong>Data in safe waters.</strong>
   <br />
@@ -135,16 +131,20 @@ havn context   # generate project summary, paste into any AI chat
 
 ### Install
 
-From source (recommended):
+From PyPI:
+
+```bash
+pip install havn
+```
+
+From source (for development):
 
 ```bash
 git clone https://github.com/chraltro/db.git
 cd db
-pip install -e .
+pip install -e ".[dev]"
 cd frontend && npm install && npm run build && cd ..
 ```
-
-> **Note:** `pip install havn` will be available once the package is published to PyPI. For now, install from source.
 
 ### Create a project
 
