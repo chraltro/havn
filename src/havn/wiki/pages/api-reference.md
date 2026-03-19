@@ -1,6 +1,6 @@
 # API Reference
 
-havn exposes a REST API via FastAPI at `http://localhost:3000`. All endpoints are prefixed with `/api/`. When authentication is enabled (`havn serve --auth`), include an `Authorization: Bearer <token>` header.
+havn exposes a REST API via FastAPI at `http://localhost:3000`. All endpoints are prefixed with `/api/`. When authentication is enabled (`havn serve --auth`), include an `Authorization: Bearer <token>` header. Full OpenAPI docs are available at `/docs` when the server is running.
 
 ## Authentication
 
@@ -98,6 +98,14 @@ Save or create a file. Allowed extensions: `.sql`, `.py`, `.yml`, `.yaml`, `.dpn
 {"content": "SELECT 1"}
 ```
 
+### POST /api/files/{path}/move
+
+Move or rename a file.
+
+```json
+{"new_path": "transform/silver/renamed.sql"}
+```
+
 ### DELETE /api/files/{path}
 
 Delete a file. Optional `?drop_object=true` to also drop the corresponding database object.
@@ -115,6 +123,22 @@ Execute an ad-hoc SQL query with timeout (30s).
 Returns: `{columns, rows, truncated, offset, limit}`
 
 Also intercepts masking SQL commands: `SHOW MASKING POLICIES`, `CREATE MASKING POLICY ON ...`, `DROP MASKING POLICY <id>`.
+
+### POST /api/query/explain
+
+Get the DuckDB EXPLAIN PLAN for a query.
+
+```json
+{"sql": "SELECT * FROM gold.summary WHERE region = 'US'"}
+```
+
+### POST /api/query/profile
+
+Profile query performance with detailed execution metrics.
+
+```json
+{"sql": "SELECT * FROM gold.summary WHERE region = 'US'"}
+```
 
 ## Tables
 
@@ -154,20 +178,24 @@ List all SQL transform models with metadata.
 
 Returns: `[{name, schema, full_name, materialized, depends_on, path, content_hash}]`
 
-### POST /api/transform
-
-Run the SQL transformation pipeline.
-
-```json
-{"targets": null, "force": false}
-```
-
 ### POST /api/models/create
 
 Create a new SQL model file.
 
 ```json
 {"name": "my_model", "schema_name": "silver", "materialized": "table", "sql": "SELECT 1"}
+```
+
+### GET /api/models/{model_name}/notebook-view
+
+Get a notebook-style view combining SQL source, sample data, lineage, and dependencies.
+
+### POST /api/transform
+
+Run the SQL transformation pipeline.
+
+```json
+{"targets": null, "force": false}
 ```
 
 ### POST /api/check
@@ -181,10 +209,6 @@ Compare SQL output against materialized tables.
 ```json
 {"targets": null, "target_schema": null, "full": false}
 ```
-
-### GET /api/models/{model_name}/notebook-view
-
-Get a notebook-style view combining SQL source, sample data, lineage, and dependencies.
 
 ## DAG
 
@@ -224,6 +248,14 @@ Run an ingest or export script.
 
 Run a full stream. Optional `?force=true`.
 
+### GET /api/stream/{stream_name}/events
+
+Server-Sent Events (SSE) for real-time pipeline execution progress. Each event includes step type, target, status, row count, duration, and error messages.
+
+### POST /api/stream/cancel
+
+Cancel a running stream.
+
 ### GET /api/streams
 
 List configured streams with steps and schedules.
@@ -240,7 +272,7 @@ Get scheduler status and scheduled streams.
 
 ### GET /api/connectors/available
 
-List all available connector types with parameters.
+List all available connector types with their parameters and descriptions.
 
 ### GET /api/connectors
 
@@ -295,7 +327,39 @@ Get last sync status for each connector.
 
 ### POST /api/webhook/{webhook_name}
 
-Receive webhook data and store in `landing.<name>_inbox`.
+Receive inbound webhook data. Stores in `landing.<name>_inbox`.
+
+## Data Import
+
+### POST /api/import/preview-file
+
+Preview an uploaded CSV/Parquet file before importing.
+
+### POST /api/import/file
+
+Import an uploaded file into a landing table.
+
+### POST /api/import/test-connection
+
+Test an external database connection for import.
+
+### POST /api/import/from-connection
+
+Import data from an external database.
+
+```json
+{
+  "connection_type": "postgres",
+  "config": {"host": "...", "database": "..."},
+  "source_table": "users",
+  "target_schema": "landing",
+  "target_table": "users"
+}
+```
+
+### POST /api/upload
+
+Upload a file to the project.
 
 ## CDC
 
@@ -373,6 +437,9 @@ Create a new masking policy.
   "table_name": "customers",
   "column_name": "email",
   "method": "hash",
+  "method_config": {},
+  "condition_column": null,
+  "condition_value": null,
   "exempted_roles": ["admin"]
 }
 ```
@@ -389,6 +456,118 @@ Update a masking policy.
 
 Delete a masking policy.
 
+## Schema Sentinel
+
+### POST /api/sentinel/check
+
+Run a schema check on all configured sources. Returns diffs with impact analysis.
+
+### GET /api/sentinel/diffs
+
+Get recent schema diffs. Optional `?limit=50`.
+
+### GET /api/sentinel/impacts/{diff_id}
+
+Get impact analysis for a specific diff.
+
+### GET /api/sentinel/sources
+
+Get all monitored sources with existence status.
+
+### GET /api/sentinel/history/{source_name}
+
+Get schema snapshot history for a source. Optional `?limit=20`.
+
+### POST /api/sentinel/resolve
+
+Mark an impact as resolved/dismissed.
+
+```json
+{"diff_id": "diff_123", "model_name": "silver.customers"}
+```
+
+### POST /api/sentinel/apply-fix
+
+Apply a rename fix to a model SQL file.
+
+```json
+{"model_path": "transform/silver/customers.sql", "old_name": "customer_name", "new_name": "full_name"}
+```
+
+## Pipeline Rewind
+
+### GET /api/rewind/runs
+
+List pipeline runs with timestamps, status, trigger type, and model count.
+
+### GET /api/rewind/snapshots
+
+List all snapshot metadata.
+
+### GET /api/rewind/snapshots/{run_id}
+
+Get snapshots for a specific run.
+
+### GET /api/rewind/sample/{run_id}/{model_name}
+
+Preview snapshot data. Optional `?limit=50`.
+
+### POST /api/rewind/restore
+
+Restore a model from a snapshot.
+
+```json
+{"run_id": "run-123", "model_name": "gold.customers", "cascade": true}
+```
+
+### GET /api/rewind/downstream/{model_name}
+
+Get downstream models for cascade rebuild.
+
+### POST /api/rewind/gc
+
+Run garbage collection on expired snapshots.
+
+## Versioning
+
+### GET /api/versions
+
+List all warehouse versions.
+
+### POST /api/versions
+
+Create a new version snapshot.
+
+```json
+{"description": "before-refactor"}
+```
+
+### GET /api/versions/{version_id}
+
+Get version details including table list and metadata.
+
+### GET /api/versions/{from_version}/diff
+
+Diff two versions. Optional `?to_version=...` (defaults to current state).
+
+### POST /api/versions/{version_id}/restore
+
+Restore tables from a version.
+
+### GET /api/versions/timeline/{table_name}
+
+Get version history for a specific table.
+
+## Snapshots
+
+### POST /api/snapshot
+
+Create a named project snapshot.
+
+```json
+{"name": "before-refactor"}
+```
+
 ## Catalog
 
 ### GET /api/seeds
@@ -397,11 +576,15 @@ List all seed CSV files.
 
 ### POST /api/seeds
 
-Load all seeds. Body: `{"force": false, "schema_name": "seeds"}`
+Load all seeds.
+
+```json
+{"force": false, "schema_name": "seeds"}
+```
 
 ### GET /api/sources
 
-List declared sources from sources.yml.
+List declared sources from project.yml.
 
 ### GET /api/sources/freshness
 
@@ -423,32 +606,6 @@ Switch the active environment.
 
 Get platform overview: schemas, tables, rows, recent runs, connectors.
 
-## Versioning
-
-### GET /api/versions
-
-List all warehouse versions.
-
-### POST /api/versions
-
-Create a new version snapshot.
-
-### GET /api/versions/{version_id}
-
-Get version details.
-
-### GET /api/versions/{from_version}/diff
-
-Diff two versions. Optional `?to_version=...` (defaults to current state).
-
-### POST /api/versions/{version_id}/restore
-
-Restore tables from a version.
-
-### GET /api/versions/timeline/{table_name}
-
-Get version history for a specific table.
-
 ## Documentation
 
 ### GET /api/docs/markdown
@@ -463,7 +620,31 @@ Generate structured documentation for the UI.
 
 ### POST /api/lint
 
-Lint SQL files. Body: `{"fix": false}`
+Lint SQL files.
+
+```json
+{"fix": false}
+```
+
+### POST /api/lint/file
+
+Lint a single file.
+
+```json
+{"path": "transform/silver/customers.sql", "fix": false}
+```
+
+### GET /api/lint/config
+
+Get current lint configuration.
+
+### PUT /api/lint/config
+
+Update lint configuration.
+
+### DELETE /api/lint/config
+
+Reset lint configuration to defaults.
 
 ## Git
 
@@ -471,24 +652,140 @@ Lint SQL files. Body: `{"fix": false}`
 
 Get git status: branch, dirty flag, changed files, last commit.
 
+## Notebooks
+
+### POST /api/notebooks/save/{name}
+
+Save a notebook.
+
+```json
+{"cells": [...]}
+```
+
+### POST /api/notebooks/create/{name}
+
+Create a new notebook.
+
+### POST /api/notebooks/run/{name}
+
+Run an entire notebook (all cells sequentially).
+
+### POST /api/notebooks/run-cell/{name}
+
+Run a single cell.
+
+```json
+{"cell_index": 2}
+```
+
+### POST /api/notebooks/promote-to-model
+
+Convert a notebook SQL cell to a transform model.
+
+```json
+{"notebook_name": "explore.dpnb", "model_name": "my_model", "schema_name": "silver"}
+```
+
+### POST /api/notebooks/model-to-notebook/{model_name}
+
+Convert a model to a notebook for interactive exploration.
+
+### POST /api/notebooks/debug/{model_name}
+
+Generate a debug notebook for a failed model.
+
+## Monitoring and Metrics
+
+### GET /api/health
+
+Server health check. Returns status and uptime.
+
+### GET /api/metrics
+
+System metrics including memory usage, database size, and connection stats.
+
+### GET /api/metrics/models
+
+Model-specific metrics: build times, row counts, change frequency.
+
+### GET /api/metrics/slow-queries
+
+Slow query log sorted by execution time.
+
+### GET /api/audit
+
+Audit log of user actions. Optional `?limit=100`.
+
+## Circuit Breakers
+
+### GET /api/circuits
+
+List circuit breaker states.
+
+### POST /api/circuits/{name}/reset
+
+Reset a tripped circuit breaker.
+
+## Collaboration
+
+### GET /api/sessions
+
+List active collaboration sessions.
+
+### POST /api/sessions
+
+Create a new collaboration session.
+
+### GET /api/sessions/{session_id}
+
+Get session details.
+
+### DELETE /api/sessions/{session_id}
+
+Delete a collaboration session.
+
+### POST /api/sessions/{session_id}/query
+
+Run a shared query within a session.
+
+### WebSocket /ws/collaboration/{session_id}
+
+Real-time collaboration WebSocket for concurrent editing with live cursor and selection sync.
+
+## Configuration
+
+### GET /api/config/database
+
+Get current database configuration (threads, memory_limit).
+
+### PUT /api/config/database
+
+Update database configuration.
+
+```json
+{"threads": 8, "memory_limit": "4GB"}
+```
+
 ## Wiki
 
 ### GET /api/wiki
 
 List all wiki pages with slugs, titles, and categories.
 
+### GET /api/wiki/search/{query}
+
+Search wiki pages by keyword. Returns matching pages with excerpts.
+
 ### GET /api/wiki/{slug}
 
 Get a wiki page by slug. Returns title, content (markdown), and category.
 
-## Collaboration
+## Agent
 
-### WebSocket /ws/collaborate
+### GET /api/agents
 
-Real-time collaboration WebSocket for concurrent file editing.
+List available AI agent adapters.
 
-## Notebooks
+### WebSocket /ws/agent
 
-### Various notebook endpoints
-
-Notebook endpoints handle listing, reading, executing cells, and saving `.dpnb` files. See the FastAPI auto-generated docs at `/docs` for the full notebook API.
+AI agent streaming WebSocket for the sidebar assistant. Supports code generation, debugging, and optimization commands.
