@@ -83,187 +83,58 @@ def run_script_endpoint(
     return result
 
 
-# --- Stream cancellation ---
+# --- Pipeline state (module-level, independent of SSE connections) ---
 
 import threading
 
 _cancel_flag = threading.Event()
 
-# --- Active pipeline tracking (for reconnect after page refresh) ---
+_pipeline_state = {
+    "running": False,
+    "stream_name": None,
+    "started_at": None,
+    "events": [],       # list of {"event": str, "data": dict}
+    "finished": False,   # True when pipeline completes (events still available)
+}
+_pipeline_lock = threading.Lock()
 
-_active_stream: dict | None = None  # {"stream_name": str, "started_at": float, "status": "running"}
-_event_buffer: list[str] = []  # Buffer of recent SSE events (last 200)
-_buffer_lock = threading.Lock()
-
-
-@router.post("/api/stream/cancel")
-def cancel_stream(request: Request) -> dict:
-    """Cancel the currently running stream."""
-    global _active_stream
-    _require_permission(request, "execute")
-    _cancel_flag.set()
-    logger.info("Stream cancellation requested")
-    # Give the generator 5s to clean up, then force-clear
-    def _force_clear():
-        import time as _t
-        _t.sleep(5)
-        global _active_stream
-        if _active_stream and _cancel_flag.is_set():
-            logger.info("Force-clearing stale active stream after cancel")
-            _active_stream = None
-    threading.Thread(target=_force_clear, daemon=True).start()
-    return {"status": "cancelling"}
+_STALE_TIMEOUT = 600  # 10 minutes
 
 
-_STALE_TIMEOUT = 600  # 10 minutes — if pipeline runs longer than this, it's likely stuck
+# --- Pipeline background thread ---
 
 
-@router.get("/api/stream/active")
-def get_active_stream(request: Request) -> dict:
-    """Check if a pipeline is currently running."""
-    global _active_stream
-    _require_permission(request, "read")
-    if _active_stream:
-        import time as _t
-        elapsed = _t.time() - _active_stream.get("started_at", 0)
-        if elapsed > _STALE_TIMEOUT:
-            logger.warning("Clearing stale active stream (%.0fs old)", elapsed)
-            _active_stream = None
-            return {"running": False}
-        with _buffer_lock:
-            buffered = len(_event_buffer)
-        return {"running": True, "buffered_events": buffered, **_active_stream}
-    return {"running": False}
+def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, force, user):
+    """Run pipeline in background. Appends events to _pipeline_state["events"]."""
+    global _pipeline_state
 
+    import json as _json
+    import time as _time
+    import queue as _queue
+    from concurrent.futures import ThreadPoolExecutor
+    from graphlib import TopologicalSorter
 
-@router.get("/api/stream/reconnect/events")
-async def reconnect_stream_sse(request: Request, from_event: int = 0):
-    """Reconnect to an active pipeline stream. Replays buffered events from `from_event` index."""
-    from fastapi.responses import StreamingResponse
+    from havn.engine.database import log_run as _lr
+    from havn.engine.runner import run_script as _run_script
+    from havn.server.deps import _get_db_resource_limits, _get_shared_conn
+    from havn.engine.transform import discover_models as _dm, build_dag as _bd, validate_models as _vm
+    from havn.engine.transform.discovery import _compute_upstream_hash as _cuh, _has_changed as _hc, _update_state as _us
+    from havn.engine.transform.execution import execute_model as _em
+    from havn.engine.transform.quality import run_assertions as _ra, _save_assertions as _sa, profile_model as _pm, _save_profile as _sp
 
-    _require_permission(request, "read")
-    if not _active_stream:
-        raise HTTPException(404, "No active pipeline")
+    def emit(event_type: str, data: dict):
+        with _pipeline_lock:
+            _pipeline_state["events"].append({"event": event_type, "data": data})
 
-    def _replay():
-        # First replay buffered events the client missed
-        with _buffer_lock:
-            for evt in _event_buffer[from_event:]:
-                yield evt
+    start = _time.perf_counter()
+    has_error = False
+    cancelled = False
 
-        # Then follow live events by tailing the buffer
-        last_seen = len(_event_buffer)
-        while _active_stream:
-            time.sleep(0.3)
-            with _buffer_lock:
-                if len(_event_buffer) > last_seen:
-                    for evt in _event_buffer[last_seen:]:
-                        yield evt
-                    last_seen = len(_event_buffer)
-            # Keepalive
-            yield ": keepalive\n\n"
+    def _is_cancelled():
+        return _cancel_flag.is_set()
 
-        # Pipeline finished — send any remaining events
-        with _buffer_lock:
-            for evt in _event_buffer[last_seen:]:
-                yield evt
-
-    return StreamingResponse(
-        _replay(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-# --- Stream execution (SSE) ---
-
-
-@router.get("/api/stream/{stream_name}/events")
-async def run_stream_sse(
-    request: Request, stream_name: str, force: bool = False
-):
-    """Run a stream with Server-Sent Events for real-time progress."""
-    from fastapi.responses import StreamingResponse
-    from havn.engine.database import connect as _connect
-    from havn.server.deps import _get_db_path
-
-    user = _require_permission(request, "execute")
-    _cancel_flag.clear()
-    logger.info("Stream SSE requested: %s (force=%s)", stream_name, force)
-
-    # Audit pipeline start
     try:
-        from havn.engine.audit import log_audit
-        from havn.server.deps import _get_shared_conn
-
-        shared = _get_shared_conn()
-        audit_cur = shared.cursor()
-        client_ip = request.client.host if request.client else None
-        log_audit(
-            audit_cur,
-            user=user.get("username", "anonymous"),
-            action="transform",
-            resource=stream_name,
-            detail=f"stream started (force={force})",
-            ip_address=client_ip,
-        )
-        audit_cur.close()
-    except Exception:
-        logger.debug("Failed to write audit log for stream start", exc_info=True)
-
-    config = _get_config()
-    if stream_name not in config.streams:
-        raise HTTPException(404, f"Stream '{stream_name}' not found")
-    stream_config = config.streams[stream_name]
-
-    # Resolve db_path before entering the generator
-    db_path_str = str(_get_db_path())
-
-    def _generate():
-        global _active_stream, _event_buffer
-        import json as _json
-        import time as _time
-        import queue as _queue
-        from concurrent.futures import ThreadPoolExecutor
-        from graphlib import TopologicalSorter
-
-        start = _time.perf_counter()
-
-        # Track active pipeline for reconnect support
-        with _buffer_lock:
-            _active_stream = {"stream_name": stream_name, "started_at": _time.time(), "status": "running"}
-            _event_buffer = []
-
-        from havn.engine.database import log_run as _lr
-        from havn.engine.runner import run_script as _run_script
-        from havn.server.deps import _get_db_resource_limits, _get_shared_conn
-        from havn.engine.transform import discover_models as _dm, build_dag as _bd, validate_models as _vm
-        from havn.engine.transform.discovery import _compute_upstream_hash as _cuh, _has_changed as _hc, _update_state as _us
-        from havn.engine.transform.execution import execute_model as _em
-        from havn.engine.transform.quality import run_assertions as _ra, _save_assertions as _sa, profile_model as _pm, _save_profile as _sp
-
-        def emit(event_type: str, data: dict):
-            payload = _json.dumps(data)
-            sse_str = f"event: {event_type}\ndata: {payload}\n\n"
-            with _buffer_lock:
-                _event_buffer.append(sse_str)
-                # Cap buffer at 200 events
-                if len(_event_buffer) > 200:
-                    _event_buffer[:] = _event_buffer[-200:]
-            return sse_str
-        has_error = False
-        cancelled = False
-        project_dir = _get_project_dir()
-
-        def _is_cancelled():
-            return _cancel_flag.is_set()
-
-        # ── Build unified DAG ──
-        # Nodes: "ingest:customers.py", "transform:bronze.customers", "export:report.py"
-        # Edges: transform models depend on their declared deps; all transforms
-        #        implicitly depend on ingest completing (since ingest populates landing.*).
-        #        Exports depend on all transforms.
-
+        # -- Build unified DAG --
         # 1. Discover ingest scripts
         ingest_dir = project_dir / "ingest"
         ingest_scripts = []
@@ -289,9 +160,8 @@ async def run_stream_sse(
             export_scripts = sorted([s for s in py + nb if not s.name.startswith("_")], key=lambda p: p.name)
 
         # 4. Build node registry and DAG
-        # Node info: {node_id: {type, action, path/model, ...}}
         nodes = {}
-        dag_deps = {}  # node_id -> set of dependency node_ids
+        dag_deps = {}
 
         # Ingest nodes have no dependencies (they're roots)
         ingest_node_ids = set()
@@ -302,18 +172,12 @@ async def run_stream_sse(
             ingest_node_ids.add(nid)
 
         # Build a mapping from landing table names to their likely ingest script.
-        # Convention: landing.customers -> ingest:customers.py (match by table name)
-        # If no specific match, fall back to depending on ALL ingests.
         _landing_to_ingest = {}
         for ingest_nid in ingest_node_ids:
-            # "ingest:customers.py" -> stem "customers"
             stem = nodes[ingest_nid]["path"].stem
             _landing_to_ingest[f"landing.{stem}"] = ingest_nid
 
-        # Transform nodes depend on:
-        #   - Other transform nodes (if depends_on references a model in the DAG)
-        #   - Specific ingest scripts (mapped by landing table name)
-        #   - ALL ingests as fallback if a landing dep can't be mapped
+        # Transform nodes
         for model in ordered:
             nid = f"transform:{model.full_name}"
             nodes[nid] = {"type": "transform", "model": model, "name": model.full_name}
@@ -323,12 +187,10 @@ async def run_stream_sse(
                 if dep_nid in nodes:
                     deps.add(dep_nid)
                 elif dep.startswith("landing."):
-                    # Try to map to specific ingest script
                     mapped = _landing_to_ingest.get(dep)
                     if mapped:
                         deps.add(mapped)
                     elif ingest_node_ids:
-                        # Can't determine which ingest — depend on all as fallback
                         deps.update(ingest_node_ids)
             dag_deps[nid] = deps
 
@@ -341,23 +203,20 @@ async def run_stream_sse(
 
         total_items = len(nodes)
 
-        # Numbering assigned at runtime as nodes START (not pre-computed).
-        # Each node gets a number when it begins, and keeps it when it ends.
+        # Numbering assigned at runtime as nodes START
         _node_number = {}
-        _next_num = [1]  # mutable so closures can increment
+        _next_num = [1]
 
-        yield emit("start", {"stream": stream_name, "steps": 1, "total": total_items})
+        emit("start", {"stream": stream_name, "steps": 1, "total": total_items})
 
         if not nodes:
-            yield emit("complete", {"stream": stream_name, "status": "success", "duration_seconds": 0})
-            _active_stream = None
+            emit("complete", {"stream": stream_name, "status": "success", "duration_seconds": 0})
             return
 
-        # Use the server's shared connection (all endpoints share one connection,
-        # each thread gets a cursor — this prevents file lock contention on Windows)
+        # Use the server's shared connection
         conn = _get_shared_conn()
 
-        # Ensure metadata tables exist (assertion_results, model_profiles, etc.)
+        # Ensure metadata tables exist
         from havn.engine.database import ensure_meta_table as _emt
         _emt(conn)
 
@@ -369,12 +228,11 @@ async def run_stream_sse(
             finally:
                 val_cur.close()
             for _ve in _val_errors:
-                yield emit("validation", {"model": _ve.model, "severity": _ve.severity, "message": _ve.message})
+                emit("validation", {"model": _ve.model, "severity": _ve.severity, "message": _ve.message})
                 if _ve.severity == "error":
                     has_error = True
             if has_error:
-                yield emit("complete", {"stream": stream_name, "status": "failed", "duration_seconds": 0})
-                _active_stream = None
+                emit("complete", {"stream": stream_name, "status": "failed", "duration_seconds": 0})
                 return
 
         # 6. Pre-create schemas
@@ -389,16 +247,12 @@ async def run_stream_sse(
         _, _threads_cfg = _get_db_resource_limits()
         max_workers = _threads_cfg or 4
         executor = ThreadPoolExecutor(max_workers=max_workers)
-        active = 0  # number of in-flight tasks
+        active = 0
 
         def _exec_node(node_id):
             """Execute a single node on a thread-local cursor."""
-            # Each thread gets its own cursor from the shared connection
-            # This is DuckDB's recommended pattern for multi-threaded access
-            # See: https://duckdb.org/docs/stable/guides/python/multiple_threads
             local = conn.cursor()
             info = nodes[node_id]
-            # Emit start event NOW — when execution actually begins, not when queued
             start_data = {"name": info["name"], "action": info["type"], "num": _node_number.get(node_id, 0)}
             if info["type"] == "transform":
                 start_data["materialized"] = info["model"].materialized
@@ -454,7 +308,6 @@ async def run_stream_sse(
             nonlocal active
             while pending and active < max_workers:
                 nid = pending.pop(0)
-                # Assign number now (worker will use it for the start event)
                 if nid not in _node_number:
                     _node_number[nid] = _next_num[0]
                     _next_num[0] += 1
@@ -475,12 +328,11 @@ async def run_stream_sse(
             try:
                 node_id, result = result_q.get(timeout=2)
             except _queue.Empty:
-                yield ": keepalive\n\n"
                 continue
 
-            # Handle start events (numbering already assigned in _submit_batch)
+            # Handle start events
             if node_id == "__start__":
-                yield emit("model_start", result)
+                emit("model_start", result)
                 continue
 
             active -= 1
@@ -493,7 +345,7 @@ async def run_stream_sse(
                 _next_num[0] += 1
 
             # Emit result
-            yield emit("model_end", {
+            emit("model_end", {
                 "name": info["name"],
                 "action": info["type"],
                 "status": status,
@@ -508,7 +360,7 @@ async def run_stream_sse(
             if status in ("error", "assertion_failed"):
                 has_error = True
 
-            # Mark node as done — this may release dependent nodes
+            # Mark node as done -- this may release dependent nodes
             sorter.done(node_id)
 
             # Add newly ready nodes to pending and submit up to max_workers
@@ -518,7 +370,7 @@ async def run_stream_sse(
                 pass  # sorter exhausted
             _submit_batch()
 
-        # Shut down executor (don't close conn — it's the shared singleton)
+        # Shut down executor (don't close conn -- it's the shared singleton)
         try:
             executor.shutdown(wait=False)
         except Exception:
@@ -543,14 +395,277 @@ async def run_stream_sse(
         except Exception:
             pass
 
-        yield emit("complete", {
+        emit("complete", {
             "stream": stream_name,
             "status": status,
             "duration_seconds": duration_s,
         })
 
-        # Mark pipeline as no longer active (buffer stays for late reconnectors)
-        _active_stream = None
+    except Exception as e:
+        logger.error("Pipeline thread error: %s", e, exc_info=True)
+        duration_s = round(_time.perf_counter() - start, 1)
+        emit("complete", {
+            "stream": stream_name,
+            "status": "failed",
+            "duration_seconds": duration_s,
+        })
+    finally:
+        with _pipeline_lock:
+            _pipeline_state["running"] = False
+            _pipeline_state["finished"] = True
+
+
+# --- Stream start ---
+
+
+@router.post("/api/stream/{stream_name}/start")
+def start_stream(request: Request, stream_name: str, force: bool = False) -> dict:
+    """Start a pipeline in a background thread. Returns immediately."""
+    user = _require_permission(request, "execute")
+
+    with _pipeline_lock:
+        if _pipeline_state["running"]:
+            return {"status": "already_running", "stream_name": _pipeline_state["stream_name"]}
+
+    _cancel_flag.clear()
+    logger.info("Stream start requested: %s (force=%s)", stream_name, force)
+
+    # Audit pipeline start
+    try:
+        from havn.engine.audit import log_audit
+        from havn.server.deps import _get_shared_conn
+
+        shared = _get_shared_conn()
+        audit_cur = shared.cursor()
+        client_ip = request.client.host if request.client else None
+        log_audit(
+            audit_cur,
+            user=user.get("username", "anonymous"),
+            action="transform",
+            resource=stream_name,
+            detail=f"stream started (force={force})",
+            ip_address=client_ip,
+        )
+        audit_cur.close()
+    except Exception:
+        logger.debug("Failed to write audit log for stream start", exc_info=True)
+
+    config = _get_config()
+    if stream_name not in config.streams:
+        raise HTTPException(404, f"Stream '{stream_name}' not found")
+    stream_config = config.streams[stream_name]
+
+    from havn.server.deps import _get_db_path
+    db_path_str = str(_get_db_path())
+    project_dir = _get_project_dir()
+
+    # Initialize pipeline state
+    with _pipeline_lock:
+        _pipeline_state["running"] = True
+        _pipeline_state["stream_name"] = stream_name
+        _pipeline_state["started_at"] = time.time()
+        _pipeline_state["events"] = []
+        _pipeline_state["finished"] = False
+
+    # Start background thread
+    t = threading.Thread(
+        target=_run_pipeline_thread,
+        args=(stream_name, stream_config, project_dir, db_path_str, force, user),
+        daemon=True,
+    )
+    t.start()
+
+    return {"status": "started", "stream_name": stream_name}
+
+
+# --- Stream events (SSE) ---
+
+
+@router.get("/api/stream/events")
+async def stream_events_sse(request: Request, from_event: int = 0):
+    """SSE endpoint that reads from the pipeline event buffer.
+
+    Replays all events from index `from_event`, then follows live.
+    Stops when pipeline is finished and all events have been sent.
+    """
+    from fastapi.responses import StreamingResponse
+
+    _require_permission(request, "read")
+
+    def _generate():
+        import json as _json
+
+        last_sent = from_event
+
+        while True:
+            with _pipeline_lock:
+                events = _pipeline_state["events"]
+                finished = _pipeline_state["finished"]
+                running = _pipeline_state["running"]
+
+            # Send any new events
+            if last_sent < len(events):
+                for evt in events[last_sent:]:
+                    payload = _json.dumps(evt["data"])
+                    yield f"event: {evt['event']}\ndata: {payload}\n\n"
+                last_sent = len(events)
+
+            # If pipeline is finished and we've sent everything, we're done
+            if finished and last_sent >= len(events):
+                break
+
+            # If no pipeline has run (not running, not finished, no events), close immediately
+            if not running and not finished and len(events) == 0:
+                break
+
+            # Poll for new events
+            time.sleep(0.3)
+
+            # Keepalive
+            yield ": keepalive\n\n"
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# --- Stream cancellation ---
+
+
+@router.post("/api/stream/cancel")
+def cancel_stream(request: Request) -> dict:
+    """Cancel the currently running stream."""
+    _require_permission(request, "execute")
+    _cancel_flag.set()
+    logger.info("Stream cancellation requested")
+    return {"status": "cancelling"}
+
+
+# --- Active stream status ---
+
+
+@router.get("/api/stream/active")
+def get_active_stream(request: Request) -> dict:
+    """Check if a pipeline is currently running or has finished events."""
+    _require_permission(request, "read")
+    with _pipeline_lock:
+        running = _pipeline_state["running"]
+        stream_name = _pipeline_state["stream_name"]
+        started_at = _pipeline_state["started_at"]
+        total_events = len(_pipeline_state["events"])
+        finished = _pipeline_state["finished"]
+
+    # Check for stale pipeline
+    if running and started_at:
+        elapsed = time.time() - started_at
+        if elapsed > _STALE_TIMEOUT:
+            logger.warning("Clearing stale active stream (%.0fs old)", elapsed)
+            with _pipeline_lock:
+                _pipeline_state["running"] = False
+                _pipeline_state["finished"] = True
+            return {"running": False, "stream_name": stream_name, "started_at": started_at,
+                    "total_events": total_events, "finished": True}
+
+    return {
+        "running": running,
+        "stream_name": stream_name,
+        "started_at": started_at,
+        "total_events": total_events,
+        "finished": finished,
+    }
+
+
+# --- Stream execution (SSE) --- LEGACY: kept for backward compat, now redirects to start+events ---
+
+
+@router.get("/api/stream/{stream_name}/events")
+async def run_stream_sse(
+    request: Request, stream_name: str, force: bool = False
+):
+    """Run a stream with Server-Sent Events for real-time progress.
+
+    Legacy endpoint: starts the pipeline via the new background thread mechanism,
+    then streams events via the unified SSE endpoint logic.
+    """
+    from fastapi.responses import StreamingResponse
+    from havn.server.deps import _get_db_path
+
+    user = _require_permission(request, "execute")
+    _cancel_flag.clear()
+    logger.info("Stream SSE requested (legacy): %s (force=%s)", stream_name, force)
+
+    # Audit pipeline start
+    try:
+        from havn.engine.audit import log_audit
+        from havn.server.deps import _get_shared_conn
+
+        shared = _get_shared_conn()
+        audit_cur = shared.cursor()
+        client_ip = request.client.host if request.client else None
+        log_audit(
+            audit_cur,
+            user=user.get("username", "anonymous"),
+            action="transform",
+            resource=stream_name,
+            detail=f"stream started (force={force})",
+            ip_address=client_ip,
+        )
+        audit_cur.close()
+    except Exception:
+        logger.debug("Failed to write audit log for stream start", exc_info=True)
+
+    config = _get_config()
+    if stream_name not in config.streams:
+        raise HTTPException(404, f"Stream '{stream_name}' not found")
+    stream_config = config.streams[stream_name]
+
+    db_path_str = str(_get_db_path())
+    project_dir = _get_project_dir()
+
+    # Start the pipeline in the background (if not already running)
+    with _pipeline_lock:
+        if not _pipeline_state["running"]:
+            _pipeline_state["running"] = True
+            _pipeline_state["stream_name"] = stream_name
+            _pipeline_state["started_at"] = time.time()
+            _pipeline_state["events"] = []
+            _pipeline_state["finished"] = False
+
+            t = threading.Thread(
+                target=_run_pipeline_thread,
+                args=(stream_name, stream_config, project_dir, db_path_str, force, user),
+                daemon=True,
+            )
+            t.start()
+
+    # Now stream events (same logic as /api/stream/events)
+    def _generate():
+        import json as _json
+
+        last_sent = 0
+
+        while True:
+            with _pipeline_lock:
+                events = _pipeline_state["events"]
+                finished = _pipeline_state["finished"]
+                running = _pipeline_state["running"]
+
+            if last_sent < len(events):
+                for evt in events[last_sent:]:
+                    payload = _json.dumps(evt["data"])
+                    yield f"event: {evt['event']}\ndata: {payload}\n\n"
+                last_sent = len(events)
+
+            if finished and last_sent >= len(events):
+                break
+
+            if not running and not finished and len(events) == 0:
+                break
+
+            time.sleep(0.3)
+            yield ": keepalive\n\n"
 
     return StreamingResponse(
         _generate(),

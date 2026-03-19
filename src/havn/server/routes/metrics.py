@@ -23,9 +23,12 @@ _SERVER_START_TIME = time.time()
 # --- Health ---
 
 
+_SERVER_BOOT = time.time()
+
+
 @router.get("/api/health")
 def health_check(conn: DbConnReadOnlyOptional) -> dict:
-    """Basic health check. Returns database connectivity status."""
+    """Basic health check. Returns database connectivity status and boot time."""
     db_ok = False
     if conn is not None:
         try:
@@ -33,7 +36,7 @@ def health_check(conn: DbConnReadOnlyOptional) -> dict:
             db_ok = True
         except Exception:
             pass
-    return {"status": "ok", "database": db_ok}
+    return {"status": "ok", "database": db_ok, "boot": _SERVER_BOOT}
 
 
 # --- Aggregate metrics ---
