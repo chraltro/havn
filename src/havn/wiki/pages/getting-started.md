@@ -10,7 +10,17 @@ This guide walks you through installing havn, creating your first project, runni
 
 ## Installation
 
+### Install from Package
+
+The easiest way to get started is to install havn from PyPI:
+
+```bash
+pip install havn
+```
+
 ### Install from Source
+
+To develop havn or run the latest version from the repository:
 
 ```bash
 git clone <repo-url>
@@ -20,15 +30,17 @@ pip install -e .
 
 ### Install with Development Dependencies
 
+If you plan to run tests or contribute to the project:
+
 ```bash
 pip install -e ".[dev]"
 ```
 
 This adds pytest and httpx for running the test suite.
 
-### Build the Frontend
+### Build the Frontend (Source Only)
 
-The web UI is a React SPA built with Vite. Build it once after installation:
+If installing from source, build the web UI (a React SPA built with Vite):
 
 ```bash
 cd frontend
@@ -99,7 +111,76 @@ This executes the pipeline steps defined in `project.yml`:
 3. **Transform** -- Builds SQL models in dependency order: `bronze` -> `silver` -> `gold`
 4. **Export** -- Generates a summary report
 
-## Explore Your Data
+## Start the Web UI
+
+```bash
+havn serve
+```
+
+This starts the web server on `http://localhost:3000`. Open it in your browser to see the havn interface.
+
+### With Authentication
+
+```bash
+havn serve --auth
+```
+
+On first launch with `--auth`, you will be prompted to create an admin user through the web UI. See [Auth](auth) for details.
+
+## Using the Web UI
+
+The web UI is organized into four main sections, accessible from the top navigation tabs:
+
+### Overview Tab
+
+When you first open localhost:3000, you'll see the Overview tab. It displays:
+
+- **Stats Row** -- Key metrics including total tables, rows, connectors, and recent pipeline health (success/failure ratio)
+- **Pipeline Health** -- Recent pipeline runs with their status, affected table/file, row counts, and duration
+- **Warehouse Summary** -- Schemas in your warehouse grouped by name, with table/view counts and total rows per schema
+- **Quick Actions** -- Fast navigation buttons to common tasks: add data sources, run queries, edit transforms, and view the DAG
+- **Failed Runs Detail** -- If any recent runs failed, click the "Runs OK" stat card to expand a list of failures with error messages
+
+The Overview is your control center for monitoring warehouse health at a glance.
+
+### Develop Tab
+
+The Develop tab contains the code editor and DAG viewer for building your data warehouse.
+
+**Editor** -- The file tree on the left shows your project structure. Click any `.sql` or `.py` file to open it in the Monaco editor with syntax highlighting and autocomplete. Changes are automatically saved. Use this to write and edit SQL transforms and Python scripts.
+
+**DAG** -- Click the DAG section to see an interactive dependency graph of all your SQL models. Hover over nodes to see upstream and downstream dependencies. This helps you understand data lineage and debug circular dependencies.
+
+### Explore Tab
+
+The Explore tab has two sub-sections for querying and browsing your data.
+
+**Query** -- Run ad-hoc SQL queries against any table in your warehouse. Write SQL in the editor, press Ctrl+Enter (or Cmd+Enter on Mac), and see results in the table below. Results can be exported as CSV or JSON. Autocomplete suggests table names and columns as you type.
+
+**Tables** -- Browse all tables and views in your warehouse organized by schema. Click on any table to see column details, data types, and a preview of the first rows. This is useful for exploring data without writing SQL, and for understanding the structure of bronze/silver/gold models.
+
+### Observe Tab
+
+The Observe tab shows pipeline execution history and logs.
+
+**History** -- View all recent pipeline runs sorted by timestamp. Each run shows:
+- Run type (ingest, seed, transform, export)
+- Affected target (table name or file)
+- Status (success or failure with error message)
+- Duration and rows affected
+- Timestamp
+
+Click on a failed run to see the error details. This is your main tool for debugging pipeline issues.
+
+### Configure Tab
+
+The Configure tab is for data source management and project settings.
+
+**Data Sources** -- Connect external data sources (databases, APIs, file uploads) to ingest data into your warehouse. This wizard guides you through importing CSVs, connecting to Postgres, setting up recurring API connectors, or loading Parquet files.
+
+## Explore Your Data (CLI)
+
+You can also explore data from the command line:
 
 ### List Tables
 
@@ -139,28 +220,6 @@ havn history
 
 Shows recent pipeline runs with status, duration, and row counts.
 
-## Start the Web UI
-
-```bash
-havn serve
-```
-
-This starts the web server on `http://localhost:3000` with:
-
-- **File Browser** -- Edit SQL and Python files with Monaco editor
-- **Query Panel** -- Run ad-hoc SQL queries with autocomplete
-- **Table Browser** -- Browse schemas, tables, and column profiles
-- **DAG Viewer** -- Interactive dependency graph visualization
-- **Notebook Runner** -- Execute `.dpnb` notebooks interactively
-- **Pipeline Controls** -- Run streams and view history
-
-### With Authentication
-
-```bash
-havn serve --auth
-```
-
-On first launch with `--auth`, you will be prompted to create an admin user through the web UI. See [Auth](auth) for details.
 
 ## Project Configuration
 

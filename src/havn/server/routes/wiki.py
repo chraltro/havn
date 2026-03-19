@@ -40,6 +40,7 @@ def _extract_category(slug: str) -> str:
         "lineage": "Data Quality",
         "auth": "Security",
         "masking": "Security",
+        "sentinel": "Data Quality",
         "scheduler": "Advanced",
         "notebooks": "Advanced",
         "versioning": "Advanced",
@@ -65,6 +66,39 @@ async def list_pages():
                 "category": _extract_category(slug),
             })
     return pages
+
+
+@router.get("/search/{query}")
+async def search_pages(query: str):
+    """Search wiki pages by keyword. Returns matching excerpts."""
+    if not PAGES_DIR.exists():
+        return []
+    query_lower = query.lower()
+    results = []
+    for f in sorted(PAGES_DIR.iterdir()):
+        if f.suffix != ".md":
+            continue
+        content = f.read_text(encoding="utf-8")
+        if query_lower not in content.lower():
+            continue
+        slug = _slug(f.name)
+        title = _extract_title(content)
+        # Extract matching lines with surrounding context
+        lines = content.splitlines()
+        excerpts = []
+        for i, line in enumerate(lines):
+            if query_lower in line.lower():
+                start = max(0, i - 1)
+                end = min(len(lines), i + 2)
+                excerpts.append("\n".join(lines[start:end]))
+                if len(excerpts) >= 3:
+                    break
+        results.append({
+            "slug": slug,
+            "title": title or slug.replace("-", " ").title(),
+            "excerpts": excerpts,
+        })
+    return results
 
 
 @router.get("/{slug}")
