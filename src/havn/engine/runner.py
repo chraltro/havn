@@ -40,8 +40,10 @@ def _get_circuit_breaker():
         _circuit_breaker = default_breaker
     return _circuit_breaker
 
-# Default script execution timeout in seconds (5 minutes)
-SCRIPT_TIMEOUT_SECONDS = 300
+# Default script execution timeout in seconds (2 hours)
+# Set high to avoid killing legitimate long-running ingests.
+# Override per-project in project.yml: database.script_timeout
+SCRIPT_TIMEOUT_SECONDS = 7200
 
 
 class ScriptTimeoutError(Exception):
