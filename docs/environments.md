@@ -30,6 +30,38 @@ Each environment can override the `database.path` setting. When no environment i
 
 ## Using Environments
 
+### Setting an Active Environment
+
+Instead of passing `--env` on every command, set a persistent active environment:
+
+```bash
+# Set the active environment
+havn env use prod
+
+# Now all commands use prod automatically
+havn transform              # uses prod
+havn query "SELECT 1"       # uses prod
+havn stream daily-etl       # uses prod
+
+# Check which environment is active
+havn env show
+
+# List all available environments
+havn env list
+
+# Reset to default (no environment override)
+havn env reset
+```
+
+The active environment is stored in a `.havn-env` file in the project root. This file is local (added to `.gitignore`) and not shared with the team.
+
+The `--env` flag still works and overrides the active environment:
+
+```bash
+havn env use prod
+havn transform --env dev    # overrides to dev for this command only
+```
+
 ### CLI Commands
 
 Most CLI commands accept an `--env` flag:
