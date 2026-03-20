@@ -204,6 +204,16 @@ interface RequestOptions extends RequestInit {
   retryable?: boolean;
 }
 
+/** Endpoints that need a longer timeout (e.g. diff can scan many models). */
+const LONG_TIMEOUT_PATHS = ["/diff", "/transform", "/stream/"];
+
+function getTimeoutForPath(path: string): number {
+  if (LONG_TIMEOUT_PATHS.some((p) => path.startsWith(p) || path === p)) {
+    return 300000; // 5 minutes
+  }
+  return REQUEST_TIMEOUT_MS;
+}
+
 async function request<T = unknown>(path: string, options: RequestOptions = {}): Promise<T> {
   const { retryable, ...fetchOptions } = options;
   const headers: Record<string, string> = {
@@ -216,6 +226,7 @@ async function request<T = unknown>(path: string, options: RequestOptions = {}):
 
   const canRetry = isRetryable(fetchOptions.method, retryable);
   let lastError: Error | null = null;
+  const timeoutMs = getTimeoutForPath(path);
 
   for (let attempt = 0; attempt <= (canRetry ? MAX_RETRIES : 0); attempt++) {
     // Wait before retry (skip first attempt)
@@ -226,7 +237,7 @@ async function request<T = unknown>(path: string, options: RequestOptions = {}):
     // Set up timeout via AbortController
     const timeoutController = new AbortController();
     const existingSignal = fetchOptions.signal;
-    const timeoutId = setTimeout(() => timeoutController.abort(), REQUEST_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
 
     try {
       // Combine existing signal (if any) with our timeout signal
@@ -279,7 +290,7 @@ async function request<T = unknown>(path: string, options: RequestOptions = {}):
 
       // Timeout
       if (error.name === "AbortError") {
-        lastError = new Error("Request timed out after 30 seconds");
+        lastError = new Error(`Request timed out after ${Math.round(timeoutMs / 1000)} seconds`);
         if (canRetry && attempt < MAX_RETRIES) continue;
         throw lastError;
       }
@@ -367,19 +378,19 @@ export const api = {
   runStream: (name: string, force: boolean = false) =>
     request<StreamResult>(`/stream/${name}?force=${force}`, { method: "POST" }),
   cancelStream: () => request("/stream/cancel", { method: "POST" }),
-  getActiveStream: () => request<{ running: boolean; stream_name?: string | null; started_at?: number | null; total_events: number; finished: boolean }>("/stream/active"),
+  getActiveStream: () => request<{ running: boolean; stream_name?: string | null; started_at?: number | null; total_events: number; finished: boolean; status?: string | null; duration_seconds?: number | null }>("/stream/active"),
   startStream: (name: string, force: boolean = false) =>
     request<{ status: string; stream_name: string }>(`/stream/${name}/start?force=${force}`, { method: "POST" }),
   connectToStreamEvents: (
     fromEvent: number,
     onEvent: (event: string, data: Record<string, unknown>) => void,
-  ): { abort: () => void } => {
+  ): { abort: () => void; done: Promise<void> } => {
     const controller = new AbortController();
     const url = `${BASE}/stream/events?from_event=${fromEvent}`;
     const headers: Record<string, string> = {};
     if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
 
-    fetch(url, { signal: controller.signal, headers })
+    const done = fetch(url, { signal: controller.signal, headers })
       .then(async (res) => {
         if (!res.ok) {
           const text = await res.text();
@@ -416,7 +427,7 @@ export const api = {
         }
       });
 
-    return { abort: () => controller.abort() };
+    return { abort: () => controller.abort(), done };
   },
 
   // Query
@@ -537,10 +548,10 @@ export const api = {
     request(`/connectors/${connection_name}`, { method: "DELETE" }),
 
   // Diff
-  runDiff: (targets: string[] | null = null, target_schema: string | null = null, full: boolean = false) =>
+  runDiff: (targets: string[] | null = null, target_schema: string | null = null, full: boolean = false, mode: string = "changed") =>
     request("/diff", {
       method: "POST",
-      body: JSON.stringify({ targets, target_schema, full }),
+      body: JSON.stringify({ targets, target_schema, full, mode }),
     }),
 
   // Git operations
