@@ -319,7 +319,7 @@ export default function GitPanel() {
             <div style={st.fileList}>
               {stagedFiles.map((f) => (
                 <div key={"s:" + f.path} style={st.fileRow}>
-                  <button onClick={() => handleUnstage([f.path])} style={st.stageBtn} title="Unstage">
+                  <button onClick={() => handleUnstage([f.path])} style={st.stageBtn} title="Unstage" aria-label={`Unstage ${f.path}`}>
                     {"\u2212"}
                   </button>
                   <span
@@ -351,7 +351,7 @@ export default function GitPanel() {
             <div style={st.fileList}>
               {unstagedFiles.map((f) => (
                 <div key={"u:" + f.path} style={st.fileRow}>
-                  <button onClick={() => handleStage([f.path])} style={{ ...st.stageBtn, color: "var(--havn-green)" }} title="Stage">
+                  <button onClick={() => handleStage([f.path])} style={{ ...st.stageBtn, color: "var(--havn-green)" }} title="Stage" aria-label={`Stage ${f.path}`}>
                     +
                   </button>
                   <span
@@ -363,7 +363,7 @@ export default function GitPanel() {
                     {f.status}
                   </span>
                   {f.status !== "U" && (
-                    <button onClick={() => handleDiscard([f.path])} style={st.discardBtn} title="Discard changes">
+                    <button onClick={() => handleDiscard([f.path])} style={st.discardBtn} title="Discard changes" aria-label={`Discard changes to ${f.path}`}>
                       {"\u21A9"}
                     </button>
                   )}
@@ -378,7 +378,7 @@ export default function GitPanel() {
           <div style={st.diffSection}>
             <div style={st.diffHeader}>
               <span style={st.diffFileName}>{diffFile}</span>
-              <button onClick={() => { setDiffFile(null); setDiffText(""); }} style={st.diffClose}>{"\u00D7"}</button>
+              <button onClick={() => { setDiffFile(null); setDiffText(""); }} style={st.diffClose} aria-label="Close diff viewer">{"\u00D7"}</button>
             </div>
             <pre style={st.diffPre}>
               {diffText.split("\n").map((line, i) => {
@@ -402,6 +402,7 @@ export default function GitPanel() {
             placeholder="Commit message..."
             style={st.commitTextarea}
             rows={3}
+            aria-label="Commit message"
             onKeyDown={(e) => {
               if ((e.ctrlKey || e.metaKey) && e.key === "Enter") handleCommit();
             }}
@@ -463,6 +464,7 @@ export default function GitPanel() {
                   onChange={(e) => setStashMsg(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") handleStashSave(); }}
                   style={st.stashInput}
+                  aria-label="Stash message"
                 />
                 <button onClick={handleStashSave} style={st.actionBtn} disabled={!status?.dirty}>
                   Stash
