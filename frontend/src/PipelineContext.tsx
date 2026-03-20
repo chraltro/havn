@@ -209,8 +209,12 @@ function createEventProcessor(
         } else if (op === "script") {
           const scriptPath = data.script_path as string || "";
           const scriptErr = data.error as string;
+          const rowsAff = data.rows_affected as number || 0;
           if (scriptErr) addOutput("error", scriptErr, serverTs);
-          addOutput(level as OutputEntry["type"], `${scriptPath} ${pipelineStatus} in ${durS}s`, serverTs);
+          const details = [rowsAff ? `${rowsAff.toLocaleString()} rows` : "", `${durS}s`].filter(Boolean).join(", ");
+          const verb = scriptPath.includes("ingest") ? "Ingested" : scriptPath.includes("export") ? "Exported" : "Ran";
+          const name = scriptPath.split("/").pop() || scriptPath;
+          addOutput(level as OutputEntry["type"], `${verb} ${name} — ${details}`, serverTs);
         } else {
           const genericErr = data.error as string | undefined;
           if (genericErr) addOutput("error", genericErr, serverTs);
