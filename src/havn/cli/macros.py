@@ -1,0 +1,54 @@
+"""Macros command: list registered Python and SQL macros."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Annotated, Optional
+
+import typer
+from rich.table import Table
+
+from havn.cli import _resolve_project, app, console
+
+
+@app.command()
+def macros(
+    project_dir: Annotated[
+        Optional[Path],
+        typer.Option("--project", "-p", help="Project directory (default: current dir)"),
+    ] = None,
+) -> None:
+    """List all registered Python and SQL macros."""
+    from havn.engine.macros import list_macros
+
+    project_dir = _resolve_project(project_dir)
+    items = list_macros(project_dir)
+
+    if not items:
+        console.print("[yellow]No macros found. Create a macros/ directory with Python or SQL files.[/yellow]")
+        return
+
+    table = Table(title="Registered Macros")
+    table.add_column("Name", style="bold")
+    table.add_column("Kind", style="cyan")
+    table.add_column("Parameters")
+    table.add_column("Returns")
+    table.add_column("Source")
+    table.add_column("Description", max_width=50)
+
+    for m in items:
+        params_str = ", ".join(
+            f"{p['name']}: {p['type']}" for p in m.get("params", [])
+        ) if m.get("params") else ""
+        source = Path(m.get("source_file", "")).name if m.get("source_file") else ""
+        table.add_row(
+            m["name"],
+            m.get("kind", ""),
+            params_str,
+            m.get("return_type", ""),
+            source,
+            m.get("docstring", ""),
+        )
+
+    console.print(table)
+    console.print(f"[dim]{len(items)} macro(s) found[/dim]")
