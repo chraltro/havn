@@ -343,6 +343,11 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
     );
   }
 
+  // Adjust Monaco options based on file size for performance
+  const contentLen = (content || "").length;
+  const disableMinimap = contentLen > 500_000;    // > 500KB
+  const disableFolding = contentLen > 1_000_000;  // > 1MB
+
   return (
     <MonacoEditor
       height="100%"
@@ -351,8 +356,9 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
       onChange={(val) => onChange(val || "")}
       theme={monacoTheme}
       onMount={(editor, monaco) => handleEditorMount(editor, monaco)}
+      wrapperProps={{ "aria-label": "Code editor" }}
       options={{
-        minimap: { enabled: false },
+        minimap: { enabled: !disableMinimap },
         hover: { above: false },
         fontSize: 13,
         lineNumbers: "on",
@@ -368,6 +374,7 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
         fontFamily: "var(--havn-font-mono)",
         quickSuggestions: true,
         suggestOnTriggerCharacters: true,
+        folding: !disableFolding,
       }}
     />
   );
