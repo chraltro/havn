@@ -1,0 +1,37 @@
+name: stress-project
+database:
+  path: warehouse.duckdb
+  memory_limit: "75%"
+  threads: 4
+
+environments:
+  dev:
+    database:
+      path: dev_warehouse.duckdb
+  test:
+    database:
+      path: ":memory:"
+
+streams:
+  full-refresh:
+    description: "Full stress-test pipeline — ingest 37M+ rows, transform through 35+ models"
+    steps:
+      - ingest: [all]
+      - transform: [all]
+  ingest-only:
+    description: "Ingest only — generate synthetic data"
+    steps:
+      - ingest: [all]
+  transform-only:
+    description: "Transform only — rebuild all models"
+    steps:
+      - transform: [all]
+
+quality:
+  anomaly_detection:
+    enabled: true
+    lookback: 10
+    threshold: 2.0
+
+lint:
+  dialect: duckdb
