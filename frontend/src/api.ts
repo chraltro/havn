@@ -205,7 +205,7 @@ interface RequestOptions extends RequestInit {
 }
 
 /** Endpoints that need a longer timeout (e.g. diff can scan many models). */
-const LONG_TIMEOUT_PATHS = ["/diff", "/transform", "/stream/"];
+const LONG_TIMEOUT_PATHS = ["/diff", "/transform", "/stream/", "/query", "/contracts", "/docs/"];
 
 function getTimeoutForPath(path: string): number {
   if (LONG_TIMEOUT_PATHS.some((p) => path.startsWith(p) || path === p)) {
