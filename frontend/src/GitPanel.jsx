@@ -223,7 +223,7 @@ export default function GitPanel() {
         <div style={st.headerBar}>
           <div style={st.headerLeft}>
             <div style={{ position: "relative" }}>
-              <button onClick={() => setBranchDropdown(!branchDropdown)} style={st.branchBtn}>
+              <button onClick={() => setBranchDropdown(!branchDropdown)} style={st.branchBtn} aria-label={`Current branch: ${currentBranch}. Switch branches`} aria-expanded={branchDropdown} aria-haspopup="true">
                 <span style={st.branchIcon}>{"\u2387"}</span>
                 <span style={st.branchName}>{currentBranch}</span>
                 <span style={st.chevron}>{"\u25BE"}</span>
@@ -240,6 +240,7 @@ export default function GitPanel() {
                       onKeyDown={(e) => { if (e.key === "Enter") handleCreateBranch(); }}
                       style={st.newBranchInput}
                       autoFocus
+                      aria-label="New branch name"
                     />
                     <button onClick={handleCreateBranch} disabled={creatingBranch || !newBranchName.trim()} style={st.newBranchBtn}>
                       Create
@@ -264,6 +265,7 @@ export default function GitPanel() {
                             onClick={(e) => { e.stopPropagation(); handleDeleteBranch(b.name); }}
                             style={st.dropdownDeleteBtn}
                             title="Delete branch"
+                            aria-label={`Delete branch ${b.name}`}
                           >{"\u00D7"}</button>
                         )}
                       </div>
@@ -279,13 +281,13 @@ export default function GitPanel() {
             )}
           </div>
           <div style={st.headerRight}>
-            <button onClick={handlePull} disabled={pulling} style={st.actionBtn}>
+            <button onClick={handlePull} disabled={pulling} style={st.actionBtn} aria-label="Pull from remote">
               {pulling ? "Pulling..." : "\u2193 Pull"}
             </button>
-            <button onClick={handlePush} disabled={pushing} style={st.actionBtn}>
+            <button onClick={handlePush} disabled={pushing} style={st.actionBtn} aria-label="Push to remote">
               {pushing ? "Pushing..." : "\u2191 Push"}
             </button>
-            <button onClick={refresh} style={st.actionBtn} title="Refresh">
+            <button onClick={refresh} style={st.actionBtn} title="Refresh" aria-label="Refresh git status">
               {"\u21BB"}
             </button>
           </div>
@@ -295,7 +297,7 @@ export default function GitPanel() {
         {actionError && (
           <div style={st.errorBanner}>
             <span>{actionError}</span>
-            <button onClick={() => setActionError(null)} style={st.errorClose}>{"\u00D7"}</button>
+            <button onClick={() => setActionError(null)} style={st.errorClose} aria-label="Dismiss error">{"\u00D7"}</button>
           </div>
         )}
 
