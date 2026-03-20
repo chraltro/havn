@@ -42,6 +42,35 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
+# Memory management: periodic checkpoint to release DuckDB buffers
+# ---------------------------------------------------------------------------
+
+import time as _time
+import threading as _threading
+
+_last_checkpoint = _time.time()
+_checkpoint_lock = _threading.Lock()
+_CHECKPOINT_INTERVAL = 60  # seconds between checkpoints
+
+@app.middleware("http")
+async def memory_management_middleware(request, call_next):
+    """After heavy API calls, periodically force DuckDB to release buffer memory."""
+    response = await call_next(request)
+    global _last_checkpoint
+    now = _time.time()
+    if now - _last_checkpoint > _CHECKPOINT_INTERVAL:
+        with _checkpoint_lock:
+            if now - _last_checkpoint > _CHECKPOINT_INTERVAL:
+                _last_checkpoint = now
+                try:
+                    from havn.server.deps import _get_shared_conn
+                    conn = _get_shared_conn()
+                    conn.execute("FORCE CHECKPOINT")
+                except Exception:
+                    pass
+    return response
+
+# ---------------------------------------------------------------------------
 # Include all route modules
 # ---------------------------------------------------------------------------
 
