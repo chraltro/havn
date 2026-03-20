@@ -267,6 +267,7 @@ def _run_script_thread(script_path_str, project_dir):
             "operation": "script", "status": result.get("status", "success"),
             "duration_seconds": duration_s,
             "duration_ms": result.get("duration_ms", 0),
+            "rows_affected": result.get("rows_affected", 0),
             "error": result.get("error"),
             "script_path": script_path_str,
         })
