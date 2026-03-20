@@ -5,8 +5,8 @@
 SELECT
     dc.customer_id,
     dc.name,
-    mask_email(dc.email) AS email,
-    dc.country,
+    dc.email,
+    normalize_country(dc.country) AS country,
     dc.created_at,
     dc.customer_tier,
     dc.total_orders,
