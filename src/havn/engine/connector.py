@@ -35,6 +35,94 @@ class ParamSpec:
     required: bool = True
     default: Any = None
     secret: bool = False  # stored in .env instead of project.yml
+    # Validation fields
+    param_type: str = "string"  # "string", "integer", "boolean", "enum", "url", "path"
+    pattern: str | None = None  # regex pattern for validation
+    enum_values: list[str] | None = None  # valid values for enum type
+    min_value: int | float | None = None  # minimum for integer type
+    max_value: int | float | None = None  # maximum for integer type
+    example: str | None = None  # example value for documentation
+
+
+def validate_param(spec: ParamSpec, value: Any) -> str | None:
+    """Validate a parameter value against its spec.
+
+    Returns an error message string if validation fails, or ``None`` if valid.
+    """
+    # Required check
+    if spec.required and (value is None or (isinstance(value, str) and not value.strip())):
+        return f"{spec.name} is required"
+
+    # Nothing more to validate if value is absent and not required
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+
+    # Type-specific checks
+    ptype = spec.param_type
+
+    if ptype == "integer":
+        try:
+            num = int(value)
+        except (TypeError, ValueError):
+            return f"{spec.name} must be an integer, got {value!r}"
+        if spec.min_value is not None and num < spec.min_value:
+            lo, hi = spec.min_value, spec.max_value
+            if hi is not None:
+                return f"{spec.name} must be between {lo} and {hi}, got {num}"
+            return f"{spec.name} must be at least {lo}, got {num}"
+        if spec.max_value is not None and num > spec.max_value:
+            lo, hi = spec.min_value, spec.max_value
+            if lo is not None:
+                return f"{spec.name} must be between {lo} and {hi}, got {num}"
+            return f"{spec.name} must be at most {hi}, got {num}"
+
+    elif ptype == "boolean":
+        if isinstance(value, bool):
+            pass
+        elif isinstance(value, str):
+            if value.lower() not in ("true", "false", "1", "0", "yes", "no"):
+                return f"{spec.name} must be a boolean (true/false), got {value!r}"
+        else:
+            return f"{spec.name} must be a boolean, got {type(value).__name__}"
+
+    elif ptype == "enum":
+        if spec.enum_values and str(value) not in spec.enum_values:
+            allowed = ", ".join(spec.enum_values)
+            return f"{spec.name} must be one of [{allowed}], got {value!r}"
+
+    elif ptype == "url":
+        s = str(value)
+        if not s.startswith(("http://", "https://")):
+            return f"{spec.name} must be a valid URL starting with http:// or https://, got {value!r}"
+
+    elif ptype == "path":
+        # Paths just need to be non-empty strings (already checked above)
+        pass
+
+    # Regex pattern check (applies to any type)
+    if spec.pattern is not None:
+        s = str(value)
+        if not re.search(spec.pattern, s):
+            return f"{spec.name} must match pattern {spec.pattern}, got {value!r}"
+
+    return None
+
+
+def validate_connector_config(connector: "BaseConnector", config: dict[str, Any]) -> list[str]:
+    """Validate all params for a connector.
+
+    Returns a list of error messages (empty if everything is valid).
+    """
+    errors: list[str] = []
+    for spec in connector.params:
+        value = config.get(spec.name, spec.default)
+        # Skip validation for env-var references (${VAR}) — resolved at runtime
+        if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+            continue
+        err = validate_param(spec, value)
+        if err:
+            errors.append(err)
+    return errors
 
 
 @dataclass
@@ -128,6 +216,12 @@ def list_connectors() -> list[dict[str, Any]]:
                     "required": p.required,
                     "secret": p.secret,
                     "default": p.default,
+                    "param_type": p.param_type,
+                    "pattern": p.pattern,
+                    "enum_values": p.enum_values,
+                    "min_value": p.min_value,
+                    "max_value": p.max_value,
+                    "example": p.example,
                 }
                 for p in inst.params
             ],
@@ -189,6 +283,15 @@ def setup_connector(
         validate_identifier(_sanitize_name(connection_name), "connection name")
     except ValueError as e:
         return {"status": "error", "error": str(e)}
+
+    # 0b. Validate connector config parameters
+    validation_errors = validate_connector_config(connector, config)
+    if validation_errors:
+        return {
+            "status": "error",
+            "error": "Configuration validation failed:\n" + "\n".join(f"  - {e}" for e in validation_errors),
+            "validation_errors": validation_errors,
+        }
 
     # 1. Test connection
     test_result = connector.test_connection(config)
@@ -275,6 +378,13 @@ def test_connector(
 ) -> dict[str, Any]:
     """Test a connector without setting anything up."""
     connector = get_connector(connector_type)
+    validation_errors = validate_connector_config(connector, config)
+    if validation_errors:
+        return {
+            "success": False,
+            "error": "Configuration validation failed:\n" + "\n".join(f"  - {e}" for e in validation_errors),
+            "validation_errors": validation_errors,
+        }
     return connector.test_connection(config)
 
 

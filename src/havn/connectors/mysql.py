@@ -21,12 +21,12 @@ class MySQLConnector(BaseConnector):
     default_schedule = "0 6 * * *"
 
     params = [
-        ParamSpec("host", "Database host", default="localhost"),
-        ParamSpec("port", "Database port", required=False, default=3306),
-        ParamSpec("database", "Database name"),
-        ParamSpec("user", "Username", default="root"),
+        ParamSpec("host", "Database host", default="localhost", example="db.example.com"),
+        ParamSpec("port", "Database port", required=False, default=3306, param_type="integer", min_value=1, max_value=65535, example="3306"),
+        ParamSpec("database", "Database name", example="myapp"),
+        ParamSpec("user", "Username", default="root", example="root"),
         ParamSpec("password", "Password", secret=True),
-        ParamSpec("cdc_column", "Column for incremental sync (e.g. updated_at)", required=False),
+        ParamSpec("cdc_column", "Column for incremental sync (e.g. updated_at)", required=False, example="updated_at"),
     ]
 
     def _conn_string(self, config: dict[str, Any]) -> str:

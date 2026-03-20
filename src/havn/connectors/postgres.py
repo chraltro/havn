@@ -21,13 +21,14 @@ class PostgresConnector(BaseConnector):
     default_schedule = "0 6 * * *"  # daily at 6 AM
 
     params = [
-        ParamSpec("host", "Database host", default="localhost"),
-        ParamSpec("port", "Database port", required=False, default=5432),
-        ParamSpec("database", "Database name"),
-        ParamSpec("user", "Username", default="postgres"),
+        ParamSpec("host", "Database host", default="localhost", example="db.example.com"),
+        ParamSpec("port", "Database port", required=False, default=5432, param_type="integer", min_value=1, max_value=65535, example="5432"),
+        ParamSpec("database", "Database name", example="myapp"),
+        ParamSpec("user", "Username", default="postgres", example="postgres"),
         ParamSpec("password", "Password", secret=True),
-        ParamSpec("schema", "Schema to import from", required=False, default="public"),
-        ParamSpec("cdc_column", "Column for incremental sync (e.g. updated_at)", required=False),
+        ParamSpec("schema", "Schema to import from", required=False, default="public", example="public"),
+        ParamSpec("sslmode", "SSL mode for connection", required=False, param_type="enum", enum_values=["disable", "require", "verify-ca", "verify-full", "prefer"], example="prefer"),
+        ParamSpec("cdc_column", "Column for incremental sync (e.g. updated_at)", required=False, example="updated_at"),
     ]
 
     def _conn_string(self, config: dict[str, Any]) -> str:

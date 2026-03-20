@@ -151,6 +151,15 @@ def connect(
         console.print("[dim]Tip: pass all params at once with --config '{...}' or --config file.json[/dim]")
         raise typer.Exit(1)
 
+    # Validate config parameters
+    from havn.engine.connector import validate_connector_config
+    validation_errors = validate_connector_config(connector, config)
+    if validation_errors:
+        console.print("[red]Configuration validation failed:[/red]")
+        for err in validation_errors:
+            console.print(f"  [red]\u2718[/red] {err}")
+        raise typer.Exit(1)
+
     connection_name = name or f"{connector_type}_{config.get('database', config.get('store', config.get('table_name', 'default')))}"
 
     # Test only

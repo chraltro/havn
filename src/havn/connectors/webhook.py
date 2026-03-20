@@ -21,9 +21,9 @@ class WebhookConnector(BaseConnector):
     default_schedule = None  # event-driven, no schedule
 
     params = [
-        ParamSpec("table_name", "Target table name for incoming data"),
+        ParamSpec("table_name", "Target table name for incoming data", example="webhook_events"),
         ParamSpec("secret", "Shared secret for webhook verification", required=False, secret=True),
-        ParamSpec("append", "Append to table instead of replace (true/false)", required=False, default="true"),
+        ParamSpec("append", "Append to table instead of replace (true/false)", required=False, default="true", param_type="boolean", example="true"),
     ]
 
     def test_connection(self, config: dict[str, Any]) -> dict:
