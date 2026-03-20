@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from havn.server.deps import DbConn, _require_permission
+from havn.server.deps import DbConn, _require_permission, _get_user
 
 router = APIRouter()
 
@@ -65,11 +65,11 @@ def list_policies(request: Request, conn: DbConn) -> list[dict]:
 @router.post("/api/masking/policies")
 def create_policy(request: Request, req: PolicyCreate, conn: DbConn) -> dict:
     """Create a new masking policy (admin-only)."""
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
     from havn.engine.masking import create_policy as _create
 
     try:
-        return _create(
+        result = _create(
             conn,
             schema_name=req.schema_name,
             table_name=req.table_name,
@@ -80,6 +80,21 @@ def create_policy(request: Request, req: PolicyCreate, conn: DbConn) -> dict:
             condition_value=req.condition_value,
             exempted_roles=req.exempted_roles,
         )
+        try:
+            from havn.engine.audit import log_audit
+
+            client_ip = request.client.host if request.client else None
+            log_audit(
+                conn,
+                user=user["username"],
+                action="masking_policy_create",
+                resource=f"{req.schema_name}.{req.table_name}.{req.column_name}",
+                detail=f"method={req.method}",
+                ip_address=client_ip,
+            )
+        except Exception:
+            pass
+        return result
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -99,7 +114,7 @@ def get_policy(request: Request, policy_id: str, conn: DbConn) -> dict:
 @router.put("/api/masking/policies/{policy_id}")
 def update_policy(request: Request, policy_id: str, req: PolicyUpdate, conn: DbConn) -> dict:
     """Update a masking policy."""
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
     from havn.engine.masking import update_policy as _update
 
     updates = req.model_dump(exclude_none=True)
@@ -111,15 +126,43 @@ def update_policy(request: Request, policy_id: str, req: PolicyUpdate, conn: DbC
         raise HTTPException(400, str(e))
     if not result:
         raise HTTPException(404, "Policy not found")
+    try:
+        from havn.engine.audit import log_audit
+
+        client_ip = request.client.host if request.client else None
+        log_audit(
+            conn,
+            user=user["username"],
+            action="masking_policy_update",
+            resource=f"policy_id={policy_id}",
+            detail=f"updated fields: {', '.join(updates.keys())}",
+            ip_address=client_ip,
+        )
+    except Exception:
+        pass
     return result
 
 
 @router.delete("/api/masking/policies/{policy_id}")
 def delete_policy(request: Request, policy_id: str, conn: DbConn) -> dict:
     """Delete a masking policy."""
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
     from havn.engine.masking import delete_policy as _delete
 
     if not _delete(conn, policy_id):
         raise HTTPException(404, "Policy not found")
+    try:
+        from havn.engine.audit import log_audit
+
+        client_ip = request.client.host if request.client else None
+        log_audit(
+            conn,
+            user=user["username"],
+            action="masking_policy_delete",
+            resource=f"policy_id={policy_id}",
+            detail="policy deleted",
+            ip_address=client_ip,
+        )
+    except Exception:
+        pass
     return {"status": "deleted", "id": policy_id}

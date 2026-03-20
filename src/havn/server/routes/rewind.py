@@ -121,7 +121,7 @@ def get_snapshot_sample_endpoint(
 @router.post("/api/rewind/restore")
 def restore_endpoint(request: Request, req: RestoreRequest, conn: DbConn) -> dict:
     """Restore a model from a snapshot, optionally with downstream cascade."""
-    _require_permission(request, "execute")
+    user = _require_permission(request, "execute")
     from havn.engine.snapshots import restore_snapshot, restore_with_cascade
 
     project_dir = _get_project_dir()
@@ -139,6 +139,21 @@ def restore_endpoint(request: Request, req: RestoreRequest, conn: DbConn) -> dic
 
     if result["status"] == "error":
         raise HTTPException(400, result["message"])
+
+    try:
+        from havn.engine.audit import log_audit
+
+        client_ip = request.client.host if request.client else None
+        log_audit(
+            conn,
+            user=user["username"],
+            action="snapshot_restore",
+            resource=req.model_name,
+            detail=f"run_id={req.run_id}, cascade={req.cascade}",
+            ip_address=client_ip,
+        )
+    except Exception:
+        pass
 
     return result
 
