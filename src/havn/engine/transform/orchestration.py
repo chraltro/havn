@@ -101,6 +101,8 @@ def _run_transform_sequential(
     """Run models sequentially (original behavior + assertions + profiling)."""
     ordered = build_dag(models)
     model_map = {m.full_name: m for m in ordered}
+    # Collect profiles for anomaly detection at end of run
+    _run_profiles: dict[str, object] = {}
 
     # Compute upstream hashes
     for model in ordered:
@@ -161,6 +163,7 @@ def _run_transform_sequential(
             if model.materialized in ("table", "incremental"):
                 profile = profile_model(conn, model)
                 _save_profile(conn, model, profile)
+                _run_profiles[model.full_name] = profile
                 null_alerts = [
                     col for col, pct in profile.null_percentages.items()
                     if pct > 50.0
@@ -177,6 +180,28 @@ def _run_transform_sequential(
             log_run(conn, "transform", model.full_name, "error", error=str(e))
             console.print(f"  [red]fail[/red]  {label}: {e}")
             results[model.full_name] = "error"
+
+    # Run anomaly detection on collected profiles
+    if _run_profiles:
+        try:
+            from havn.engine.anomaly import detect_all_anomalies, log_anomalies, alert_anomalies
+            anomalies = detect_all_anomalies(conn, _run_profiles)
+            if anomalies:
+                log_anomalies(conn, anomalies)
+                for a in anomalies:
+                    console.print(
+                        f"         [yellow]anomaly[/yellow]  {a.model}: {a.message} (z={a.z_score})"
+                    )
+                # Send alerts if configured
+                try:
+                    if project_dir:
+                        from havn.config import load_project
+                        cfg = load_project(project_dir)
+                        alert_anomalies(anomalies, cfg.alerts, conn)
+                except Exception as alert_err:
+                    logger.debug("Anomaly alerting skipped: %s", alert_err)
+        except Exception as anom_err:
+            logger.debug("Anomaly detection skipped: %s", anom_err)
 
     return results
 

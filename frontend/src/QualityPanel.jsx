@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { api } from './api';
 import { schemaWeight } from './schemaOrder';
 
-const SUB_TABS = ['Freshness', 'Profiles', 'Assertions', 'Contracts'];
+const SUB_TABS = ['Freshness', 'Profiles', 'Assertions', 'Contracts', 'Anomalies'];
 
 function useSortable(defaultKey, defaultDir = 'asc') {
   const [sortKey, setSortKey] = useState(defaultKey);
@@ -50,6 +50,9 @@ export default function QualityPanel() {
   const [expandedProfile, setExpandedProfile] = useState(null);
   const [expandedContract, setExpandedContract] = useState(null);
   const [expandedAssertionModel, setExpandedAssertionModel] = useState(null);
+  const [anomalies, setAnomalies] = useState([]);
+  const [anomalyProfileHistory, setAnomalyProfileHistory] = useState({});
+  const [expandedAnomaly, setExpandedAnomaly] = useState(null);
 
   // Filters
   const [freshnessFilter, setFreshnessFilter] = useState('');
@@ -59,6 +62,7 @@ export default function QualityPanel() {
   const [assertionStatus, setAssertionStatus] = useState('all');
   const [contractFilter, setContractFilter] = useState('');
   const [contractStatus, setContractStatus] = useState('all');
+  const [anomalyFilter, setAnomalyFilter] = useState('');
 
   // Sorting
   const freshSort = useSortable('model');
@@ -66,6 +70,7 @@ export default function QualityPanel() {
   const assertionSort = useSortable('model');
   const contractSort = useSortable('name');
   const historySort = useSortable('checked_at', 'desc');
+  const anomalySort = useSortable('detected_at', 'desc');
 
   useEffect(() => { loadAll(); }, []);
 
@@ -82,6 +87,7 @@ export default function QualityPanel() {
             else if (target === 'Freshness') setFreshnessFilter(e.detail.filter);
             else if (target === 'Profiles') setProfileFilter(e.detail.filter);
             else if (target === 'Assertions') setAssertionFilter(e.detail.filter);
+            else if (target === 'Anomalies') setAnomalyFilter(e.detail.filter);
           }
         }
       }
@@ -93,18 +99,20 @@ export default function QualityPanel() {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [f, p, a, c, ch] = await Promise.allSettled([
+      const [f, p, a, c, ch, an] = await Promise.allSettled([
         api.getFreshness(24),
         api.getProfiles(),
         api.getAssertions(100),
         api.getContracts(),
-        api.getContractHistory()
+        api.getContractHistory(),
+        api.getAnomalies(100)
       ]);
       setFreshness(f.status === 'fulfilled' ? (Array.isArray(f.value) ? f.value : []) : []);
       setProfiles(p.status === 'fulfilled' ? (p.value || []) : []);
       setAssertions(a.status === 'fulfilled' ? (a.value || []) : []);
       setContracts(c.status === 'fulfilled' ? (c.value || []) : []);
       setContractHistory(ch.status === 'fulfilled' ? (ch.value || []) : []);
+      setAnomalies(an.status === 'fulfilled' ? (an.value || []) : []);
     } catch (e) { console.error(e); }
     setLoading(false);
   };
@@ -125,6 +133,29 @@ export default function QualityPanel() {
   const assertionRate = assertions.length > 0 ? Math.round((passedAssertions / assertions.length) * 100) : null;
   const passedContracts = contractHistory.filter(c => c.passed === true).length;
   const contractRate = contractHistory.length > 0 ? Math.round((passedContracts / contractHistory.length) * 100) : null;
+  const anomalyCount = anomalies.length;
+
+  // --- Anomalies: filter and sort ---
+  const filteredAnomalies = useMemo(() => {
+    let data = anomalies;
+    if (anomalyFilter) data = data.filter(a => (a.model || '').toLowerCase().includes(anomalyFilter.toLowerCase()) || (a.metric || '').toLowerCase().includes(anomalyFilter.toLowerCase()));
+    return sortData(data, anomalySort.sortKey, anomalySort.sortDir, (item, key) => {
+      if (key === 'model') return item.model || '';
+      if (key === 'metric') return item.metric || '';
+      if (key === 'z_score') return Math.abs(item.z_score ?? 0);
+      if (key === 'detected_at') return item.detected_at || '';
+      return item[key];
+    });
+  }, [anomalies, anomalyFilter, anomalySort.sortKey, anomalySort.sortDir]);
+
+  // Load profile history for a model (for sparkline)
+  const loadProfileHistory = async (model) => {
+    if (anomalyProfileHistory[model]) return;
+    try {
+      const data = await api.getModelProfileHistory(model, 30);
+      setAnomalyProfileHistory(prev => ({ ...prev, [model]: data || [] }));
+    } catch (e) { console.error(e); }
+  };
 
   // --- Freshness: fields are model, last_run_at, hours_since_run, is_stale, row_count ---
   const filteredFreshness = useMemo(() => {
@@ -229,6 +260,7 @@ export default function QualityPanel() {
         passed: latest ? latest.passed : null,
         detail: latest ? latest.detail : null,
         checked_at: latest ? latest.checked_at : null,
+        consecutive_failures: latest ? (latest.consecutive_failures || 0) : 0,
         _hasResult: !!latest,
       };
     });
@@ -283,6 +315,10 @@ export default function QualityPanel() {
           <div style={s.card}>
             <div style={s.cardLabel}>Contract Pass Rate</div>
             <div style={{ ...s.cardValue, color: contractRate == null ? 'var(--havn-text-dim)' : contractRate === 100 ? 'var(--havn-green)' : contractRate >= 80 ? 'var(--havn-yellow)' : 'var(--havn-red)' }}>{contractRate != null ? `${contractRate}%` : '\u2014'}</div>
+          </div>
+          <div style={s.card}>
+            <div style={s.cardLabel}>Anomalies</div>
+            <div style={{ ...s.cardValue, color: anomalyCount > 0 ? 'var(--havn-yellow)' : 'var(--havn-text-dim)' }}>{anomalyCount}</div>
           </div>
         </div>
         <div style={s.tabs}>
@@ -519,7 +555,14 @@ export default function QualityPanel() {
                                 {c.passed ? (
                                   <span style={{ fontSize: 12, color: 'var(--havn-text-dim)' }}>{detail.length} rule{detail.length !== 1 ? 's' : ''} passed</span>
                                 ) : (
-                                  <span style={{ fontSize: 12, color: 'var(--havn-red)' }}>{failedRules.length} of {detail.length} rule{detail.length !== 1 ? 's' : ''} failed</span>
+                                  <span style={{ fontSize: 12, color: 'var(--havn-red)' }}>
+                                    {failedRules.length} of {detail.length} rule{detail.length !== 1 ? 's' : ''} failed
+                                    {(c.consecutive_failures || 0) > 1 && (
+                                      <span style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 3, fontSize: 10, background: 'color-mix(in srgb, var(--havn-red) 20%, transparent)', color: 'var(--havn-red)' }}>
+                                        Failed {c.consecutive_failures}x in a row
+                                      </span>
+                                    )}
+                                  </span>
                                 )}
                               </td>
                               <td style={s.td}>{c.checked_at || '\u2014'}</td>
@@ -593,7 +636,14 @@ export default function QualityPanel() {
                                 ) : c.passed ? (
                                   <span style={{ fontSize: 12, color: 'var(--havn-green)' }}>{detail.length} of {detail.length} passed</span>
                                 ) : (
-                                  <span style={{ fontSize: 12, color: 'var(--havn-red)' }}>{detail.filter(d => !d.passed).length} of {detail.length} failed</span>
+                                  <span style={{ fontSize: 12, color: 'var(--havn-red)' }}>
+                                    {detail.filter(d => !d.passed).length} of {detail.length} failed
+                                    {(c.consecutive_failures || 0) > 1 && (
+                                      <span style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 3, fontSize: 10, background: 'color-mix(in srgb, var(--havn-red) 20%, transparent)', color: 'var(--havn-red)' }}>
+                                        Failed {c.consecutive_failures}x in a row
+                                      </span>
+                                    )}
+                                  </span>
                                 )}
                               </td>
                             </tr>
