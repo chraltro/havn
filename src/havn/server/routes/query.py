@@ -207,15 +207,14 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
                 else:
                     result = conn.execute(req.sql)
                 columns = [desc[0] for desc in result.description]
-                # Hard cap: never fetch more than 10,000 rows through the API
-                # This prevents memory/CPU spikes from unlimited queries
-                HARD_ROW_CAP = 10_000
-                effective_limit = min(req.limit, HARD_ROW_CAP) if req.limit is not None else HARD_ROW_CAP
-                rows = result.fetchmany(effective_limit)
+                if req.limit is not None:
+                    rows = result.fetchmany(req.limit)
+                else:
+                    rows = result.fetchall()
                 query_result["data"] = {
                     "columns": columns,
                     "rows": [[_serialize(v) for v in row] for row in rows],
-                    "truncated": len(rows) == effective_limit,
+                    "truncated": req.limit is not None and len(rows) == req.limit,
                     "offset": req.offset,
                     "limit": req.limit,
                 }
