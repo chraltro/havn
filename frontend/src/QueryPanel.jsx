@@ -276,9 +276,18 @@ export default function QueryPanel({ addOutput }) {
     }
   }
 
-  function formatQuery() {
+  async function formatQuery() {
     if (!sql.trim()) return;
-    setSql(fmt(sql));
+    try {
+      const result = await api.formatSql(sql);
+      if (result.formatted && result.formatted.trim()) {
+        setSql(result.formatted);
+      } else {
+        setSql(fmt(sql));
+      }
+    } catch {
+      setSql(fmt(sql));
+    }
   }
 
   function handleKeyDown(e) {
