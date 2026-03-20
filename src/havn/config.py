@@ -48,6 +48,23 @@ class LintConfig(BaseModel):
     rules: list[str] = Field(default_factory=list)
 
 
+class AnomalyDetectionConfig(BaseModel):
+    """Configuration for statistical anomaly detection on model profiles."""
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = True
+    lookback: int = 30  # Number of historical profiles to consider
+    threshold: float = 2.0  # Z-score threshold for anomaly flagging
+    notify: list[str] = Field(default_factory=list)  # ["slack", "webhook", "log"]
+
+
+class QualityConfig(BaseModel):
+    """Configuration for data quality features."""
+    model_config = ConfigDict(extra="ignore")
+
+    anomaly_detection: AnomalyDetectionConfig = Field(default_factory=AnomalyDetectionConfig)
+
+
 class AlertsConfig(BaseModel):
     """Configuration for pipeline alerts and notifications."""
     model_config = ConfigDict(extra="ignore")
@@ -149,6 +166,7 @@ class ProjectConfig(BaseModel):
     streams: dict[str, StreamConfig] = Field(default_factory=dict)
     lint: LintConfig = Field(default_factory=LintConfig)
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
+    quality: QualityConfig = Field(default_factory=QualityConfig)
     rewind: RewindConfig = Field(default_factory=RewindConfig)
     sentinel: SentinelConfig = Field(default_factory=SentinelConfig)
     environments: dict[str, EnvironmentConfig] = Field(default_factory=dict)
@@ -309,6 +327,18 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
         select_star_warning=sentinel_raw.get("select_star_warning", True),
     )
 
+    # Quality (anomaly detection)
+    quality_raw = raw.get("quality", {})
+    anomaly_raw = quality_raw.get("anomaly_detection", {})
+    quality = QualityConfig(
+        anomaly_detection=AnomalyDetectionConfig(
+            enabled=anomaly_raw.get("enabled", True),
+            lookback=int(anomaly_raw.get("lookback", 30)),
+            threshold=float(anomaly_raw.get("threshold", 2.0)),
+            notify=anomaly_raw.get("notify", []),
+        ),
+    )
+
     # Alerts
     alerts_raw = raw.get("alerts", {})
     alerts = AlertsConfig(
@@ -358,6 +388,7 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
         streams=streams,
         lint=lint,
         alerts=alerts,
+        quality=quality,
         rewind=rewind,
         sentinel=sentinel,
         environments=environments,
