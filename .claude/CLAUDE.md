@@ -32,8 +32,12 @@ A self-hosted data platform — Nordic alternative to Databricks/Snowflake. Ever
 
 ### Data Quality (`src/havn/engine/transform/quality.py`, `contracts.py`)
 - **Inline assertions** — `-- assert: row_count > 0`, `unique(col)`, `no_nulls(col)`, `accepted_values(col, [...])`
+- **Assertion debugging** — on failure, shows diagnostic details (top duplicates, null samples, unexpected values)
 - **YAML contracts** — `contracts/*.yml` with row_count min/max, freshness warn_after, column-level rules
+- **Contract thresholds** — `{previous}` placeholder for relative checks: `row_count > {previous * 0.9}`
+- **Severity levels** — error (blocks pipeline) or warning (logs only), with escalation after N consecutive failures
 - **Auto-profiling** — row_count, column_count, null_percentages, distinct_counts per model
+- **Anomaly detection** — Z-score analysis on metrics over N runs, auto-alerts on statistical deviations
 - **Freshness checks** — detect stale models by last run time
 
 ### Schema Sentinel (`src/havn/engine/sentinel.py`)
@@ -106,9 +110,24 @@ A self-hosted data platform — Nordic alternative to Databricks/Snowflake. Ever
 - Auto-snapshot before restore operations
 
 ### Diff Engine (`src/havn/engine/diff.py`)
-- Preview what SQL transforms would change before running
-- Row-level diff: added, removed, modified counts
-- Compare against git branches
+- **3-mode diff**: single model (`havn diff gold.orders`), changed+downstream (`havn diff --changed`, default), full database (`havn diff --all`)
+- Row-level diff: added, removed, modified counts with sample rows
+- Schema diff: column additions, removals, type changes
+- Primary key support for modified row detection
+- Frontend: mode selector, model autocomplete, skipped model toggle
+
+### Query Plan Visualization (`src/havn/engine/explain.py`)
+- DuckDB EXPLAIN parsing into structured operator tree (PlanNode dataclass)
+- EXPLAIN ANALYZE with actual timing data per operator
+- `POST /api/query/explain-analyze` endpoint
+- ExplainPanel: collapsible tree, color-coded operators, timing bars, Visual/Raw toggle
+
+### Python SQL Macros (`src/havn/engine/macros.py`)
+- `@macro` decorator for Python functions → DuckDB scalar UDFs
+- Auto-discovery from `macros/` directory, SQL macros from `.sql` files
+- Auto-registration on `connect()` when project_dir has macros/
+- `havn macros` CLI, `GET /api/macros` API
+- Type mapping: str→VARCHAR, int→INTEGER, float→DOUBLE, bool→BOOLEAN, date→DATE, datetime→TIMESTAMP
 
 ### CI/CD Integration (`src/havn/engine/ci.py`)
 - `havn ci generate` creates GitHub Actions workflow
@@ -126,7 +145,7 @@ A self-hosted data platform — Nordic alternative to Databricks/Snowflake. Ever
 - Plain SQL = LLMs write correct transforms (no Jinja to hallucinate)
 
 ### Audit Logging (`src/havn/engine/audit.py`)
-- Tracks: query, transform, ingest, export, file_edit, file_delete, login, config_change
+- Tracks 20+ action types: query, transform, ingest, export, file_edit, file_delete, login, config_change, auth_failed, permission_denied, connector_sync, connector_setup, masking_policy_create/update/delete, user_create/update/delete, token_revoke, snapshot_restore, secret_change
 - Filterable by user, action, resource
 
 ### Git Operations (`src/havn/engine/git.py`, `src/havn/server/routes/git.py`)
@@ -151,7 +170,7 @@ React 19 + Vite SPA with Monaco editor. 5 sections, 14+ tabs:
 - **Observe** — pipeline history, data quality (contracts/assertions/freshness), schema sentinel, masking policies, audit log
 - **Configure** — settings (themes, auth, scheduler), data sources (connector setup), wiki
 
-8 color themes, 7 font pairings (composable). SSE for pipeline streaming. WebSocket for collaboration + agent sidebar. Output panel shows live running status with in-flight task names. Session storage cleared on server restart to reset pipeline output and agent messages.
+8 color themes, 7 font pairings (composable). SSE for pipeline streaming with auto-reconnection (exponential backoff, heartbeat timeout). WebSocket for collaboration + agent sidebar. Output panel shows live running status with in-flight task names and connection state banners. File edit conflict detection (ETag-based, 409 on stale save). Command palette (Ctrl+K) for quick file/table/command navigation. Session storage cleared on server restart to reset pipeline output and agent messages.
 
 ## Server/API (`src/havn/server/`)
 
@@ -159,17 +178,18 @@ FastAPI with 150+ endpoints across 21 route modules. Shared DuckDB connection si
 
 ## CLI (`src/havn/cli/`)
 
-50+ Typer commands. Key ones: `init`, `transform`, `stream`, `query`, `tables`, `serve`, `run`, `connect`, `diff`, `lint`, `snapshot`, `rewind`, `sentinel`, `version`, `ci generate`, `context`.
+50+ Typer commands. Key ones: `init`, `transform`, `stream`, `query`, `tables`, `serve`, `run`, `connect`, `diff`, `lint`, `snapshot`, `rewind`, `sentinel`, `version`, `ci generate`, `context`, `env`, `macros`.
 
 ## Internal Metadata (`_dp_internal` schema)
 
 All metadata lives in the warehouse itself:
 - `model_state` — change detection hashes, materialization info, row counts, build times
 - `run_log` — pipeline execution history (run_id, type, status, duration, error, output)
-- `model_profiles` — auto-computed column statistics
-- `assertion_results` — data quality check results
+- `model_profiles` — auto-computed column statistics (used by anomaly detection for baselines)
+- `assertion_results` — data quality check results with diagnostics JSON
+- `anomaly_log` — statistical anomaly detections (z-score, direction, message)
 - `masking_policies` — column masking rules
-- `audit_log` — user action trail
+- `audit_log` — user action trail (20+ action types)
 - `slow_queries` — queries exceeding 5s threshold
 - `alert_log` — notification delivery tracking
 - `circuit_state` — circuit breaker persistence
@@ -207,7 +227,7 @@ All metadata lives in the warehouse itself:
 
 ```
 src/havn/
-  cli/              12 command modules (Typer)
+  cli/              14 command modules (Typer) — includes env, macros
   connectors/       10 built-in connectors + BaseConnector
   engine/
     transform/      DAG engine: discovery, execution, orchestration, quality, analysis
@@ -228,7 +248,10 @@ src/havn/
     cdc.py          Change data capture
     collaboration.py WebSocket shared sessions
     contracts.py    YAML data quality contracts
-    diff.py         Transform diff engine
+    diff.py         Transform diff engine (3-mode: single/changed/all)
+    explain.py      Query plan parsing (EXPLAIN/EXPLAIN ANALYZE)
+    macros.py       Python SQL macros (@macro decorator, UDF registration)
+    anomaly.py      Statistical anomaly detection (Z-score profiling)
     ci.py           GitHub Actions generation
     git.py          Git integration
     sentinel.py     Schema change detection
@@ -251,9 +274,14 @@ frontend/src/       React 19 + Vite SPA
   DAGPanel.jsx      Canvas DAG with rewind timeline
   TablesPanel.jsx   Table browser with sorting + stats
   GitPanel.jsx      Git operations (commit, branch, stash, diff)
+  ExplainPanel.jsx  Query plan tree visualization
+  QualityPanel.jsx  Contracts, assertions with debugging, anomalies
+  DiffPanel.jsx     3-mode diff (single/changed/full) with model selector
+  CommandPalette.jsx Ctrl+K quick navigation (files, tables, commands)
+  FocusTrap.jsx     Accessibility: modal focus management
   + 30 more components, 5 context providers, 8 themes
 
-tests/              40 test files, real DuckDB (no mocks)
+tests/              45+ test files, real DuckDB (no mocks)
 ```
 
 ## Internal Docs

@@ -48,6 +48,7 @@ export default function DiffPanel({ api, addOutput }) {
         <button
           onClick={runDiff}
           disabled={loading}
+          aria-label="Run diff comparison"
           style={{
             padding: "4px 12px",
             borderRadius: "var(--havn-radius-lg)",
@@ -72,13 +73,13 @@ export default function DiffPanel({ api, addOutput }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ borderBottom: "2px solid var(--havn-border)", textAlign: "left" }}>
-                <th style={thStyle}>Model</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Before</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>After</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Added</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Removed</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Modified</th>
-                <th style={thStyle}>Schema</th>
+                <th style={thStyle} scope="col">Model</th>
+                <th style={{ ...thStyle, textAlign: "right" }} scope="col">Before</th>
+                <th style={{ ...thStyle, textAlign: "right" }} scope="col">After</th>
+                <th style={{ ...thStyle, textAlign: "right" }} scope="col">Added</th>
+                <th style={{ ...thStyle, textAlign: "right" }} scope="col">Removed</th>
+                <th style={{ ...thStyle, textAlign: "right" }} scope="col">Modified</th>
+                <th style={thStyle} scope="col">Schema</th>
               </tr>
             </thead>
             <tbody>

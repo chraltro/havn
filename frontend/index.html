@@ -132,6 +132,17 @@
       [data-havn-resize-handle]:hover {
         background-color: color-mix(in srgb, var(--havn-accent, #3ECFB4) 10%, transparent);
       }
+
+      /* ── Keyboard focus indicators (visible only for keyboard navigation) ── */
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      textarea:focus-visible,
+      a:focus-visible,
+      [tabindex]:focus-visible {
+        outline: 2px solid var(--havn-accent, #3ECFB4);
+        outline-offset: 2px;
+      }
     </style>
   </head>
   <body>

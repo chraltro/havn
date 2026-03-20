@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { schemaCompare } from "./schemaOrder";
 
 function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, onMoveFile }) {
@@ -11,7 +11,7 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
 
   if (node.type === "dir") {
     return (
-      <div>
+      <div role="treeitem" aria-expanded={expanded} aria-label={node.name}>
         <div
           data-havn-file=""
           style={{
@@ -50,6 +50,7 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
               }}
               style={styles.addBtn}
               title={`New file in ${node.name}/`}
+              aria-label={`New file in ${node.name}`}
             >+</button>
           )}
         </div>
@@ -96,6 +97,8 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
   return (
     <div
       data-havn-file=""
+      role="treeitem"
+      aria-selected={isActive}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData("text/plain", node.path);
@@ -118,26 +121,141 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
           onClick={(e) => { e.stopPropagation(); onDeleteFile(node.path); }}
           style={styles.deleteBtn}
           title={`Delete ${node.name}`}
+          aria-label={`Delete ${node.name}`}
         >&times;</button>
       )}
     </div>
   );
 }
 
-export default function FileTree({ files, onSelect, activeFile, onNewFile, onDeleteFile, onMoveFile }) {
+/**
+ * Collect all file names (leaf nodes) in a tree, returning a Set of paths whose
+ * file name matches the query (case-insensitive substring).
+ */
+function collectMatchingPaths(nodes, query) {
+  const matches = new Set();
+  const lower = query.toLowerCase();
+  function walk(node) {
+    if (node.type === "file") {
+      if (node.name.toLowerCase().includes(lower)) matches.add(node.path);
+    }
+    if (node.children) node.children.forEach(walk);
+  }
+  nodes.forEach(walk);
+  return matches;
+}
+
+/**
+ * Given a set of matching file paths, return a set of all ancestor directory paths
+ * that need to be visible (expanded) so the matching files are shown.
+ */
+function ancestorPaths(matchingPaths) {
+  const ancestors = new Set();
+  for (const p of matchingPaths) {
+    const parts = p.split("/");
+    for (let i = 1; i < parts.length; i++) {
+      ancestors.add(parts.slice(0, i).join("/"));
+    }
+  }
+  return ancestors;
+}
+
+function FilteredFileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, onMoveFile, matchingFiles, visibleDirs }) {
+  if (node.type === "file") {
+    if (!matchingFiles.has(node.path)) return null;
+    return (
+      <FileNode node={node} depth={depth} onSelect={onSelect} activeFile={activeFile} onNewFile={onNewFile} onDeleteFile={onDeleteFile} onMoveFile={onMoveFile} />
+    );
+  }
+  // Directory: only show if it's an ancestor of a matching file
+  if (!visibleDirs.has(node.path)) return null;
+  const children = (node.path === "transform"
+    ? [...(node.children || [])].sort((a, b) => a.type === "dir" && b.type === "dir" ? schemaCompare(a.name, b.name) : 0)
+    : node.children || []);
   return (
     <div>
-      {files.length === 0 && (
-        <div style={styles.empty}>No files found</div>
-      )}
-      {files.map((f) => (
-        <FileNode key={f.path} node={f} depth={0} onSelect={onSelect} activeFile={activeFile} onNewFile={onNewFile} onDeleteFile={onDeleteFile} onMoveFile={onMoveFile} />
+      <div data-havn-file="" style={{ ...styles.item, paddingLeft: 8 + depth * 16 }}>
+        <span style={{ ...styles.icon, transform: "rotate(0deg)" }}>{"\u25BE"}</span>
+        <span style={styles.dirName}>{node.name}</span>
+      </div>
+      {children.map((child) => (
+        <FilteredFileNode
+          key={child.path}
+          node={child}
+          depth={depth + 1}
+          onSelect={onSelect}
+          activeFile={activeFile}
+          onNewFile={onNewFile}
+          onDeleteFile={onDeleteFile}
+          onMoveFile={onMoveFile}
+          matchingFiles={matchingFiles}
+          visibleDirs={visibleDirs}
+        />
       ))}
     </div>
   );
 }
 
+export default function FileTree({ files, onSelect, activeFile, onNewFile, onDeleteFile, onMoveFile }) {
+  const [filter, setFilter] = useState("");
+
+  const matchingFiles = useMemo(() => filter.trim() ? collectMatchingPaths(files, filter.trim()) : null, [files, filter]);
+  const visibleDirs = useMemo(() => matchingFiles ? ancestorPaths(matchingFiles) : null, [matchingFiles]);
+
+  const isFiltering = filter.trim().length > 0;
+
+  return (
+    <div role="tree" aria-label="Project files">
+      <div style={styles.filterRow}>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--havn-text-dim)" strokeWidth="1.5" style={{ flexShrink: 0 }}>
+          <circle cx="6.5" cy="6.5" r="5"/>
+          <path d="M10.5 10.5L14.5 14.5"/>
+        </svg>
+        <input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter files..."
+          style={styles.filterInput}
+          aria-label="Filter files"
+        />
+        {filter && (
+          <button onClick={() => setFilter("")} style={styles.filterClear} title="Clear filter" aria-label="Clear filter">&times;</button>
+        )}
+      </div>
+      {files.length === 0 && !isFiltering && (
+        <div style={styles.empty}>No files found</div>
+      )}
+      {isFiltering && matchingFiles && matchingFiles.size === 0 && (
+        <div style={styles.empty}>No files matching '{filter}'</div>
+      )}
+      {isFiltering && matchingFiles && visibleDirs ? (
+        files.map((f) => (
+          <FilteredFileNode
+            key={f.path}
+            node={f}
+            depth={0}
+            onSelect={onSelect}
+            activeFile={activeFile}
+            onNewFile={onNewFile}
+            onDeleteFile={onDeleteFile}
+            onMoveFile={onMoveFile}
+            matchingFiles={matchingFiles}
+            visibleDirs={visibleDirs}
+          />
+        ))
+      ) : (
+        !isFiltering && files.map((f) => (
+          <FileNode key={f.path} node={f} depth={0} onSelect={onSelect} activeFile={activeFile} onNewFile={onNewFile} onDeleteFile={onDeleteFile} onMoveFile={onMoveFile} />
+        ))
+      )}
+    </div>
+  );
+}
+
 const styles = {
+  filterRow: { display: "flex", alignItems: "center", gap: "6px", padding: "4px 8px", margin: "4px 4px 2px" },
+  filterInput: { flex: 1, padding: "3px 6px", background: "var(--havn-bg)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", outline: "none", minWidth: 0 },
+  filterClear: { background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", padding: "0 2px", lineHeight: 1, flexShrink: 0 },
   item: { display: "flex", alignItems: "center", gap: "6px", padding: "4px 8px", cursor: "pointer", fontSize: "13px", whiteSpace: "nowrap", margin: "0 4px", borderRadius: "3px" },
   icon: { fontSize: "10px", color: "var(--havn-text-secondary)", width: "10px", display: "inline-block", transition: "transform 0.12s ease" },
   dirName: { color: "var(--havn-text)", fontWeight: 500, fontFamily: "var(--havn-font-mono)" },
