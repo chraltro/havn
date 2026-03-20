@@ -4,6 +4,8 @@ import React, { useEffect, useRef, useMemo } from "react";
 const FILE_LINE_RE = /^([\w./\\-]+\.\w+):(\d+):(\d+)/;
 // Match identifier with a dot followed by ": " (model or script reference, e.g. "silver.earthquake_daily: skipped")
 const REF_RE = /^([\w/\\-]+\.[\w./\\-]+): /;
+// Match schema.model_name in pipeline output (e.g. "Building silver.fct_events...")
+const SCHEMA_MODEL_RE = /\b((?:bronze|silver|gold)\.\w+)/g;
 
 function renderMessage(message, style, onOpenFile) {
   if (!onOpenFile) return <span style={style}>{message}</span>;
@@ -50,6 +52,41 @@ function renderMessage(message, style, onOpenFile) {
         {rest}
       </span>
     );
+  }
+
+  // Try schema.model_name references (e.g. "Building silver.fct_events...")
+  {
+    const schemaParts = [];
+    let lastIdx = 0;
+    let sm;
+    const re = new RegExp(SCHEMA_MODEL_RE.source, "g");
+    while ((sm = re.exec(message)) !== null) {
+      if (sm.index > lastIdx) schemaParts.push({ text: message.slice(lastIdx, sm.index) });
+      schemaParts.push({ text: sm[1], isSchemaModel: true });
+      lastIdx = sm.index + sm[0].length;
+    }
+    if (schemaParts.length > 0) {
+      if (lastIdx < message.length) schemaParts.push({ text: message.slice(lastIdx) });
+      return (
+        <span style={style}>
+          {schemaParts.map((p, i) => p.isSchemaModel ? (
+            <span
+              key={i}
+              style={styles.fileLink}
+              onClick={() => {
+                const [schema, model] = p.text.split(".");
+                onOpenFile(`transform/${schema}/${model}.sql`, 1, 1);
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--havn-accent)"; e.currentTarget.style.textDecoration = "underline"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = ""; e.currentTarget.style.textDecoration = ""; }}
+              title={`Open transform/${p.text.replace(".", "/")}.sql`}
+            >
+              {p.text}
+            </span>
+          ) : p.text)}
+        </span>
+      );
+    }
   }
 
   // Try inline file paths anywhere in the message (e.g. "Exported 31 rows to output/file.csv")

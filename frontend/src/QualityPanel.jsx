@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { api } from './api';
 import { schemaWeight } from './schemaOrder';
+import { usePipeline } from './PipelineContext';
 
 const SUB_TABS = ['Freshness', 'Profiles', 'Assertions', 'Contracts', 'Anomalies'];
 
@@ -37,7 +38,9 @@ function SortTh({ label, sortKey, current, dir, onToggle, style }) {
   );
 }
 
-export default function QualityPanel() {
+export default function QualityPanel({ addOutput: addOutputProp } = {}) {
+  const pipeline = usePipeline();
+  const addOutput = addOutputProp || pipeline.addOutput;
   const [tab, setTab] = useState('Freshness');
   const [freshness, setFreshness] = useState([]);
   const [profiles, setProfiles] = useState([]);
@@ -120,9 +123,12 @@ export default function QualityPanel() {
   const handleRunContracts = async () => {
     setRunningContracts(true);
     try {
-      await api.runContracts();
+      await pipeline.runContracts();
       await loadAll();
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      addOutput('error', `Contracts failed: ${e.message}`);
+      console.error(e);
+    }
     setRunningContracts(false);
   };
 
