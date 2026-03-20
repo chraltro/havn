@@ -40,10 +40,10 @@ def _get_circuit_breaker():
         _circuit_breaker = default_breaker
     return _circuit_breaker
 
-# Default script execution timeout in seconds (2 hours)
-# Set high to avoid killing legitimate long-running ingests.
-# Override per-project in project.yml: database.script_timeout
+# Hard timeout: absolute max execution time (2 hours)
 SCRIPT_TIMEOUT_SECONDS = 7200
+# Idle timeout: if no DuckDB activity AND no stdout for this long, assume stuck
+SCRIPT_IDLE_TIMEOUT_SECONDS = 120
 
 
 class ScriptTimeoutError(Exception):
@@ -259,15 +259,68 @@ def run_script(
 
     thread = threading.Thread(target=_execute, daemon=True)
     thread.start()
-    thread.join(timeout=timeout)
+
+    # Poll for completion with activity-based idle detection.
+    # Instead of a single hard timeout, we check:
+    # 1. Is the thread still alive?
+    # 2. Is DuckDB actively running a query? (via duckdb_queries())
+    # 3. Is the script producing stdout output?
+    # If none of these show activity for IDLE_TIMEOUT seconds, kill it.
+    idle_timeout = SCRIPT_IDLE_TIMEOUT_SECONDS
+    last_activity = time.perf_counter()
+    last_stdout_len = 0
+    timed_out = False
+    idle_killed = False
+
+    while thread.is_alive():
+        thread.join(timeout=5)  # check every 5 seconds
+        if not thread.is_alive():
+            break
+
+        elapsed = time.perf_counter() - start
+        now = time.perf_counter()
+
+        # Hard timeout
+        if elapsed >= timeout:
+            timed_out = True
+            break
+
+        # Check for activity
+        has_activity = False
+
+        # 1. Check DuckDB for running queries
+        try:
+            running_queries = conn.execute(
+                "SELECT count(*) FROM duckdb_queries() WHERE success IS NULL"
+            ).fetchone()[0]
+            if running_queries > 0:
+                has_activity = True
+        except Exception:
+            # duckdb_queries() may not be available in all versions
+            has_activity = True  # assume active if we can't check
+
+        # 2. Check for new stdout output
+        current_stdout_len = len(stdout_capture.getvalue())
+        if current_stdout_len > last_stdout_len:
+            has_activity = True
+            last_stdout_len = current_stdout_len
+
+        if has_activity:
+            last_activity = now
+        elif now - last_activity > idle_timeout:
+            idle_killed = True
+            break
 
     if thread.is_alive():
         duration_ms = int((time.perf_counter() - start) * 1000)
-        error_msg = f"Script timed out after {timeout}s"
+        if idle_killed:
+            error_msg = f"Script appears stuck — no DuckDB activity or output for {idle_timeout}s (total {duration_ms // 1000}s elapsed)"
+        else:
+            error_msg = f"Script timed out after {timeout}s"
         log_output = stdout_capture.getvalue() + stderr_capture.getvalue()
-        logger.warning("Script %s timed out after %ds", script_path.name, timeout)
+        logger.warning("Script %s: %s", script_path.name, error_msg)
         log_run(conn, script_type, script_path.name, "error", duration_ms, error=error_msg, log_output=log_output or None)
-        console.print(f"  [red]timeout[/red] {label}: exceeded {timeout}s limit")
+        console.print(f"  [red]timeout[/red] {label}: {error_msg}")
         if use_circuit_breaker:
             _get_circuit_breaker()._record_failure(script_path.name)
         return {"script": script_path.name, "status": "error", "duration_ms": duration_ms, "log_output": log_output, "error": error_msg}
