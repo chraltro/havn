@@ -7,6 +7,7 @@ import re
 import time
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from havn.server.deps import (
@@ -506,3 +507,49 @@ def get_autocomplete(request: Request, conn: DbConnReadOnly) -> dict:
             for c in columns
         ],
     }
+
+
+# --- Export to CSV ---
+
+
+class ExportRequest(BaseModel):
+    sql: str = Field(..., min_length=1, max_length=100_000)
+
+
+@router.post("/api/query/export-csv")
+def export_csv(request: Request, req: ExportRequest, conn: DbConnReadOnly):
+    """Stream query results as CSV download. No row limit."""
+    _require_permission(request, "read")
+    import csv
+    import io
+
+    try:
+        result = conn.execute(req.sql)
+        columns = [desc[0] for desc in result.description]
+    except Exception as e:
+        raise HTTPException(400, f"SQL error: {e}")
+
+    def generate():
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        # Header
+        writer.writerow(columns)
+        yield buf.getvalue()
+        buf.seek(0)
+        buf.truncate(0)
+        # Stream rows in batches
+        while True:
+            batch = result.fetchmany(5000)
+            if not batch:
+                break
+            for row in batch:
+                writer.writerow([_serialize(v) for v in row])
+            yield buf.getvalue()
+            buf.seek(0)
+            buf.truncate(0)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=export.csv"},
+    )

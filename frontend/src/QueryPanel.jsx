@@ -501,6 +501,24 @@ export default function QueryPanel({ addOutput }) {
               LIMIT {DEFAULT_LIMIT}
             </button>
 
+            <button
+              onClick={async () => {
+                if (!sql.trim()) return;
+                addOutput("info", "Exporting to CSV (no row limit)...");
+                try {
+                  await api.exportCsv(sql);
+                  addOutput("success", "CSV export downloaded");
+                } catch (e) {
+                  addOutput("error", `Export failed: ${e.message}`);
+                }
+              }}
+              disabled={queryRunning || !sql.trim()}
+              style={st.fmtBtn}
+              title="Export full query results as CSV (no row limit)"
+            >
+              Export CSV
+            </button>
+
             {/* History dropdown */}
             <div ref={historyRef} style={st.historyWrapper}>
               <button onClick={() => setHistoryOpen(!historyOpen)} style={st.historyBtn} title="Query history" aria-label="Query history" aria-expanded={historyOpen}>
