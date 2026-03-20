@@ -3,8 +3,9 @@ import { schemaCompare } from "./schemaOrder";
 
 function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, onMoveFile }) {
   // Auto-expand directories that contain the active file
-  const containsActive = activeFile && node.type === "dir" && node.children?.some(function check(n) {
-    return n.path === activeFile || (n.children && n.children.some(check));
+  const _af = activeFile?.replace(/\\/g, "/");
+  const containsActive = _af && node.type === "dir" && node.children?.some(function check(n) {
+    return n.path?.replace(/\\/g, "/") === _af || (n.children && n.children.some(check));
   });
   const [expanded, setExpanded] = useState(depth < 2 || !!containsActive);
 
@@ -17,7 +18,7 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
   const [hovered, setHovered] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const activeRef = useRef(null);
-  const isActive = activeFile === node.path;
+  const isActive = activeFile && node.path && activeFile.replace(/\\/g, "/") === node.path.replace(/\\/g, "/");
 
   // Scroll into view when this node becomes active
   useEffect(() => {
