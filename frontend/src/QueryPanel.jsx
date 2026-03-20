@@ -10,6 +10,7 @@ import useResizable from "./useResizable";
 import { schemaCompare } from "./schemaOrder";
 
 const MAX_HISTORY = 50;
+const DEFAULT_LIMIT = 1000;
 const FMT_OPTS = { language: "sql", keywordCase: "upper", indentStyle: "standard" };
 function fmt(sql) { try { return formatSQL(sql, FMT_OPTS); } catch { return sql; } }
 
@@ -160,6 +161,8 @@ const sbSt = {
 
 export default function QueryPanel({ addOutput }) {
   const [sql, setSql] = useState("");
+  const [limitEnabled, setLimitEnabled] = useState(true);
+  const queryAbortRef = useRef(null);
   const [results, setResults] = useState(null);
   const [queryRunning, setQueryRunning] = useState(false);
   const [error, setError] = useState(null);
@@ -233,9 +236,15 @@ export default function QueryPanel({ addOutput }) {
     setQueryRunning(true);
     setError(null);
     setExplainResult(null);
-    addOutput("info", "Running query...");
+    // Apply default limit if enabled and query doesn't already have LIMIT
+    let query = sql.trim();
+    if (limitEnabled && !/\bLIMIT\b/i.test(query)) {
+      // Wrap in subquery to safely add LIMIT
+      query = `SELECT * FROM (${query.replace(/;\s*$/, "")}) AS _q LIMIT ${DEFAULT_LIMIT}`;
+    }
+    addOutput("info", `Running query${limitEnabled && !/\bLIMIT\b/i.test(sql) ? ` (limit ${DEFAULT_LIMIT})` : ""}...`);
     try {
-      const data = await api.runQuery(sql);
+      const data = await api.runQuery(query);
       setResults(data);
       const newHistory = [{ sql: sql.trim(), ts: new Date().toISOString() }, ...history.filter((h) => h.sql !== sql.trim())];
       setHistory(newHistory);
@@ -464,20 +473,38 @@ export default function QueryPanel({ addOutput }) {
           <ResizeHandle direction="vertical" onResize={onEditorResize} onResizeStart={onEditorResizeStart} />
           {/* Toolbar */}
           <div style={st.toolbar}>
-            <button onClick={runQuery} disabled={queryRunning || !sql.trim()} style={st.runBtn} aria-label="Run query">
-              {queryRunning ? "Running..." : "Run"} <span style={st.shortcut}>Ctrl+Enter</span>
-            </button>
+            {queryRunning ? (
+              <button onClick={() => { if (queryAbortRef.current) queryAbortRef.current.abort(); }} style={{ ...st.runBtn, background: "var(--havn-red)", borderColor: "var(--havn-red)" }} aria-label="Cancel query">
+                Cancel
+              </button>
+            ) : (
+              <button onClick={runQuery} disabled={!sql.trim()} style={st.runBtn} aria-label="Run query">
+                Run <span style={st.shortcut}>Ctrl+Enter</span>
+              </button>
+            )}
             <button onClick={explainQuery} disabled={queryRunning || !sql.trim()} style={st.fmtBtn} title="Show query execution plan">
               Explain
             </button>
             <button onClick={formatQuery} disabled={!sql.trim()} style={st.fmtBtn} title="Format SQL (Ctrl+Shift+F)">
               Format <span style={st.shortcut}>Ctrl+Shift+F</span>
             </button>
+            <button
+              onClick={() => setLimitEnabled(!limitEnabled)}
+              style={{
+                ...st.fmtBtn,
+                background: limitEnabled ? "color-mix(in srgb, var(--havn-accent) 15%, transparent)" : undefined,
+                borderColor: limitEnabled ? "var(--havn-accent)" : undefined,
+                color: limitEnabled ? "var(--havn-accent)" : undefined,
+              }}
+              title={limitEnabled ? `Auto-limit queries to ${DEFAULT_LIMIT} rows (click to disable)` : `Enable auto-limit to ${DEFAULT_LIMIT} rows`}
+            >
+              LIMIT {DEFAULT_LIMIT}
+            </button>
 
             {/* History dropdown */}
             <div ref={historyRef} style={st.historyWrapper}>
               <button onClick={() => setHistoryOpen(!historyOpen)} style={st.historyBtn} title="Query history" aria-label="Query history" aria-expanded={historyOpen}>
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 1.5"/></svg> {history.length > 0 && <span style={st.historyCount}>{history.length}</span>}
+                History {history.length > 0 && <span style={st.historyCount}>{history.length}</span>}
               </button>
               {historyOpen && (
                 <div style={st.historyDropdown}>
