@@ -437,6 +437,23 @@ export const api = {
     request<{ plan: string }>("/query/explain", { method: "POST", body: JSON.stringify({ sql }) }),
   profileQuery: (sql: string) =>
     request<{ plan: string }>("/query/profile", { method: "POST", body: JSON.stringify({ sql }) }),
+  exportCsv: async (sql: string) => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+    const res = await fetch("/api/query/export-csv", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ sql }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "export.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  },
   getSlowQueries: (limit: number = 50) =>
     request("/metrics/slow-queries?limit=" + limit),
 
