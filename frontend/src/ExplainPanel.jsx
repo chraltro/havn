@@ -211,6 +211,94 @@ function PlanLegend() {
 }
 
 /**
+ * Parse DuckDB EXPLAIN text output into a structured tree.
+ *
+ * DuckDB EXPLAIN output uses box-drawing characters and indentation like:
+ *   ┌───────────────────────────┐
+ *   │    HASH_GROUP_BY          │
+ *   │   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │
+ *   │             #0            │
+ *   │          count            │
+ *   └─────────────┬─────────────┘
+ *   ┌─────────────┴─────────────┐
+ *   │         SEQ_SCAN          │
+ *   │   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │
+ *   │          orders           │
+ *   └───────────────────────────┘
+ */
+export function parseDuckDBPlan(rawText) {
+  if (!rawText || typeof rawText !== "string") return null;
+
+  const lines = rawText.split("\n");
+  const nodes = [];
+  let current = null;
+
+  for (const line of lines) {
+    const trimmed = line.replace(/[│┌┐└┘┬┴─╶╴├┤┼]/g, "").trim();
+    if (!trimmed || /^[─ ]+$/.test(trimmed)) continue;
+
+    // Detect operator names: typically ALL_CAPS_WITH_UNDERSCORES
+    if (/^[A-Z][A-Z_0-9 ]+$/.test(trimmed) && !trimmed.startsWith("#") && trimmed.length > 1) {
+      if (current) nodes.push(current);
+      current = { operator: trimmed.trim(), children: [], extra_info: {}, table: null, estimated_rows: null, actual_rows: null, actual_time_ms: null, time_percentage: null };
+    } else if (current) {
+      // Table name (lowercase, no spaces, or schema.table)
+      if (!current.table && /^[a-z_][a-z0-9_.]*$/.test(trimmed)) {
+        current.table = trimmed;
+      }
+      // Estimated cardinality
+      else if (/^~?\d[\d,]*$/.test(trimmed.replace(/[~,]/g, ""))) {
+        const num = parseInt(trimmed.replace(/[~,]/g, ""), 10);
+        if (!isNaN(num)) current.estimated_rows = num;
+      }
+      // EC marker
+      else if (trimmed.startsWith("EC:") || trimmed.startsWith("EC=")) {
+        const num = parseInt(trimmed.replace(/[^0-9]/g, ""), 10);
+        if (!isNaN(num)) current.estimated_rows = num;
+      }
+      // Column references or other extra info
+      else if (trimmed.startsWith("#") || trimmed.startsWith("[")) {
+        const key = current.table ? "Columns" : "Projection";
+        const prev = current.extra_info[key];
+        current.extra_info[key] = prev ? prev + ", " + trimmed : trimmed;
+      }
+      // Filters, expressions, etc.
+      else if (trimmed.includes("=") || trimmed.includes(">") || trimmed.includes("<") || trimmed.includes("BETWEEN") || trimmed.includes("AND") || trimmed.includes("OR")) {
+        const key = "Filter";
+        const prev = current.extra_info[key];
+        current.extra_info[key] = prev ? prev + " " + trimmed : trimmed;
+      }
+      // Anything else is extra info
+      else if (trimmed.length > 0 && trimmed !== "─") {
+        const key = "Info";
+        const prev = current.extra_info[key];
+        current.extra_info[key] = prev ? prev + ", " + trimmed : trimmed;
+      }
+    }
+  }
+  if (current) nodes.push(current);
+
+  if (nodes.length === 0) return null;
+
+  // Build tree: DuckDB EXPLAIN lists nodes top-down (root first, children below).
+  // The box-drawing connects parent to child with └──┬──┘ / ┌──┴──┐ patterns.
+  // Simple heuristic: build a linear chain (parent -> child -> grandchild).
+  function buildTree(nodeList) {
+    if (nodeList.length === 0) return null;
+    if (nodeList.length === 1) return nodeList[0];
+    const root = nodeList[0];
+    let parent = root;
+    for (let i = 1; i < nodeList.length; i++) {
+      parent.children = [nodeList[i]];
+      parent = nodeList[i];
+    }
+    return root;
+  }
+
+  return buildTree(nodes);
+}
+
+/**
  * ExplainPanel — main export.
  *
  * Props:
@@ -223,7 +311,9 @@ export default function ExplainPanel({ plan, raw, isAnalyze = false }) {
 
   if (!plan && !raw) return null;
 
-  const totalTimeMs = plan?._total_time_ms || 0;
+  // If no structured plan provided, try to parse from raw text
+  const effectivePlan = plan || (raw ? parseDuckDBPlan(raw) : null);
+  const totalTimeMs = effectivePlan?._total_time_ms || 0;
 
   return (
     <div style={st.container}>
@@ -253,9 +343,9 @@ export default function ExplainPanel({ plan, raw, isAnalyze = false }) {
       {/* Content */}
       <div style={st.body}>
         {viewMode === "visual" ? (
-          plan ? (
+          effectivePlan ? (
             <div style={{ padding: "6px 8px" }}>
-              <PlanNodeView node={plan} totalTimeMs={totalTimeMs} isAnalyze={isAnalyze} />
+              <PlanNodeView node={effectivePlan} totalTimeMs={totalTimeMs} isAnalyze={isAnalyze} />
             </div>
           ) : (
             <div style={st.fallback}>No structured plan available. Switch to Raw view.</div>

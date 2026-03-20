@@ -123,6 +123,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
     from havn.engine.transform.quality import run_assertions as _ra, _save_assertions as _sa, profile_model as _pm, _save_profile as _sp
 
     def emit(event_type: str, data: dict):
+        data["ts"] = _time.time()
         with _pipeline_lock:
             _pipeline_state["events"].append({"event": event_type, "data": data})
 
@@ -221,7 +222,10 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
         _emt(conn)
 
         # 5. Pre-build validation for transform models
-        if models:
+        # Skip validation when stream includes ingest steps — landing tables
+        # won't exist yet on a fresh database and will be created by ingest.
+        has_ingest = bool(ingest_node_ids)
+        if models and not has_ingest:
             val_cur = conn.cursor()
             try:
                 _val_errors = _vm(val_cur, models)
@@ -556,6 +560,14 @@ def get_active_stream(request: Request) -> dict:
         started_at = _pipeline_state["started_at"]
         total_events = len(_pipeline_state["events"])
         finished = _pipeline_state["finished"]
+        # Extract status and duration from the last complete event if available
+        last_status = None
+        last_duration = None
+        for evt in reversed(_pipeline_state["events"]):
+            if evt["event"] == "complete":
+                last_status = evt["data"].get("status")
+                last_duration = evt["data"].get("duration_seconds")
+                break
 
     # Check for stale pipeline
     if running and started_at:
@@ -566,7 +578,8 @@ def get_active_stream(request: Request) -> dict:
                 _pipeline_state["running"] = False
                 _pipeline_state["finished"] = True
             return {"running": False, "stream_name": stream_name, "started_at": started_at,
-                    "total_events": total_events, "finished": True}
+                    "total_events": total_events, "finished": True,
+                    "status": last_status, "duration_seconds": last_duration}
 
     return {
         "running": running,
@@ -574,6 +587,8 @@ def get_active_stream(request: Request) -> dict:
         "started_at": started_at,
         "total_events": total_events,
         "finished": finished,
+        "status": last_status,
+        "duration_seconds": last_duration,
     }
 
 
