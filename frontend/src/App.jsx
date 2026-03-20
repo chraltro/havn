@@ -90,8 +90,8 @@ const GUIDE_STEPS = [
 
 const SECTIONS = [
   { id: "Overview", label: "Overview", tabs: [] },
-  { id: "Develop", label: "Develop", tabs: ["Editor", "Notebooks", "DAG", "Git"] },
-  { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "Data Sources"] },
+  { id: "Develop", label: "Develop", tabs: ["Editor", "Notebooks", "Data Sources", "Git"] },
+  { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "DAG"] },
   { id: "Observe", label: "Observe", tabs: ["Quality", "Sentinel", "Diff", "History"] },
   { id: "Configure", label: "Configure", tabs: ["Masking", "Wiki", "Docs", "Settings"] },
 ];
