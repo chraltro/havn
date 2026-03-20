@@ -1,0 +1,21 @@
+contracts:
+  - name: customer_360_complete
+    description: "Customer 360 must have data with valid keys"
+    model: gold.customer_360
+    severity: error
+    assertions:
+      - row_count > 0
+      - row_count > {previous * 0.9}
+      - no_nulls(customer_id)
+      - unique(customer_id)
+      - freshness < 24h
+
+  - name: dim_customer_valid
+    description: "Dim customer must have no null keys and stable volume"
+    model: silver.dim_customer
+    severity: error
+    assertions:
+      - row_count > 0
+      - row_count > {previous * 0.85}
+      - no_nulls(customer_id)
+      - unique(customer_id)
