@@ -469,9 +469,9 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
     }
   }, [layout, fitToView]);
 
-  // Mark that we need to re-fit when DAG data changes
+  // Mark that we need to re-fit only on first load (not mode toggles)
   useEffect(() => {
-    needsFit.current = true;
+    if (!dag) needsFit.current = true;
   }, [dag]);
 
   const draw = useCallback(() => {
@@ -570,11 +570,30 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
         ctx.stroke();
       }
 
+      // Arrowhead — orient along the edge direction
+      const arrowLen = 8;
+      const arrowW = 4;
+      // Get the direction from the last segment of the edge
+      let dx, dy;
+      if (waypoints && waypoints.length > 0) {
+        const prev = waypoints[waypoints.length - 1];
+        dx = x2 - prev.x;
+        dy = y2 - prev.y;
+      } else {
+        // Bezier: approximate tangent at endpoint
+        const cpx = (x1 + x2) / 2;
+        dx = x2 - cpx;
+        dy = y2 - y2; // horizontal tangent for simple bezier
+        dx = 1; dy = 0; // fallback horizontal
+      }
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const ux = dx / len;
+      const uy = dy / len;
       ctx.fillStyle = ctx.strokeStyle;
       ctx.beginPath();
       ctx.moveTo(x2, y2);
-      ctx.lineTo(x2 - 8, y2 - 4);
-      ctx.lineTo(x2 - 8, y2 + 4);
+      ctx.lineTo(x2 - ux * arrowLen + uy * arrowW, y2 - uy * arrowLen - ux * arrowW);
+      ctx.lineTo(x2 - ux * arrowLen - uy * arrowW, y2 - uy * arrowLen + ux * arrowW);
       ctx.closePath();
       ctx.fill();
     }
