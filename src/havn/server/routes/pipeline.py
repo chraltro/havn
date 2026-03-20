@@ -414,6 +414,11 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
             "duration_seconds": duration_s,
         })
     finally:
+        # Release DuckDB buffer memory after pipeline completes
+        try:
+            conn.execute("FORCE CHECKPOINT")
+        except Exception:
+            pass
         with _pipeline_lock:
             _pipeline_state["running"] = False
             _pipeline_state["finished"] = True
