@@ -84,6 +84,23 @@ Custom expressions are evaluated as `SELECT (<expression>) FROM <table>` and mus
 - All assertions for a model are evaluated (not short-circuited)
 - Results are stored in `_dp_internal.assertion_results`
 
+### Assertion Debugging
+
+When an assertion fails, havn provides diagnostic details to help you find the problem:
+
+- **`unique(col)` failure** — shows top 10 duplicated values with counts
+- **`no_nulls(col)` failure** — shows null count, percentage, and sample rows with NULLs
+- **`accepted_values(col, [...])` failure** — shows unexpected values with counts
+- **`row_count` failure** — shows actual count vs threshold
+
+To re-run assertions with full diagnostics on demand:
+
+```bash
+curl http://localhost:3000/api/quality/assertion-debug/gold.customer_summary
+```
+
+In the web UI, click **"Re-run with diagnostics"** on any failed assertion in the Observe → Quality panel to see detailed debugging output.
+
 ### Viewing Assertion Results
 
 ```bash
@@ -250,6 +267,43 @@ curl -X POST http://localhost:3000/api/alerts/test \
 ```bash
 curl http://localhost:3000/api/alerts
 ```
+
+## Anomaly Detection
+
+havn tracks profile statistics over time and automatically detects anomalies using Z-score analysis. When the current run's metrics deviate significantly from the historical baseline, an anomaly is flagged.
+
+### How It Works
+
+After each transform run, havn compares the current profile (row_count, null percentages, distinct counts) against the last N runs (default 30). If the Z-score exceeds the threshold (default 2.0), an anomaly is logged.
+
+### Configuration
+
+```yaml
+quality:
+  anomaly_detection:
+    enabled: true
+    lookback: 30          # Number of historical runs to compare
+    threshold: 2.0        # Z-score threshold for flagging
+    notify: [slack]       # Alert channels
+```
+
+### Viewing Anomalies
+
+```bash
+# Recent anomalies
+curl http://localhost:3000/api/anomalies
+
+# Anomalies for a specific model
+curl http://localhost:3000/api/anomalies/gold.customer_summary
+```
+
+In the web UI, anomalies appear in the Observe → Quality panel with severity coloring, showing the current value vs expected range.
+
+### Edge Cases
+
+- Fewer than 3 historical profiles → skipped (not enough baseline data)
+- Zero standard deviation → skipped (constant value, no deviation possible)
+- First run → skipped (no baseline)
 
 ## Related Pages
 

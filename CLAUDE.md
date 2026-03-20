@@ -32,6 +32,12 @@ havn serve --auth               # with authentication
 havn run ingest/example.py      # run a script
 havn stream full-refresh        # run full pipeline
 havn history                    # show run log
+havn env use prod               # switch environment
+havn env list                   # show all environments
+havn diff gold.orders           # diff a single model
+havn diff                       # diff changed models + downstream
+havn diff --all                 # diff entire database
+havn macros                     # list registered SQL macros
 ```
 
 ## Project Structure
@@ -44,6 +50,10 @@ src/havn/                       # Python package (the platform itself)
     database.py               # DuckDB connection, metadata tables
     transform/                # SQL DAG engine with change detection
     runner.py                 # Python script executor (ingest/export)
+    macros.py                 # Python SQL macros (@macro → DuckDB UDFs)
+    explain.py                # Query plan parsing (EXPLAIN/EXPLAIN ANALYZE)
+    anomaly.py                # Statistical anomaly detection
+    diff.py                   # 3-mode diff engine (single/changed/all)
     auth.py                   # Token auth, RBAC (admin/editor/viewer)
     secrets.py                # .env secrets management
     scheduler.py              # Cron scheduler (Huey) + file watcher
@@ -90,8 +100,10 @@ User project layout (created by `havn init`):
     gold/         Consumption-ready SQL
   export/         Python scripts (or .dpnb notebooks)
   notebooks/      .dpnb interactive notebooks
+  macros/         Python SQL macros (auto-registered as DuckDB UDFs)
   project.yml     Config: streams, connections, schedules
   .env            Secrets (never committed)
+  .havn-env       Active environment (local, not committed)
   warehouse.duckdb   Single-file DuckDB database
 
 Internal DuckDB schemas:
@@ -124,8 +136,34 @@ GROUP BY 1, 2
 - `-- config:` sets materialization (`view` or `table`) and schema
 - `-- depends_on:` declares upstream dependencies (used for DAG ordering)
 - Folder name is the default schema (e.g., `transform/bronze/` → `schema=bronze`)
-- No Jinja, no templating — just plain SQL
+- No Jinja, no templating — just plain SQL (use Python macros for reusable logic)
 - Change detection uses SHA256 hash of normalized SQL content
+
+### Python SQL Macros
+
+Python functions in `macros/` are auto-registered as DuckDB UDFs, callable directly in SQL:
+
+```python
+# macros/utils.py
+from havn import macro
+
+@macro
+def mask_email(email: str) -> str:
+    """Mask the local part of an email, keep domain."""
+    if not email or "@" not in email:
+        return "***"
+    local, domain = email.split("@", 1)
+    return f"***@{domain}"
+```
+```sql
+-- transform/silver/customers.sql
+SELECT customer_id, mask_email(email) AS email FROM bronze.customers
+```
+
+- `@macro` decorator marks functions for registration
+- Type hints map to DuckDB types (str→VARCHAR, int→INTEGER, float→DOUBLE, etc.)
+- `.sql` files in `macros/` with `CREATE MACRO` also supported
+- `havn macros` lists all available macros
 
 ### Python Script Convention
 

@@ -26,6 +26,7 @@ function formatRows(n) {
 export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, onRunStream, streams }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [runningDemo, setRunningDemo] = useState(false);
   const [gitStatus, setGitStatus] = useState(null);
   const [showFailed, setShowFailed] = useState(false);
@@ -38,6 +39,7 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
 
   async function load() {
     setLoading(true);
+    setLoadError(null);
     try {
       const overview = await api.getOverview();
       setData(overview);
@@ -51,6 +53,7 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
       }
     } catch (e) {
       console.error("Failed to load overview:", e);
+      setLoadError(e.message || "Failed to load overview");
     } finally {
       setLoading(false);
     }
@@ -74,7 +77,32 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
   }
 
   if (!data) {
-    return <div style={st.container}><div style={st.center}>Failed to load overview.</div></div>;
+    return (
+      <div style={st.container}>
+        <div style={st.center}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ marginBottom: "8px", color: "var(--havn-text-secondary)" }}>
+              {loadError || "Failed to load overview."}
+            </div>
+            <button
+              onClick={load}
+              style={{
+                padding: "6px 16px",
+                background: "var(--havn-btn-bg)",
+                border: "1px solid var(--havn-btn-border)",
+                borderRadius: "var(--havn-radius-lg)",
+                color: "var(--havn-text)",
+                cursor: "pointer",
+                fontSize: "12px",
+                fontWeight: 500,
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const recentRuns = data.recent_runs || [];

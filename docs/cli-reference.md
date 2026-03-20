@@ -273,21 +273,37 @@ Creates a `.dpnb` notebook pre-populated with error info, upstream queries, and 
 
 ### havn diff
 
-Compare model SQL output against materialized tables.
+Compare model SQL output against materialized tables. Three modes:
 
 ```bash
-havn diff [TARGETS...] [--target SCHEMA] [--format FMT] [--rows] [--full] [--against REF] [--snapshot NAME] [--project PATH]
+# Single model — diff one specific table
+havn diff gold.orders
+
+# Changed + downstream (default) — only diff models with SQL changes
+havn diff
+havn diff --changed
+
+# Full database — diff everything (old behavior)
+havn diff --all
+```
+
+```bash
+havn diff [TARGETS...] [--changed] [--all] [--target SCHEMA] [--format FMT] [--rows] [--full] [--against REF] [--snapshot NAME] [--project PATH]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `TARGETS` | all | Models to diff |
+| `TARGETS` | none | Specific models to diff (single mode) |
+| `--changed` | true | Only diff models with SQL changes + downstream |
+| `--all` | false | Diff all models (full database) |
 | `--target, -t` | none | Diff all models in a schema |
 | `--format, -f` | `table` | Output format: `table` or `json` |
 | `--rows` | false | Include sample rows |
 | `--full` | false | Show all changed rows |
 | `--against` | none | Git-aware: only diff models changed vs a branch |
 | `--snapshot` | none | Compare against a named snapshot |
+
+When no targets or flags are given, `--changed` is the default — it uses change detection to only diff models whose SQL (or upstream) actually changed, plus their downstream dependents. This is much faster than diffing the entire database.
 
 ## Connectors
 
@@ -425,6 +441,30 @@ havn serve [--port PORT] [--host HOST] [--auth] [--env NAME] [--project PATH]
 | `--env` | none | Environment to use |
 
 ## Version
+
+### havn env
+
+Manage active environment.
+
+```bash
+havn env ACTION [NAME]
+```
+
+Actions:
+- `list` — Show all environments, mark active with star
+- `use <name>` — Set active environment (writes `.havn-env`)
+- `show` — Show current active environment
+- `reset` — Clear active environment
+
+### havn macros
+
+List registered Python SQL macros.
+
+```bash
+havn macros [--project PATH]
+```
+
+Shows all macros discovered from the `macros/` directory: name, parameters, return type, source file, and docstring.
 
 ### havn version
 

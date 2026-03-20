@@ -119,7 +119,7 @@ export default function SortableTable({ columns, rows, columnTypes }) {
             const sym = resolvedTypes[i];
             const isActive = sortCol === i;
             return (
-              <th key={col} style={styles.th} onClick={() => handleSort(i)}>
+              <th key={col} style={styles.th} onClick={() => handleSort(i)} role="columnheader" scope="col" aria-sort={isActive ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
                 <span style={styles.thInner}>
                   <span>{col}</span>
                   <span style={{ ...styles.typeSymbol, color: sym.color }}>{sym.label}</span>
