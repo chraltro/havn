@@ -366,11 +366,12 @@ def get_overview(request: Request, conn: DbConnReadOnly) -> dict:
         # Use cached row counts from model_state — never live COUNT(*)
         try:
             cached_rows = conn.execute(
-                "SELECT schema_name, model_name, row_count FROM _dp_internal.model_state WHERE row_count IS NOT NULL"
+                "SELECT model_path, row_count FROM _dp_internal.model_state WHERE row_count IS NOT NULL"
             ).fetchall()
-            for s, t, rc in cached_rows:
-                if s in schema_map:
-                    schema_map[s]["total_rows"] += rc
+            for model_path, rc in cached_rows:
+                parts = model_path.split(".", 1)
+                if len(parts) == 2 and parts[0] in schema_map:
+                    schema_map[parts[0]]["total_rows"] += rc
         except Exception:
             pass
 
