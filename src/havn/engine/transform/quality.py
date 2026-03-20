@@ -167,8 +167,10 @@ def _save_profile(
     model: SQLModel,
     profile: ProfileResult,
 ) -> None:
-    """Save profile stats to the metadata table."""
+    """Save profile stats to the metadata table and append to history."""
     import json
+    null_json = json.dumps(profile.null_percentages)
+    distinct_json = json.dumps(profile.distinct_counts)
     conn.execute(
         """
         INSERT OR REPLACE INTO _dp_internal.model_profiles
@@ -179,10 +181,28 @@ def _save_profile(
             model.full_name,
             profile.row_count,
             profile.column_count,
-            json.dumps(profile.null_percentages),
-            json.dumps(profile.distinct_counts),
+            null_json,
+            distinct_json,
         ],
     )
+    # Append to profile_history for anomaly detection baselines
+    try:
+        conn.execute(
+            """
+            INSERT INTO _dp_internal.profile_history
+                (model_path, row_count, column_count, null_percentages, distinct_counts, profiled_at)
+            VALUES (?, ?, ?, ?::JSON, ?::JSON, current_timestamp)
+            """,
+            [
+                model.full_name,
+                profile.row_count,
+                profile.column_count,
+                null_json,
+                distinct_json,
+            ],
+        )
+    except Exception:
+        pass  # profile_history table may not exist in older databases
 
 
 def _save_assertions(
