@@ -198,25 +198,41 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
 
         def _exec_query():
             try:
-                if req.offset > 0 and req.limit is not None:
-                    wrapped = f"SELECT * FROM ({req.sql}) AS _q OFFSET {req.offset} LIMIT {req.limit}"
-                    result = conn.execute(wrapped)
-                elif req.offset > 0:
-                    wrapped = f"SELECT * FROM ({req.sql}) AS _q OFFSET {req.offset}"
-                    result = conn.execute(wrapped)
+                # Safety: if no LIMIT in the SQL and no limit param, inject a
+                # server-side cap so DuckDB never buffers millions of rows.
+                # The response includes total_rows so the user knows it was capped.
+                SERVER_ROW_CAP = 50_000
+                sql_clean = req.sql.strip().rstrip(";")
+                has_limit = bool(re.search(r'\bLIMIT\b', req.sql, re.IGNORECASE))
+                effective_limit = req.limit
+
+                if req.offset > 0 and effective_limit is not None:
+                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q OFFSET {req.offset} LIMIT {effective_limit}"
+                elif effective_limit is not None:
+                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q LIMIT {effective_limit}"
+                elif not has_limit:
+                    # No limit anywhere — inject server cap into the SQL itself
+                    # so DuckDB can optimize and stop scanning early
+                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q LIMIT {SERVER_ROW_CAP}"
+                    effective_limit = SERVER_ROW_CAP
                 else:
-                    result = conn.execute(req.sql)
+                    wrapped = req.sql
+
+                if req.offset > 0 and effective_limit is None:
+                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q OFFSET {req.offset}"
+
+                result = conn.execute(wrapped)
                 columns = [desc[0] for desc in result.description]
-                if req.limit is not None:
-                    rows = result.fetchmany(req.limit)
+                if effective_limit is not None:
+                    rows = result.fetchmany(effective_limit)
                 else:
                     rows = result.fetchall()
                 query_result["data"] = {
                     "columns": columns,
                     "rows": [[_serialize(v) for v in row] for row in rows],
-                    "truncated": req.limit is not None and len(rows) == req.limit,
+                    "truncated": effective_limit is not None and len(rows) == effective_limit,
                     "offset": req.offset,
-                    "limit": req.limit,
+                    "limit": effective_limit,
                 }
             except Exception as e:
                 query_error.append(e)
