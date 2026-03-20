@@ -492,7 +492,10 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
         const failedCount = (cr.assertions || []).filter(a => !a.passed).length;
         const level = cr.passed ? "info" : "error";
 
-        if (cr.passed) {
+        if (cr.error && ruleCount === 0) {
+          // Table missing or other pre-check error — no rules ran
+          addOutput("warn", `SKIP  ${cr.contract_name} on ${cr.model} — ${cr.error}`);
+        } else if (cr.passed) {
           addOutput(level as OutputEntry["type"], `PASS  ${cr.contract_name} on ${cr.model} -- ${ruleCount} rule${ruleCount !== 1 ? "s" : ""} passed [${cr.duration_ms}ms]`);
         } else {
           addOutput(level as OutputEntry["type"], `FAIL  ${cr.contract_name} on ${cr.model} -- ${failedCount} of ${ruleCount} rule${ruleCount !== 1 ? "s" : ""} failed [${cr.duration_ms}ms]`);
@@ -501,8 +504,8 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
               addOutput("error", `       ${a.expression}  -->  ${a.detail || "failed"}`);
             }
           }
+          if (cr.error) addOutput("error", `       Error: ${cr.error}`);
         }
-        if (cr.error) addOutput("error", `       Error: ${cr.error}`);
       }
 
       addOutput("info", "");
