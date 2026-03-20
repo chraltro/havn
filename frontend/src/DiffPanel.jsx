@@ -37,6 +37,8 @@ export default function DiffPanel({ api, addOutput }) {
   const runDiff = async () => {
     setLoading(true);
     setResults(null);
+    const modeLabel = mode === "single" ? `single model (${selectedModel})` : mode === "changed" ? "changed models" : "full database";
+    addOutput("info", `Running diff (${modeLabel})...`);
     try {
       let targets = null;
       if (mode === "single" && selectedModel) {

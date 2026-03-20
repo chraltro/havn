@@ -28,7 +28,8 @@ export default function HistoryPanel({ onOpenFile }) {
   }
 
   const filtered = history.filter((row) => {
-    if (statusFilter !== "all" && row.status !== statusFilter) return false;
+    if (statusFilter === "success" && row.status !== "success") return false;
+    if (statusFilter === "failed" && row.status !== "error" && row.status !== "failed") return false;
     if (targetFilter && !(row.target || "").toLowerCase().includes(targetFilter.toLowerCase())) return false;
     return true;
   });
@@ -46,7 +47,7 @@ export default function HistoryPanel({ onOpenFile }) {
         >
           <option value="all">All Statuses</option>
           <option value="success">Success</option>
-          <option value="error">Error</option>
+          <option value="failed">Failed</option>
         </select>
         <input
           style={styles.filterInput}
@@ -96,7 +97,18 @@ export default function HistoryPanel({ onOpenFile }) {
                     {onOpenFile && row.target ? (
                       <span
                         style={styles.fileLink}
-                        onClick={() => onOpenFile(row.target, 1, 1)}
+                        onClick={() => {
+                          let target = row.target;
+                          // Contract targets are "contract_name:schema.model" — extract the model part
+                          if (target.includes(":")) target = target.split(":").pop();
+                          // schema.model → transform/schema/model.sql
+                          if (/^(bronze|silver|gold)\.\w+$/.test(target)) {
+                            const [schema, model] = target.split(".");
+                            onOpenFile(`transform/${schema}/${model}.sql`, 1, 1);
+                          } else {
+                            onOpenFile(target, 1, 1);
+                          }
+                        }}
                         onMouseEnter={(e) => { e.currentTarget.style.color = "var(--havn-accent)"; e.currentTarget.style.textDecoration = "underline"; }}
                         onMouseLeave={(e) => { e.currentTarget.style.color = ""; e.currentTarget.style.textDecoration = ""; }}
                         title={`Open ${row.target}`}
