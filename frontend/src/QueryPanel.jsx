@@ -278,15 +278,18 @@ export default function QueryPanel({ addOutput }) {
 
   async function formatQuery() {
     if (!sql.trim()) return;
+    // Step 1: sql-formatter for layout (line breaks, indentation)
+    const layoutFormatted = fmt(sql);
+    // Step 2: SQLFluff for keyword casing and DuckDB-specific fixes
     try {
-      const result = await api.formatSql(sql);
+      const result = await api.formatSql(layoutFormatted);
       if (result.formatted && result.formatted.trim()) {
         setSql(result.formatted);
       } else {
-        setSql(fmt(sql));
+        setSql(layoutFormatted);
       }
     } catch {
-      setSql(fmt(sql));
+      setSql(layoutFormatted);
     }
   }
 
