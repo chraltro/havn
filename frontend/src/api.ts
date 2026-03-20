@@ -137,29 +137,167 @@ export interface StreamConfig {
 // ---- API client ----
 
 const BASE = "/api";
+const REQUEST_TIMEOUT_MS = 30000;
+const MAX_RETRIES = 3;
+const RETRY_BACKOFF = [1000, 2000, 4000];
 
 let authToken: string | null = localStorage.getItem("dp_token") || null;
 
-async function request<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
+/** Parse an error response into a human-readable message */
+async function parseErrorResponse(res: Response, path: string): Promise<string> {
+  const status = res.status;
+  let text = "";
+  try {
+    text = await res.text();
+  } catch {
+    // ignore read errors
+  }
+
+  // Try JSON first
+  if (text) {
+    try {
+      const json = JSON.parse(text);
+      // FastAPI/Pydantic validation errors (422)
+      if (status === 422 && json.detail) {
+        if (Array.isArray(json.detail)) {
+          const msgs = json.detail.map((d: { loc?: string[]; msg?: string }) => {
+            const loc = d.loc ? d.loc.join(" > ") : "";
+            return loc ? `${loc}: ${d.msg}` : d.msg || "Validation error";
+          });
+          return `Validation error (422): ${msgs.join("; ")}`;
+        }
+        return `Validation error (422): ${typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail)}`;
+      }
+      // Standard error/detail fields
+      if (json.error) return `Error (${status}): ${json.error}`;
+      if (json.detail) return `Error (${status}): ${typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail)}`;
+      if (json.message) return `Error (${status}): ${json.message}`;
+    } catch {
+      // Not JSON — check if HTML
+    }
+  }
+
+  // HTML response — don't show raw HTML to users
+  if (text && (text.includes("<html") || text.includes("<!DOCTYPE") || text.includes("<!doctype"))) {
+    if (status >= 500) return `Server error (${status}). The server may be restarting.`;
+    return `Server error (${status})`;
+  }
+
+  // Specific status code messages
+  if (status === 404) return `Not found: ${path}`;
+  if (status === 429) return "Rate limited. Please wait and try again.";
+  if (status >= 500) return `Server error (${status}). The server may be restarting.`;
+
+  // Fallback
+  return text ? `Error (${status}): ${text}` : `Error (${status}): ${res.statusText}`;
+}
+
+/** Determine if a request is safe to retry (GET, or explicitly marked retryable) */
+function isRetryable(method: string | undefined, retryable: boolean | undefined): boolean {
+  if (retryable !== undefined) return retryable;
+  const m = (method || "GET").toUpperCase();
+  return m === "GET" || m === "HEAD" || m === "OPTIONS";
+}
+
+interface RequestOptions extends RequestInit {
+  /** Whether this request can be retried on transient failure. Default: true for GET, false for POST/PUT/DELETE. */
+  retryable?: boolean;
+}
+
+async function request<T = unknown>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { retryable, ...fetchOptions } = options;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...(options.headers as Record<string, string> || {}),
+    ...(fetchOptions.headers as Record<string, string> || {}),
   };
   if (authToken) {
     headers["Authorization"] = `Bearer ${authToken}`;
   }
-  const res = await fetch(`${BASE}${path}`, { ...options, headers });
-  if (res.status === 401) {
-    authToken = null;
-    localStorage.removeItem("dp_token");
-    window.dispatchEvent(new Event("dp_auth_required"));
-    throw new Error("Authentication required");
+
+  const canRetry = isRetryable(fetchOptions.method, retryable);
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= (canRetry ? MAX_RETRIES : 0); attempt++) {
+    // Wait before retry (skip first attempt)
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, RETRY_BACKOFF[attempt - 1] || 4000));
+    }
+
+    // Set up timeout via AbortController
+    const timeoutController = new AbortController();
+    const existingSignal = fetchOptions.signal;
+    const timeoutId = setTimeout(() => timeoutController.abort(), REQUEST_TIMEOUT_MS);
+
+    try {
+      // Combine existing signal (if any) with our timeout signal
+      let signal = timeoutController.signal;
+      if (existingSignal) {
+        const combined = new AbortController();
+        existingSignal.addEventListener("abort", () => combined.abort());
+        timeoutController.signal.addEventListener("abort", () => combined.abort());
+        signal = combined.signal;
+      }
+
+      const res = await fetch(`${BASE}${path}`, { ...fetchOptions, headers, signal });
+      clearTimeout(timeoutId);
+
+      // 401 — auth required, don't retry
+      if (res.status === 401) {
+        authToken = null;
+        localStorage.removeItem("dp_token");
+        window.dispatchEvent(new Event("dp_auth_required"));
+        throw new Error("Authentication required");
+      }
+
+      // 4xx — client error, don't retry
+      if (res.status >= 400 && res.status < 500) {
+        const msg = await parseErrorResponse(res, path);
+        throw new Error(msg);
+      }
+
+      // 5xx — server error, retry if allowed
+      if (res.status >= 500) {
+        const msg = await parseErrorResponse(res, path);
+        lastError = new Error(msg);
+        if (canRetry && attempt < MAX_RETRIES) continue;
+        throw lastError;
+      }
+
+      // Success
+      return res.json() as Promise<T>;
+    } catch (err: unknown) {
+      clearTimeout(timeoutId);
+      const error = err as Error;
+
+      // Don't retry auth errors or client errors
+      if (error.message === "Authentication required" ||
+          (error.message && error.message.startsWith("Validation error")) ||
+          (error.message && error.message.startsWith("Not found:")) ||
+          (error.message && error.message.startsWith("Rate limited"))) {
+        throw error;
+      }
+
+      // Timeout
+      if (error.name === "AbortError") {
+        lastError = new Error("Request timed out after 30 seconds");
+        if (canRetry && attempt < MAX_RETRIES) continue;
+        throw lastError;
+      }
+
+      // Network error (TypeError from fetch) — retry if allowed
+      if (error instanceof TypeError) {
+        lastError = new Error(`Network error: Unable to reach the server. Check that havn is running.`);
+        if (canRetry && attempt < MAX_RETRIES) continue;
+        throw lastError;
+      }
+
+      // Other errors — don't retry
+      throw error;
+    }
   }
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || res.statusText);
-  }
-  return res.json() as Promise<T>;
+
+  // Should not reach here, but just in case
+  throw lastError || new Error("Request failed");
 }
 
 export const api = {
@@ -447,9 +585,35 @@ export const api = {
     formData.append("file", file);
     const headers: Record<string, string> = {};
     if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
-    const res = await fetch(`${BASE}/upload`, { method: "POST", body: formData, headers });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
+
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => timeoutController.abort(), REQUEST_TIMEOUT_MS);
+
+    try {
+      const res = await fetch(`${BASE}/upload`, { method: "POST", body: formData, headers, signal: timeoutController.signal });
+      clearTimeout(timeoutId);
+      if (res.status === 401) {
+        authToken = null;
+        localStorage.removeItem("dp_token");
+        window.dispatchEvent(new Event("dp_auth_required"));
+        throw new Error("Authentication required");
+      }
+      if (!res.ok) {
+        const msg = await parseErrorResponse(res, "/upload");
+        throw new Error(msg);
+      }
+      return res.json();
+    } catch (err: unknown) {
+      clearTimeout(timeoutId);
+      const error = err as Error;
+      if (error.name === "AbortError") {
+        throw new Error("Request timed out after 30 seconds");
+      }
+      if (error instanceof TypeError) {
+        throw new Error("Network error: Unable to reach the server. Check that havn is running.");
+      }
+      throw error;
+    }
   },
 
   // Environment
@@ -524,6 +688,20 @@ export const api = {
   getAssertions: (limit: number = 100) => request(`/assertions?limit=${limit}`),
   getContracts: () => request("/contracts"),
   getContractHistory: () => request("/contracts/history"),
+  getContractModelHistory: (model: string) => request(`/contracts/${encodeURIComponent(model)}/history`),
+
+  // Anomaly Detection
+  getAnomalies: (limit: number = 100, model?: string) => {
+    const params = model ? `?limit=${limit}&model=${encodeURIComponent(model)}` : `?limit=${limit}`;
+    return request(`/anomalies${params}`);
+  },
+  getModelAnomalies: (model: string, limit: number = 50) =>
+    request(`/anomalies/${encodeURIComponent(model)}?limit=${limit}`),
+  getAnomalyConfig: () => request("/anomalies/config"),
+  updateAnomalyConfig: (config: { enabled?: boolean; lookback?: number; threshold?: number }) =>
+    request("/anomalies/config", { method: "PUT", body: JSON.stringify(config) }),
+  getModelProfileHistory: (model: string, limit: number = 30) =>
+    request(`/anomalies/${encodeURIComponent(model)}/history?limit=${limit}`),
 
   // Impact analysis
   getImpactAnalysis: (model: string, column?: string) => {

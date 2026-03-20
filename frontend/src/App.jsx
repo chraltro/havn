@@ -32,6 +32,8 @@ import ModelNotebookView from "./ModelNotebookView";
 import NewModelDialog from "./NewModelDialog";
 import GitPanel from "./GitPanel";
 import AgentSidebar from "./AgentSidebar";
+import CommandPalette from "./CommandPalette";
+import FocusTrap from "./FocusTrap";
 import { useAuth } from "./AuthContext";
 import { WarehouseProvider, useWarehouse } from "./WarehouseContext";
 import { schemaCompare } from "./schemaOrder";
@@ -402,6 +404,9 @@ function AppContent() {
   // Agent sidebar state
   const [agentSidebarOpen, setAgentSidebarOpen] = useState(false);
 
+  // Command palette state
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
   // Delete confirmation dialog state
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const deleteResolveRef = useRef(null);
@@ -459,9 +464,15 @@ function AppContent() {
     setHintTrigger("tabSwitchCount", tabSwitchCountRef.current);
   }
 
-  // Keyboard shortcuts: Alt+1..5 for sections
+  // Keyboard shortcuts: Alt+1..5 for sections, Ctrl/Cmd+K for command palette
   useEffect(() => {
     function handleKeyDown(e) {
+      // Ctrl+K / Cmd+K — command palette
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+        return;
+      }
       if (!e.altKey) return;
       if (e.ctrlKey || e.metaKey || e.shiftKey) return;
       const num = parseInt(e.key);
@@ -495,8 +506,36 @@ function AppContent() {
     }
     try {
       const data = await api.readFile(path);
+      const content = data.content || "";
+
+      // Binary file check: look for null bytes in first 1000 chars
+      const sample = content.substring(0, 1000);
+      if (sample.indexOf("\0") !== -1) {
+        addOutput("warn", "This appears to be a binary file and cannot be opened in the editor.");
+        return;
+      }
+
+      const sizeMB = (content.length / 1_000_000).toFixed(1);
+
+      // Hard limit: refuse files > 10MB
+      if (content.length > 10_000_000) {
+        addOutput("error", `This file is too large to edit (${sizeMB}MB). Use an external editor or the query panel to inspect the data.`);
+        return;
+      }
+
+      // Soft limit: warn for files > 1MB
+      if (content.length > 1_000_000) {
+        const ok = await showConfirm(
+          "Large file",
+          `This file is large (${sizeMB}MB). Large files may slow down the editor. Open anyway?`,
+          "Open anyway",
+          false
+        );
+        if (!ok) return;
+      }
+
       setActiveFile(path);
-      setFileContent(data.content);
+      setFileContent(content);
       setFileLang(data.language);
       setDirty(false);
       setPreview(null);
@@ -816,7 +855,7 @@ function AppContent() {
               <span style={styles.userName}>{currentUser.display_name || currentUser.username}</span>
               <span style={styles.userRole}>{currentUser.role}</span>
               {currentUser.username !== "local" && (
-                <button onClick={handleLogout} style={styles.logoutBtn}>Logout</button>
+                <button onClick={handleLogout} style={styles.logoutBtn} aria-label="Logout">Logout</button>
               )}
             </div>
           )}
@@ -825,7 +864,7 @@ function AppContent() {
 
       <div style={styles.main}>
         {/* Sidebar */}
-        <aside style={{ ...styles.sidebar, width: sidebarWidth }} data-havn-guide="sidebar">
+        <aside style={{ ...styles.sidebar, width: sidebarWidth }} data-havn-guide="sidebar" role="navigation" aria-label="File browser">
           <div style={styles.sidebarPane}>
             <div style={styles.sidebarSectionHeader}>
               <span>FILES</span>
@@ -939,7 +978,7 @@ function AppContent() {
                           <span>
                             {previewRunning ? "Running\u2026" : previewError ? "Error" : `${preview.rows.length} row${preview.rows.length !== 1 ? "s" : ""}, ${preview.columns.length} col${preview.columns.length !== 1 ? "s" : ""}`}
                           </span>
-                          <button onClick={() => { setPreview(null); setPreviewError(null); }} style={{ background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", lineHeight: 1 }}>{"\u00D7"}</button>
+                          <button onClick={() => { setPreview(null); setPreviewError(null); }} style={{ background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", lineHeight: 1 }} aria-label="Close preview">{"\u00D7"}</button>
                         </div>
                         <div style={{ flex: 1, overflow: "auto" }}>
                           {previewError
@@ -1004,7 +1043,7 @@ function AppContent() {
               onResize={(d) => onAgentResize(-d)}
               onResizeStart={onAgentResizeStart}
             />
-            <div style={{ ...styles.agentPanel, width: agentWidth }}>
+            <div style={{ ...styles.agentPanel, width: agentWidth }} aria-label="Agent">
               <AgentSidebar
                 isOpen={agentSidebarOpen}
                 onToggle={() => setAgentSidebarOpen(false)}
@@ -1020,11 +1059,12 @@ function AppContent() {
       <Hint onNavigate={navigateToTab} />
       <GuideTour steps={GUIDE_STEPS} onComplete={handleGuideComplete} isOpen={guideOpen} />
 
-      {/* Delete confirmation dialog */}
-      {deleteConfirm && (
-        <div style={dcStyles.overlay} onClick={() => resolveDeleteConfirm("cancel")}>
+      {/* Dialog priority system: only one dialog visible at a time */}
+      {/* Priority: delete > agent > confirm (highest to lowest) */}
+      {deleteConfirm && !agentConflict ? (
+        <FocusTrap labelledBy="havn-delete-dialog-title" style={dcStyles.overlay} onClick={() => resolveDeleteConfirm("cancel")}>
           <div style={dcStyles.dialog} onClick={(e) => e.stopPropagation()}>
-            <div style={dcStyles.title}>Delete {deleteConfirm.path}?</div>
+            <div id="havn-delete-dialog-title" style={dcStyles.title}>Delete {deleteConfirm.path}?</div>
             {deleteConfirm.hasObject ? (
               <>
                 <div style={dcStyles.body}>
@@ -1046,28 +1086,11 @@ function AppContent() {
               </>
             )}
           </div>
-        </div>
-      )}
-
-      {/* Generic confirm dialog */}
-      {confirmDialog && (
-        <div style={dcStyles.overlay} onClick={() => resolveConfirm(false)}>
+        </FocusTrap>
+      ) : agentConflict ? (
+        <FocusTrap labelledBy="havn-agent-conflict-dialog-title" style={dcStyles.overlay} onClick={() => resolveAgentConflict("keep")}>
           <div style={dcStyles.dialog} onClick={(e) => e.stopPropagation()}>
-            <div style={dcStyles.title}>{confirmDialog.title}</div>
-            <div style={dcStyles.body}>{confirmDialog.body}</div>
-            <div style={dcStyles.footer}>
-              <button onClick={() => resolveConfirm(false)} style={dcStyles.btnCancel}>Cancel</button>
-              <button onClick={() => resolveConfirm(true)} style={confirmDialog.danger ? dcStyles.btnDanger : dcStyles.btnSecondary}>{confirmDialog.confirmLabel}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Agent file conflict dialog */}
-      {agentConflict && (
-        <div style={dcStyles.overlay} onClick={() => resolveAgentConflict("keep")}>
-          <div style={dcStyles.dialog} onClick={(e) => e.stopPropagation()}>
-            <div style={dcStyles.title}>Agent edited {agentConflict.path}</div>
+            <div id="havn-agent-conflict-dialog-title" style={dcStyles.title}>Agent edited {agentConflict.path}</div>
             <div style={dcStyles.body}>
               You have unsaved changes to this file. Load the agent's version? Your unsaved changes will be lost.
             </div>
@@ -1076,8 +1099,19 @@ function AppContent() {
               <button onClick={() => resolveAgentConflict("load")} style={dcStyles.btnDanger}>Load agent version</button>
             </div>
           </div>
-        </div>
-      )}
+        </FocusTrap>
+      ) : confirmDialog ? (
+        <FocusTrap labelledBy="havn-confirm-dialog-title" style={dcStyles.overlay} onClick={() => resolveConfirm(false)}>
+          <div style={dcStyles.dialog} onClick={(e) => e.stopPropagation()}>
+            <div id="havn-confirm-dialog-title" style={dcStyles.title}>{confirmDialog.title}</div>
+            <div style={dcStyles.body}>{confirmDialog.body}</div>
+            <div style={dcStyles.footer}>
+              <button onClick={() => resolveConfirm(false)} style={dcStyles.btnCancel}>Cancel</button>
+              <button onClick={() => resolveConfirm(true)} style={confirmDialog.danger ? dcStyles.btnDanger : dcStyles.btnSecondary}>{confirmDialog.confirmLabel}</button>
+            </div>
+          </div>
+        </FocusTrap>
+      ) : null}
 
       {/* Model notebook view overlay */}
       {modelNotebookName && (
@@ -1102,6 +1136,18 @@ function AppContent() {
           }}
         />
       )}
+
+      {/* Command palette (Ctrl+K / Cmd+K) */}
+      <CommandPalette
+        isOpen={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        files={files}
+        tables={tables}
+        streams={streams}
+        onOpenFile={(path) => { openFile(path); }}
+        onNavigate={(tab) => { navigateToTab(tab); }}
+        onRunStream={(name) => { runStream(name); }}
+      />
     </div>
   );
 }
