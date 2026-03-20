@@ -30,12 +30,13 @@ class HubSpotConnector(BaseConnector):
     default_schedule = "0 */6 * * *"
 
     params = [
-        ParamSpec("api_key", "HubSpot private app access token", secret=True),
+        ParamSpec("api_key", "HubSpot private app access token", secret=True, example="pat-na1-xxx"),
         ParamSpec(
             "objects",
             "Comma-separated objects to sync (default: contacts,companies,deals)",
             required=False,
             default="contacts,companies,deals",
+            example="contacts,companies,deals",
         ),
     ]
 

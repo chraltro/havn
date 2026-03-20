@@ -683,8 +683,178 @@ export default function QualityPanel() {
                 )}
               </>
             )}
+
+            {/* --- ANOMALIES --- */}
+            {tab === 'Anomalies' && (
+              <>
+                <div style={s.toolbar}>
+                  <input style={s.filterInput} placeholder="Filter by model or metric..." value={anomalyFilter} onChange={e => setAnomalyFilter(e.target.value)} />
+                  <span style={s.count}>{filteredAnomalies.length} anomal{filteredAnomalies.length !== 1 ? 'ies' : 'y'}</span>
+                </div>
+                {filteredAnomalies.length === 0 ? (
+                  <div style={s.emptyState}>No anomalies detected. Anomalies appear when model metrics deviate significantly from their historical baselines after 3+ runs.</div>
+                ) : (
+                  <table style={s.table}>
+                    <thead><tr>
+                      <SortTh label="Model" sortKey="model" current={anomalySort.sortKey} dir={anomalySort.sortDir} onToggle={anomalySort.toggle} style={s.th} />
+                      <SortTh label="Metric" sortKey="metric" current={anomalySort.sortKey} dir={anomalySort.sortDir} onToggle={anomalySort.toggle} style={s.th} />
+                      <th style={s.th}>Current vs Expected</th>
+                      <SortTh label="Z-Score" sortKey="z_score" current={anomalySort.sortKey} dir={anomalySort.sortDir} onToggle={anomalySort.toggle} style={s.th} />
+                      <th style={s.th}>Direction</th>
+                      <SortTh label="Detected" sortKey="detected_at" current={anomalySort.sortKey} dir={anomalySort.sortDir} onToggle={anomalySort.toggle} style={s.th} />
+                    </tr></thead>
+                    <tbody>
+                      {filteredAnomalies.map((a, i) => {
+                        const isExpanded = expandedAnomaly === i;
+                        const histData = anomalyProfileHistory[a.model];
+                        return (
+                          <React.Fragment key={i}>
+                            <tr>
+                              <td style={s.td}>
+                                <span style={{ cursor: 'pointer', color: 'var(--havn-accent)' }} onClick={() => { setExpandedAnomaly(isExpanded ? null : i); if (!isExpanded) loadProfileHistory(a.model); }}>
+                                  {isExpanded ? '\u25BE' : '\u25B8'} {a.model}
+                                </span>
+                              </td>
+                              <td style={s.td}>
+                                <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text-secondary)' }}>
+                                  {a.metric === 'row_count' ? 'Row Count' : a.metric === 'null_percentage' ? 'Null %' : a.metric === 'distinct_count' ? 'Distinct Count' : a.metric}
+                                </span>
+                              </td>
+                              <td style={s.td}>
+                                <span style={{ fontFamily: 'var(--havn-font-mono)', fontSize: 12 }}>
+                                  {_fmtNum(a.current_value)} <span style={{ color: 'var(--havn-text-dim)' }}>vs {_fmtNum(a.mean_value)} +/- {_fmtNum(a.stddev_value)}</span>
+                                </span>
+                              </td>
+                              <td style={s.td}>
+                                <span style={{ fontWeight: 600, color: Math.abs(a.z_score) > 3 ? 'var(--havn-red)' : 'var(--havn-yellow)' }}>
+                                  {a.z_score > 0 ? '+' : ''}{a.z_score?.toFixed(1)}
+                                </span>
+                              </td>
+                              <td style={s.td}>
+                                <span style={{ fontSize: 16, color: a.direction === 'increase' ? 'var(--havn-red)' : 'var(--havn-green)' }}>
+                                  {a.direction === 'increase' ? '\u25B2' : '\u25BC'}
+                                </span>
+                              </td>
+                              <td style={s.td}>{a.detected_at || '\u2014'}</td>
+                            </tr>
+                            {isExpanded && (
+                              <tr>
+                                <td colSpan={6} style={{ padding: '8px 12px', background: 'var(--havn-bg-tertiary)' }}>
+                                  <div style={{ fontSize: 12, color: 'var(--havn-text-secondary)', marginBottom: 6 }}>{a.message}</div>
+                                  {histData ? (
+                                    <AnomalySparkline data={histData} metric={a.metric} currentValue={a.current_value} meanValue={a.mean_value} stddevValue={a.stddev_value} />
+                                  ) : (
+                                    <span style={{ fontSize: 12, color: 'var(--havn-text-dim)' }}>Loading history...</span>
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </>
+            )}
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Helper: format number compactly
+function _fmtNum(v) {
+  if (v == null) return '\u2014';
+  if (Math.abs(v) >= 1000000) return (v / 1000000).toFixed(1) + 'M';
+  if (Math.abs(v) >= 1000) return (v / 1000).toFixed(1) + 'K';
+  if (Number.isInteger(v)) return v.toLocaleString();
+  return v.toFixed(1);
+}
+
+// Sparkline component: shows last N profile values as colored dots with the anomaly highlighted
+function AnomalySparkline({ data, metric, currentValue, meanValue, stddevValue }) {
+  if (!data || data.length === 0) return <span style={{ fontSize: 12, color: 'var(--havn-text-dim)' }}>No history</span>;
+
+  // Extract the relevant metric values from profile history
+  const values = data.map(d => {
+    if (metric === 'row_count') return d.row_count ?? null;
+    if (metric === 'null_percentage') {
+      const pcts = d.null_percentages || {};
+      const vals = Object.values(pcts);
+      return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    }
+    if (metric === 'distinct_count') {
+      const cts = d.distinct_counts || {};
+      const vals = Object.values(cts);
+      return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    }
+    return null;
+  }).filter(v => v != null);
+
+  // Add current value at the end
+  const allValues = [...values, currentValue];
+  if (allValues.length === 0) return null;
+
+  const max = Math.max(...allValues);
+  const min = Math.min(...allValues);
+  const range = max - min || 1;
+
+  const dotSize = 6;
+  const width = Math.min(allValues.length * 14, 400);
+  const height = 40;
+  const padY = 6;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <svg width={width} height={height + padY * 2} style={{ display: 'block' }}>
+        {/* Mean line */}
+        {meanValue != null && (
+          <line
+            x1={0} x2={width}
+            y1={padY + (1 - (meanValue - min) / range) * height}
+            y2={padY + (1 - (meanValue - min) / range) * height}
+            stroke="var(--havn-text-dim)" strokeDasharray="3,3" strokeWidth={1} opacity={0.5}
+          />
+        )}
+        {/* Stddev band */}
+        {meanValue != null && stddevValue != null && (
+          <rect
+            x={0} width={width}
+            y={padY + (1 - Math.min((meanValue + stddevValue - min) / range, 1)) * height}
+            height={Math.max((2 * stddevValue / range) * height, 2)}
+            fill="var(--havn-accent)" opacity={0.08} rx={2}
+          />
+        )}
+        {/* Dots and connecting line */}
+        {allValues.map((v, idx) => {
+          const x = allValues.length === 1 ? width / 2 : (idx / (allValues.length - 1)) * (width - dotSize) + dotSize / 2;
+          const y = padY + (1 - (v - min) / range) * height;
+          const isLast = idx === allValues.length - 1;
+          const color = isLast ? 'var(--havn-red)' : 'var(--havn-accent)';
+          const r = isLast ? dotSize / 2 + 1 : dotSize / 2;
+
+          // Line to next dot
+          let line = null;
+          if (idx < allValues.length - 1) {
+            const nx = ((idx + 1) / (allValues.length - 1)) * (width - dotSize) + dotSize / 2;
+            const ny = padY + (1 - (allValues[idx + 1] - min) / range) * height;
+            line = <line x1={x} y1={y} x2={nx} y2={ny} stroke="var(--havn-accent)" strokeWidth={1} opacity={0.3} />;
+          }
+
+          return (
+            <React.Fragment key={idx}>
+              {line}
+              <circle cx={x} cy={y} r={r} fill={color} opacity={isLast ? 1 : 0.6} />
+            </React.Fragment>
+          );
+        })}
+      </svg>
+      <div style={{ fontSize: 11, color: 'var(--havn-text-dim)', lineHeight: 1.4 }}>
+        <div>{allValues.length} data points</div>
+        <div style={{ color: 'var(--havn-red)' }}>Current: {_fmtNum(currentValue)}</div>
+        <div>Mean: {_fmtNum(meanValue)}</div>
       </div>
     </div>
   );
@@ -694,7 +864,7 @@ const s = {
   container: { height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--havn-bg)' },
   header: { display: 'flex', flexDirection: 'column', padding: '8px 12px', borderBottom: '1px solid var(--havn-border)' },
   title: { fontSize: 13, fontWeight: 600, color: 'var(--havn-text)' },
-  cards: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 },
+  cards: { display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 16 },
   card: { background: 'var(--havn-bg-secondary)', border: '1px solid var(--havn-border)', borderRadius: 8, padding: '12px 16px' },
   cardLabel: { fontSize: 11, color: 'var(--havn-text-secondary)', textTransform: 'uppercase', marginBottom: 4 },
   cardValue: { fontSize: 24, fontWeight: 700, color: 'var(--havn-text)' },
