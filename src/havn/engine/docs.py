@@ -98,13 +98,17 @@ def generate_docs(
                     lines.append(f"**Depends on:** {deps}\n")
                 lines.append(f"**Materialized as:** {model.materialized}\n")
 
-            # Row count for tables
+            # Row count for tables — use cached data, never live COUNT(*)
             if kind == "TABLE":
                 try:
-                    count = conn.execute(f"SELECT count(*) FROM {full_name}").fetchone()[0]
-                    lines.append(f"**Row count:** {count:,}\n")
+                    cached = conn.execute(
+                        "SELECT row_count FROM _dp_internal.model_state WHERE schema_name = ? AND model_name = ? AND row_count IS NOT NULL",
+                        [schema_name, table_name],
+                    ).fetchone()
+                    if cached:
+                        lines.append(f"**Row count:** {cached[0]:,}\n")
                 except Exception as e:
-                    logger.debug("Could not get table stats: %s", e)
+                    logger.debug("Could not get cached row count: %s", e)
 
             # Columns
             cols = conn.execute("""
@@ -245,15 +249,18 @@ def generate_structured_docs(
             kind = "view" if table_type == "VIEW" else "table"
             model = model_map.get(full_name)
 
-            # Row count
+            # Row count — always use cached data, never live COUNT(*)
             row_count = None
             if kind == "table":
                 try:
-                    row_count = conn.execute(
-                        f"SELECT count(*) FROM {full_name}"
-                    ).fetchone()[0]
+                    cached = conn.execute(
+                        "SELECT row_count FROM _dp_internal.model_state WHERE schema_name = ? AND model_name = ? AND row_count IS NOT NULL",
+                        [schema_name, table_name],
+                    ).fetchone()
+                    if cached:
+                        row_count = cached[0]
                 except Exception as e:
-                    logger.debug("Could not get table stats for JSON: %s", e)
+                    logger.debug("Could not get cached row count: %s", e)
 
             # Columns
             cols_raw = conn.execute("""
