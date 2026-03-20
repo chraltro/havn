@@ -362,13 +362,17 @@ def get_overview(request: Request, conn: DbConnReadOnly) -> dict:
                 schema_map[schema]["views"] += 1
             else:
                 schema_map[schema]["tables"] += 1
-                try:
-                    row_count = conn.execute(
-                        f'SELECT COUNT(*) FROM "{schema}"."{table_name}"'
-                    ).fetchone()[0]
-                    schema_map[schema]["total_rows"] += row_count
-                except Exception:
-                    pass
+
+        # Use cached row counts from model_state — never live COUNT(*)
+        try:
+            cached_rows = conn.execute(
+                "SELECT schema_name, model_name, row_count FROM _dp_internal.model_state WHERE row_count IS NOT NULL"
+            ).fetchall()
+            for s, t, rc in cached_rows:
+                if s in schema_map:
+                    schema_map[s]["total_rows"] += rc
+        except Exception:
+            pass
 
         SCHEMA_ORDER = ["landing", "bronze", "silver", "gold"]
         sorted_schemas = sorted(
