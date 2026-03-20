@@ -375,6 +375,12 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
   const [dagSearch, setDagSearch] = useState("");
   const [selectedNode, setSelectedNode] = useState(null);
 
+  // Column lineage state
+  const [columnLineage, setColumnLineage] = useState(null); // {model, columns, depends_on}
+  const [highlightedColumn, setHighlightedColumn] = useState(null); // column name being traced
+  const [columnEdgeSet, setColumnEdgeSet] = useState(null); // Set of "source|target" edge keys
+  const [allLineage, setAllLineage] = useState(null); // cached result of getAllLineage
+
   // Zoom & pan state
   const [scale, setScale] = useState(1.0);
   const [offsetX, setOffsetX] = useState(0);
@@ -394,6 +400,69 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
     api.getDAG().then(setDag).catch((e) => setError(e.message || "Failed to load DAG"));
     setHintTrigger("dagOpened", true);
   }, []);
+
+  // Fetch column lineage when a node is selected (non-rewind mode)
+  useEffect(() => {
+    if (!selectedNode || rewindMode) { setColumnLineage(null); setHighlightedColumn(null); setColumnEdgeSet(null); return; }
+    // Only fetch for transform models (not ingest/export scripts)
+    const node = dag?.nodes?.find(n => n.id === selectedNode);
+    if (!node || node.id.startsWith("script:")) { setColumnLineage(null); return; }
+    api.getLineage(selectedNode).then(setColumnLineage).catch(() => setColumnLineage(null));
+  }, [selectedNode, rewindMode, dag]);
+
+  // When a column is highlighted, compute which edges carry it
+  useEffect(() => {
+    if (!highlightedColumn || !columnLineage || !dag) { setColumnEdgeSet(null); return; }
+    // Find which source tables this column comes from
+    const sources = columnLineage.columns?.[highlightedColumn] || [];
+    const sourceTables = new Set(sources.map(s => s.source_table));
+    // Highlight edges from those source tables to this model
+    const edgeKeys = new Set();
+    const modelId = columnLineage.model;
+    // Direct edges from sources to this model
+    for (const e of dag.edges || []) {
+      if (e.target === modelId && sourceTables.has(e.source)) {
+        edgeKeys.add(`${e.source}|${e.target}`);
+      }
+    }
+    // Also trace upstream: for each source table, find edges that feed into it
+    // Use allLineage if available for deeper tracing
+    if (allLineage) {
+      const visited = new Set([modelId]);
+      const queue = [...sourceTables];
+      while (queue.length > 0) {
+        const table = queue.shift();
+        if (visited.has(table)) continue;
+        visited.add(table);
+        const tLineage = allLineage.find(l => l.model === table);
+        if (!tLineage) continue;
+        // Find columns in this table that feed into our highlighted column
+        for (const [col, srcs] of Object.entries(tLineage.columns || {})) {
+          // Check if this column is one of the source columns for our highlighted column
+          const isRelevant = sources.some(s => s.source_table === table && s.source_column === col) ||
+            [...sourceTables].some(st => st === table);
+          if (isRelevant) {
+            for (const s of srcs) {
+              for (const e of dag.edges || []) {
+                if (e.target === table && e.source === s.source_table) {
+                  edgeKeys.add(`${e.source}|${e.target}`);
+                  if (!visited.has(s.source_table)) queue.push(s.source_table);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    setColumnEdgeSet(edgeKeys.size > 0 ? edgeKeys : null);
+  }, [highlightedColumn, columnLineage, dag, allLineage]);
+
+  // Lazy-load all lineage when a column is first highlighted
+  useEffect(() => {
+    if (highlightedColumn && !allLineage) {
+      api.getAllLineage().then(setAllLineage).catch(() => {});
+    }
+  }, [highlightedColumn, allLineage]);
 
   // Load rewind data when entering rewind mode
   useEffect(() => {
@@ -523,10 +592,12 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
       const to = positions[e.target];
       if (!from || !to) continue;
 
-      const isHighlighted = lineageSet ? (lineageSet.has(e.source) && lineageSet.has(e.target)) : false;
-      ctx.strokeStyle = isHighlighted ? getCV("--havn-accent") : getCV("--havn-border-light");
-      ctx.lineWidth = isHighlighted ? 2 : 1.5;
-      ctx.globalAlpha = isHighlighted ? 1 : (hovered ? 0.3 : 0.8);
+      const edgeKey = `${e.source}|${e.target}`;
+      const isColumnHighlighted = columnEdgeSet ? columnEdgeSet.has(edgeKey) : false;
+      const isHighlighted = isColumnHighlighted || (lineageSet ? (lineageSet.has(e.source) && lineageSet.has(e.target)) : false);
+      ctx.strokeStyle = isColumnHighlighted ? getCV("--havn-purple") : isHighlighted ? getCV("--havn-accent") : getCV("--havn-border-light");
+      ctx.lineWidth = isColumnHighlighted ? 3 : isHighlighted ? 2 : 1.5;
+      ctx.globalAlpha = isColumnHighlighted ? 1 : isHighlighted ? 1 : (columnEdgeSet ? 0.15 : (hovered ? 0.3 : 0.8));
 
       const x1 = from.x + NODE_W;
       const y1 = from.y + NODE_H / 2;
@@ -607,7 +678,15 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
       const snap = rewindMode ? currentSnaps[n.id] : null;
       const prevSnap = rewindMode ? prevSnaps[n.id] : null;
 
-      if (dagSearch && !isSearchMatch) {
+      // Compute if node is in the column trace path
+      const isInColumnTrace = columnEdgeSet ? (
+        n.id === selectedNode ||
+        [...columnEdgeSet].some(k => { const [s, t] = k.split("|"); return s === n.id || t === n.id; })
+      ) : false;
+
+      if (columnEdgeSet && !isInColumnTrace && !isHovered) {
+        ctx.globalAlpha = 0.15;
+      } else if (dagSearch && !isSearchMatch) {
         ctx.globalAlpha = 0.15;
       } else if (lineageSet && !isHovered) {
         ctx.globalAlpha = lineageSet.has(n.id) ? 1 : 0.25;
@@ -760,21 +839,35 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
     }
   }
 
+  const lastClickRef = useRef({ time: 0, nodeId: null });
+
   function handleClick(e) {
     if (!layout || !canvasRef.current) return;
-    // Don't trigger click if we were panning
     const { mx, my } = screenToDAG(e);
     const node = findNodeAt(mx, my);
 
     if (node) {
+      const now = Date.now();
+      const last = lastClickRef.current;
+      // Double-click: open file
+      if (last.nodeId === node.id && now - last.time < 400) {
+        if (onOpenFile && node.path) onOpenFile(node.path);
+        lastClickRef.current = { time: 0, nodeId: null };
+        return;
+      }
+      lastClickRef.current = { time: now, nodeId: node.id };
+
       if (rewindMode) {
         setSelectedNode(selectedNode === node.id ? null : node.id);
-      } else if (onOpenFile && node.path) {
-        onOpenFile(node.path);
+      } else {
+        // Single click: select node to show column lineage panel
+        setSelectedNode(selectedNode === node.id ? null : node.id);
+        setHighlightedColumn(null);
       }
       return;
     }
     setSelectedNode(null);
+    setHighlightedColumn(null);
   }
 
   function handleWheel(e) {
@@ -1028,6 +1121,55 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
           </div>
         </div>
 
+        {/* Column lineage panel */}
+        {!rewindMode && selectedNode && columnLineage && (
+          <div style={styles.lineagePanel}>
+            <div style={styles.lineagePanelHeader}>
+              <span style={styles.lineagePanelTitle}>{selectedNode}</span>
+              <div style={{ display: "flex", gap: 4 }}>
+                {dag?.nodes?.find(n => n.id === selectedNode)?.path && (
+                  <button onClick={() => onOpenFile(dag.nodes.find(n => n.id === selectedNode).path)} style={styles.lineageOpenBtn}>Open</button>
+                )}
+                <button onClick={() => { setSelectedNode(null); setHighlightedColumn(null); }} style={styles.lineageCloseBtn}>&times;</button>
+              </div>
+            </div>
+            <div style={styles.lineagePanelLabel}>Column Lineage</div>
+            <div style={styles.lineagePanelBody}>
+              {Object.keys(columnLineage.columns || {}).length === 0 && (
+                <div style={styles.lineageEmpty}>No column lineage data available</div>
+              )}
+              {Object.entries(columnLineage.columns || {}).map(([col, sources]) => (
+                <div key={col}>
+                  <button
+                    onClick={() => setHighlightedColumn(highlightedColumn === col ? null : col)}
+                    style={{
+                      ...styles.lineageColBtn,
+                      background: highlightedColumn === col ? "color-mix(in srgb, var(--havn-purple) 15%, transparent)" : "none",
+                      color: highlightedColumn === col ? "var(--havn-purple)" : "var(--havn-text)",
+                      borderLeft: highlightedColumn === col ? "2px solid var(--havn-purple)" : "2px solid transparent",
+                    }}
+                  >
+                    {col}
+                    <span style={styles.lineageColArrow}>{highlightedColumn === col ? "\u25BC" : "\u25B8"}</span>
+                  </button>
+                  {highlightedColumn === col && sources.length > 0 && (
+                    <div style={styles.lineageSources}>
+                      {sources.map((s, i) => (
+                        <div key={i} style={styles.lineageSourceRow}>
+                          <span style={styles.lineageSourceArrow}>&larr;</span>
+                          <span style={styles.lineageSourceTable}>{s.source_table}</span>
+                          <span style={styles.lineageSourceDot}>.</span>
+                          <span style={styles.lineageSourceCol}>{s.source_column}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Rewind detail panel */}
         {rewindMode && selectedNode && currentRun && (
           <DetailPanel
@@ -1062,4 +1204,22 @@ const styles = {
   zoomControls: { position: "absolute", top: 8, right: 8, display: "flex", gap: 4, alignItems: "center", background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius-lg)", padding: "2px 4px", zIndex: 10 },
   zoomBtn: { background: "none", border: "1px solid var(--havn-border-light)", borderRadius: 4, color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: 12, fontWeight: 600, width: 28, height: 24, display: "flex", alignItems: "center", justifyContent: "center" },
   zoomPct: { fontSize: 10, color: "var(--havn-text-dim)", minWidth: 32, textAlign: "center", fontWeight: 500 },
+
+  // Column lineage panel
+  lineagePanel: { width: 280, borderLeft: "1px solid var(--havn-border)", background: "var(--havn-bg-secondary)", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0 },
+  lineagePanelHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderBottom: "1px solid var(--havn-border)", gap: 8 },
+  lineagePanelTitle: { fontSize: 12, fontWeight: 600, color: "var(--havn-accent)", fontFamily: "var(--havn-font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  lineagePanelLabel: { fontSize: 10, fontWeight: 600, color: "var(--havn-text-dim)", textTransform: "uppercase", letterSpacing: "0.5px", padding: "8px 12px 4px" },
+  lineagePanelBody: { flex: 1, overflow: "auto", padding: "0 0 8px" },
+  lineageEmpty: { padding: "16px 12px", color: "var(--havn-text-dim)", fontSize: 11, fontStyle: "italic" },
+  lineageColBtn: { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "4px 12px", border: "none", cursor: "pointer", fontSize: 12, fontFamily: "var(--havn-font-mono)", fontWeight: 500, textAlign: "left" },
+  lineageColArrow: { fontSize: 9, color: "var(--havn-text-dim)", flexShrink: 0, marginLeft: 4 },
+  lineageSources: { padding: "2px 12px 6px 24px" },
+  lineageSourceRow: { display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontFamily: "var(--havn-font-mono)", padding: "1px 0", color: "var(--havn-text-secondary)" },
+  lineageSourceArrow: { color: "var(--havn-text-dim)", fontSize: 10, flexShrink: 0 },
+  lineageSourceTable: { color: "var(--havn-purple)", fontWeight: 500 },
+  lineageSourceDot: { color: "var(--havn-text-dim)" },
+  lineageSourceCol: { color: "var(--havn-text-secondary)" },
+  lineageOpenBtn: { background: "var(--havn-btn-bg)", border: "1px solid var(--havn-btn-border)", borderRadius: "var(--havn-radius)", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: 11, padding: "2px 8px", fontWeight: 500 },
+  lineageCloseBtn: { background: "none", border: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 2px" },
 };
