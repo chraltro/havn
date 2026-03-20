@@ -29,6 +29,12 @@ class TestAlertRequest(BaseModel):
     webhook_url: str | None = None
 
 
+class AnomalyConfigUpdate(BaseModel):
+    enabled: bool | None = None
+    lookback: int | None = Field(None, ge=3, le=1000)
+    threshold: float | None = Field(None, gt=0.0, le=10.0)
+
+
 # --- Freshness ---
 
 
@@ -234,6 +240,8 @@ def list_contracts(request: Request) -> list[dict]:
             "description": c.description,
             "severity": c.severity,
             "assertions": c.assertions,
+            "notify": c.notify,
+            "escalate_after": c.escalate_after,
             "path": str(c.path) if c.path else None,
         }
         for c in contracts
@@ -261,6 +269,7 @@ def run_contracts_endpoint(request: Request, conn: DbConn) -> dict:
                 "duration_ms": r.duration_ms,
                 "error": r.error,
                 "assertions": r.results,
+                "consecutive_failures": r.consecutive_failures,
             }
             for r in results
         ],
@@ -276,3 +285,174 @@ def get_contracts_history(
     from havn.engine.contracts import get_contract_history
 
     return get_contract_history(conn, limit=100)
+
+
+@router.get("/api/contracts/{model_name}/history")
+def get_contract_model_history(
+    request: Request, model_name: str, conn: DbConnReadOnly
+) -> list[dict]:
+    """Get contract evaluation history for a specific model with trends."""
+    _require_permission(request, "read")
+    from havn.engine.contracts import get_contract_model_history
+
+    return get_contract_model_history(conn, model_name, limit=50)
+
+
+# --- Anomaly Detection ---
+
+
+@router.get("/api/anomalies")
+def get_anomalies(
+    request: Request,
+    conn: DbConnReadOnly,
+    limit: int = 100,
+    model: str | None = None,
+) -> list[dict]:
+    """List recent anomalies, optionally filtered by model."""
+    _require_permission(request, "read")
+    ensure_meta_table(conn)
+    if model:
+        rows = conn.execute(
+            """
+            SELECT model_name, metric, current_value, mean_value, stddev_value,
+                   z_score, direction, message, detected_at
+            FROM _dp_internal.anomaly_log
+            WHERE model_name = ?
+            ORDER BY detected_at DESC
+            LIMIT ?
+            """,
+            [model, limit],
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT model_name, metric, current_value, mean_value, stddev_value,
+                   z_score, direction, message, detected_at
+            FROM _dp_internal.anomaly_log
+            ORDER BY detected_at DESC
+            LIMIT ?
+            """,
+            [limit],
+        ).fetchall()
+    return [
+        {
+            "model": r[0],
+            "metric": r[1],
+            "current_value": r[2],
+            "mean_value": r[3],
+            "stddev_value": r[4],
+            "z_score": r[5],
+            "direction": r[6],
+            "message": r[7],
+            "detected_at": str(r[8]) if r[8] else None,
+        }
+        for r in rows
+    ]
+
+
+@router.get("/api/anomalies/config")
+def get_anomaly_config(request: Request) -> dict:
+    """Get current anomaly detection configuration."""
+    _require_permission(request, "read")
+    config = _get_config()
+    ad = config.quality.anomaly_detection
+    return {
+        "enabled": ad.enabled,
+        "lookback": ad.lookback,
+        "threshold": ad.threshold,
+        "notify": ad.notify,
+    }
+
+
+@router.put("/api/anomalies/config")
+def update_anomaly_config(request: Request, req: AnomalyConfigUpdate) -> dict:
+    """Update anomaly detection settings in project.yml."""
+    _require_permission(request, "write")
+    import yaml
+
+    project_dir = _get_project_dir()
+    config_path = project_dir / "project.yml"
+    if not config_path.exists():
+        raise HTTPException(404, "project.yml not found")
+
+    raw = yaml.safe_load(config_path.read_text()) or {}
+    quality = raw.setdefault("quality", {})
+    anomaly = quality.setdefault("anomaly_detection", {})
+
+    if req.enabled is not None:
+        anomaly["enabled"] = req.enabled
+    if req.lookback is not None:
+        anomaly["lookback"] = req.lookback
+    if req.threshold is not None:
+        anomaly["threshold"] = req.threshold
+
+    config_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False))
+
+    return {
+        "status": "updated",
+        "enabled": anomaly.get("enabled", True),
+        "lookback": anomaly.get("lookback", 30),
+        "threshold": anomaly.get("threshold", 2.0),
+    }
+
+
+@router.get("/api/anomalies/{model_name}")
+def get_model_anomalies(
+    request: Request, model_name: str, conn: DbConnReadOnly, limit: int = 50
+) -> list[dict]:
+    """Get anomalies for a specific model."""
+    _require_permission(request, "read")
+    ensure_meta_table(conn)
+    rows = conn.execute(
+        """
+        SELECT model_name, metric, current_value, mean_value, stddev_value,
+               z_score, direction, message, detected_at
+        FROM _dp_internal.anomaly_log
+        WHERE model_name = ?
+        ORDER BY detected_at DESC
+        LIMIT ?
+        """,
+        [model_name, limit],
+    ).fetchall()
+    return [
+        {
+            "model": r[0],
+            "metric": r[1],
+            "current_value": r[2],
+            "mean_value": r[3],
+            "stddev_value": r[4],
+            "z_score": r[5],
+            "direction": r[6],
+            "message": r[7],
+            "detected_at": str(r[8]) if r[8] else None,
+        }
+        for r in rows
+    ]
+
+
+@router.get("/api/anomalies/{model_name}/history")
+def get_model_profile_history(
+    request: Request, model_name: str, conn: DbConnReadOnly, limit: int = 30
+) -> list[dict]:
+    """Get profile history for a model (for sparkline/trend visualization)."""
+    _require_permission(request, "read")
+    ensure_meta_table(conn)
+    rows = conn.execute(
+        """
+        SELECT row_count, null_percentages, distinct_counts, profiled_at
+        FROM _dp_internal.profile_history
+        WHERE model_path = ?
+        ORDER BY profiled_at ASC
+        LIMIT ?
+        """,
+        [model_name, limit],
+    ).fetchall()
+    return [
+        {
+            "row_count": r[0],
+            "null_percentages": json.loads(r[1]) if r[1] else {},
+            "distinct_counts": json.loads(r[2]) if r[2] else {},
+            "profiled_at": str(r[3]) if r[3] else None,
+        }
+        for r in rows
+    ]
