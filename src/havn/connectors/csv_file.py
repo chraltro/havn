@@ -21,9 +21,9 @@ class CSVConnector(BaseConnector):
     default_schedule = None  # typically one-shot
 
     params = [
-        ParamSpec("path", "File path or URL (supports CSV, Parquet, JSON)"),
-        ParamSpec("format", "File format: csv, parquet, json (auto-detected if omitted)", required=False),
-        ParamSpec("table_name", "Target table name", required=False),
+        ParamSpec("path", "File path or URL (supports CSV, Parquet, JSON)", param_type="path", example="/data/customers.csv"),
+        ParamSpec("format", "File format: csv, parquet, json (auto-detected if omitted)", required=False, param_type="enum", enum_values=["csv", "parquet", "json"], example="csv"),
+        ParamSpec("table_name", "Target table name", required=False, example="customers"),
     ]
 
     def test_connection(self, config: dict[str, Any]) -> dict:

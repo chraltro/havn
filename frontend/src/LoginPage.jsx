@@ -29,7 +29,7 @@ export default function LoginPage({ onLogin, needsSetup }) {
 
   return (
     <div style={st.backdrop}>
-      <form onSubmit={handleSubmit} style={st.card}>
+      <form onSubmit={handleSubmit} style={st.card} aria-label={needsSetup ? "Create admin account" : "Sign in"}>
         <div style={st.logo}>
           <img src="/logo.svg" alt="havn" width="48" height="48" style={{ marginBottom: "8px" }} />
           <div>havn</div>
@@ -38,12 +38,13 @@ export default function LoginPage({ onLogin, needsSetup }) {
           {needsSetup ? "Create your admin account" : "Sign in to your data platform"}
         </div>
 
-        {error && <div style={st.error}>{error}</div>}
+        {error && <div style={st.error} role="alert">{error}</div>}
 
         {needsSetup && (
           <div style={st.fieldGroup}>
-            <label style={st.label}>Display Name</label>
+            <label htmlFor="login-display-name" style={st.label}>Display Name</label>
             <input
+              id="login-display-name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="Your name"
@@ -52,26 +53,30 @@ export default function LoginPage({ onLogin, needsSetup }) {
           </div>
         )}
         <div style={st.fieldGroup}>
-          <label style={st.label}>Username</label>
+          <label htmlFor="login-username" style={st.label}>Username</label>
           <input
+            id="login-username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder="Enter username"
             style={st.input}
             autoFocus
+            aria-required="true"
           />
         </div>
         <div style={st.fieldGroup}>
-          <label style={st.label}>Password</label>
+          <label htmlFor="login-password" style={st.label}>Password</label>
           <input
+            id="login-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Enter password"
             type="password"
             style={st.input}
+            aria-required="true"
           />
         </div>
-        <button type="submit" disabled={loading || !username || !password} style={st.btn}>
+        <button type="submit" disabled={loading || !username || !password} style={st.btn} aria-label={needsSetup ? "Create account" : "Sign in"}>
           {loading ? "..." : needsSetup ? "Create Account" : "Sign In"}
         </button>
       </form>

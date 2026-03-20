@@ -21,12 +21,12 @@ class S3GCSConnector(BaseConnector):
     default_schedule = "0 6 * * *"
 
     params = [
-        ParamSpec("path", "Bucket path (s3://bucket/prefix or gs://bucket/prefix)"),
-        ParamSpec("format", "File format: csv, parquet, json (auto-detected if omitted)", required=False),
-        ParamSpec("table_name", "Target table name", required=False),
+        ParamSpec("path", "Bucket path (s3://bucket/prefix or gs://bucket/prefix)", pattern=r"^(s3|gs)://", example="s3://my-bucket/data/"),
+        ParamSpec("format", "File format: csv, parquet, json (auto-detected if omitted)", required=False, param_type="enum", enum_values=["csv", "parquet", "json"], example="parquet"),
+        ParamSpec("table_name", "Target table name", required=False, example="my_data"),
         ParamSpec("aws_access_key_id", "AWS access key ID", required=False, secret=True),
         ParamSpec("aws_secret_access_key", "AWS secret access key", required=False, secret=True),
-        ParamSpec("aws_region", "AWS region", required=False, default="us-east-1"),
+        ParamSpec("aws_region", "AWS region", required=False, default="us-east-1", example="eu-west-1"),
     ]
 
     def test_connection(self, config: dict[str, Any]) -> dict:
