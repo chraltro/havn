@@ -15,6 +15,7 @@ from havn.server.deps import (
     _get_project_dir,
     _require_permission,
     _validate_identifier,
+    get_db_readonly_optional,
 )
 
 logger = logging.getLogger("havn.server")
@@ -203,10 +204,10 @@ def discover_connector_endpoint(
 
 @router.post("/api/connectors/setup")
 def setup_connector_endpoint(
-    request: Request, req: ConnectorSetupRequest
+    request: Request, req: ConnectorSetupRequest, conn: DbConn
 ) -> dict:
     """Set up a new connector: test, generate script, update config."""
-    _require_permission(request, "execute")
+    user = _require_permission(request, "execute")
     import havn.connectors  # noqa: F401
     from havn.engine.connector import setup_connector
 
@@ -222,6 +223,20 @@ def setup_connector_endpoint(
         )
         if result["status"] == "error":
             raise HTTPException(400, result.get("error", "Setup failed"))
+        try:
+            from havn.engine.audit import log_audit
+
+            client_ip = request.client.host if request.client else None
+            log_audit(
+                conn,
+                user=user["username"],
+                action="connector_setup",
+                resource=req.connection_name,
+                detail=f"type={req.connector_type}",
+                ip_address=client_ip,
+            )
+        except Exception:
+            pass
         return result
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -244,9 +259,9 @@ def regenerate_connector_endpoint(
 
 
 @router.post("/api/connectors/sync/{connection_name}")
-def sync_connector_endpoint(request: Request, connection_name: str) -> dict:
+def sync_connector_endpoint(request: Request, connection_name: str, conn: DbConn) -> dict:
     """Run sync for a configured connector."""
-    _require_permission(request, "execute")
+    user = _require_permission(request, "execute")
     _validate_identifier(connection_name, "connection name")
     import havn.connectors  # noqa: F401
     from havn.engine.connector import sync_connector
@@ -254,6 +269,20 @@ def sync_connector_endpoint(request: Request, connection_name: str) -> dict:
     result = sync_connector(_get_project_dir(), connection_name)
     if result.get("status") == "error":
         raise HTTPException(400, result.get("error", "Sync failed"))
+    try:
+        from havn.engine.audit import log_audit
+
+        client_ip = request.client.host if request.client else None
+        log_audit(
+            conn,
+            user=user["username"],
+            action="connector_sync",
+            resource=connection_name,
+            detail=f"status={result.get('status', 'unknown')}",
+            ip_address=client_ip,
+        )
+    except Exception:
+        pass
     return result
 
 

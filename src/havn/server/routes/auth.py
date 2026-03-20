@@ -63,14 +63,24 @@ def login(request: Request, req: LoginRequest, conn: DbConn) -> dict:
     try:
         from havn.engine.audit import log_audit
 
-        log_audit(
-            conn,
-            user=req.username,
-            action="login",
-            resource="auth",
-            detail="success" if token else "failed",
-            ip_address=client_ip,
-        )
+        if token:
+            log_audit(
+                conn,
+                user=req.username,
+                action="login",
+                resource="auth",
+                detail="success",
+                ip_address=client_ip,
+            )
+        else:
+            log_audit(
+                conn,
+                user=req.username,
+                action="auth_failed",
+                resource="login",
+                detail="Invalid credentials",
+                ip_address=client_ip,
+            )
     except Exception:
         pass  # don't break login on audit failure
     if not token:
@@ -123,11 +133,26 @@ def create_user_endpoint(
     request: Request, req: CreateUserRequest, conn: DbConn
 ) -> dict:
     """Create a new user (admin only)."""
-    _require_permission(request, "manage_users")
+    admin = _require_permission(request, "manage_users")
     from havn.engine.auth import create_user
 
     try:
-        return create_user(conn, req.username, req.password, req.role, req.display_name)
+        result = create_user(conn, req.username, req.password, req.role, req.display_name)
+        try:
+            from havn.engine.audit import log_audit
+
+            client_ip = request.client.host if request.client else None
+            log_audit(
+                conn,
+                user=admin["username"],
+                action="user_create",
+                resource=req.username,
+                detail=f"role={req.role}",
+                ip_address=client_ip,
+            )
+        except Exception:
+            pass
+        return result
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -137,13 +162,34 @@ def update_user_endpoint(
     request: Request, username: str, req: UpdateUserRequest, conn: DbConn
 ) -> dict:
     """Update a user (admin only)."""
-    _require_permission(request, "manage_users")
+    admin = _require_permission(request, "manage_users")
     from havn.engine.auth import update_user
 
     try:
         found = update_user(conn, username, req.role, req.password, req.display_name)
         if not found:
             raise HTTPException(404, f"User '{username}' not found")
+        try:
+            from havn.engine.audit import log_audit
+
+            changes = []
+            if req.role:
+                changes.append(f"role={req.role}")
+            if req.password:
+                changes.append("password=changed")
+            if req.display_name is not None:
+                changes.append(f"display_name={req.display_name}")
+            client_ip = request.client.host if request.client else None
+            log_audit(
+                conn,
+                user=admin["username"],
+                action="user_update",
+                resource=username,
+                detail=", ".join(changes) if changes else "no changes",
+                ip_address=client_ip,
+            )
+        except Exception:
+            pass
         return {"status": "updated"}
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -152,12 +198,26 @@ def update_user_endpoint(
 @router.delete("/api/users/{username}")
 def delete_user_endpoint(request: Request, username: str, conn: DbConn) -> dict:
     """Delete a user (admin only)."""
-    _require_permission(request, "manage_users")
+    admin = _require_permission(request, "manage_users")
     from havn.engine.auth import delete_user
 
     found = delete_user(conn, username)
     if not found:
         raise HTTPException(404, f"User '{username}' not found")
+    try:
+        from havn.engine.audit import log_audit
+
+        client_ip = request.client.host if request.client else None
+        log_audit(
+            conn,
+            user=admin["username"],
+            action="user_delete",
+            resource=username,
+            detail="user deleted",
+            ip_address=client_ip,
+        )
+    except Exception:
+        pass
     return {"status": "deleted"}
 
 
@@ -174,22 +234,50 @@ def list_secrets(request: Request) -> list[dict]:
 
 
 @router.post("/api/secrets")
-def set_secret(request: Request, req: SetSecretRequest) -> dict:
+def set_secret(request: Request, req: SetSecretRequest, conn: DbConn) -> dict:
     """Set or update a secret."""
-    _require_permission(request, "manage_secrets")
+    admin = _require_permission(request, "manage_secrets")
     from havn.engine.secrets import set_secret as _set_secret
 
     _set_secret(_get_project_dir(), req.key, req.value)
+    try:
+        from havn.engine.audit import log_audit
+
+        client_ip = request.client.host if request.client else None
+        log_audit(
+            conn,
+            user=admin["username"],
+            action="secret_change",
+            resource=req.key,
+            detail="secret set/updated",
+            ip_address=client_ip,
+        )
+    except Exception:
+        pass
     return {"status": "set", "key": req.key}
 
 
 @router.delete("/api/secrets/{key}")
-def delete_secret(request: Request, key: str) -> dict:
+def delete_secret(request: Request, key: str, conn: DbConn) -> dict:
     """Delete a secret."""
-    _require_permission(request, "manage_secrets")
+    admin = _require_permission(request, "manage_secrets")
     from havn.engine.secrets import delete_secret as _delete_secret
 
     found = _delete_secret(_get_project_dir(), key)
     if not found:
         raise HTTPException(404, f"Secret '{key}' not found")
+    try:
+        from havn.engine.audit import log_audit
+
+        client_ip = request.client.host if request.client else None
+        log_audit(
+            conn,
+            user=admin["username"],
+            action="secret_change",
+            resource=key,
+            detail="secret deleted",
+            ip_address=client_ip,
+        )
+    except Exception:
+        pass
     return {"status": "deleted", "key": key}
