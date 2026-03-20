@@ -56,9 +56,13 @@ function createEventProcessor(
   const processor = (event: string, data: Record<string, unknown>) => {
     const serverTs = data.ts as number | undefined;
     switch (event) {
-      case "start":
+      case "start": {
         totalItems = (data.total as number) || 0;
+        const opLabel = data.label as string || data.stream as string || "Running";
+        addOutput("info", `${opLabel}...`, serverTs);
+        if (firstLineMsgRef) firstLineMsgRef.current = `${opLabel}...`;
         break;
+      }
       case "step_start":
         break;
       case "model_start": {
@@ -116,20 +120,112 @@ function createEventProcessor(
         if (status === "error" || status === "assertion_failed") hasError = true;
         break;
       }
+      case "lint_violation": {
+        const file = data.file as string;
+        const line = data.line as number;
+        const col = data.col as number;
+        const code = data.code as string;
+        const desc = data.description as string;
+        const fixable = data.fixable as boolean;
+        const tag = fixable === false ? " (unfixable)" : "";
+        addOutput("warn", `${file}:${line}:${col} [${code}] ${desc}${tag}`, serverTs);
+        break;
+      }
+      case "contract_result": {
+        const cr = data as Record<string, unknown>;
+        const contractName = cr.contract_name as string;
+        const model = cr.model as string;
+        const passed = cr.passed as boolean;
+        const assertions = (cr.assertions || []) as { expression: string; passed: boolean; detail: string }[];
+        const ruleCount = assertions.length;
+        const failedCount = assertions.filter(a => !a.passed).length;
+        const durMs = cr.duration_ms as number;
+        const crError = cr.error as string | undefined;
+
+        if (crError && ruleCount === 0) {
+          addOutput("warn", `SKIP  ${contractName} on ${model} — ${crError}`, serverTs);
+        } else if (passed) {
+          addOutput("info", `PASS  ${contractName} on ${model} -- ${ruleCount} rule${ruleCount !== 1 ? "s" : ""} passed [${durMs}ms]`, serverTs);
+        } else {
+          addOutput("error", `FAIL  ${contractName} on ${model} -- ${failedCount} of ${ruleCount} rule${ruleCount !== 1 ? "s" : ""} failed [${durMs}ms]`, serverTs);
+          for (const a of assertions) {
+            if (!a.passed) {
+              addOutput("error", `       ${a.expression}  -->  ${a.detail || "failed"}`, serverTs);
+            }
+          }
+          if (crError) addOutput("error", `       Error: ${crError}`, serverTs);
+        }
+        if (!passed) hasError = true;
+        break;
+      }
+      case "script_output": {
+        addOutput("log", data.line as string, serverTs);
+        break;
+      }
       case "complete": {
         gotComplete = true;
         const durS = (data.duration_seconds as number) || 0;
         const pipelineStatus = data.status as string;
+        const op = (data.operation as string) || "stream";
         const isCancelled = pipelineStatus === "cancelled";
-        const level = isCancelled ? "warn" : "info";
-        const preposition = isCancelled ? "after" : "in";
-        addOutput(level as OutputEntry["type"], `Pipeline ${pipelineStatus} ${preposition} ${durS}s`, serverTs);
+        const level = isCancelled ? "warn" : pipelineStatus === "failed" || pipelineStatus === "error" ? "error" : "info";
+
+        // Operation-specific completion messages
+        if (op === "lint") {
+          const lintErr = data.error as string | undefined;
+          if (lintErr) {
+            addOutput("error", lintErr, serverTs);
+          } else {
+            const count = data.count as number || 0;
+            const fixed = data.fixed as number || 0;
+            const isFix = data.fix as boolean;
+            if (isFix) {
+              const parts: string[] = [];
+              if (fixed > 0) parts.push(`${fixed} fixed`);
+              if (count > 0) parts.push(`${count} violation(s) remain (unfixable by SQLFluff)`);
+              addOutput("info", parts.length > 0 ? parts.join(", ") + "." : "All fixable violations resolved.", serverTs);
+            } else {
+              addOutput("info", count === 0 ? "No lint violations found." : `${count} violation(s) found.`, serverTs);
+            }
+          }
+          addOutput(level as OutputEntry["type"], `Lint completed in ${durS}s`, serverTs);
+        } else if (op === "contracts") {
+          const contractErr = data.error as string | undefined;
+          if (contractErr) {
+            addOutput("error", contractErr, serverTs);
+          } else {
+            const total = data.total as number || 0;
+            const passed = data.passed as number || 0;
+            const failed = data.failed as number || 0;
+            if (total === 0) {
+              addOutput("warn", "No contracts found. Create YAML files in contracts/ to get started.", serverTs);
+            } else if (failed === 0) {
+              addOutput("info", `Done: ${passed} contract${passed !== 1 ? "s" : ""} passed`, serverTs);
+            } else {
+              addOutput("error", `Done: ${failed} contract${failed !== 1 ? "s" : ""} failed, ${passed} passed`, serverTs);
+            }
+          }
+          addOutput(level as OutputEntry["type"], `Contracts completed in ${durS}s`, serverTs);
+        } else if (op === "script") {
+          const scriptPath = data.script_path as string || "";
+          const scriptErr = data.error as string;
+          if (scriptErr) addOutput("error", scriptErr, serverTs);
+          addOutput(level as OutputEntry["type"], `${scriptPath} ${pipelineStatus} in ${durS}s`, serverTs);
+        } else {
+          const genericErr = data.error as string | undefined;
+          if (genericErr) addOutput("error", genericErr, serverTs);
+          const preposition = isCancelled ? "after" : "in";
+          const opLabel = op === "transform" ? "Transform" : "Pipeline";
+          addOutput(level as OutputEntry["type"], `${opLabel} ${pipelineStatus} ${preposition} ${durS}s`, serverTs);
+        }
+
         setProgress(1);
         if (firstLineMsgRef) firstLineMsgRef.current = "";
-        onTablesChanged();
+        if (op === "transform" || op === "stream") onTablesChanged();
 
+        const summaryType = (op === "stream" || op === "transform" || op === "lint" || op === "script" || op === "contracts") ? op : "stream";
         const summary: RunSummary = {
-          type: "stream",
+          type: summaryType as RunSummary["type"],
           status: isCancelled ? "failed" : hasError ? "failed" : pipelineStatus === "failed" ? "failed" : "success",
           models,
           totalRows,
@@ -183,6 +279,11 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
   const firstLineMsgRef = useRef<string>("");
 
   // Persist output to sessionStorage
+  const outputRef = useRef(output);
+  outputRef.current = output;
+  const runSummaryRef = useRef(runSummary);
+  runSummaryRef.current = runSummary;
+
   useEffect(() => {
     try {
       const toSave = output.length > 500 ? output.slice(-500) : output;
@@ -198,15 +299,50 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
     } catch { /* ignore */ }
   }, [runSummary]);
 
-  // Reconnect to active pipeline on mount (handles page refresh)
+  // Force-persist on page unload (useEffect may not fire before unload)
+  useEffect(() => {
+    const handler = () => {
+      try {
+        const toSave = outputRef.current.length > 500 ? outputRef.current.slice(-500) : outputRef.current;
+        sessionStorage.setItem('havn_pipeline_output', JSON.stringify(toSave));
+        if (runSummaryRef.current) sessionStorage.setItem('havn_run_summary', JSON.stringify(runSummaryRef.current));
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, []);
+
+  // Clear output if server has restarted (boot time changed)
+  const bootCheckDone = useRef(false);
+  useEffect(() => {
+    if (bootCheckDone.current) return;
+    bootCheckDone.current = true;
+    fetch("/api/health").then(r => r.json()).then(d => {
+      const currentBoot = String(d.boot || "");
+      const lastBoot = sessionStorage.getItem("havn_server_boot");
+      if (currentBoot) sessionStorage.setItem("havn_server_boot", currentBoot);
+      if (lastBoot && lastBoot !== currentBoot) {
+        // Server restarted — clear all persisted output
+        setOutput([]);
+        setRunSummary(null);
+        sessionStorage.removeItem("havn_pipeline_output");
+        sessionStorage.removeItem("havn_run_summary");
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Reconnect to active operation on mount (handles page refresh)
   const reconnectAttempted = useRef(false);
   useEffect(() => {
     if (reconnectAttempted.current) return;
     reconnectAttempted.current = true;
 
     api.getActiveStream().then((data) => {
-      // If pipeline is running OR has finished with events to replay
+      // If no operation is running or has finished with events, nothing to do
       if (!data.running && !(data.finished && data.total_events > 0)) return;
+
+      // If operation already finished and we have saved output, keep it
+      if (!data.running && data.finished && output.length > 0) return;
 
       if (data.running) {
         setRunning(true);
@@ -241,6 +377,7 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
               const durS = active.duration_seconds ?? 0;
               const status = active.status ?? "success";
               processor("complete", {
+                operation: active.operation ?? "stream",
                 stream: active.stream_name,
                 status,
                 duration_seconds: durS,
@@ -290,91 +427,44 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
     sessionStorage.removeItem('havn_run_summary');
   }, []);
 
-  const runTransformAll = useCallback(async (force: boolean = false) => {
-    setRunning(true);
-    setRunSummary(null);
-    const firstMsg = `Running transform (force=${force})...`;
-    firstLineMsgRef.current = firstMsg;
-    addOutput("info", firstMsg);
-    try {
-      const data = await api.runTransform(null, force);
-      const models: { name: string; result: string }[] = [];
-      for (const [model, status] of Object.entries(data.results || {})) {
-        addOutput(status === "error" ? "error" : "info", `${model}: ${status}`);
-        models.push({ name: model, result: status });
-      }
-      onTablesChanged();
-
-      const summary: RunSummary = {
-        type: "transform",
-        status: models.some((m) => m.result === "error") ? "failed" : "success",
-        models,
-        totalRows: 0,
-        duration: 0,
-        errors: models.filter((m) => m.result === "error").length,
-      };
-      setRunSummary(summary);
-      if (summary.status === "success") onPipelineComplete?.();
-    } catch (e: unknown) {
-      addOutput("error", (e as Error).message);
-    } finally {
-      firstLineMsgRef.current = "";
-      setRunning(false);
-    }
-  }, [addOutput, onTablesChanged, onPipelineComplete]);
-
-  const runStream = useCallback(async (name: string, force: boolean = false) => {
+  // Shared helper: start a background operation and connect to SSE
+  const startAndConnect = useCallback((
+    startFn: () => Promise<{ status: string }>,
+    _label: string,
+  ): Promise<void> => {
     setRunning(true);
     setRunSummary(null);
     setProgress(0);
-    const firstMsg = `Running pipeline${force ? " (full refresh)" : ""}...`;
-    firstLineMsgRef.current = firstMsg;
-    addOutput("info", firstMsg);
 
     return new Promise<void>(async (resolve) => {
       try {
-        // 1. Start pipeline in background
-        const startResult = await api.startStream(name, force);
+        const startResult = await startFn();
         if (startResult.status === "already_running") {
-          addOutput("warn", "A pipeline is already running.");
+          addOutput("warn", "An operation is already running.");
           setRunning(false);
           resolve();
           return;
         }
 
-        // 2. Connect to SSE event stream from the beginning
         const processor = createEventProcessor(
-          addOutput,
-          setProgress,
-          setRunning,
-          setRunSummary,
-          onTablesChanged,
-          onPipelineComplete,
-          firstLineMsgRef,
-          resolve,
+          addOutput, setProgress, setRunning, setRunSummary,
+          onTablesChanged, onPipelineComplete, firstLineMsgRef, resolve,
         );
 
-        const { abort, done } = api.connectToStreamEvents(0, processor);
-        // Store abort for potential cancellation
-        void abort;
-
-        // After SSE stream ends, check if we got the complete event.
+        const { done } = api.connectToStreamEvents(0, processor);
         done.then(() => {
           if (!processor.gotComplete()) {
             api.getActiveStream().then((active) => {
               if (active.finished && !active.running) {
                 processor("complete", {
+                  operation: active.operation ?? "stream",
                   stream: active.stream_name,
                   status: active.status ?? "success",
                   duration_seconds: active.duration_seconds ?? 0,
                   ts: Date.now() / 1000,
                 });
               }
-            }).catch(() => {
-              // Fallback: just mark as done
-              setRunning(false);
-              resolve();
-            });
+            }).catch(() => { setRunning(false); resolve(); });
           }
         });
       } catch (e: unknown) {
@@ -386,6 +476,20 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
     });
   }, [addOutput, onTablesChanged, onPipelineComplete]);
 
+  const runTransformAll = useCallback((force: boolean = false) =>
+    startAndConnect(
+      () => api.startTransform(null, force),
+      `Running transform${force ? " (force)" : ""}...`,
+    ),
+  [startAndConnect]);
+
+  const runStream = useCallback((name: string, force: boolean = false) =>
+    startAndConnect(
+      () => api.startStream(name, force),
+      `Running pipeline ${name}${force ? " (full refresh)" : ""}...`,
+    ),
+  [startAndConnect]);
+
   const cancelPipeline = useCallback(async () => {
     try {
       await api.cancelStream();
@@ -395,132 +499,33 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
     }
   }, [addOutput]);
 
-  const runLint = useCallback(async (fix: boolean = false) => {
-    setRunning(true);
-    addOutput("info", fix ? "Fixing SQL..." : "Linting SQL...");
-    try {
-      const data = await api.runLint(fix);
-      for (const v of data.violations || []) {
-        const tag = fix && !v.fixable ? " (unfixable)" : "";
-        addOutput("warn", `${v.file}:${v.line}:${v.col} [${v.code}] ${v.description}${tag}`);
-      }
-      if (fix) {
-        const fixed = data.fixed ?? 0;
-        const remaining = data.count;
-        const parts: string[] = [];
-        if (fixed > 0) parts.push(`${fixed} fixed`);
-        if (remaining > 0) parts.push(`${remaining} violation(s) remain (unfixable by SQLFluff)`);
-        addOutput("info", parts.length > 0 ? parts.join(", ") + "." : "All fixable violations resolved.");
-      } else {
-        addOutput("info", data.count === 0 ? "No lint violations found." : `${data.count} violation(s) found.`);
-      }
-    } catch (e: unknown) {
-      addOutput("error", (e as Error).message);
-    } finally {
-      setRunning(false);
-    }
-  }, [addOutput]);
+  const runLint = useCallback((fix: boolean = false) =>
+    startAndConnect(
+      () => api.startLint(fix),
+      fix ? "Running SQLFluff lint --fix..." : "Running SQLFluff lint...",
+    ),
+  [startAndConnect]);
 
-  const runCurrentScript = useCallback(async (scriptPath: string) => {
-    setRunning(true);
-    addOutput("info", `Running ${scriptPath}...`);
-    try {
-      const data = await api.runScript(scriptPath);
-      addOutput(data.status === "error" ? "error" : "info", `${scriptPath}: ${data.status} (${data.duration_ms}ms)`);
-      if (data.log_output) data.log_output.split("\n").filter((l: string) => l.trim()).forEach((l: string) => addOutput("log", l));
-      if (data.error) addOutput("error", data.error);
-    } catch (e: unknown) {
-      addOutput("error", (e as Error).message);
-    } finally {
-      setRunning(false);
-    }
-  }, [addOutput]);
+  const runCurrentScript = useCallback((scriptPath: string) =>
+    startAndConnect(
+      () => api.startScript(scriptPath),
+      `Running script ${scriptPath}...`,
+    ),
+  [startAndConnect]);
 
-  const runSingleModel = useCallback(async (modelName: string) => {
-    setRunning(true);
-    setRunSummary(null);
-    addOutput("info", `Running transform for ${modelName}...`);
-    try {
-      const data = await api.runTransform([modelName], true);
-      const models: { name: string; result: string }[] = [];
-      for (const [model, status] of Object.entries(data.results || {})) {
-        addOutput(status === "error" ? "error" : "info", `${model}: ${status}`);
-        models.push({ name: model, result: status });
-      }
-      onTablesChanged();
-      setRunSummary({
-        type: "transform",
-        status: models.some((m) => m.result === "error") ? "failed" : "success",
-        models,
-        totalRows: 0,
-        duration: 0,
-        errors: models.filter((m) => m.result === "error").length,
-      });
-    } catch (e: unknown) {
-      addOutput("error", (e as Error).message);
-    } finally {
-      setRunning(false);
-    }
-  }, [addOutput, onTablesChanged]);
+  const runSingleModel = useCallback((modelName: string) =>
+    startAndConnect(
+      () => api.startTransform([modelName], true),
+      `Running transform for ${modelName}...`,
+    ),
+  [startAndConnect]);
 
-  const runContracts = useCallback(async () => {
-    setRunning(true);
-    addOutput("info", "Running contracts...");
-    try {
-      const data = await api.runContracts() as {
-        total: number;
-        passed: number;
-        failed: number;
-        results: {
-          contract_name: string;
-          model: string;
-          passed: boolean;
-          severity: string;
-          duration_ms: number;
-          error?: string;
-          assertions: { expression: string; passed: boolean; detail: string }[];
-        }[];
-      };
-
-      if (data.total === 0) {
-        addOutput("warn", "No contracts found. Create YAML files in contracts/ to get started.");
-        return;
-      }
-
-      for (const cr of data.results) {
-        const ruleCount = (cr.assertions || []).length;
-        const failedCount = (cr.assertions || []).filter(a => !a.passed).length;
-        const level = cr.passed ? "info" : "error";
-
-        if (cr.error && ruleCount === 0) {
-          // Table missing or other pre-check error — no rules ran
-          addOutput("warn", `SKIP  ${cr.contract_name} on ${cr.model} — ${cr.error}`);
-        } else if (cr.passed) {
-          addOutput(level as OutputEntry["type"], `PASS  ${cr.contract_name} on ${cr.model} -- ${ruleCount} rule${ruleCount !== 1 ? "s" : ""} passed [${cr.duration_ms}ms]`);
-        } else {
-          addOutput(level as OutputEntry["type"], `FAIL  ${cr.contract_name} on ${cr.model} -- ${failedCount} of ${ruleCount} rule${ruleCount !== 1 ? "s" : ""} failed [${cr.duration_ms}ms]`);
-          for (const a of cr.assertions || []) {
-            if (!a.passed) {
-              addOutput("error", `       ${a.expression}  -->  ${a.detail || "failed"}`);
-            }
-          }
-          if (cr.error) addOutput("error", `       Error: ${cr.error}`);
-        }
-      }
-
-      addOutput("info", "");
-      const totalRules = data.results.reduce((sum, cr) => sum + (cr.assertions || []).length, 0);
-      if (data.failed === 0) {
-        addOutput("info", `Done: ${data.passed} contract${data.passed !== 1 ? "s" : ""} passed (${totalRules} rules total)`);
-      } else {
-        addOutput("error", `Done: ${data.failed} contract${data.failed !== 1 ? "s" : ""} failed, ${data.passed} passed (${totalRules} rules total)`);
-      }
-    } catch (e: unknown) {
-      addOutput("error", (e as Error).message);
-    } finally {
-      setRunning(false);
-    }
-  }, [addOutput]);
+  const runContracts = useCallback(() =>
+    startAndConnect(
+      () => api.startContracts(),
+      "Running data contracts...",
+    ),
+  [startAndConnect]);
 
   return (
     <PipelineContext.Provider
