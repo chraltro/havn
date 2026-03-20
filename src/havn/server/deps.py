@@ -303,6 +303,26 @@ def _require_permission(request: Request, permission: str) -> dict:
     from havn.engine.auth import has_permission
 
     if not has_permission(user["role"], permission):
+        # Audit the permission denial
+        try:
+            from havn.engine.audit import log_audit
+
+            conn = _get_shared_conn()
+            cursor = conn.cursor()
+            try:
+                client_ip = request.client.host if request.client else None
+                log_audit(
+                    cursor,
+                    user=user["username"],
+                    action="permission_denied",
+                    resource=str(request.url.path),
+                    detail=f"Required: {permission}, role: {user['role']}",
+                    ip_address=client_ip,
+                )
+            finally:
+                cursor.close()
+        except Exception:
+            pass  # don't break auth flow on audit failure
         raise HTTPException(403, f"Permission denied: {permission}")
     return user
 
