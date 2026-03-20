@@ -268,6 +268,9 @@ def switch_environment(request: Request, env_name: str) -> dict:
         raise HTTPException(404, f"Environment '{env_name}' not found")
     _set_active_env(env_name)
     invalidate_config_cache()
+    # Reset DB connection so it reconnects to the new environment's database
+    from havn.server.deps import reset_shared_conn
+    reset_shared_conn()
     new_config = _get_config()
     return {
         "active": new_config.active_environment,

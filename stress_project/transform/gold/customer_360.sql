@@ -5,9 +5,8 @@
 -- Full 360-degree customer profile
 SELECT
     dc.customer_id,
-    dc.name,
+    dc.customer_name,
     dc.email,
-    normalize_country(dc.country) AS country_normalized,
     dc.country,
     dc.created_at,
     dc.customer_tier,
@@ -31,14 +30,22 @@ SELECT
     cl.monthly_value,
     cl.annualized_value,
     cl.ltv_decile,
+    normalize_country(dc.country) AS country_normalized,
     CASE
         WHEN dc.last_order_date IS NULL THEN 'never_purchased'
-        WHEN DATEDIFF('day', dc.last_order_date, TIMESTAMP '2024-12-31') > 365 THEN 'churned'
-        WHEN DATEDIFF('day', dc.last_order_date, TIMESTAMP '2024-12-31') > 180 THEN 'at_risk'
-        WHEN DATEDIFF('day', dc.last_order_date, TIMESTAMP '2024-12-31') > 90 THEN 'cooling'
+        WHEN
+            datediff('day', dc.last_order_date, TIMESTAMP '2024-12-31') > 365
+            THEN 'churned'
+        WHEN
+            datediff('day', dc.last_order_date, TIMESTAMP '2024-12-31') > 180
+            THEN 'at_risk'
+        WHEN
+            datediff('day', dc.last_order_date, TIMESTAMP '2024-12-31') > 90
+            THEN 'cooling'
         ELSE 'active'
     END AS activity_status,
-    DATEDIFF('day', dc.last_order_date, TIMESTAMP '2024-12-31') AS days_since_last_order
-FROM silver.dim_customer dc
-LEFT JOIN silver.customer_segments cs ON dc.customer_id = cs.customer_id
-LEFT JOIN silver.fct_customer_lifetime cl ON dc.customer_id = cl.customer_id
+    datediff('day', dc.last_order_date, TIMESTAMP '2024-12-31')
+        AS days_since_last_order
+FROM silver.dim_customer AS dc
+LEFT JOIN silver.customer_segments AS cs ON dc.customer_id = cs.customer_id
+LEFT JOIN silver.fct_customer_lifetime AS cl ON dc.customer_id = cl.customer_id

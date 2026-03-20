@@ -91,7 +91,9 @@ _cancel_flag = threading.Event()
 
 _pipeline_state = {
     "running": False,
-    "stream_name": None,
+    "operation": None,        # "stream", "transform", "lint", "script", "contracts"
+    "operation_label": None,  # Human-readable label
+    "stream_name": None,      # backward compat
     "started_at": None,
     "events": [],       # list of {"event": str, "data": dict}
     "finished": False,   # True when pipeline completes (events still available)
@@ -99,6 +101,236 @@ _pipeline_state = {
 _pipeline_lock = threading.Lock()
 
 _STALE_TIMEOUT = 600  # 10 minutes
+
+
+def _start_operation(operation: str, label: str, target_fn, args: tuple) -> dict:
+    """Start a background operation. Returns status dict."""
+    with _pipeline_lock:
+        if _pipeline_state["running"]:
+            return {
+                "status": "already_running",
+                "operation": _pipeline_state["operation"],
+                "operation_label": _pipeline_state["operation_label"],
+            }
+
+    _cancel_flag.clear()
+    with _pipeline_lock:
+        _pipeline_state["running"] = True
+        _pipeline_state["operation"] = operation
+        _pipeline_state["operation_label"] = label
+        _pipeline_state["stream_name"] = label  # backward compat
+        _pipeline_state["started_at"] = time.time()
+        _pipeline_state["events"] = []
+        _pipeline_state["finished"] = False
+
+    t = threading.Thread(target=target_fn, args=args, daemon=True)
+    t.start()
+    return {"status": "started", "operation": operation, "operation_label": label}
+
+
+def _emit(event_type: str, data: dict):
+    """Append an event to the pipeline event buffer."""
+    data["ts"] = time.time()
+    with _pipeline_lock:
+        _pipeline_state["events"].append({"event": event_type, "data": data})
+
+
+def _finish_operation():
+    """Mark the current operation as finished."""
+    try:
+        from havn.server.deps import _get_shared_conn
+        _get_shared_conn().execute("FORCE CHECKPOINT")
+    except Exception:
+        pass
+    with _pipeline_lock:
+        _pipeline_state["running"] = False
+        _pipeline_state["finished"] = True
+
+
+# --- Background thread: Lint ---
+
+
+def _run_lint_thread(fix, project_dir, config):
+    """Run SQLFluff lint in background thread."""
+    import time as _time
+
+    start = _time.perf_counter()
+    _emit("start", {"operation": "lint", "label": f"Lint{' --fix' if fix else ''}"})
+    try:
+        from havn.lint.linter import lint
+
+        count, violations, fixed = lint(
+            project_dir / "transform",
+            fix=fix,
+            dialect=config.lint.dialect,
+            rules=config.lint.rules or None,
+        )
+
+        for v in violations:
+            _emit("lint_violation", {
+                "file": v["file"], "line": v["line"], "col": v["col"],
+                "code": v["code"], "description": v["description"],
+                "fixable": v.get("fixable", False),
+            })
+
+        duration_s = round(_time.perf_counter() - start, 1)
+        _emit("complete", {
+            "operation": "lint", "status": "success",
+            "duration_seconds": duration_s,
+            "count": count, "fixed": fixed, "fix": fix,
+        })
+    except Exception as e:
+        duration_s = round(_time.perf_counter() - start, 1)
+        _emit("complete", {
+            "operation": "lint", "status": "failed",
+            "duration_seconds": duration_s, "error": str(e),
+        })
+    finally:
+        _finish_operation()
+
+
+# --- Background thread: Contracts ---
+
+
+def _run_contracts_thread(project_dir):
+    """Run data contracts in background thread."""
+    import time as _time
+    from havn.server.deps import _get_shared_conn
+
+    start = _time.perf_counter()
+    _emit("start", {"operation": "contracts", "label": "Contracts"})
+    try:
+        from havn.engine.contracts import run_contracts
+
+        conn = _get_shared_conn()
+        contracts_dir = project_dir / "contracts"
+        results = run_contracts(conn, contracts_dir)
+
+        for r in results:
+            _emit("contract_result", {
+                "contract_name": r.contract_name,
+                "model": r.model,
+                "passed": r.passed,
+                "severity": r.severity,
+                "duration_ms": r.duration_ms,
+                "error": r.error,
+                "assertions": r.results,
+                "consecutive_failures": r.consecutive_failures,
+            })
+
+        duration_s = round(_time.perf_counter() - start, 1)
+        _emit("complete", {
+            "operation": "contracts", "status": "success",
+            "duration_seconds": duration_s,
+            "total": len(results),
+            "passed": sum(1 for r in results if r.passed),
+            "failed": sum(1 for r in results if not r.passed),
+        })
+    except Exception as e:
+        duration_s = round(_time.perf_counter() - start, 1)
+        _emit("complete", {
+            "operation": "contracts", "status": "failed",
+            "duration_seconds": duration_s, "error": str(e),
+        })
+    finally:
+        _finish_operation()
+
+
+# --- Background thread: Script ---
+
+
+def _run_script_thread(script_path_str, project_dir):
+    """Run a single script in background thread."""
+    import time as _time
+    from havn.server.deps import _get_shared_conn
+
+    start = _time.perf_counter()
+    _emit("start", {"operation": "script", "label": script_path_str})
+    try:
+        from havn.engine.runner import run_script
+
+        conn = _get_shared_conn()
+        script_path = project_dir / script_path_str
+        script_type = "ingest" if "ingest" in script_path_str else "export"
+        result = run_script(conn, script_path, script_type)
+
+        from havn.engine.secrets import mask_output
+        log_output = result.get("log_output", "")
+        if log_output:
+            log_output = mask_output(log_output, project_dir)
+            for line in log_output.split("\n"):
+                if line.strip():
+                    _emit("script_output", {"line": line})
+
+        duration_s = round(_time.perf_counter() - start, 1)
+        _emit("complete", {
+            "operation": "script", "status": result.get("status", "success"),
+            "duration_seconds": duration_s,
+            "duration_ms": result.get("duration_ms", 0),
+            "error": result.get("error"),
+            "script_path": script_path_str,
+        })
+    except Exception as e:
+        duration_s = round(_time.perf_counter() - start, 1)
+        _emit("complete", {
+            "operation": "script", "status": "error",
+            "duration_seconds": duration_s, "error": str(e),
+            "script_path": script_path_str,
+        })
+    finally:
+        _finish_operation()
+
+
+# --- Background thread: Transform ---
+
+
+def _run_transform_thread(targets, force, project_dir):
+    """Run SQL transforms in background thread."""
+    import time as _time
+    from havn.server.deps import _get_shared_conn
+
+    label = "Transform"
+    if targets:
+        label += f" ({', '.join(targets)})"
+    if force:
+        label += " --force"
+
+    start = _time.perf_counter()
+    _emit("start", {"operation": "transform", "label": label})
+    try:
+        conn = _get_shared_conn()
+        results = run_transform(
+            conn,
+            project_dir / "transform",
+            targets=targets,
+            force=force,
+        )
+
+        for model, status in results.items():
+            _emit("model_end", {
+                "name": model,
+                "action": "transform",
+                "status": status,
+                "duration_ms": 0,
+                "row_count": 0,
+                "num": 0,
+            })
+
+        duration_s = round(_time.perf_counter() - start, 1)
+        has_error = any(s == "error" for s in results.values())
+        _emit("complete", {
+            "operation": "transform",
+            "status": "failed" if has_error else "success",
+            "duration_seconds": duration_s,
+        })
+    except Exception as e:
+        duration_s = round(_time.perf_counter() - start, 1)
+        _emit("complete", {
+            "operation": "transform", "status": "failed",
+            "duration_seconds": duration_s, "error": str(e),
+        })
+    finally:
+        _finish_operation()
 
 
 # --- Pipeline background thread ---
@@ -123,9 +355,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
     from havn.engine.transform.quality import run_assertions as _ra, _save_assertions as _sa, profile_model as _pm, _save_profile as _sp
 
     def emit(event_type: str, data: dict):
-        data["ts"] = _time.time()
-        with _pipeline_lock:
-            _pipeline_state["events"].append({"event": event_type, "data": data})
+        _emit(event_type, data)
 
     start = _time.perf_counter()
     has_error = False
@@ -208,7 +438,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
         _node_number = {}
         _next_num = [1]
 
-        emit("start", {"stream": stream_name, "steps": 1, "total": total_items})
+        emit("start", {"operation": "stream", "label": f"Pipeline {stream_name}", "stream": stream_name, "steps": 1, "total": total_items})
 
         if not nodes:
             emit("complete", {"stream": stream_name, "status": "success", "duration_seconds": 0})
@@ -315,7 +545,11 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
                 if nid not in _node_number:
                     _node_number[nid] = _next_num[0]
                     _next_num[0] += 1
-                executor.submit(_exec_node, nid)
+                try:
+                    executor.submit(_exec_node, nid)
+                except RuntimeError:
+                    # Interpreter shutting down — stop submitting
+                    return
                 active += 1
 
         # Kick off initial ready nodes (roots with no deps)
@@ -414,14 +648,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
             "duration_seconds": duration_s,
         })
     finally:
-        # Release DuckDB buffer memory after pipeline completes
-        try:
-            conn.execute("FORCE CHECKPOINT")
-        except Exception:
-            pass
-        with _pipeline_lock:
-            _pipeline_state["running"] = False
-            _pipeline_state["finished"] = True
+        _finish_operation()
 
 
 # --- Stream start ---
@@ -471,6 +698,8 @@ def start_stream(request: Request, stream_name: str, force: bool = False) -> dic
     # Initialize pipeline state
     with _pipeline_lock:
         _pipeline_state["running"] = True
+        _pipeline_state["operation"] = "stream"
+        _pipeline_state["operation_label"] = stream_name
         _pipeline_state["stream_name"] = stream_name
         _pipeline_state["started_at"] = time.time()
         _pipeline_state["events"] = []
@@ -484,7 +713,54 @@ def start_stream(request: Request, stream_name: str, force: bool = False) -> dic
     )
     t.start()
 
-    return {"status": "started", "stream_name": stream_name}
+    return {"status": "started", "operation": "stream", "stream_name": stream_name}
+
+
+# --- Start endpoints for non-stream operations ---
+
+
+class TransformStartRequest(BaseModel):
+    targets: list[str] | None = None
+    force: bool = False
+
+
+@router.post("/api/lint/start")
+def start_lint(request: Request, fix: bool = False) -> dict:
+    """Start lint in background thread. Returns immediately."""
+    _require_permission(request, "execute")
+    config = _get_config()
+    project_dir = _get_project_dir()
+    return _start_operation("lint", f"Lint{' --fix' if fix else ''}", _run_lint_thread, (fix, project_dir, config))
+
+
+@router.post("/api/contracts/run/start")
+def start_contracts(request: Request) -> dict:
+    """Start contracts in background thread. Returns immediately."""
+    _require_permission(request, "execute")
+    project_dir = _get_project_dir()
+    return _start_operation("contracts", "Contracts", _run_contracts_thread, (project_dir,))
+
+
+@router.post("/api/run/start")
+def start_script(request: Request, req: RunScriptRequest) -> dict:
+    """Start a script in background thread. Returns immediately."""
+    _require_permission(request, "execute")
+    project_dir = _get_project_dir()
+    script_path = project_dir / req.script_path
+    if not script_path.exists():
+        raise HTTPException(404, f"Script not found: {req.script_path}")
+    return _start_operation("script", req.script_path, _run_script_thread, (req.script_path, project_dir))
+
+
+@router.post("/api/transform/start")
+def start_transform(request: Request, req: TransformStartRequest) -> dict:
+    """Start transform in background thread. Returns immediately."""
+    _require_permission(request, "execute")
+    project_dir = _get_project_dir()
+    label = "Transform"
+    if req.targets:
+        label += f" ({', '.join(req.targets)})"
+    return _start_operation("transform", label, _run_transform_thread, (req.targets, req.force, project_dir))
 
 
 # --- Stream events (SSE) ---
@@ -561,6 +837,8 @@ def get_active_stream(request: Request) -> dict:
     _require_permission(request, "read")
     with _pipeline_lock:
         running = _pipeline_state["running"]
+        operation = _pipeline_state["operation"]
+        operation_label = _pipeline_state["operation_label"]
         stream_name = _pipeline_state["stream_name"]
         started_at = _pipeline_state["started_at"]
         total_events = len(_pipeline_state["events"])
@@ -582,12 +860,15 @@ def get_active_stream(request: Request) -> dict:
             with _pipeline_lock:
                 _pipeline_state["running"] = False
                 _pipeline_state["finished"] = True
-            return {"running": False, "stream_name": stream_name, "started_at": started_at,
+            return {"running": False, "operation": operation, "operation_label": operation_label,
+                    "stream_name": stream_name, "started_at": started_at,
                     "total_events": total_events, "finished": True,
                     "status": last_status, "duration_seconds": last_duration}
 
     return {
         "running": running,
+        "operation": operation,
+        "operation_label": operation_label,
         "stream_name": stream_name,
         "started_at": started_at,
         "total_events": total_events,
@@ -648,6 +929,8 @@ async def run_stream_sse(
     with _pipeline_lock:
         if not _pipeline_state["running"]:
             _pipeline_state["running"] = True
+            _pipeline_state["operation"] = "stream"
+            _pipeline_state["operation_label"] = stream_name
             _pipeline_state["stream_name"] = stream_name
             _pipeline_state["started_at"] = time.time()
             _pipeline_state["events"] = []
