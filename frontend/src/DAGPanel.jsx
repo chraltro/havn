@@ -373,6 +373,7 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
   const setHintTrigger = useHintTriggerFn();
   const [error, setError] = useState(null);
   const [dagMode, setDagMode] = useState('basic'); // 'basic' | 'full'
+  const [dagSearch, setDagSearch] = useState("");
   const [selectedNode, setSelectedNode] = useState(null);
 
   // Zoom & pan state
@@ -611,11 +612,14 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
       const color = SCHEMA_COLORS[n.schema] || getCV("--havn-accent");
       const isHovered = hovered === n.id;
       const isSelected = selectedNode === n.id;
+      const isSearchMatch = dagSearch && n.id.toLowerCase().includes(dagSearch.toLowerCase());
       const isTable = n.type === "table";
       const snap = rewindMode ? currentSnaps[n.id] : null;
       const prevSnap = rewindMode ? prevSnaps[n.id] : null;
 
-      if (lineageSet && !isHovered) {
+      if (dagSearch && !isSearchMatch) {
+        ctx.globalAlpha = 0.15;
+      } else if (lineageSet && !isHovered) {
         ctx.globalAlpha = lineageSet.has(n.id) ? 1 : 0.25;
       } else {
         ctx.globalAlpha = 1;
@@ -623,8 +627,8 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
 
       // Node background
       ctx.fillStyle = isHovered || isSelected ? getCV("--havn-bg") : getCV("--havn-bg-secondary");
-      ctx.strokeStyle = isSelected ? getCV("--havn-accent") : color;
-      ctx.lineWidth = isHovered || isSelected ? 2.5 : (isTable ? 2 : 1.5);
+      ctx.strokeStyle = isSearchMatch ? getCV("--havn-accent") : isSelected ? getCV("--havn-accent") : color;
+      ctx.lineWidth = isHovered || isSelected || isSearchMatch ? 2.5 : (isTable ? 2 : 1.5);
 
       const r = 6;
       if (isHovered || isSelected) {
@@ -693,7 +697,7 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
 
     ctx.globalAlpha = 1;
     ctx.restore();
-  }, [dag, layout, hovered, rewindMode, currentSnaps, prevSnaps, selectedNode, scale, offsetX, offsetY]);
+  }, [dag, layout, hovered, rewindMode, currentSnaps, prevSnaps, selectedNode, scale, offsetX, offsetY, dagSearch]);
 
   useEffect(() => {
     draw();
@@ -860,6 +864,17 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
               <span style={styles.legendItem}>
                 <span style={{ ...styles.legendDot, background: SCHEMA_COLORS.exposure }} />exposure
               </span>
+            </div>
+          )}
+          {!rewindMode && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                value={dagSearch}
+                onChange={(e) => setDagSearch(e.target.value)}
+                placeholder="Search models..."
+                style={{ padding: "3px 8px", background: "var(--havn-bg)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", outline: "none", width: 140 }}
+              />
+              {dagSearch && <button onClick={() => setDagSearch("")} style={{ background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", padding: 0, lineHeight: 1 }}>&times;</button>}
             </div>
           )}
           {!rewindMode && (
