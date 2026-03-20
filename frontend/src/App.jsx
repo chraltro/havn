@@ -163,25 +163,28 @@ function PipelineMenu({ running, streams, onRunStream, onTransform, onLint, onCo
   return (
     <div ref={ref} style={pmStyles.wrapper}>
       {running ? (
-        <button onClick={onCancel} style={{...pmStyles.btn, background: "var(--havn-error, #c0392b)", color: "#fff", borderColor: "var(--havn-error, #c0392b)", borderRadius: "var(--havn-radius-lg)"}}>
+        <button onClick={onCancel} aria-label="Cancel pipeline" style={{...pmStyles.btn, background: "var(--havn-error, #c0392b)", color: "#fff", borderColor: "var(--havn-error, #c0392b)", borderRadius: "var(--havn-radius-lg)"}}>
           {"\u25A0"} Cancel
         </button>
       ) : (
         <>
-          <button onClick={defaultRun} disabled={running} style={pmStyles.btn}>
+          <button onClick={defaultRun} disabled={running} aria-label="Run pipeline" style={pmStyles.btn}>
             {"\u25B6"} Run
           </button>
           <button
             onClick={() => setOpen(!open)}
             disabled={running}
             style={pmStyles.chevron}
+            aria-label="Open run menu"
+            aria-expanded={open}
+            aria-haspopup="menu"
           >
             {"\u25BE"}
           </button>
         </>
       )}
       {open && (
-        <div style={pmStyles.menu}>
+        <div style={pmStyles.menu} role="menu" aria-label="Pipeline actions">
           <div style={pmStyles.groupLabel}>Pipeline</div>
           <button style={pmStyles.item} disabled={running} onClick={() => { defaultRun(); setOpen(false); }}
             onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-btn-bg)"}
@@ -823,6 +826,7 @@ function AppContent() {
                 onClick={() => navigateToTab(SECTION_DEFAULT[section.id])}
                 style={isActive ? styles.sectionActive : styles.section}
                 title={`${section.label} (Alt+${i + 1})`}
+                aria-current={isActive ? "true" : undefined}
               >
                 {section.label}
               </button>
@@ -871,7 +875,7 @@ function AppContent() {
           <div style={styles.sidebarPane}>
             <div style={styles.sidebarSectionHeader}>
               <span>FILES</span>
-              <button onClick={refreshAll} style={styles.sidebarRefreshBtn} title="Refresh files &amp; tables">&#x21BB;</button>
+              <button onClick={refreshAll} style={styles.sidebarRefreshBtn} title="Refresh files &amp; tables" aria-label="Refresh files and tables">&#x21BB;</button>
             </div>
             <div style={styles.sidebarPaneContent}>
               <FileTree files={files} onSelect={openFile} activeFile={activeFile} onNewFile={createFile} onDeleteFile={deleteFile} onMoveFile={moveFile} />
@@ -897,7 +901,7 @@ function AppContent() {
         />
 
         {/* Content */}
-        <div style={styles.content}>
+        <div style={styles.content} role="main">
           {/* Sub-tab bar (shown when section has multiple tabs) */}
           {subTabs.length > 0 && (
             <div style={styles.subTabBar} data-havn-hint="tab-bar">
