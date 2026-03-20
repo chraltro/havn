@@ -21,6 +21,19 @@ VALID_ACTIONS = frozenset({
     "file_delete",
     "login",
     "config_change",
+    "auth_failed",
+    "permission_denied",
+    "connector_sync",
+    "connector_setup",
+    "masking_policy_create",
+    "masking_policy_update",
+    "masking_policy_delete",
+    "user_create",
+    "user_update",
+    "user_delete",
+    "token_revoke",
+    "snapshot_restore",
+    "secret_change",
 })
 
 
