@@ -46,6 +46,7 @@ class DiffResult:
     schema_changes: list[SchemaChange] = field(default_factory=list)
     error: str | None = None
     is_new: bool = False
+    skipped: bool = False
 
 
 def parse_primary_key_from_sql(sql: str) -> list[str] | None:
@@ -361,6 +362,7 @@ def diff_models(
     target_schema: str | None = None,
     project_config=None,
     full: bool = False,
+    mode: str = "all",
 ) -> list[DiffResult]:
     """Diff multiple models.
 
@@ -371,17 +373,21 @@ def diff_models(
         target_schema: Only diff models in this schema
         project_config: Project config for PK lookup
         full: If True, return all changed rows
+        mode: "single" (only targets), "changed" (only changed + downstream), "all"
 
     Returns:
         List of DiffResult objects
     """
     from havn.engine.transform import build_dag, discover_models
+    from havn.engine.transform.discovery import _has_changed
 
-    models = discover_models(transform_dir)
-    if not models:
+    all_models = discover_models(transform_dir)
+    if not all_models:
         return []
 
-    # Filter to targets if specified
+    models = all_models
+
+    # Filter to targets if specified (single mode)
     if targets:
         target_set = set(targets)
         models = [m for m in models if m.full_name in target_set or m.name in target_set]
@@ -393,8 +399,27 @@ def diff_models(
     # Sort by DAG order
     ordered = build_dag(models)
 
+    # Changed mode: only diff models whose SQL or upstream changed
+    changed_set = None
+    if mode == "changed" and not targets:
+        changed_set = set()
+        model_map = {m.full_name: m for m in ordered}
+        for model in ordered:
+            if _has_changed(conn, model):
+                changed_set.add(model.full_name)
+        # Include downstream of changed models
+        downstream = set()
+        for model in ordered:
+            for dep in model.depends_on:
+                if dep in changed_set or dep in downstream:
+                    downstream.add(model.full_name)
+        changed_set.update(downstream)
+
     results: list[DiffResult] = []
     for model in ordered:
+        if changed_set is not None and model.full_name not in changed_set:
+            results.append(DiffResult(model=model.full_name, skipped=True))
+            continue
         pk = get_primary_key(model.sql, project_config, model.full_name)
         result = diff_model(
             conn,
