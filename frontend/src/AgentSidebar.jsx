@@ -645,13 +645,13 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (e.key === "Enter" && !e.shiftKey && !isStreaming) {
               e.preventDefault();
               sendMessage();
             }
           }}
           placeholder={isConnected ? "Ask the agent\u2026" : "Connecting\u2026"}
-          disabled={!isConnected || isStreaming}
+          disabled={!isConnected}
           style={st.textarea}
           rows={3}
         />

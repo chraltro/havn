@@ -106,7 +106,7 @@ export interface ModelResult {
 }
 
 export interface RunSummary {
-  type: "transform" | "stream";
+  type: "transform" | "stream" | "lint" | "script" | "contracts";
   status: "success" | "failed";
   models: ModelResult[];
   totalRows: number;
@@ -378,9 +378,23 @@ export const api = {
   runStream: (name: string, force: boolean = false) =>
     request<StreamResult>(`/stream/${name}?force=${force}`, { method: "POST" }),
   cancelStream: () => request("/stream/cancel", { method: "POST" }),
-  getActiveStream: () => request<{ running: boolean; stream_name?: string | null; started_at?: number | null; total_events: number; finished: boolean; status?: string | null; duration_seconds?: number | null }>("/stream/active"),
+  getActiveStream: () => request<{ running: boolean; operation?: string | null; operation_label?: string | null; stream_name?: string | null; started_at?: number | null; total_events: number; finished: boolean; status?: string | null; duration_seconds?: number | null }>("/stream/active"),
   startStream: (name: string, force: boolean = false) =>
     request<{ status: string; stream_name: string }>(`/stream/${name}/start?force=${force}`, { method: "POST" }),
+  startLint: (fix: boolean = false) =>
+    request<{ status: string; operation: string }>(`/lint/start?fix=${fix}`, { method: "POST" }),
+  startContracts: () =>
+    request<{ status: string; operation: string }>("/contracts/run/start", { method: "POST" }),
+  startScript: (scriptPath: string) =>
+    request<{ status: string; operation: string }>("/run/start", {
+      method: "POST",
+      body: JSON.stringify({ script_path: scriptPath }),
+    }),
+  startTransform: (targets: string[] | null = null, force: boolean = false) =>
+    request<{ status: string; operation: string }>("/transform/start", {
+      method: "POST",
+      body: JSON.stringify({ targets, force }),
+    }),
   connectToStreamEvents: (
     fromEvent: number,
     onEvent: (event: string, data: Record<string, unknown>) => void,

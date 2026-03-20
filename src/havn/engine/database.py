@@ -36,9 +36,6 @@ def connect(
     max_threads = threads if (threads is not None and threads > 0) else max(1, os.cpu_count() // 2)
     conn.execute(f"SET threads = {max_threads}")
 
-    # Limit memory per-thread to prevent runaway allocations
-    conn.execute("SET temp_directory = ''")  # disable temp spilling to avoid disk IO storms
-
     return conn
 
 

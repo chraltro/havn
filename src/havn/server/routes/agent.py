@@ -19,8 +19,9 @@ log = logging.getLogger(__name__)
 _active_sessions: dict[int, dict] = {}
 
 
-def _build_system_prompt(project_path: str) -> str:
+def _build_system_prompt(project_path: str, port: int = 3000) -> str:
     """Build a context-rich system prompt so the agent understands havn conventions."""
+    base_url = f"http://localhost:{port}"
     parts = [
         "You are an assistant embedded in the havn data platform web UI.",
         "You are shown in the Agent sidebar panel within the havn web interface.",
@@ -96,21 +97,55 @@ def _build_system_prompt(project_path: str) -> str:
         "- ALL Bash commands must operate within the project root.",
         "- If a user asks to access files outside the project, refuse and explain why.",
         "",
+        "CRITICAL EXECUTION CONSTRAINT:",
+        "NEVER run pipeline, transform, lint, or any data-modifying commands yourself.",
+        "This includes: `havn transform`, `havn stream`, `havn lint --fix`, `havn run`,",
+        "`havn query` with INSERT/UPDATE/DELETE, or any curl POST to /api/transform,",
+        "/api/stream, /api/lint, /api/run endpoints.",
+        "These operations use the shared DuckDB connection and will cause file locking",
+        "conflicts with the running server. They can also make irreversible changes to",
+        "the warehouse that the user cannot undo.",
+        "Instead, TELL THE USER to run these operations from the UI (Run button, etc.).",
+        "You may only READ data: `havn query \"SELECT ...\"`, `havn tables`, `havn diff`,",
+        "curl GET endpoints, etc.",
+        "",
         "# Searching the wiki for answers",
         "When you don't know the answer to a question about havn features, SEARCH THE WIKI.",
         "Use curl to query the local API (the server you are running inside):",
         "",
-        "  curl -s http://localhost:3000/api/wiki/search/<keyword>",
+        f"  curl -s {base_url}/api/wiki/search/<keyword>",
         "",
         "This returns matching excerpts from wiki pages. To read the full page:",
         "",
-        "  curl -s http://localhost:3000/api/wiki/<slug>",
+        f"  curl -s {base_url}/api/wiki/<slug>",
         "",
         "Available wiki slugs: getting-started, configuration, environments, transforms,",
         "pipelines, seeds, sources, connectors, cdc, quality, contracts, lineage, auth,",
         "masking, sentinel, scheduler, notebooks, versioning, cli-reference, api-reference.",
         "",
         "ALWAYS search the wiki before saying you don't know about a feature.",
+        "",
+        "# Querying the project DAG and lineage",
+        "When you need to understand model dependencies (e.g., before renaming a column,",
+        "changing a schema, or understanding downstream impact), query the local API:",
+        "",
+        f"  curl -s {base_url}/api/dag",
+        "",
+        "This returns the full DAG with nodes and edges. Each node has:",
+        "  { id, schema, name, type, materialized, depends_on, file_path }",
+        "Each edge has: { from, to }",
+        "",
+        "For column-level lineage of a specific model:",
+        "",
+        f"  curl -s {base_url}/api/lineage/<schema.model>",
+        "",
+        "For downstream impact analysis:",
+        "",
+        f"  curl -s {base_url}/api/impact/<schema.model>",
+        "",
+        "IMPORTANT: When changing column names, table schemas, or model structure,",
+        "ALWAYS check downstream dependencies first using the DAG or impact API.",
+        "Fix ALL affected downstream models before reporting the change as complete.",
         "",
         "When editing files:",
         "- Follow existing naming conventions in the project",
@@ -273,7 +308,10 @@ async def _handle_start(
         )
         return
 
-    system_prompt = _build_system_prompt(project_path)
+    # Extract port from WebSocket scope for API URL in system prompt
+    server = websocket.scope.get("server")
+    port = server[1] if server and len(server) > 1 else 3000
+    system_prompt = _build_system_prompt(project_path, port=port)
     permission_mode = data.get("mode", "auto")
     if permission_mode not in ("ask", "auto"):
         permission_mode = "auto"

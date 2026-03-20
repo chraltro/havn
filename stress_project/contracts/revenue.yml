@@ -5,5 +5,5 @@ contracts:
     severity: error
     assertions:
       - row_count > 0
-      - "SUM(revenue) >= 0"
-      - no_nulls(sale_date)
+      - "SUM(gross_revenue) >= 0"
+      - no_nulls(order_day)

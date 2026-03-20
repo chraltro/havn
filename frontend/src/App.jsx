@@ -110,34 +110,6 @@ for (const s of SECTIONS) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Clear stale session data on server restart                          */
-/* ------------------------------------------------------------------ */
-// Phase 1 (sync): fetch boot time and update for NEXT page load.
-// We can't do a sync XHR for the current load, so we use a two-load strategy:
-// - On this load, fire async health check and store the boot time.
-// - If boot time changed since last stored value, clear session data NOW
-//   (the async response will be too late for useState inits, but we also
-//    clear synchronously by comparing what we stored last time).
-(() => {
-  // Async: fetch current boot time and store it for next load's comparison
-  fetch("/api/health").then(r => r.json()).then(d => {
-    const currentBoot = String(d.boot || "");
-    const lastBoot = sessionStorage.getItem("havn_server_boot");
-    if (currentBoot) {
-      sessionStorage.setItem("havn_server_boot", currentBoot);
-    }
-    // If this is a NEW boot we haven't seen, clear now (catches late loads)
-    if (lastBoot && lastBoot !== currentBoot) {
-      sessionStorage.removeItem("havn_pipeline_output");
-      sessionStorage.removeItem("havn_run_summary");
-      sessionStorage.removeItem("havn_agent_messages");
-      // Force reload so components pick up cleared state
-      window.location.reload();
-    }
-  }).catch(() => {});
-})();
-
-/* ------------------------------------------------------------------ */
 /* Pipeline Run Menu (replaces 5 separate action buttons)              */
 /* ------------------------------------------------------------------ */
 
@@ -853,7 +825,6 @@ function AppContent() {
             onCancel={cancelPipeline}
             addOutput={addOutput}
           />
-          <button onClick={() => setShowNewDialog(true)} style={styles.btn} aria-label="Create new file">+ New</button>
           <button
             onClick={() => setAgentSidebarOpen((v) => !v)}
             style={agentSidebarOpen ? styles.btnPrimary : styles.btn}
@@ -900,6 +871,7 @@ function AppContent() {
           <div style={styles.sidebarPane}>
             <div style={styles.sidebarSectionHeader}>
               <span>FILES</span>
+              <button onClick={() => setShowNewDialog(true)} style={styles.sidebarNewBtn} title="Create new file" aria-label="Create new file">+</button>
             </div>
             <div style={styles.sidebarPaneContent}>
               <FileTree files={files} onSelect={openFile} activeFile={activeFile} onNewFile={createFile} onDeleteFile={deleteFile} onMoveFile={moveFile} filter={sidebarFilter} />
@@ -1260,6 +1232,7 @@ const styles = {
   sidebarPaneContent: { flex: 1, overflow: "auto", minHeight: 0, padding: "0 0 8px" },
   sidebarDivider: { height: "1px", background: "var(--havn-border)", margin: "0 12px", flexShrink: 0 },
   sidebarSectionHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px 6px", fontSize: "10px", fontWeight: "600", color: "var(--havn-text-dim)", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0 },
+  sidebarNewBtn: { background: "none", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius)", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "14px", lineHeight: 1, padding: "0 5px", fontWeight: 600 },
   sidebarRefreshBtn: { background: "none", border: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "13px", padding: "0 2px", lineHeight: 1 },
   content: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" },
   agentPanel: { flexShrink: 0, overflow: "hidden", height: "100%", display: "flex", flexDirection: "column" },
