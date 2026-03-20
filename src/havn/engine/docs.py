@@ -102,8 +102,8 @@ def generate_docs(
             if kind == "TABLE":
                 try:
                     cached = conn.execute(
-                        "SELECT row_count FROM _dp_internal.model_state WHERE schema_name = ? AND model_name = ? AND row_count IS NOT NULL",
-                        [schema_name, table_name],
+                        "SELECT row_count FROM _dp_internal.model_state WHERE model_path = ? AND row_count IS NOT NULL",
+                        [f"{schema_name}.{table_name}"],
                     ).fetchone()
                     if cached:
                         lines.append(f"**Row count:** {cached[0]:,}\n")
@@ -254,8 +254,8 @@ def generate_structured_docs(
             if kind == "table":
                 try:
                     cached = conn.execute(
-                        "SELECT row_count FROM _dp_internal.model_state WHERE schema_name = ? AND model_name = ? AND row_count IS NOT NULL",
-                        [schema_name, table_name],
+                        "SELECT row_count FROM _dp_internal.model_state WHERE model_path = ? AND row_count IS NOT NULL",
+                        [f"{schema_name}.{table_name}"],
                     ).fetchone()
                     if cached:
                         row_count = cached[0]
