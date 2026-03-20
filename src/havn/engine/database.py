@@ -202,6 +202,33 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
             error       VARCHAR
         )
     """)
+    # Profile history (append-only for anomaly detection baselines)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS _dp_internal.profile_history (
+            id              VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
+            model_path      VARCHAR NOT NULL,
+            row_count       BIGINT DEFAULT 0,
+            column_count    INTEGER DEFAULT 0,
+            null_percentages JSON,
+            distinct_counts  JSON,
+            profiled_at     TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
+    # Anomaly detection log
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS _dp_internal.anomaly_log (
+            id            VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
+            model_name    VARCHAR NOT NULL,
+            metric        VARCHAR NOT NULL,
+            current_value DOUBLE,
+            mean_value    DOUBLE,
+            stddev_value  DOUBLE,
+            z_score       DOUBLE,
+            direction     VARCHAR,
+            message       VARCHAR,
+            detected_at   TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
 
 
 def ensure_circuit_state_table(conn: duckdb.DuckDBPyConnection) -> None:
