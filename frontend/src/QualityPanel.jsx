@@ -553,12 +553,20 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                                 ) : c.contract_name}
                               </td>
                               <td style={s.td}>{c.model}</td>
-                              <td style={s.td}><span style={s.badge(c.passed)}>{c.passed ? 'PASS' : 'FAIL'}</span></td>
+                              <td style={s.td}>
+                                {c.error && detail.length === 0 ? (
+                                  <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: 'color-mix(in srgb, var(--havn-yellow) 20%, transparent)', color: 'var(--havn-yellow)', fontWeight: 500 }}>SKIP</span>
+                                ) : (
+                                  <span style={s.badge(c.passed)}>{c.passed ? 'PASS' : 'FAIL'}</span>
+                                )}
+                              </td>
                               <td style={s.td}>
                                 <span style={s.severityBadge(c.severity)}>{c.severity === 'warn' ? 'warning' : 'must pass'}</span>
                               </td>
                               <td style={s.td}>
-                                {c.passed ? (
+                                {c.error && detail.length === 0 ? (
+                                  <span style={{ fontSize: 12, color: 'var(--havn-yellow)' }}>{c.error}</span>
+                                ) : c.passed ? (
                                   <span style={{ fontSize: 12, color: 'var(--havn-text-dim)' }}>{detail.length} rule{detail.length !== 1 ? 's' : ''} passed</span>
                                 ) : (
                                   <span style={{ fontSize: 12, color: 'var(--havn-red)' }}>
