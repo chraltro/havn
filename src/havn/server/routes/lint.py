@@ -73,6 +73,44 @@ def lint_file_endpoint(request: Request, req: LintFileRequest) -> dict:
     }
 
 
+class FormatSqlRequest(BaseModel):
+    sql: str = Field(..., min_length=1, max_length=1_000_000)
+
+
+@router.post("/api/format-sql")
+def format_sql_endpoint(request: Request, req: FormatSqlRequest) -> dict:
+    """Format SQL using SQLFluff (DuckDB dialect)."""
+    _require_permission(request, "read")
+    from havn.lint.linter import lint_file
+    import tempfile
+    from pathlib import Path
+
+    config = _get_config()
+    project_dir = _get_project_dir()
+
+    # Write SQL to a temp file for SQLFluff to process
+    with tempfile.NamedTemporaryFile(suffix=".sql", dir=str(project_dir), delete=False, mode="w") as f:
+        f.write(req.sql)
+        tmp_path = Path(f.name)
+    try:
+        _, _, _, formatted = lint_file(
+            tmp_path,
+            project_dir=project_dir,
+            fix=True,
+            dialect=config.lint.dialect,
+            rules=config.lint.rules or None,
+            content=req.sql,
+        )
+        return {"formatted": formatted or req.sql}
+    except Exception:
+        return {"formatted": req.sql}
+    finally:
+        try:
+            tmp_path.unlink()
+        except Exception:
+            pass
+
+
 @router.get("/api/lint/config")
 def get_lint_config(request: Request) -> dict:
     """Get the .sqlfluff config file contents."""
