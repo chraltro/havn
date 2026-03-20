@@ -1,0 +1,9 @@
+contracts:
+  - name: daily_sales_positive
+    description: "Daily sales must have positive revenue"
+    model: silver.fct_daily_sales
+    severity: error
+    assertions:
+      - row_count > 0
+      - "SUM(revenue) >= 0"
+      - no_nulls(sale_date)

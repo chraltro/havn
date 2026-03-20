@@ -234,9 +234,9 @@ function SecretsSection({ showConfirm }) {
         </table>
       )}
       <div style={sec.addRow}>
-        <input value={newKey} onChange={(e) => setNewKey(e.target.value)} placeholder="KEY" style={sec.input} />
-        <input value={newVal} onChange={(e) => setNewVal(e.target.value)} placeholder="value" style={sec.input} type="password" />
-        <button onClick={addSecret} style={sec.addBtn}>Add</button>
+        <input value={newKey} onChange={(e) => setNewKey(e.target.value)} placeholder="KEY" style={sec.input} aria-label="Secret key" />
+        <input value={newVal} onChange={(e) => setNewVal(e.target.value)} placeholder="value" style={sec.input} type="password" aria-label="Secret value" />
+        <button onClick={addSecret} style={sec.addBtn} aria-label="Add secret">Add</button>
       </div>
     </div>
   );
@@ -319,14 +319,14 @@ function UsersSection({ showConfirm }) {
         </table>
       )}
       <div style={sec.addRow}>
-        <input value={newUser} onChange={(e) => setNewUser(e.target.value)} placeholder="username" style={sec.input} />
-        <input value={newPass} onChange={(e) => setNewPass(e.target.value)} placeholder="password" style={sec.input} type="password" />
-        <select value={newRole} onChange={(e) => setNewRole(e.target.value)} style={sec.roleSelect}>
+        <input value={newUser} onChange={(e) => setNewUser(e.target.value)} placeholder="username" style={sec.input} aria-label="New username" />
+        <input value={newPass} onChange={(e) => setNewPass(e.target.value)} placeholder="password" style={sec.input} type="password" aria-label="New user password" />
+        <select value={newRole} onChange={(e) => setNewRole(e.target.value)} style={sec.roleSelect} aria-label="New user role">
           <option value="admin">admin</option>
           <option value="editor">editor</option>
           <option value="viewer">viewer</option>
         </select>
-        <button onClick={addUser} style={sec.addBtn}>Add User</button>
+        <button onClick={addUser} style={sec.addBtn} aria-label="Add user">Add User</button>
       </div>
     </div>
   );
@@ -375,7 +375,7 @@ function AlertsSection() {
         <div style={{ flex: 1, minWidth: 280 }}>
           <label style={sec.label}>Slack Webhook URL</label>
           <div style={{ display: 'flex', gap: 8 }}>
-            <input style={{ ...sec.input, flex: 1 }} placeholder="https://hooks.slack.com/services/..." value={slackUrl} onChange={e => setSlackUrl(e.target.value)} />
+            <input style={{ ...sec.input, flex: 1 }} placeholder="https://hooks.slack.com/services/..." value={slackUrl} onChange={e => setSlackUrl(e.target.value)} aria-label="Slack webhook URL" />
             <button style={sec.addBtn} disabled={!slackUrl || testing === 'slack'} onClick={() => handleTest('slack')}>
               {testing === 'slack' ? 'Testing...' : 'Test Slack'}
             </button>
@@ -384,7 +384,7 @@ function AlertsSection() {
         <div style={{ flex: 1, minWidth: 280 }}>
           <label style={sec.label}>Generic Webhook URL</label>
           <div style={{ display: 'flex', gap: 8 }}>
-            <input style={{ ...sec.input, flex: 1 }} placeholder="https://example.com/webhook" value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)} />
+            <input style={{ ...sec.input, flex: 1 }} placeholder="https://example.com/webhook" value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)} aria-label="Generic webhook URL" />
             <button style={sec.addBtn} disabled={!webhookUrl || testing === 'webhook'} onClick={() => handleTest('webhook')}>
               {testing === 'webhook' ? 'Testing...' : 'Test Webhook'}
             </button>
@@ -510,6 +510,7 @@ function LintConfigSection({ showConfirm }) {
         style={sec.configTextarea}
         rows={14}
         spellCheck={false}
+        aria-label="SQLFluff configuration"
       />
       <div style={{ ...sec.addRow, marginTop: "8px" }}>
         <button onClick={save} style={sec.addBtn}>{saved ? "Saved" : "Save"}</button>
@@ -597,8 +598,9 @@ function ResourcesSection() {
       </p>
       <div style={{ display: "flex", gap: "12px", alignItems: "flex-end", flexWrap: "wrap" }}>
         <div>
-          <label style={sec.label}>Memory limit</label>
+          <label htmlFor="settings-mem-limit" style={sec.label}>Memory limit</label>
           <input
+            id="settings-mem-limit"
             style={{ ...sec.input, width: "140px" }}
             value={memLimit}
             onChange={(e) => setMemLimit(e.target.value)}
@@ -606,8 +608,9 @@ function ResourcesSection() {
           />
         </div>
         <div>
-          <label style={sec.label}>Max threads</label>
+          <label htmlFor="settings-threads" style={sec.label}>Max threads</label>
           <input
+            id="settings-threads"
             style={{ ...sec.input, width: "80px" }}
             type="number"
             min="1"

@@ -800,18 +800,19 @@ function AppContent() {
   return (
     <div style={styles.container}>
       {/* Header: logo + section nav + actions + user */}
-      <header style={styles.header}>
+      <header style={styles.header} role="banner">
         <button
           onClick={() => navigateToTab("Overview")}
           style={styles.logo}
           title="Home"
+          aria-label="havn home"
         >
           <img src="/logo.svg" alt="havn" width="22" height="22" style={{ marginRight: "6px", verticalAlign: "middle" }} />
           havn
         </button>
 
         {/* Section navigation */}
-        <nav style={styles.sectionNav} data-havn-guide="tabs">
+        <nav style={styles.sectionNav} data-havn-guide="tabs" aria-label="Main navigation">
           {SECTIONS.map((section, i) => {
             const isActive = activeSection === section.id;
             return (
@@ -841,11 +842,13 @@ function AppContent() {
             onCancel={cancelPipeline}
             addOutput={addOutput}
           />
-          <button onClick={() => setShowNewDialog(true)} style={styles.btn}>+ New</button>
+          <button onClick={() => setShowNewDialog(true)} style={styles.btn} aria-label="Create new file">+ New</button>
           <button
             onClick={() => setAgentSidebarOpen((v) => !v)}
             style={agentSidebarOpen ? styles.btnPrimary : styles.btn}
             title="Toggle agent sidebar"
+            aria-label="Toggle agent sidebar"
+            aria-expanded={agentSidebarOpen}
           >
             Agent
           </button>
