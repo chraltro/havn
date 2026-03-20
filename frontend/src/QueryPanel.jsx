@@ -265,8 +265,8 @@ export default function QueryPanel({ addOutput }) {
     setExplainResult(null);
     try {
       const data = await api.explainQuery(sql);
-      setResults(null);
       setExplainResult({ raw: data.plan, isAnalyze: false });
+      setViewMode("plan");
       addOutput("info", "EXPLAIN plan generated");
     } catch (e) {
       setError(e.message);
@@ -276,9 +276,15 @@ export default function QueryPanel({ addOutput }) {
     }
   }
 
-  function formatQuery() {
+  async function formatQuery() {
     if (!sql.trim()) return;
-    setSql(fmt(sql));
+    try {
+      const result = await api.formatSql(sql);
+      if (result.formatted) setSql(result.formatted);
+    } catch {
+      // Fallback to client-side formatter
+      setSql(fmt(sql));
+    }
   }
 
   function handleKeyDown(e) {
@@ -317,6 +323,21 @@ export default function QueryPanel({ addOutput }) {
     setTimeout(() => { ta.focus(); ta.selectionStart = ta.selectionEnd = newCursor; }, 0);
   }
 
+  // Extract aliases from SQL: FROM/JOIN schema.table alias or schema.table AS alias
+  function extractAliases(sqlText) {
+    const aliasMap = {};
+    const re = /\b(?:FROM|JOIN)\s+([\w]+\.[\w]+)\s+(?:AS\s+)?([\w]+)/gi;
+    let m;
+    while ((m = re.exec(sqlText)) !== null) {
+      const fullTable = m[1]; // e.g. "landing.customers"
+      const alias = m[2].toLowerCase();
+      if (!["ON", "WHERE", "AND", "OR", "SET", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "FULL", "JOIN", "GROUP", "ORDER", "HAVING", "LIMIT", "UNION", "EXCEPT", "INTERSECT"].includes(alias.toUpperCase())) {
+        aliasMap[alias] = fullTable;
+      }
+    }
+    return aliasMap;
+  }
+
   async function computeAutocomplete(value, cursor) {
     if (cursor == null) cursor = value.length;
     const beforeCursor = value.substring(0, cursor);
@@ -328,11 +349,40 @@ export default function QueryPanel({ addOutput }) {
     if (token.length < 1) { setAcItems([]); return; }
 
     const dotIdx = token.indexOf(".");
+    const aliases = extractAliases(value);
 
     if (dotIdx !== -1) {
-      // "schema.partial" — suggest schema.table matches AND columns for exact schema.table
-      const schema = token.substring(0, dotIdx).toLowerCase();
+      const prefix = token.substring(0, dotIdx).toLowerCase();
       const partial = token.substring(dotIdx + 1).toLowerCase();
+
+      // Check if prefix is an alias
+      const aliasTarget = aliases[prefix];
+      if (aliasTarget) {
+        // Alias.column — resolve to the aliased table's columns
+        const [aSchema, aTable] = aliasTarget.split(".");
+        const key = `${aSchema}.${aTable}`;
+        let cols = colCacheRef.current[key];
+        if (!cols) {
+          try {
+            const info = await api.describeTable(aSchema, aTable);
+            cols = info.columns || [];
+            colCacheRef.current[key] = cols;
+          } catch { cols = []; }
+        }
+        const colMatches = cols
+          .filter((c) => !partial || c.name.toLowerCase().startsWith(partial))
+          .slice(0, 12)
+          .map((c) => ({
+            label: `${c.name}  ${c.type}`, insert: c.name, kind: "column",
+          }));
+        setAcToken(token);
+        setAcItems(colMatches);
+        setAcIndex(0);
+        return;
+      }
+
+      // "schema.partial" — suggest schema.table matches AND columns for exact schema.table
+      const schema = prefix;
 
       // schema.table completions
       const tableMatches = tables
@@ -363,18 +413,47 @@ export default function QueryPanel({ addOutput }) {
       setAcItems(items);
       setAcIndex(0);
     } else {
-      // Plain token — match schema names and table names
+      // Plain token — match table names, schema names, AND columns from tables in FROM/JOIN
       const lower = token.toLowerCase();
-      const matches = tables
+      const tableMatches = tables
         .filter((t) =>
           t.schema.toLowerCase().startsWith(lower) ||
           t.name.toLowerCase().startsWith(lower) ||
           `${t.schema}.${t.name}`.toLowerCase().startsWith(lower)
         )
-        .slice(0, 8)
+        .slice(0, 6)
         .map((t) => ({ label: `${t.schema}.${t.name}`, insert: `${t.schema}.${t.name}`, kind: "table" }));
+
+      // Also suggest columns from tables referenced in FROM/JOIN clauses
+      const colMatches = [];
+      const referencedTables = new Set(Object.values(aliases));
+      // Also find direct schema.table refs in FROM/JOIN without aliases
+      const directRe = /\b(?:FROM|JOIN)\s+([\w]+\.[\w]+)/gi;
+      let dm;
+      while ((dm = directRe.exec(value)) !== null) referencedTables.add(dm[1]);
+
+      for (const fullName of referencedTables) {
+        const [s, t] = fullName.split(".");
+        if (!s || !t) continue;
+        const key = `${s}.${t}`;
+        let cols = colCacheRef.current[key];
+        if (!cols) {
+          try {
+            const info = await api.describeTable(s, t);
+            cols = info.columns || [];
+            colCacheRef.current[key] = cols;
+          } catch { cols = []; }
+        }
+        for (const c of cols) {
+          if (c.name.toLowerCase().startsWith(lower)) {
+            colMatches.push({ label: `${c.name}  ${c.type}  (${t})`, insert: c.name, kind: "column" });
+          }
+        }
+      }
+
+      const items = [...colMatches.slice(0, 8), ...tableMatches];
       setAcToken(token);
-      setAcItems(matches);
+      setAcItems(items.slice(0, 12));
       setAcIndex(0);
     }
   }
@@ -546,10 +625,11 @@ export default function QueryPanel({ addOutput }) {
               )}
             </div>
 
-            {results && (
+            {(results || explainResult) && (
               <div style={st.viewToggle}>
-                <button onClick={() => setViewMode("table")} style={viewMode === "table" ? st.viewBtnActive : st.viewBtn}>Table</button>
-                <button onClick={() => setViewMode("chart")} style={viewMode === "chart" ? st.viewBtnActive : st.viewBtn}>Chart</button>
+                {results && <button onClick={() => setViewMode("table")} style={viewMode === "table" ? st.viewBtnActive : st.viewBtn}>Table</button>}
+                {results && <button onClick={() => setViewMode("chart")} style={viewMode === "chart" ? st.viewBtnActive : st.viewBtn}>Chart</button>}
+                {explainResult && <button onClick={() => setViewMode("plan")} style={viewMode === "plan" ? st.viewBtnActive : st.viewBtn}>Plan</button>}
               </div>
             )}
           </div>
@@ -582,25 +662,26 @@ export default function QueryPanel({ addOutput }) {
             </div>
           )}
 
-          {/* Explain Plan */}
-          {explainResult && (
+          {/* Results area — tabbed between Table, Chart, Plan */}
+          {viewMode === "plan" && explainResult && (
             <div style={st.results}>
               <ExplainPanel raw={explainResult.raw} isAnalyze={explainResult.isAnalyze} />
             </div>
           )}
-
-          {/* Results */}
-          {results && !explainResult && (
+          {viewMode === "table" && results && (
             <div style={st.results}>
               <div style={st.resultsHeader}>
                 <span>{results.rows.length} row{results.rows.length !== 1 ? "s" : ""}, {results.columns.length} column{results.columns.length !== 1 ? "s" : ""}</span>
               </div>
               <div style={st.resultsBody}>
-                {viewMode === "table" ? (
-                  <SortableTable columns={results.columns} rows={results.rows} />
-                ) : (
-                  <ChartPanel columns={results.columns} rows={results.rows} />
-                )}
+                <SortableTable columns={results.columns} rows={results.rows} />
+              </div>
+            </div>
+          )}
+          {viewMode === "chart" && results && (
+            <div style={st.results}>
+              <div style={st.resultsBody}>
+                <ChartPanel columns={results.columns} rows={results.rows} />
               </div>
             </div>
           )}
