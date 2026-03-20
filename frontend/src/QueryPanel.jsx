@@ -28,6 +28,7 @@ function saveHistory(h) {
  */
 function SchemaSidebar({ tables, onInsert }) {
   const [expanded, setExpanded] = useState({});
+  const [search, setSearch] = useState("");
 
   const schemas = {};
   for (const t of tables) {
@@ -35,6 +36,27 @@ function SchemaSidebar({ tables, onInsert }) {
     schemas[t.schema].push(t);
   }
   const schemaNames = Object.keys(schemas).sort(schemaCompare);
+
+  // Filter tables by search query (matches table name or column names)
+  const query = search.trim().toLowerCase();
+  const filteredSchemas = {};
+  if (query) {
+    for (const schema of schemaNames) {
+      const matching = schemas[schema].filter((t) => {
+        if (t.name.toLowerCase().includes(query)) return true;
+        // Check column names if table is expanded
+        const key = `${t.schema}.${t.name}`;
+        const cols = expanded[key];
+        if (cols && cols.length > 0) {
+          return cols.some((c) => c.name.toLowerCase().includes(query));
+        }
+        return false;
+      });
+      if (matching.length > 0) filteredSchemas[schema] = matching;
+    }
+  }
+  const displaySchemas = query ? filteredSchemas : schemas;
+  const displaySchemaNames = Object.keys(displaySchemas).sort(schemaCompare);
 
   async function toggleExpand(key) {
     if (expanded[key]) {
@@ -57,14 +79,32 @@ function SchemaSidebar({ tables, onInsert }) {
   return (
     <div style={sbSt.container}>
       <div style={sbSt.header}>Tables</div>
+      <div style={sbSt.searchRow}>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--havn-text-dim)" strokeWidth="1.5" style={{ flexShrink: 0 }}>
+          <circle cx="6.5" cy="6.5" r="5"/>
+          <path d="M10.5 10.5L14.5 14.5"/>
+        </svg>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Filter tables..."
+          style={sbSt.searchInput}
+        />
+        {search && (
+          <button onClick={() => setSearch("")} style={sbSt.searchClear}>&times;</button>
+        )}
+      </div>
       <div style={sbSt.list}>
-        {schemaNames.map((schema) => (
+        {displaySchemaNames.length === 0 && query && (
+          <div style={sbSt.empty}>No tables matching '{search}'</div>
+        )}
+        {displaySchemaNames.map((schema) => (
           <div key={schema}>
             <div style={sbSt.schemaRow}>
               <span style={sbSt.schemaName}>{schema}</span>
-              <span style={sbSt.schemaCount}>{schemas[schema].length}</span>
+              <span style={sbSt.schemaCount}>{displaySchemas[schema].length}</span>
             </div>
-            {schemas[schema].map((t) => {
+            {displaySchemas[schema].map((t) => {
               const key = `${t.schema}.${t.name}`;
               const cols = expanded[key];
               return (
@@ -99,7 +139,10 @@ function SchemaSidebar({ tables, onInsert }) {
 
 const sbSt = {
   container: { width: "100%", height: "100%", overflow: "auto", background: "var(--havn-bg-tertiary)", fontSize: "12px" },
-  header: { padding: "8px 10px", fontWeight: 600, fontSize: "11px", color: "var(--havn-text-secondary)", textTransform: "uppercase", letterSpacing: "0.3px", borderBottom: "1px solid var(--havn-border)" },
+  header: { padding: "8px 10px 4px", fontWeight: 600, fontSize: "11px", color: "var(--havn-text-secondary)", textTransform: "uppercase", letterSpacing: "0.3px" },
+  searchRow: { display: "flex", alignItems: "center", gap: "6px", padding: "2px 8px 6px", borderBottom: "1px solid var(--havn-border)" },
+  searchInput: { flex: 1, padding: "3px 6px", background: "var(--havn-bg)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", outline: "none", minWidth: 0 },
+  searchClear: { background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", padding: "0 2px", lineHeight: 1, flexShrink: 0 },
   list: { padding: "4px 0" },
   empty: { padding: "16px 10px", color: "var(--havn-text-dim)", fontSize: "12px", textAlign: "center" },
   schemaRow: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 10px 2px", marginTop: "4px" },
@@ -387,6 +430,8 @@ export default function QueryPanel({ addOutput }) {
               placeholder="Write SQL here..."
               style={{ ...st.textarea, height: "calc(100% - 22px)", resize: "none" }}
               spellCheck={false}
+              aria-label="SQL query editor"
+              aria-autocomplete="list"
             />
             <div style={st.shortcutHint}>
               <span style={st.shortcutKey}>Ctrl+Enter</span> run &nbsp;·&nbsp;
@@ -395,10 +440,12 @@ export default function QueryPanel({ addOutput }) {
             </div>
           </div>
           {acItems.length > 0 && (
-            <div style={st.acDropdown}>
+            <div style={st.acDropdown} role="listbox" aria-label="Autocomplete suggestions">
               {acItems.map((item, i) => (
                 <div
                   key={i}
+                  role="option"
+                  aria-selected={i === acIndex}
                   onMouseDown={(e) => { e.preventDefault(); applyCompletion(item); }}
                   style={i === acIndex ? st.acItemActive : st.acItem}
                 >
@@ -410,7 +457,7 @@ export default function QueryPanel({ addOutput }) {
           )}
           {/* Toolbar */}
           <div style={st.toolbar}>
-            <button onClick={runQuery} disabled={queryRunning || !sql.trim()} style={st.runBtn}>
+            <button onClick={runQuery} disabled={queryRunning || !sql.trim()} style={st.runBtn} aria-label="Run query">
               {queryRunning ? "Running..." : "Run"} <span style={st.shortcut}>Ctrl+Enter</span>
             </button>
             <button onClick={explainQuery} disabled={queryRunning || !sql.trim()} style={st.fmtBtn} title="Show query execution plan">
@@ -422,7 +469,7 @@ export default function QueryPanel({ addOutput }) {
 
             {/* History dropdown */}
             <div ref={historyRef} style={st.historyWrapper}>
-              <button onClick={() => setHistoryOpen(!historyOpen)} style={st.historyBtn} title="Query history">
+              <button onClick={() => setHistoryOpen(!historyOpen)} style={st.historyBtn} title="Query history" aria-label="Query history" aria-expanded={historyOpen}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 1.5"/></svg> {history.length > 0 && <span style={st.historyCount}>{history.length}</span>}
               </button>
               {historyOpen && (
@@ -471,8 +518,16 @@ export default function QueryPanel({ addOutput }) {
           {/* Error */}
           {error && (
             <div style={st.error}>
-              <span style={st.errorLabel}>Error</span>
-              {error}
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+                <div>
+                  <span style={st.errorLabel}>Query Failed</span>
+                  {error}
+                </div>
+                <button
+                  onClick={() => setError(null)}
+                  style={{ background: "none", border: "none", color: "var(--havn-red)", cursor: "pointer", fontSize: "14px", lineHeight: 1, flexShrink: 0, padding: "0 2px", opacity: 0.7 }}
+                >{"\u00D7"}</button>
+              </div>
             </div>
           )}
 
