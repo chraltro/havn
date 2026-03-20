@@ -200,8 +200,10 @@ function FilteredFileNode({ node, depth, onSelect, activeFile, onNewFile, onDele
   );
 }
 
-export default function FileTree({ files, onSelect, activeFile, onNewFile, onDeleteFile, onMoveFile }) {
-  const [filter, setFilter] = useState("");
+export default function FileTree({ files, onSelect, activeFile, onNewFile, onDeleteFile, onMoveFile, filter: externalFilter }) {
+  // Support both external filter (from sidebar) and internal filter (standalone)
+  const [internalFilter, setInternalFilter] = useState("");
+  const filter = externalFilter !== undefined ? externalFilter : internalFilter;
 
   const matchingFiles = useMemo(() => filter.trim() ? collectMatchingPaths(files, filter.trim()) : null, [files, filter]);
   const visibleDirs = useMemo(() => matchingFiles ? ancestorPaths(matchingFiles) : null, [matchingFiles]);
@@ -210,22 +212,24 @@ export default function FileTree({ files, onSelect, activeFile, onNewFile, onDel
 
   return (
     <div role="tree" aria-label="Project files">
-      <div style={styles.filterRow}>
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--havn-text-dim)" strokeWidth="1.5" style={{ flexShrink: 0 }}>
-          <circle cx="6.5" cy="6.5" r="5"/>
-          <path d="M10.5 10.5L14.5 14.5"/>
-        </svg>
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter files..."
-          style={styles.filterInput}
-          aria-label="Filter files"
-        />
-        {filter && (
-          <button onClick={() => setFilter("")} style={styles.filterClear} title="Clear filter" aria-label="Clear filter">&times;</button>
-        )}
-      </div>
+      {externalFilter === undefined && (
+        <div style={styles.filterRow}>
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--havn-text-dim)" strokeWidth="1.5" style={{ flexShrink: 0 }}>
+            <circle cx="6.5" cy="6.5" r="5"/>
+            <path d="M10.5 10.5L14.5 14.5"/>
+          </svg>
+          <input
+            value={internalFilter}
+            onChange={(e) => setInternalFilter(e.target.value)}
+            placeholder="Filter files..."
+            style={styles.filterInput}
+            aria-label="Filter files"
+          />
+          {internalFilter && (
+            <button onClick={() => setInternalFilter("")} style={styles.filterClear} title="Clear filter" aria-label="Clear filter">&times;</button>
+          )}
+        </div>
+      )}
       {files.length === 0 && !isFiltering && (
         <div style={styles.empty}>No files found</div>
       )}
