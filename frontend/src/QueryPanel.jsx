@@ -210,7 +210,7 @@ export default function QueryPanel({ addOutput }) {
           const newHistory = [{ sql: query.trim(), ts: new Date().toISOString() }, ...getHistory().filter((h) => h.sql !== query.trim())];
           setHistory(newHistory);
           saveHistory(newHistory);
-          addOutput("info", `Query: ${data.rows.length} rows (${data.columns.length} cols)`);
+          addOutput("info", `Query: ${data.rows.length} row${data.rows.length !== 1 ? "s" : ""} (${data.columns.length} cols)${data.truncated ? " — results capped, add LIMIT to your query for full control" : ""}`);
         } catch (e) {
           setError(e.message);
           addOutput("error", `Query error: ${e.message}`);
@@ -249,7 +249,7 @@ export default function QueryPanel({ addOutput }) {
       const newHistory = [{ sql: sql.trim(), ts: new Date().toISOString() }, ...history.filter((h) => h.sql !== sql.trim())];
       setHistory(newHistory);
       saveHistory(newHistory);
-      addOutput("info", `Query: ${data.rows.length} rows (${data.columns.length} cols)`);
+      addOutput("info", `Query: ${data.rows.length} row${data.rows.length !== 1 ? "s" : ""} (${data.columns.length} cols)${data.truncated ? " — results capped, add LIMIT to your query for full control" : ""}`);
     } catch (e) {
       setError(e.message);
       addOutput("error", `Query error: ${e.message}`);
