@@ -101,7 +101,7 @@ def format_sql_endpoint(request: Request, req: FormatSqlRequest) -> dict:
             rules=config.lint.rules or None,
             content=req.sql,
         )
-        return {"formatted": formatted or req.sql}
+        return {"formatted": (formatted or req.sql).strip()}
     except Exception:
         return {"formatted": req.sql}
     finally:
