@@ -276,15 +276,9 @@ export default function QueryPanel({ addOutput }) {
     }
   }
 
-  async function formatQuery() {
+  function formatQuery() {
     if (!sql.trim()) return;
-    try {
-      const result = await api.formatSql(sql);
-      if (result.formatted) setSql(result.formatted);
-    } catch {
-      // Fallback to client-side formatter
-      setSql(fmt(sql));
-    }
+    setSql(fmt(sql));
   }
 
   function handleKeyDown(e) {
@@ -625,13 +619,6 @@ export default function QueryPanel({ addOutput }) {
               )}
             </div>
 
-            {(results || explainResult) && (
-              <div style={st.viewToggle}>
-                {results && <button onClick={() => setViewMode("table")} style={viewMode === "table" ? st.viewBtnActive : st.viewBtn}>Table</button>}
-                {results && <button onClick={() => setViewMode("chart")} style={viewMode === "chart" ? st.viewBtnActive : st.viewBtn}>Chart</button>}
-                {explainResult && <button onClick={() => setViewMode("plan")} style={viewMode === "plan" ? st.viewBtnActive : st.viewBtn}>Plan</button>}
-              </div>
-            )}
           </div>
 
           {/* Starter suggestions when textarea is empty */}
@@ -662,7 +649,28 @@ export default function QueryPanel({ addOutput }) {
             </div>
           )}
 
-          {/* Results area — tabbed between Table, Chart, Plan */}
+          {/* Result tabs */}
+          {(results || explainResult) && (
+            <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--havn-border)", padding: "0 12px" }}>
+              {results && (
+                <button onClick={() => setViewMode("table")} style={{ padding: "6px 14px", fontSize: 12, fontWeight: 500, cursor: "pointer", background: "none", border: "none", borderBottom: viewMode === "table" ? "2px solid var(--havn-accent)" : "2px solid transparent", color: viewMode === "table" ? "var(--havn-accent)" : "var(--havn-text-secondary)" }}>
+                  Table ({results.rows.length})
+                </button>
+              )}
+              {results && (
+                <button onClick={() => setViewMode("chart")} style={{ padding: "6px 14px", fontSize: 12, fontWeight: 500, cursor: "pointer", background: "none", border: "none", borderBottom: viewMode === "chart" ? "2px solid var(--havn-accent)" : "2px solid transparent", color: viewMode === "chart" ? "var(--havn-accent)" : "var(--havn-text-secondary)" }}>
+                  Chart
+                </button>
+              )}
+              {explainResult && (
+                <button onClick={() => setViewMode("plan")} style={{ padding: "6px 14px", fontSize: 12, fontWeight: 500, cursor: "pointer", background: "none", border: "none", borderBottom: viewMode === "plan" ? "2px solid var(--havn-accent)" : "2px solid transparent", color: viewMode === "plan" ? "var(--havn-accent)" : "var(--havn-text-secondary)" }}>
+                  Plan
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Results area */}
           {viewMode === "plan" && explainResult && (
             <div style={st.results}>
               <ExplainPanel raw={explainResult.raw} isAnalyze={explainResult.isAnalyze} />
