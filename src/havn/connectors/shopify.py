@@ -29,13 +29,14 @@ class ShopifyConnector(BaseConnector):
     default_schedule = "0 */6 * * *"
 
     params = [
-        ParamSpec("store", "Shopify store name (e.g. my-store from my-store.myshopify.com)"),
+        ParamSpec("store", "Shopify store name (e.g. my-store from my-store.myshopify.com)", example="my-store"),
         ParamSpec("access_token", "Shopify Admin API access token", secret=True),
         ParamSpec(
             "resources",
             "Comma-separated resources to sync",
             required=False,
             default="orders,products,customers",
+            example="orders,products,customers",
         ),
     ]
 

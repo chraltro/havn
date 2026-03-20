@@ -34,12 +34,13 @@ class StripeConnector(BaseConnector):
     default_schedule = "0 */6 * * *"
 
     params = [
-        ParamSpec("api_key", "Stripe secret API key (sk_...)", secret=True),
+        ParamSpec("api_key", "Stripe secret API key (sk_...)", secret=True, pattern=r"^sk_", example="sk_live_xxx"),
         ParamSpec(
             "resources",
             "Comma-separated resources to sync (default: all)",
             required=False,
             default="charges,customers,invoices,subscriptions,payment_intents,products,prices,balance_transactions",
+            example="charges,customers,invoices",
         ),
     ]
 

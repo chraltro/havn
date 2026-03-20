@@ -21,14 +21,15 @@ class RESTAPIConnector(BaseConnector):
     default_schedule = "0 */6 * * *"  # every 6 hours
 
     params = [
-        ParamSpec("url", "API base URL (e.g. https://api.example.com/v1/data)"),
-        ParamSpec("method", "HTTP method", required=False, default="GET"),
+        ParamSpec("url", "API base URL (e.g. https://api.example.com/v1/data)", param_type="url", example="https://api.example.com/v1/data"),
+        ParamSpec("method", "HTTP method", required=False, default="GET", param_type="enum", enum_values=["GET", "POST"], example="GET"),
         ParamSpec("headers", "Extra headers as JSON string", required=False, default="{}"),
         ParamSpec("auth_header", "Authorization header value", required=False, secret=True),
-        ParamSpec("json_path", "JSONPath to the data array (e.g. $.data or $.results)", required=False, default="$"),
-        ParamSpec("table_name", "Target table name", required=False, default="api_data"),
-        ParamSpec("pagination_key", "Key for next-page URL in response", required=False),
-        ParamSpec("since_param", "Query param for incremental fetch (e.g. since, updated_after)", required=False),
+        ParamSpec("json_path", "JSONPath to the data array (e.g. $.data or $.results)", required=False, default="$", example="$.data"),
+        ParamSpec("table_name", "Target table name", required=False, default="api_data", example="api_data"),
+        ParamSpec("timeout", "Request timeout in seconds", required=False, param_type="integer", min_value=1, max_value=300, default=30, example="30"),
+        ParamSpec("pagination_key", "Key for next-page URL in response", required=False, example="next"),
+        ParamSpec("since_param", "Query param for incremental fetch (e.g. since, updated_after)", required=False, example="since"),
     ]
 
     def test_connection(self, config: dict[str, Any]) -> dict:

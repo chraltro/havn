@@ -21,9 +21,9 @@ class GoogleSheetsConnector(BaseConnector):
     default_schedule = "0 */4 * * *"  # every 4 hours
 
     params = [
-        ParamSpec("spreadsheet_id", "Google Sheets ID (from the URL)"),
-        ParamSpec("sheet_name", "Sheet/tab name", required=False, default="Sheet1"),
-        ParamSpec("table_name", "Target table name", required=False),
+        ParamSpec("spreadsheet_id", "Google Sheets ID (from the URL)", example="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"),
+        ParamSpec("sheet_name", "Sheet/tab name", required=False, default="Sheet1", example="Sheet1"),
+        ParamSpec("table_name", "Target table name", required=False, example="sales_data"),
     ]
 
     def test_connection(self, config: dict[str, Any]) -> dict:
