@@ -160,7 +160,18 @@ const sbSt = {
 };
 
 export default function QueryPanel({ addOutput }) {
-  const [sql, setSql] = useState("");
+  // Use ref-based value to preserve browser undo stack (controlled textarea breaks Ctrl+Z)
+  const sqlRef = useRef("");
+  const [sql, _setSql] = useState("");
+  const setSql = (val) => {
+    const v = typeof val === "function" ? val(sqlRef.current) : val;
+    sqlRef.current = v;
+    _setSql(v);
+    // Sync textarea value for programmatic changes (format, history, autocomplete)
+    if (textareaRef.current && textareaRef.current.value !== v) {
+      textareaRef.current.value = v;
+    }
+  };
   const [limitEnabled, setLimitEnabled] = useState(true);
   const queryAbortRef = useRef(null);
   const [results, setResults] = useState(null);
@@ -523,21 +534,16 @@ export default function QueryPanel({ addOutput }) {
           <div style={{ ...st.editorWrapper, height: editorHeight }}>
             <textarea
               ref={textareaRef}
-              value={sql}
-              onChange={(e) => { const v = e.target.value; const cur = e.target.selectionStart; setSql(v); computeAutocomplete(v, cur); }}
+              defaultValue=""
+              onInput={(e) => { const v = e.target.value; const cur = e.target.selectionStart; sqlRef.current = v; _setSql(v); computeAutocomplete(v, cur); }}
               onKeyDown={handleKeyDown}
               onBlur={() => setTimeout(() => setAcItems([]), 150)}
               placeholder="Write SQL here..."
-              style={{ ...st.textarea, height: "calc(100% - 22px)", resize: "none" }}
+              style={{ ...st.textarea, height: "100%", resize: "none" }}
               spellCheck={false}
               aria-label="SQL query editor"
               aria-autocomplete="list"
             />
-            <div style={st.shortcutHint}>
-              <span style={st.shortcutKey}>Ctrl+Enter</span> run &nbsp;·&nbsp;
-              <span style={st.shortcutKey}>Ctrl+Shift+F</span> format &nbsp;·&nbsp;
-              <span style={st.shortcutKey}>Tab</span> autocomplete
-            </div>
           </div>
           {acItems.length > 0 && (
             <div style={st.acDropdown} role="listbox" aria-label="Autocomplete suggestions">
@@ -556,6 +562,11 @@ export default function QueryPanel({ addOutput }) {
             </div>
           )}
           <ResizeHandle direction="vertical" onResize={onEditorResize} onResizeStart={onEditorResizeStart} />
+          <div style={st.shortcutHint}>
+            <span style={st.shortcutKey}>Ctrl+Enter</span> run &nbsp;·&nbsp;
+            <span style={st.shortcutKey}>Ctrl+Shift+F</span> format &nbsp;·&nbsp;
+            <span style={st.shortcutKey}>Tab</span> autocomplete
+          </div>
           {/* Toolbar */}
           <div style={st.toolbar}>
             {queryRunning ? (
@@ -748,7 +759,7 @@ const st = {
 
   editorWrapper: { flexShrink: 0 },
   textarea: { width: "100%", height: "100%", padding: "10px 12px", background: "var(--havn-bg)", border: "none", color: "var(--havn-text)", fontFamily: "var(--havn-font-mono)", fontSize: "13px", resize: "none", outline: "none", boxSizing: "border-box", lineHeight: 1.5, display: "block" },
-  shortcutHint: { height: "22px", display: "flex", alignItems: "center", padding: "0 10px", gap: "2px", fontSize: "10px", color: "var(--havn-text-dim)", background: "var(--havn-bg)", borderTop: "1px solid var(--havn-border)" },
+  shortcutHint: { height: "22px", display: "flex", alignItems: "center", padding: "0 10px", gap: "2px", fontSize: "10px", color: "var(--havn-text-dim)", background: "var(--havn-bg)", flexShrink: 0 },
   shortcutKey: { background: "var(--havn-btn-bg)", border: "1px solid var(--havn-btn-border)", borderRadius: "3px", padding: "0 4px", fontSize: "10px", fontFamily: "var(--havn-font-mono)", color: "var(--havn-text-secondary)" },
   acDropdown: { maxHeight: "180px", overflow: "auto", background: "var(--havn-bg-secondary)", borderBottom: "1px solid var(--havn-border)", flexShrink: 0 },
   acItem: { display: "flex", alignItems: "center", gap: "8px", padding: "5px 10px", cursor: "pointer", fontSize: "12px" },

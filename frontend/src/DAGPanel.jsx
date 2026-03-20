@@ -372,7 +372,6 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
   const [hovered, setHovered] = useState(null);
   const setHintTrigger = useHintTriggerFn();
   const [error, setError] = useState(null);
-  const [dagMode, setDagMode] = useState('basic'); // 'basic' | 'full'
   const [dagSearch, setDagSearch] = useState("");
   const [selectedNode, setSelectedNode] = useState(null);
 
@@ -392,18 +391,9 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
 
   useEffect(() => {
     setError(null);
-    if (dagMode === 'full') {
-      (api.getFullDAG ? api.getFullDAG() : Promise.reject(new Error('not available')))
-        .then(setDag)
-        .catch(() => {
-          // Fallback to basic DAG if full is not available
-          api.getDAG().then(setDag).catch((e) => setError(e.message || "Failed to load DAG"));
-        });
-    } else {
-      api.getDAG().then(setDag).catch((e) => setError(e.message || "Failed to load DAG"));
-    }
+    api.getDAG().then(setDag).catch((e) => setError(e.message || "Failed to load DAG"));
     setHintTrigger("dagOpened", true);
-  }, [dagMode]);
+  }, []);
 
   // Load rewind data when entering rewind mode
   useEffect(() => {
@@ -875,18 +865,6 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
                 style={{ padding: "3px 8px", background: "var(--havn-bg)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", outline: "none", width: 140 }}
               />
               {dagSearch && <button onClick={() => setDagSearch("")} style={{ background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", padding: 0, lineHeight: 1 }}>&times;</button>}
-            </div>
-          )}
-          {!rewindMode && (
-            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-              {['basic', 'full'].map(mode => (
-                <button key={mode} onClick={() => setDagMode(mode)} style={{
-                  padding: '4px 12px', borderRadius: 'var(--havn-radius-lg)', fontSize: 11, cursor: 'pointer', fontWeight: 500,
-                  background: dagMode === mode ? 'var(--havn-accent)' : 'var(--havn-btn-bg)',
-                  color: dagMode === mode ? '#fff' : 'var(--havn-text)',
-                  border: dagMode === mode ? '1px solid var(--havn-accent)' : '1px solid var(--havn-btn-border)'
-                }}>{mode === 'basic' ? 'Basic' : 'Full'}</button>
-              ))}
             </div>
           )}
           <button

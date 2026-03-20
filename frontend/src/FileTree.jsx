@@ -1,13 +1,30 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { schemaCompare } from "./schemaOrder";
 
 function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, onMoveFile }) {
-  const [expanded, setExpanded] = useState(depth < 2);
+  // Auto-expand directories that contain the active file
+  const containsActive = activeFile && node.type === "dir" && node.children?.some(function check(n) {
+    return n.path === activeFile || (n.children && n.children.some(check));
+  });
+  const [expanded, setExpanded] = useState(depth < 2 || !!containsActive);
+
+  // Expand when active file changes to be inside this dir
+  useEffect(() => {
+    if (containsActive && !expanded) setExpanded(true);
+  }, [containsActive]);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [hovered, setHovered] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const activeRef = useRef(null);
   const isActive = activeFile === node.path;
+
+  // Scroll into view when this node becomes active
+  useEffect(() => {
+    if (isActive && activeRef.current) {
+      activeRef.current.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [isActive]);
 
   if (node.type === "dir") {
     return (
@@ -94,6 +111,7 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
 
   return (
     <div
+      ref={isActive ? activeRef : undefined}
       data-havn-file=""
       role="treeitem"
       aria-selected={isActive}
