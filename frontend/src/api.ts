@@ -454,6 +454,8 @@ export const api = {
     a.click();
     URL.revokeObjectURL(url);
   },
+  formatSql: (sql: string) =>
+    request<{ formatted: string }>("/format-sql", { method: "POST", body: JSON.stringify({ sql }) }),
   getSlowQueries: (limit: number = 50) =>
     request("/metrics/slow-queries?limit=" + limit),
 
