@@ -114,16 +114,16 @@ export default function OutputPanel({ output, onClear, height = 180, onOpenFile,
   const pctText = running && progress > 0 && progress < 1 ? `${Math.round(progress * 100)}%` : "";
 
   return (
-    <div style={{ ...styles.container, height }}>
+    <div style={{ ...styles.container, height }} role="region" aria-label="Output">
       <div style={styles.header}>
         <span style={styles.headerTitle}>Output</span>
-        {running && <span style={styles.runningBadge}>{pctText || "running"}</span>}
+        {running && <span style={styles.runningBadge} aria-live="polite">{pctText || "running"}</span>}
         <span style={styles.count}>{output.length > 0 ? `${output.length} entries` : ""}</span>
-        <button onClick={onClear} style={styles.clearBtn}>
+        <button onClick={onClear} style={styles.clearBtn} aria-label="Clear output">
           Clear
         </button>
       </div>
-      <div style={styles.log}>
+      <div style={styles.log} role="log" aria-live="polite">
         {output.length === 0 && (
           <div style={styles.placeholder}>Run a script or transform to see output here.</div>
         )}
