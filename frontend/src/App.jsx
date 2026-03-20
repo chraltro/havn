@@ -273,8 +273,14 @@ function groupBySchema(tables) {
   return schemas;
 }
 
-function SchemaTree({ tables, selectedTable, onSelectTable }) {
-  const schemas = groupBySchema(tables);
+function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
+  const allSchemas = groupBySchema(tables);
+  // Apply filter to table names
+  const schemas = {};
+  for (const [schema, tbls] of Object.entries(allSchemas)) {
+    const filtered = filter ? tbls.filter(t => t.name.toLowerCase().includes(filter.toLowerCase())) : tbls;
+    if (filtered.length > 0) schemas[schema] = filtered;
+  }
   const schemaNames = Object.keys(schemas).sort(schemaCompare);
   const [expanded, setExpanded] = useState(() => {
     const m = {};
@@ -361,6 +367,7 @@ function AppContent() {
 
   // Editor state
   const [activeFile, setActiveFile] = useState(null);
+  const [sidebarFilter, setSidebarFilter] = useState("");
   const activeFileRef = useRef(null);
   const [fileContent, setFileContent] = useState("");
   const [fileLang, setFileLang] = useState("sql");
@@ -872,13 +879,30 @@ function AppContent() {
       <div style={styles.main}>
         {/* Sidebar */}
         <aside style={{ ...styles.sidebar, width: sidebarWidth }} data-havn-guide="sidebar" role="navigation" aria-label="File browser">
+          <div style={{ padding: "4px 8px", borderBottom: "1px solid var(--havn-border)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--havn-text-dim)" strokeWidth="1.5" style={{ flexShrink: 0 }}>
+                <circle cx="6.5" cy="6.5" r="5"/><path d="M10.5 10.5L14.5 14.5"/>
+              </svg>
+              <input
+                value={sidebarFilter}
+                onChange={(e) => setSidebarFilter(e.target.value)}
+                placeholder="Filter files &amp; tables..."
+                style={{ flex: 1, padding: "3px 6px", background: "var(--havn-bg)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", outline: "none", minWidth: 0 }}
+                aria-label="Filter files and tables"
+              />
+              {sidebarFilter && (
+                <button onClick={() => setSidebarFilter("")} style={{ background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", padding: "0 2px", lineHeight: 1 }} aria-label="Clear filter">&times;</button>
+              )}
+              <button onClick={refreshAll} style={styles.sidebarRefreshBtn} title="Refresh files &amp; tables" aria-label="Refresh files and tables">&#x21BB;</button>
+            </div>
+          </div>
           <div style={styles.sidebarPane}>
             <div style={styles.sidebarSectionHeader}>
               <span>FILES</span>
-              <button onClick={refreshAll} style={styles.sidebarRefreshBtn} title="Refresh files &amp; tables" aria-label="Refresh files and tables">&#x21BB;</button>
             </div>
             <div style={styles.sidebarPaneContent}>
-              <FileTree files={files} onSelect={openFile} activeFile={activeFile} onNewFile={createFile} onDeleteFile={deleteFile} onMoveFile={moveFile} />
+              <FileTree files={files} onSelect={openFile} activeFile={activeFile} onNewFile={createFile} onDeleteFile={deleteFile} onMoveFile={moveFile} filter={sidebarFilter} />
             </div>
           </div>
           <div style={styles.sidebarDivider} />
@@ -889,6 +913,7 @@ function AppContent() {
                 tables={tables}
                 selectedTable={selectedTable}
                 onSelectTable={handleSelectTable}
+                filter={sidebarFilter}
               />
             </div>
           </div>

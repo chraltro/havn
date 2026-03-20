@@ -40,6 +40,7 @@ class DiffRequest(BaseModel):
     targets: list[str] | None = Field(default=None)
     target_schema: str | None = Field(default=None, max_length=100)
     full: bool = False
+    mode: str = Field(default="all", pattern=r"^(single|changed|all)$")
 
 
 class CreateModelRequest(BaseModel):
@@ -118,6 +119,7 @@ def run_diff_endpoint(request: Request, req: DiffRequest, conn: DbConn) -> list[
             target_schema=req.target_schema,
             project_config=config,
             full=req.full,
+            mode=req.mode,
         )
         return [
             {
@@ -141,6 +143,7 @@ def run_diff_endpoint(request: Request, req: DiffRequest, conn: DbConn) -> list[
                 "sample_added": r.sample_added,
                 "sample_removed": r.sample_removed,
                 "sample_modified": r.sample_modified,
+                "skipped": r.skipped,
             }
             for r in results
         ]
