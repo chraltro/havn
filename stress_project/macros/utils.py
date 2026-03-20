@@ -2,12 +2,20 @@ from havn import macro
 
 
 @macro
-def mask_email(email: str) -> str:
-    """Mask the local part of an email, keep domain."""
-    if not email or "@" not in email:
-        return "***"
-    local, domain = email.split("@", 1)
-    return f"***@{domain}"
+def normalize_country(code: str) -> str:
+    """Normalize country codes to ISO 3166-1 alpha-2."""
+    if not code:
+        return "UNKNOWN"
+    code = code.strip().upper()
+    aliases = {
+        "USA": "US", "UNITED STATES": "US", "AMERICA": "US",
+        "UK": "GB", "UNITED KINGDOM": "GB", "ENGLAND": "GB",
+        "DEUTSCHLAND": "DE", "GERMANY": "DE",
+        "NORGE": "NO", "NORWAY": "NO",
+        "SVERIGE": "SE", "SWEDEN": "SE",
+        "DANMARK": "DK", "DENMARK": "DK",
+    }
+    return aliases.get(code, code)
 
 
 @macro
