@@ -40,19 +40,17 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
             {"\u25BE"}
           </span>
           <span style={styles.dirName}>{node.name}</span>
-          {hovered && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setExpanded(true);
-                setCreating(true);
-                setNewName("");
-              }}
-              style={styles.addBtn}
-              title={`New file in ${node.name}/`}
-              aria-label={`New file in ${node.name}`}
-            >+</button>
-          )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(true);
+              setCreating(true);
+              setNewName("");
+            }}
+            style={{ ...styles.addBtn, opacity: hovered ? 1 : 0, pointerEvents: hovered ? "auto" : "none" }}
+            title={`New file in ${node.name}/`}
+            aria-label={`New file in ${node.name}`}
+          >+</button>
         </div>
         {expanded && creating && (
           <div style={{ ...styles.newFileRow, paddingLeft: 24 + depth * 16 }}>
@@ -116,10 +114,10 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
     >
       <span style={{ ...styles.dot, background: iconColor }} />
       <span style={isActive ? styles.activeFileName : styles.fileName}>{node.name}</span>
-      {hovered && onDeleteFile && (
+      {onDeleteFile && (
         <button
           onClick={(e) => { e.stopPropagation(); onDeleteFile(node.path); }}
-          style={styles.deleteBtn}
+          style={{ ...styles.deleteBtn, opacity: hovered ? 1 : 0, pointerEvents: hovered ? "auto" : "none" }}
           title={`Delete ${node.name}`}
           aria-label={`Delete ${node.name}`}
         >&times;</button>
@@ -137,7 +135,10 @@ function collectMatchingPaths(nodes, query) {
   const lower = query.toLowerCase();
   function walk(node) {
     if (node.type === "file") {
-      if (node.name.toLowerCase().includes(lower)) matches.add(node.path);
+      if (node.name.toLowerCase().includes(lower)) {
+        // Normalize backslashes to forward slashes for consistent path comparison
+        matches.add((node.path || "").replace(/\\/g, "/"));
+      }
     }
     if (node.children) node.children.forEach(walk);
   }
@@ -152,7 +153,9 @@ function collectMatchingPaths(nodes, query) {
 function ancestorPaths(matchingPaths) {
   const ancestors = new Set();
   for (const p of matchingPaths) {
-    const parts = p.split("/");
+    // Handle both forward slashes and backslashes (Windows paths from API)
+    const normalized = p.replace(/\\/g, "/");
+    const parts = normalized.split("/");
     for (let i = 1; i < parts.length; i++) {
       ancestors.add(parts.slice(0, i).join("/"));
     }
@@ -161,14 +164,15 @@ function ancestorPaths(matchingPaths) {
 }
 
 function FilteredFileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, onMoveFile, matchingFiles, visibleDirs }) {
+  const normalizedPath = (node.path || "").replace(/\\/g, "/");
   if (node.type === "file") {
-    if (!matchingFiles.has(node.path)) return null;
+    if (!matchingFiles.has(normalizedPath)) return null;
     return (
       <FileNode node={node} depth={depth} onSelect={onSelect} activeFile={activeFile} onNewFile={onNewFile} onDeleteFile={onDeleteFile} onMoveFile={onMoveFile} />
     );
   }
   // Directory: only show if it's an ancestor of a matching file
-  if (!visibleDirs.has(node.path)) return null;
+  if (!visibleDirs.has(normalizedPath)) return null;
   const children = (node.path === "transform"
     ? [...(node.children || [])].sort((a, b) => a.type === "dir" && b.type === "dir" ? schemaCompare(a.name, b.name) : 0)
     : node.children || []);

@@ -6,6 +6,9 @@ import logging
 
 __version__ = "0.1.2"
 
+# Re-export the @macro decorator for user-facing macros
+from havn.engine.macros import macro  # noqa: F401
+
 
 def setup_logging(level: str = "INFO") -> None:
     """Configure structured logging for the havn platform.

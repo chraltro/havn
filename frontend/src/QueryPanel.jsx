@@ -3,6 +3,7 @@ import { format as formatSQL } from "sql-formatter";
 import { api } from "./api";
 import SortableTable from "./SortableTable";
 import ChartPanel from "./ChartPanel";
+import ExplainPanel from "./ExplainPanel";
 import { useHintTriggerFn } from "./HintSystem";
 import ResizeHandle from "./ResizeHandle";
 import useResizable from "./useResizable";
@@ -166,6 +167,7 @@ export default function QueryPanel({ addOutput }) {
   const [tables, setTables] = useState([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [viewMode, setViewMode] = useState("table");
+  const [explainResult, setExplainResult] = useState(null);
   const textareaRef = useRef(null);
   const historyRef = useRef(null);
   const setHintTrigger = useHintTriggerFn();
@@ -230,6 +232,8 @@ export default function QueryPanel({ addOutput }) {
     if (!sql.trim()) return;
     setQueryRunning(true);
     setError(null);
+    setExplainResult(null);
+    addOutput("info", "Running query...");
     try {
       const data = await api.runQuery(sql);
       setResults(data);
@@ -249,9 +253,11 @@ export default function QueryPanel({ addOutput }) {
     if (!sql.trim()) return;
     setQueryRunning(true);
     setError(null);
+    setExplainResult(null);
     try {
       const data = await api.explainQuery(sql);
-      setResults({ columns: ["Query Plan"], rows: data.plan.split("\n").map((line) => [line]) });
+      setResults(null);
+      setExplainResult({ raw: data.plan, isAnalyze: false });
       addOutput("info", "EXPLAIN plan generated");
     } catch (e) {
       setError(e.message);
@@ -455,6 +461,7 @@ export default function QueryPanel({ addOutput }) {
               ))}
             </div>
           )}
+          <ResizeHandle direction="vertical" onResize={onEditorResize} onResizeStart={onEditorResizeStart} />
           {/* Toolbar */}
           <div style={st.toolbar}>
             <button onClick={runQuery} disabled={queryRunning || !sql.trim()} style={st.runBtn} aria-label="Run query">
@@ -501,7 +508,6 @@ export default function QueryPanel({ addOutput }) {
               </div>
             )}
           </div>
-          <ResizeHandle direction="vertical" onResize={onEditorResize} onResizeStart={onEditorResizeStart} />
 
           {/* Starter suggestions when textarea is empty */}
           {!sql.trim() && suggestions.length > 0 && (
@@ -531,8 +537,15 @@ export default function QueryPanel({ addOutput }) {
             </div>
           )}
 
+          {/* Explain Plan */}
+          {explainResult && (
+            <div style={st.results}>
+              <ExplainPanel raw={explainResult.raw} isAnalyze={explainResult.isAnalyze} />
+            </div>
+          )}
+
           {/* Results */}
-          {results && (
+          {results && !explainResult && (
             <div style={st.results}>
               <div style={st.resultsHeader}>
                 <span>{results.rows.length} row{results.rows.length !== 1 ? "s" : ""}, {results.columns.length} column{results.columns.length !== 1 ? "s" : ""}</span>

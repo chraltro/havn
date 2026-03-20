@@ -26,12 +26,17 @@ interface PipelineProviderProps {
   onPipelineComplete?: () => void;
 }
 
+interface EventProcessor {
+  (event: string, data: Record<string, unknown>): void;
+  gotComplete: () => boolean;
+}
+
 /**
  * Process SSE events from the pipeline event stream.
  * Shared between runStream and reconnect-on-mount.
  */
 function createEventProcessor(
-  addOutput: (type: OutputEntry["type"], message: string) => void,
+  addOutput: (type: OutputEntry["type"], message: string, serverTs?: number) => void,
   setProgress: React.Dispatch<React.SetStateAction<number>>,
   setRunning: React.Dispatch<React.SetStateAction<boolean>>,
   setRunSummary: React.Dispatch<React.SetStateAction<RunSummary | null>>,
@@ -45,9 +50,11 @@ function createEventProcessor(
   let hasError = false;
   let totalItems = 0;
   let completedItems = 0;
+  let gotComplete = false;
   const nodeStartTimes: Record<string, number> = {};
 
-  return (event: string, data: Record<string, unknown>) => {
+  const processor = (event: string, data: Record<string, unknown>) => {
+    const serverTs = data.ts as number | undefined;
     switch (event) {
       case "start":
         totalItems = (data.total as number) || 0;
@@ -62,7 +69,7 @@ function createEventProcessor(
         const prefix = totalItems && num ? `(${num}/${totalItems}) ` : "";
         nodeStartTimes[mName] = Date.now();
         const displayName = (action === "ingest" || action === "export") && !mName.includes("/") ? `${action}/${mName}` : mName;
-        addOutput("log", `${prefix}${verb} ${displayName}...`);
+        addOutput("log", `${prefix}${verb} ${displayName}...`, serverTs);
         break;
       }
       case "model_end": {
@@ -101,7 +108,7 @@ function createEventProcessor(
         const level = status === "error" || status === "assertion_failed" ? "error"
           : status === "skipped" ? "log"
           : "success";
-        addOutput(level as OutputEntry["type"], msg);
+        addOutput(level as OutputEntry["type"], msg, serverTs);
 
         if (status !== "skipped") {
           models.push({ name: mName, result: status });
@@ -110,19 +117,20 @@ function createEventProcessor(
         break;
       }
       case "complete": {
+        gotComplete = true;
         const durS = (data.duration_seconds as number) || 0;
         const pipelineStatus = data.status as string;
         const isCancelled = pipelineStatus === "cancelled";
         const level = isCancelled ? "warn" : "info";
         const preposition = isCancelled ? "after" : "in";
-        addOutput(level as OutputEntry["type"], `Pipeline ${pipelineStatus} ${preposition} ${durS}s`);
+        addOutput(level as OutputEntry["type"], `Pipeline ${pipelineStatus} ${preposition} ${durS}s`, serverTs);
         setProgress(1);
         if (firstLineMsgRef) firstLineMsgRef.current = "";
         onTablesChanged();
 
         const summary: RunSummary = {
           type: "stream",
-          status: isCancelled ? "failed" : hasError ? "failed" : "success",
+          status: isCancelled ? "failed" : hasError ? "failed" : pipelineStatus === "failed" ? "failed" : "success",
           models,
           totalRows,
           duration: Math.round(durS * 1000),
@@ -148,6 +156,10 @@ function createEventProcessor(
       }
     }
   };
+
+  // Expose gotComplete flag for post-stream checking
+  (processor as EventProcessor).gotComplete = () => gotComplete;
+  return processor as EventProcessor;
 }
 
 export function PipelineProvider({ children, onTablesChanged, onPipelineComplete }: PipelineProviderProps) {
@@ -217,7 +229,27 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
       );
 
       // Connect from event 0 -- replay the entire buffer
-      api.connectToStreamEvents(0, processor);
+      const { done } = api.connectToStreamEvents(0, processor);
+
+      // After SSE stream ends, check if we got the complete event.
+      // If not, the pipeline may have finished while we were disconnected.
+      done.then(() => {
+        if (!processor.gotComplete()) {
+          api.getActiveStream().then((active) => {
+            if (active.finished && !active.running) {
+              // Pipeline finished but we missed the complete event — synthesize it
+              const durS = active.duration_seconds ?? 0;
+              const status = active.status ?? "success";
+              processor("complete", {
+                stream: active.stream_name,
+                status,
+                duration_seconds: durS,
+                ts: Date.now() / 1000,
+              });
+            }
+          }).catch(() => { /* ignore */ });
+        }
+      });
     }).catch(() => {
       // Server not reachable or auth issue -- ignore
     });
@@ -245,8 +277,10 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
     };
   }, [running]);
 
-  const addOutput = useCallback((type: OutputEntry["type"], message: string) => {
-    const ts = new Date().toLocaleTimeString();
+  const addOutput = useCallback((type: OutputEntry["type"], message: string, serverTs?: number) => {
+    const ts = serverTs
+      ? new Date(serverTs * 1000).toLocaleTimeString()
+      : new Date().toLocaleTimeString();
     setOutput((prev) => [...prev, { type, message, ts }]);
   }, []);
 
@@ -320,9 +354,29 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
           resolve,
         );
 
-        const { abort } = api.connectToStreamEvents(0, processor);
+        const { abort, done } = api.connectToStreamEvents(0, processor);
         // Store abort for potential cancellation
         void abort;
+
+        // After SSE stream ends, check if we got the complete event.
+        done.then(() => {
+          if (!processor.gotComplete()) {
+            api.getActiveStream().then((active) => {
+              if (active.finished && !active.running) {
+                processor("complete", {
+                  stream: active.stream_name,
+                  status: active.status ?? "success",
+                  duration_seconds: active.duration_seconds ?? 0,
+                  ts: Date.now() / 1000,
+                });
+              }
+            }).catch(() => {
+              // Fallback: just mark as done
+              setRunning(false);
+              resolve();
+            });
+          }
+        });
       } catch (e: unknown) {
         addOutput("error", (e as Error).message);
         firstLineMsgRef.current = "";

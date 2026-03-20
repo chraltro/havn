@@ -375,6 +375,14 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
   const [dagMode, setDagMode] = useState('basic'); // 'basic' | 'full'
   const [selectedNode, setSelectedNode] = useState(null);
 
+  // Zoom & pan state
+  const [scale, setScale] = useState(1.0);
+  const [offsetX, setOffsetX] = useState(0);
+  const [offsetY, setOffsetY] = useState(0);
+  const isPanning = useRef(false);
+  const panStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 });
+  const needsFit = useRef(true);
+
   // Rewind state
   const [runs, setRuns] = useState([]);
   const [snapshots, setSnapshots] = useState([]);
@@ -432,20 +440,63 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
     return layoutDAG(dag.nodes, dag.edges);
   }, [dag]);
 
+  // Fit-to-view: calculate scale and offset to show entire DAG
+  const fitToView = useCallback(() => {
+    if (!layout || !canvasRef.current) return;
+    const container = canvasRef.current.parentElement;
+    if (!container) return;
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    const { width: dagW, height: dagH } = layout;
+    const pad = 40;
+    const sx = (cw - pad * 2) / dagW;
+    const sy = (ch - pad * 2) / dagH;
+    const s = Math.min(sx, sy, 3.0);
+    const clampedScale = Math.max(0.2, Math.min(3.0, s));
+    setScale(clampedScale);
+    setOffsetX((cw - dagW * clampedScale) / 2);
+    setOffsetY((ch - dagH * clampedScale) / 2);
+  }, [layout]);
+
+  // Auto fit-to-view on initial render and DAG data changes
+  useEffect(() => {
+    if (layout && needsFit.current) {
+      // Small delay to ensure container has been laid out
+      requestAnimationFrame(() => {
+        fitToView();
+        needsFit.current = false;
+      });
+    }
+  }, [layout, fitToView]);
+
+  // Mark that we need to re-fit when DAG data changes
+  useEffect(() => {
+    needsFit.current = true;
+  }, [dag]);
+
   const draw = useCallback(() => {
     if (!layout || !canvasRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     const { nodes, edges } = dag;
-    const { positions, width, height, edgeRoutes } = layout;
+    const { positions, edgeRoutes } = layout;
 
+    // Size canvas to fill container
+    const container = canvas.parentElement;
+    const cw = container ? container.clientWidth : 800;
+    const ch = container ? container.clientHeight : 600;
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    canvas.style.width = width + "px";
-    canvas.style.height = height + "px";
+    canvas.width = cw * dpr;
+    canvas.height = ch * dpr;
+    canvas.style.width = cw + "px";
+    canvas.style.height = ch + "px";
     ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, width, height);
+    ctx.clearRect(0, 0, cw, ch);
+
+    // Apply pan and zoom
+    ctx.save();
+    ctx.translate(offsetX, offsetY);
+    ctx.scale(scale, scale);
 
     // Compute full transitive lineage for hovered node
     let lineageSet = null;
@@ -622,50 +673,112 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
     }
 
     ctx.globalAlpha = 1;
-  }, [dag, layout, hovered, rewindMode, currentSnaps, prevSnaps, selectedNode]);
+    ctx.restore();
+  }, [dag, layout, hovered, rewindMode, currentSnaps, prevSnaps, selectedNode, scale, offsetX, offsetY]);
 
   useEffect(() => {
     draw();
   }, [draw]);
 
-  function handleMouseMove(e) {
-    if (!layout || !canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const mx = (e.clientX - rect.left) * (canvasRef.current.width / rect.width / (window.devicePixelRatio || 1));
-    const my = (e.clientY - rect.top) * (canvasRef.current.height / rect.height / (window.devicePixelRatio || 1));
+  // Redraw on container resize
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    const container = canvasRef.current.parentElement;
+    if (!container || !window.ResizeObserver) return;
+    const ro = new ResizeObserver(() => draw());
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [draw]);
 
+  // Convert screen coordinates to DAG coordinates (accounting for pan/zoom)
+  function screenToDAG(e) {
+    const rect = canvasRef.current.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const mx = (sx - offsetX) / scale;
+    const my = (sy - offsetY) / scale;
+    return { mx, my, sx, sy };
+  }
+
+  function findNodeAt(mx, my) {
     const { positions } = layout;
-    let found = null;
     for (const n of dag.nodes) {
       const p = positions[n.id];
       if (p && mx >= p.x && mx <= p.x + NODE_W && my >= p.y && my <= p.y + NODE_H) {
-        found = n.id;
-        break;
+        return n;
       }
     }
-    setHovered(found);
-    canvasRef.current.style.cursor = found ? "pointer" : "default";
+    return null;
+  }
+
+  function handleMouseDown(e) {
+    if (!layout || !canvasRef.current) return;
+    const { mx, my, sx, sy } = screenToDAG(e);
+    const node = findNodeAt(mx, my);
+    if (!node) {
+      isPanning.current = true;
+      panStart.current = { x: sx, y: sy, ox: offsetX, oy: offsetY };
+      canvasRef.current.style.cursor = "grabbing";
+    }
+  }
+
+  function handleMouseMove(e) {
+    if (!layout || !canvasRef.current) return;
+
+    if (isPanning.current) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      setOffsetX(panStart.current.ox + (sx - panStart.current.x));
+      setOffsetY(panStart.current.oy + (sy - panStart.current.y));
+      return;
+    }
+
+    const { mx, my } = screenToDAG(e);
+    const node = findNodeAt(mx, my);
+    setHovered(node ? node.id : null);
+    canvasRef.current.style.cursor = node ? "pointer" : "grab";
+  }
+
+  function handleMouseUp() {
+    isPanning.current = false;
+    if (canvasRef.current) {
+      canvasRef.current.style.cursor = "grab";
+    }
   }
 
   function handleClick(e) {
     if (!layout || !canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const mx = (e.clientX - rect.left) * (canvasRef.current.width / rect.width / (window.devicePixelRatio || 1));
-    const my = (e.clientY - rect.top) * (canvasRef.current.height / rect.height / (window.devicePixelRatio || 1));
+    // Don't trigger click if we were panning
+    const { mx, my } = screenToDAG(e);
+    const node = findNodeAt(mx, my);
 
-    const { positions } = layout;
-    for (const n of dag.nodes) {
-      const p = positions[n.id];
-      if (p && mx >= p.x && mx <= p.x + NODE_W && my >= p.y && my <= p.y + NODE_H) {
-        if (rewindMode) {
-          setSelectedNode(selectedNode === n.id ? null : n.id);
-        } else if (onOpenFile && n.path) {
-          onOpenFile(n.path);
-        }
-        return;
+    if (node) {
+      if (rewindMode) {
+        setSelectedNode(selectedNode === node.id ? null : node.id);
+      } else if (onOpenFile && node.path) {
+        onOpenFile(node.path);
       }
+      return;
     }
     setSelectedNode(null);
+  }
+
+  function handleWheel(e) {
+    if (!canvasRef.current) return;
+    e.preventDefault();
+    const rect = canvasRef.current.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+    const newScale = Math.max(0.2, Math.min(3.0, scale * zoomFactor));
+
+    // Zoom toward cursor position
+    const ratio = newScale / scale;
+    setOffsetX(mx - (mx - offsetX) * ratio);
+    setOffsetY(my - (my - offsetY) * ratio);
+    setScale(newScale);
   }
 
   async function handleRestore(runId, modelName) {
@@ -849,14 +962,58 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
       )}
 
       <div style={styles.mainArea}>
-        <div style={{ flex: 1, overflow: "auto", background: "var(--havn-bg-tertiary)" }} data-havn-hint="dag-canvas">
+        <div style={{ flex: 1, overflow: "hidden", background: "var(--havn-bg-tertiary)", position: "relative" }} data-havn-hint="dag-canvas">
           <canvas
             ref={canvasRef}
+            onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
-            onMouseLeave={() => setHovered(null)}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={() => { setHovered(null); isPanning.current = false; }}
             onClick={handleClick}
-            style={styles.canvas}
+            onWheel={handleWheel}
+            style={{ ...styles.canvas, cursor: "grab", width: "100%", height: "100%" }}
           />
+          {/* Zoom controls */}
+          <div style={styles.zoomControls}>
+            <button
+              onClick={() => {
+                const newScale = Math.min(3.0, scale * 1.2);
+                const canvas = canvasRef.current;
+                if (canvas) {
+                  const cw = canvas.parentElement.clientWidth / 2;
+                  const ch = canvas.parentElement.clientHeight / 2;
+                  const ratio = newScale / scale;
+                  setOffsetX(cw - (cw - offsetX) * ratio);
+                  setOffsetY(ch - (ch - offsetY) * ratio);
+                }
+                setScale(newScale);
+              }}
+              style={styles.zoomBtn}
+              title="Zoom in"
+            >+</button>
+            <button
+              onClick={() => {
+                const newScale = Math.max(0.2, scale / 1.2);
+                const canvas = canvasRef.current;
+                if (canvas) {
+                  const cw = canvas.parentElement.clientWidth / 2;
+                  const ch = canvas.parentElement.clientHeight / 2;
+                  const ratio = newScale / scale;
+                  setOffsetX(cw - (cw - offsetX) * ratio);
+                  setOffsetY(ch - (ch - offsetY) * ratio);
+                }
+                setScale(newScale);
+              }}
+              style={styles.zoomBtn}
+              title="Zoom out"
+            >-</button>
+            <button
+              onClick={fitToView}
+              style={styles.zoomBtn}
+              title="Fit to view"
+            >Fit</button>
+            <span style={styles.zoomPct}>{Math.round(scale * 100)}%</span>
+          </div>
         </div>
 
         {/* Rewind detail panel */}
@@ -890,4 +1047,7 @@ const styles = {
   empty: { padding: "24px", color: "var(--havn-text-dim)", textAlign: "center" },
   rewindBtn: { border: "1px solid var(--havn-btn-border)", borderRadius: "var(--havn-radius-lg)", padding: "4px 12px", fontSize: 11, fontWeight: 500, cursor: "pointer" },
   sliderContainer: { display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: "1px solid var(--havn-border)", background: "var(--havn-bg-secondary)", fontSize: 12, flexShrink: 0 },
+  zoomControls: { position: "absolute", top: 8, right: 8, display: "flex", gap: 4, alignItems: "center", background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius-lg)", padding: "2px 4px", zIndex: 10 },
+  zoomBtn: { background: "none", border: "1px solid var(--havn-border-light)", borderRadius: 4, color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: 12, fontWeight: 600, width: 28, height: 24, display: "flex", alignItems: "center", justifyContent: "center" },
+  zoomPct: { fontSize: 10, color: "var(--havn-text-dim)", minWidth: 32, textAlign: "center", fontWeight: 500 },
 };
