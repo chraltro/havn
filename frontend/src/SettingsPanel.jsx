@@ -549,9 +549,9 @@ function HintsSection() {
 function GuideSection({ onShowGuide }) {
   return (
     <div style={sec.section}>
-      <h3 style={sec.heading}>Getting Started Guide</h3>
-      <p style={sec.desc}>Re-watch the interactive tour that explains the main areas of the interface.</p>
-      <button onClick={onShowGuide} style={sec.addBtn}>Show Guide</button>
+      <h3 style={sec.heading}>Onboarding Tour</h3>
+      <p style={sec.desc}>Watch the introduction that explains the platform and its key concepts.</p>
+      <button onClick={onShowGuide} style={sec.addBtn}>Show Introduction</button>
     </div>
   );
 }

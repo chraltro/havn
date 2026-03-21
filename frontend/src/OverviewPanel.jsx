@@ -275,8 +275,8 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
                 </div>
               )}
               {recentRuns.length > 0 && (
-                <button onClick={() => onNavigate("History")} style={st.cardLink}>
-                  View all history
+                <button onClick={() => onNavigate("Runs")} style={st.cardLink}>
+                  View all runs
                 </button>
               )}
             </div>

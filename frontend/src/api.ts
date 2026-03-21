@@ -112,6 +112,37 @@ export interface RunSummary {
   totalRows: number;
   duration: number;
   errors: number;
+  pipelineRunId?: string | null;
+}
+
+export interface PipelineRun {
+  pipeline_run_id: string;
+  run_type: string;
+  target: string;
+  started_at: string | null;
+  status: string;
+  total_duration_ms: number;
+  model_count: number;
+  success_count: number;
+  error_count: number;
+  skipped_count: number;
+  total_rows: number;
+}
+
+export interface RunComparison {
+  models: RunComparisonModel[];
+  previous_run_id: string | null;
+}
+
+export interface RunComparisonModel {
+  target: string;
+  duration_ms: number | null;
+  rows_affected: number | null;
+  status: string;
+  prev_duration_ms: number | null;
+  prev_rows_affected: number | null;
+  prev_status: string | null;
+  is_new: boolean;
 }
 
 export interface SecretEntry {
@@ -395,6 +426,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ targets, force }),
     }),
+  startPipeline: (steps: string[] = ["ingest", "transform", "export"], force: boolean = false) =>
+    request<{ status: string; operation: string }>("/pipeline/start", {
+      method: "POST",
+      body: JSON.stringify({ steps, force }),
+    }),
   connectToStreamEvents: (
     fromEvent: number,
     onEvent: (event: string, data: Record<string, unknown>) => void,
@@ -483,6 +519,9 @@ export const api = {
 
   // History
   getHistory: (limit: number = 50) => request(`/history?limit=${limit}`),
+  getPipelineRuns: (limit: number = 50) => request<PipelineRun[]>(`/history/runs?limit=${limit}`),
+  getPipelineRunDetail: (pipelineRunId: string) => request(`/history/runs/${pipelineRunId}`),
+  getRunComparison: (pipelineRunId: string) => request<RunComparison>(`/history/runs/${pipelineRunId}/comparison`),
 
   // Lint
   runLint: (fix: boolean = false) =>

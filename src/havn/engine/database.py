@@ -117,6 +117,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS _dp_internal.run_log (
             run_id       VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
+            pipeline_run_id VARCHAR,
             run_type     VARCHAR NOT NULL,
             target       VARCHAR NOT NULL,
             status       VARCHAR NOT NULL,
@@ -128,6 +129,13 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
             log_output   VARCHAR
         )
     """)
+    # Migration for existing databases
+    try:
+        conn.execute("""
+            ALTER TABLE _dp_internal.run_log ADD COLUMN IF NOT EXISTS pipeline_run_id VARCHAR
+        """)
+    except Exception:
+        pass  # column already exists or ALTER not supported
     # Model profiling stats (auto-computed after each build)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS _dp_internal.model_profiles (
@@ -256,13 +264,14 @@ def log_run(
     rows_affected: int = 0,
     error: str | None = None,
     log_output: str | None = None,
+    pipeline_run_id: str | None = None,
 ) -> None:
     """Insert a run log entry."""
     conn.execute(
         """
         INSERT INTO _dp_internal.run_log
-            (run_type, target, status, duration_ms, rows_affected, error, log_output)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (run_type, target, status, duration_ms, rows_affected, error, log_output, pipeline_run_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [run_type, target, status, duration_ms, rows_affected, error, log_output],
+        [run_type, target, status, duration_ms, rows_affected, error, log_output, pipeline_run_id],
     )
