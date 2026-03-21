@@ -148,6 +148,7 @@ def run_script(
     script_type: str = "ingest",
     timeout: int = SCRIPT_TIMEOUT_SECONDS,
     use_circuit_breaker: bool = True,
+    pipeline_run_id: str | None = None,
 ) -> dict:
     """Run a single script (.py or .dpnb).
 
@@ -157,6 +158,7 @@ def run_script(
         script_type: "ingest" or "export" (for logging)
         timeout: Maximum execution time in seconds
         use_circuit_breaker: If True, wrap execution with the default circuit breaker
+        pipeline_run_id: Shared ID grouping all executions in a pipeline run
 
     Returns:
         Dict with keys: script, status, duration_ms, log_output, error
@@ -204,6 +206,7 @@ def run_script(
                 result["status"], duration_ms,
                 error=result["error"],
                 log_output=result["log_output"] or None,
+                pipeline_run_id=pipeline_run_id,
             )
             if result["status"] == "success":
                 console.print(f"  [green]done[/green] {label} ({duration_ms}ms)")
@@ -217,7 +220,7 @@ def run_script(
         except Exception as e:
             duration_ms = int((time.perf_counter() - start) * 1000)
             error_msg = traceback.format_exc()
-            log_run(conn, script_type, script_path.name, "error", duration_ms, error=str(e), log_output=error_msg)
+            log_run(conn, script_type, script_path.name, "error", duration_ms, error=str(e), log_output=error_msg, pipeline_run_id=pipeline_run_id)
             console.print(f"  [red]fail[/red] {label}: {e}")
             if use_circuit_breaker:
                 _get_circuit_breaker()._record_failure(script_path.name)
@@ -319,7 +322,7 @@ def run_script(
             error_msg = f"Script timed out after {timeout}s"
         log_output = stdout_capture.getvalue() + stderr_capture.getvalue()
         logger.warning("Script %s: %s", script_path.name, error_msg)
-        log_run(conn, script_type, script_path.name, "error", duration_ms, error=error_msg, log_output=log_output or None)
+        log_run(conn, script_type, script_path.name, "error", duration_ms, error=error_msg, log_output=log_output or None, pipeline_run_id=pipeline_run_id)
         console.print(f"  [red]timeout[/red] {label}: {error_msg}")
         if use_circuit_breaker:
             _get_circuit_breaker()._record_failure(script_path.name)
@@ -332,7 +335,7 @@ def run_script(
         error_str = "".join(error_msg)
         log_output = stdout_capture.getvalue() + stderr_capture.getvalue() + "\n" + error_str
 
-        log_run(conn, script_type, script_path.name, "error", duration_ms, error=str(e), log_output=log_output)
+        log_run(conn, script_type, script_path.name, "error", duration_ms, error=str(e), log_output=log_output, pipeline_run_id=pipeline_run_id)
         console.print(f"  [red]fail[/red] {label}: {e}")
 
         if use_circuit_breaker:
@@ -345,7 +348,7 @@ def run_script(
     # Try to extract row count from log output (e.g., "Loaded 42 rows" or "42 rows")
     rows_affected = _extract_row_count(log_output)
 
-    log_run(conn, script_type, script_path.name, "success", duration_ms, rows_affected=rows_affected, log_output=log_output or None)
+    log_run(conn, script_type, script_path.name, "success", duration_ms, rows_affected=rows_affected, log_output=log_output or None, pipeline_run_id=pipeline_run_id)
     rows_msg = f", {rows_affected} rows" if rows_affected else ""
     console.print(f"  [green]done[/green] {label} ({duration_ms}ms{rows_msg})")
 
@@ -383,6 +386,7 @@ def run_scripts_in_dir(
     scripts_dir: Path,
     script_type: str = "ingest",
     targets: list[str] | None = None,
+    pipeline_run_id: str | None = None,
 ) -> list[dict]:
     """Run all scripts in a directory (or specific targets).
 
@@ -391,6 +395,7 @@ def run_scripts_in_dir(
         scripts_dir: Directory containing .py/.dpnb scripts
         script_type: "ingest" or "export"
         targets: Specific script names (without extension), or None for all
+        pipeline_run_id: Shared ID grouping all executions in a pipeline run
 
     Returns:
         List of result dicts from run_script
@@ -415,7 +420,7 @@ def run_scripts_in_dir(
     for script in scripts:
         if script.name.startswith("_"):
             continue
-        result = run_script(conn, script, script_type)
+        result = run_script(conn, script, script_type, pipeline_run_id=pipeline_run_id)
         results.append(result)
         # Stop on error for ingest (data integrity)
         if script_type == "ingest" and result["status"] == "error":

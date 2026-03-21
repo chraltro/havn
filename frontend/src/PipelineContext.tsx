@@ -16,6 +16,7 @@ interface PipelineState {
   runCurrentScript: (scriptPath: string) => Promise<void>;
   runSingleModel: (modelName: string) => Promise<void>;
   runContracts: () => Promise<void>;
+  runPipeline: (steps?: string[], force?: boolean) => Promise<void>;
 }
 
 const PipelineContext = createContext<PipelineState | null>(null);
@@ -53,12 +54,15 @@ function createEventProcessor(
   let gotComplete = false;
   const nodeStartTimes: Record<string, number> = {};
 
+  let pipelineRunId: string | null = null;
+
   const processor = (event: string, data: Record<string, unknown>) => {
     const serverTs = data.ts as number | undefined;
     switch (event) {
       case "start": {
         totalItems = (data.total as number) || 0;
         const opLabel = data.label as string || data.stream as string || "Running";
+        if (data.pipeline_run_id) pipelineRunId = data.pipeline_run_id as string;
         addOutput("info", `${opLabel}...`, serverTs);
         if (firstLineMsgRef) firstLineMsgRef.current = `${opLabel}...`;
         break;
@@ -228,6 +232,8 @@ function createEventProcessor(
         if (op === "transform" || op === "stream") onTablesChanged();
 
         const summaryType = (op === "stream" || op === "transform" || op === "lint" || op === "script" || op === "contracts") ? op : "stream";
+        // Capture pipeline_run_id from complete event if not already set
+        if (data.pipeline_run_id) pipelineRunId = data.pipeline_run_id as string;
         const summary: RunSummary = {
           type: summaryType as RunSummary["type"],
           status: isCancelled ? "failed" : hasError ? "failed" : pipelineStatus === "failed" ? "failed" : "success",
@@ -235,6 +241,7 @@ function createEventProcessor(
           totalRows,
           duration: Math.round(durS * 1000),
           errors: models.filter((m) => m.result === "error").length,
+          pipelineRunId: pipelineRunId || null,
         };
         setRunSummary(summary);
         if (!hasError && !isCancelled) onPipelineComplete?.();
@@ -531,6 +538,13 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
     ),
   [startAndConnect]);
 
+  const runPipeline = useCallback((steps: string[] = ["ingest", "transform", "export"], force: boolean = false) =>
+    startAndConnect(
+      () => api.startPipeline(steps, force),
+      `Running ${steps.join(" + ")}${force ? " (force)" : ""}...`,
+    ),
+  [startAndConnect]);
+
   return (
     <PipelineContext.Provider
       value={{
@@ -548,6 +562,7 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
         runCurrentScript,
         runSingleModel,
         runContracts,
+        runPipeline,
       }}
     >
       {children}

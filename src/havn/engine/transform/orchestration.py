@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -43,6 +44,7 @@ def run_transform(
     project_dir: Path | None = None,
     rewind_config: object | None = None,
     run_id: str | None = None,
+    pipeline_run_id: str | None = None,
 ) -> dict[str, str]:
     """Run the full transformation pipeline.
 
@@ -57,10 +59,15 @@ def run_transform(
         project_dir: Project root (for snapshot capture)
         rewind_config: RewindConfig from project settings
         run_id: Pipeline run ID (for snapshot tagging)
+        pipeline_run_id: Shared ID grouping all model executions in this pipeline run
 
     Returns:
         Dict of model_name -> status ("built", "skipped", "error")
     """
+    # Generate a pipeline_run_id if not provided, so all models share the same group
+    if pipeline_run_id is None:
+        pipeline_run_id = str(uuid.uuid4())
+
     ensure_meta_table(conn)
     models = discover_models(transform_dir)
 
@@ -83,10 +90,12 @@ def run_transform(
         return _run_transform_parallel(
             conn, models, force, max_workers, db_path=db_path,
             project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
+            pipeline_run_id=pipeline_run_id,
         )
     return _run_transform_sequential(
         conn, models, force,
         project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
+        pipeline_run_id=pipeline_run_id,
     )
 
 
@@ -97,6 +106,7 @@ def _run_transform_sequential(
     project_dir: Path | None = None,
     rewind_config: object | None = None,
     run_id: str | None = None,
+    pipeline_run_id: str | None = None,
 ) -> dict[str, str]:
     """Run models sequentially (original behavior + assertions + profiling)."""
     ordered = build_dag(models)
@@ -122,7 +132,7 @@ def _run_transform_sequential(
         try:
             duration_ms, row_count = execute_model(conn, model)
             _update_state(conn, model, duration_ms, row_count)
-            log_run(conn, "transform", model.full_name, "success", duration_ms, row_count)
+            log_run(conn, "transform", model.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
 
             suffix = f" ({row_count:,} rows, {duration_ms}ms)" if row_count else f" ({duration_ms}ms)"
             console.print(f"  [green]done[/green]  {label}{suffix}")
@@ -177,7 +187,7 @@ def _run_transform_sequential(
             results[model.full_name] = "built"
 
         except Exception as e:
-            log_run(conn, "transform", model.full_name, "error", error=str(e))
+            log_run(conn, "transform", model.full_name, "error", error=str(e), pipeline_run_id=pipeline_run_id)
             console.print(f"  [red]fail[/red]  {label}: {e}")
             results[model.full_name] = "error"
 
@@ -215,6 +225,7 @@ def _run_transform_parallel(
     project_dir: Path | None = None,
     rewind_config: object | None = None,
     run_id: str | None = None,
+    pipeline_run_id: str | None = None,
 ) -> dict[str, str]:
     """Run models in parallel by DAG tiers.
 
@@ -244,6 +255,7 @@ def _run_transform_parallel(
         return _run_transform_sequential(
             conn, models, force,
             project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
+            pipeline_run_id=pipeline_run_id,
         )
 
     results: dict[str, str] = {}
@@ -277,7 +289,7 @@ def _run_transform_parallel(
             try:
                 duration_ms, row_count = execute_model(conn, model)
                 _update_state(conn, model, duration_ms, row_count)
-                log_run(conn, "transform", model.full_name, "success", duration_ms, row_count)
+                log_run(conn, "transform", model.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
 
                 # Assertions
                 if model.assertions:
@@ -317,7 +329,7 @@ def _run_transform_parallel(
                         logger.warning("Snapshot capture failed for %s: %s", model.full_name, snap_err)
 
             except Exception as e:
-                log_run(conn, "transform", model.full_name, "error", error=str(e))
+                log_run(conn, "transform", model.full_name, "error", error=str(e), pipeline_run_id=pipeline_run_id)
                 console.print(f"  [red]fail[/red]  {label}: {e}")
                 results[model.full_name] = "error"
         else:
