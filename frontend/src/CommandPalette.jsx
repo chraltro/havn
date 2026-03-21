@@ -117,7 +117,7 @@ export default function CommandPalette({ isOpen, onClose, files, tables, streams
       { name: "Query Table", secondary: "Open SQL query runner", icon: "Q", action: () => { onNavigate("Query"); onClose(); } },
       { name: "View DAG", secondary: "Model dependency graph", icon: "D", action: () => { onNavigate("DAG"); onClose(); } },
       { name: "Settings", secondary: "Configuration and preferences", icon: "\u2699", action: () => { onNavigate("Settings"); onClose(); } },
-      { name: "View History", secondary: "Pipeline run history", icon: "H", action: () => { onNavigate("History"); onClose(); } },
+      { name: "View Runs", secondary: "Pipeline run history", icon: "H", action: () => { onNavigate("Runs"); onClose(); } },
       { name: "Data Quality", secondary: "Contracts, assertions, freshness", icon: "\u2713", action: () => { onNavigate("Quality"); onClose(); } },
       { name: "Git", secondary: "Commit, push, branch", icon: "G", action: () => { onNavigate("Git"); onClose(); } },
     ];

@@ -84,8 +84,8 @@ export default function RunSummary({ summary, onNavigate, onDismiss }) {
         <button onClick={() => onNavigate("DAG")} style={st.actionBtn}>
           See DAG
         </button>
-        <button onClick={() => onNavigate("History")} style={st.actionBtn}>
-          History
+        <button onClick={() => onNavigate("Runs")} style={st.actionBtn}>
+          Runs
         </button>
       </div>
     </div>

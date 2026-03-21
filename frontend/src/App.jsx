@@ -23,7 +23,7 @@ import LoginPage from "./LoginPage";
 import ResizeHandle from "./ResizeHandle";
 import useResizable from "./useResizable";
 import SortableTable from "./SortableTable";
-import GuideTour from "./GuideTour";
+import Onboarding from "./Onboarding";
 import ErrorBoundary from "./ErrorBoundary";
 import Hint from "./Hint";
 import { useHintTriggerFn } from "./HintSystem";
@@ -39,50 +39,6 @@ import { WarehouseProvider, useWarehouse } from "./WarehouseContext";
 import { schemaCompare } from "./schemaOrder";
 import { PipelineProvider, usePipeline } from "./PipelineContext";
 
-const GUIDE_STEPS = [
-  {
-    id: "welcome",
-    title: "Welcome to havn",
-    description: "havn is your self-hosted data platform. Data in safe waters. Let's take a quick tour of the interface.",
-    position: "center",
-  },
-  {
-    id: "sidebar",
-    title: "File Tree",
-    description: "Browse your project files here. SQL transforms, Python ingest/export scripts, and notebooks are organized by folder.",
-    position: "right",
-  },
-  {
-    id: "editor",
-    title: "Code Editor",
-    description: "Edit SQL transforms and Python scripts with syntax highlighting, auto-complete, and one-click execution.",
-    position: "left",
-  },
-  {
-    id: "tabs",
-    title: "Navigation",
-    description: "Sections group your workflow: Develop for code, Explore for data, Observe for monitoring, Configure for settings. Sub-tabs appear within each section.",
-    position: "bottom",
-  },
-  {
-    id: "actions",
-    title: "Run Menu",
-    description: "The Run button executes your pipeline. Click the arrow for more options: Transform, Lint, Contracts, and Full Refresh.",
-    position: "bottom",
-  },
-  {
-    id: "output",
-    title: "Output Panel",
-    description: "Execution logs, errors, and results appear here. After a pipeline runs, you'll see a summary with links to explore your data.",
-    position: "top",
-  },
-  {
-    id: "ready",
-    title: "You're Ready!",
-    description: "Start by connecting a data source from the Overview, or run a stream to kick off your pipeline. You can replay this guide from Settings.",
-    position: "center",
-  },
-];
 
 /* ------------------------------------------------------------------ */
 /* Section-based navigation                                            */
@@ -92,7 +48,7 @@ const SECTIONS = [
   { id: "Overview", label: "Overview", tabs: [] },
   { id: "Develop", label: "Develop", tabs: ["Editor", "Notebooks", "Data Sources", "Git"] },
   { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "DAG"] },
-  { id: "Observe", label: "Observe", tabs: ["Quality", "Sentinel", "Diff", "History"] },
+  { id: "Observe", label: "Observe", tabs: ["Quality", "Sentinel", "Diff", "Runs"] },
   { id: "Configure", label: "Configure", tabs: ["Masking", "Wiki", "Docs", "Settings"] },
 ];
 
@@ -113,8 +69,11 @@ for (const s of SECTIONS) {
 /* Pipeline Run Menu (replaces 5 separate action buttons)              */
 /* ------------------------------------------------------------------ */
 
-function PipelineMenu({ running, streams, onRunStream, onTransform, onLint, onContracts, onCancel, addOutput }) {
+function PipelineMenu({ running, onRunPipeline, onLint, onContracts, onCancel }) {
   const [open, setOpen] = useState(false);
+  const [selectedSteps, setSelectedSteps] = useState(["ingest", "transform", "export"]);
+  const [onlyChanged, setOnlyChanged] = useState(true);
+  const [autoFix, setAutoFix] = useState(true);
   const ref = useRef(null);
 
   useEffect(() => {
@@ -126,10 +85,16 @@ function PipelineMenu({ running, streams, onRunStream, onTransform, onLint, onCo
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  const streamNames = Object.keys(streams);
+  function toggleStep(step) {
+    setSelectedSteps(prev =>
+      prev.includes(step)
+        ? prev.filter(s => s !== step)
+        : [...prev, step]
+    );
+  }
+
   const defaultRun = () => {
-    if (streamNames.length > 0) onRunStream(streamNames[0]);
-    else addOutput("warn", "No streams defined in project.yml");
+    onRunPipeline(["ingest", "transform", "export"], false);
   };
 
   return (
@@ -157,45 +122,68 @@ function PipelineMenu({ running, streams, onRunStream, onTransform, onLint, onCo
       )}
       {open && (
         <div style={pmStyles.menu} role="menu" aria-label="Pipeline actions">
-          <div style={pmStyles.groupLabel}>Pipeline</div>
-          <button style={pmStyles.item} disabled={running} onClick={() => { defaultRun(); setOpen(false); }}
-            onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-btn-bg)"}
-            onMouseLeave={(e) => e.currentTarget.style.background = "none"}
-          >Run Stream</button>
-          <button style={pmStyles.item} disabled={running} onClick={() => {
-            if (streamNames.length > 0) onRunStream(streamNames[0], true);
-            else addOutput("warn", "No streams defined");
-            setOpen(false);
-          }}
-            onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-btn-bg)"}
-            onMouseLeave={(e) => e.currentTarget.style.background = "none"}
-          >Full Refresh</button>
+          <div style={pmStyles.groupLabel}>Steps</div>
+          <div style={pmStyles.pillRow}>
+            {["ingest", "transform", "export"].map((step) => {
+              const active = selectedSteps.includes(step);
+              return (
+                <button
+                  key={step}
+                  onClick={() => toggleStep(step)}
+                  style={active ? pmStyles.pillActive : pmStyles.pillInactive}
+                  aria-pressed={active}
+                >
+                  {step.charAt(0).toUpperCase() + step.slice(1)}
+                </button>
+              );
+            })}
+          </div>
 
-          <div style={pmStyles.divider} />
-          <div style={pmStyles.groupLabel}>Build</div>
-          <button style={pmStyles.item} disabled={running} onClick={() => { onTransform(false); setOpen(false); }}
-            onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-btn-bg)"}
-            onMouseLeave={(e) => e.currentTarget.style.background = "none"}
-          >Transform</button>
-          <button style={pmStyles.item} disabled={running} onClick={() => { onTransform(true); setOpen(false); }}
-            onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-btn-bg)"}
-            onMouseLeave={(e) => e.currentTarget.style.background = "none"}
-          >Transform (Force)</button>
+          <label style={pmStyles.checkboxRow}>
+            <input
+              type="checkbox"
+              checked={onlyChanged}
+              onChange={(e) => setOnlyChanged(e.target.checked)}
+              style={{ margin: 0 }}
+            />
+            <span style={{ fontSize: "12px", color: "var(--havn-text)" }}>Only changed</span>
+          </label>
+          <div style={pmStyles.hintText}>
+            Skip models that haven't changed since last build
+          </div>
+
+          <button
+            style={pmStyles.runSelectedBtn}
+            disabled={running || selectedSteps.length === 0}
+            onClick={() => {
+              onRunPipeline(selectedSteps, !onlyChanged);
+              setOpen(false);
+            }}
+          >
+            {"\u25B6"} Run{selectedSteps.length < 3 ? " Selected" : ""}
+          </button>
 
           <div style={pmStyles.divider} />
           <div style={pmStyles.groupLabel}>Validate</div>
-          <button style={pmStyles.item} disabled={running} onClick={() => { onLint(false); setOpen(false); }}
-            onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-btn-bg)"}
-            onMouseLeave={(e) => e.currentTarget.style.background = "none"}
-          >Lint</button>
-          <button style={pmStyles.item} disabled={running} onClick={() => { onLint(true); setOpen(false); }}
-            onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-btn-bg)"}
-            onMouseLeave={(e) => e.currentTarget.style.background = "none"}
-          >Lint (Fix)</button>
-          <button style={pmStyles.item} disabled={running} onClick={() => { onContracts(); setOpen(false); }}
-            onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-btn-bg)"}
-            onMouseLeave={(e) => e.currentTarget.style.background = "none"}
-          >Contracts</button>
+          <div style={{ padding: "4px 12px", display: "flex", alignItems: "center", gap: "8px" }}>
+            <button style={{ ...pmStyles.item, flex: 1, textAlign: "center", background: "var(--havn-btn-bg)", borderRadius: "var(--havn-radius)", padding: "5px 0" }} disabled={running} onClick={() => { onLint(autoFix); setOpen(false); }}
+              onMouseEnter={(e) => e.currentTarget.style.filter = "brightness(1.15)"}
+              onMouseLeave={(e) => e.currentTarget.style.filter = ""}
+            >Lint</button>
+            <button style={{ ...pmStyles.item, flex: 1, textAlign: "center", background: "var(--havn-btn-bg)", borderRadius: "var(--havn-radius)", padding: "5px 0" }} disabled={running} onClick={() => { onContracts(); setOpen(false); }}
+              onMouseEnter={(e) => e.currentTarget.style.filter = "brightness(1.15)"}
+              onMouseLeave={(e) => e.currentTarget.style.filter = ""}
+            >Contracts</button>
+          </div>
+          <label style={{ ...pmStyles.checkboxRow, paddingTop: "2px" }}>
+            <input
+              type="checkbox"
+              checked={autoFix}
+              onChange={(e) => setAutoFix(e.target.checked)}
+              style={{ margin: 0 }}
+            />
+            <span style={{ fontSize: "11px", color: "var(--havn-text-secondary)" }}>Auto-fix lint issues</span>
+          </label>
         </div>
       )}
     </div>
@@ -217,7 +205,7 @@ const pmStyles = {
   menu: {
     position: "absolute", top: "100%", right: 0, marginTop: "4px",
     background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)",
-    borderRadius: "var(--havn-radius)", zIndex: 100, minWidth: "170px",
+    borderRadius: "var(--havn-radius)", zIndex: 100, minWidth: "220px",
     boxShadow: "0 4px 16px rgba(0,0,0,0.3)", padding: "4px 0",
   },
   groupLabel: {
@@ -230,6 +218,33 @@ const pmStyles = {
     textAlign: "left", whiteSpace: "nowrap",
   },
   divider: { height: "1px", background: "var(--havn-border)", margin: "4px 0" },
+  pillRow: {
+    display: "flex", gap: "6px", padding: "6px 12px",
+  },
+  pillActive: {
+    padding: "4px 12px", fontSize: "11px", fontWeight: 600, cursor: "pointer",
+    background: "var(--havn-accent)", color: "var(--havn-bg)", border: "1px solid var(--havn-accent)",
+    borderRadius: "var(--havn-radius-lg)",
+  },
+  pillInactive: {
+    padding: "4px 12px", fontSize: "11px", fontWeight: 600, cursor: "pointer",
+    background: "transparent", color: "var(--havn-text-secondary)", border: "1px solid var(--havn-border-light)",
+    borderRadius: "var(--havn-radius-lg)",
+  },
+  checkboxRow: {
+    display: "flex", alignItems: "center", gap: "6px", padding: "6px 12px 0",
+    cursor: "pointer",
+  },
+  hintText: {
+    padding: "2px 12px 6px", fontSize: "10px", color: "var(--havn-text-dim)",
+    lineHeight: 1.3,
+  },
+  runSelectedBtn: {
+    display: "block", width: "calc(100% - 24px)", margin: "4px 12px 8px",
+    padding: "6px 0", background: "var(--havn-green)", border: "1px solid var(--havn-green-border)",
+    borderRadius: "var(--havn-radius)", color: "#fff", cursor: "pointer",
+    fontSize: "12px", fontWeight: 600, textAlign: "center",
+  },
 };
 
 /* ------------------------------------------------------------------ */
@@ -259,6 +274,7 @@ function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
     for (const s of schemaNames) m[s] = true;
     return m;
   });
+  const activeTableRef = useRef(null);
 
   useEffect(() => {
     setExpanded((prev) => {
@@ -269,6 +285,13 @@ function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
       return next;
     });
   }, [tables]);
+
+  // Auto-scroll to selected table
+  useEffect(() => {
+    if (selectedTable && activeTableRef.current) {
+      activeTableRef.current.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [selectedTable]);
 
   if (tables.length === 0) {
     return <div style={stStyles.empty}>No tables yet</div>;
@@ -295,6 +318,7 @@ function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
               <div
                 data-havn-file=""
                 key={key}
+                ref={isActive ? activeTableRef : undefined}
                 style={{
                   ...stStyles.tableRow,
                   background: isActive ? "var(--havn-bg-secondary)" : "transparent",
@@ -335,7 +359,7 @@ const stStyles = {
 function AppContent() {
   const { currentUser, handleLogout } = useAuth();
   const { tables, files, streams, loadFiles, refreshAll } = useWarehouse();
-  const { running, output, runSummary, progress, addOutput, clearOutput, setRunSummary, runTransformAll, runStream, cancelPipeline, runLint, runCurrentScript, runSingleModel, runContracts } = usePipeline();
+  const { running, output, runSummary, progress, addOutput, clearOutput, setRunSummary, runTransformAll, runStream, cancelPipeline, runLint, runCurrentScript, runSingleModel, runContracts, runPipeline } = usePipeline();
 
   // Editor state
   const [activeFile, setActiveFile] = useState(null);
@@ -368,8 +392,8 @@ function AppContent() {
   const editorRef = useRef(null);
   const [goToLine, setGoToLine] = useState(null);
 
-  // Guide state
-  const [guideOpen, setGuideOpen] = useState(() => !localStorage.getItem("dp_guide_completed"));
+  // Onboarding state
+  const [onboardingOpen, setOnboardingOpen] = useState(() => !localStorage.getItem("dp_onboarding_completed"));
 
   // Hint system triggers
   const setHintTrigger = useHintTriggerFn();
@@ -385,6 +409,20 @@ function AppContent() {
 
   // Agent sidebar state
   const [agentSidebarOpen, setAgentSidebarOpen] = useState(false);
+
+  // Run status indicator (header)
+  const [recentStatus, setRecentStatus] = useState(null); // "success" | "failed" | null
+  const prevRunningRef = useRef(false);
+  useEffect(() => {
+    if (prevRunningRef.current && !running) {
+      // Running just went from true to false — determine status from runSummary
+      const status = runSummary?.status === "success" ? "success" : "failed";
+      setRecentStatus(status);
+      const timer = setTimeout(() => setRecentStatus(null), 10000);
+      return () => clearTimeout(timer);
+    }
+    prevRunningRef.current = running;
+  }, [running, runSummary]);
 
   // Command palette state
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -414,13 +452,13 @@ function AppContent() {
     }
   }
 
-  function handleGuideComplete() {
-    setGuideOpen(false);
-    localStorage.setItem("dp_guide_completed", "true");
+  function handleOnboardingComplete() {
+    setOnboardingOpen(false);
+    localStorage.setItem("dp_onboarding_completed", "true");
   }
 
   function showGuide() {
-    setGuideOpen(true);
+    setOnboardingOpen(true);
   }
 
   const pendingSubTabRef = useRef(null);
@@ -813,17 +851,40 @@ function AppContent() {
           })}
         </nav>
 
+        {/* Run status indicator */}
+        {running && (
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginLeft: "auto", marginRight: "12px" }}>
+            <div style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: "var(--havn-accent)",
+              animation: "havn-pulse 1.5s ease-in-out infinite",
+            }} />
+            <span style={{ fontSize: "11px", color: "var(--havn-text-secondary)", fontFamily: "var(--havn-font-mono)" }}>
+              Running...
+            </span>
+          </div>
+        )}
+        {!running && recentStatus && (
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginLeft: "auto", marginRight: "12px" }}>
+            <span style={{ fontSize: "12px" }}>{recentStatus === "success" ? "\u2713" : "\u2717"}</span>
+            <span style={{
+              fontSize: "11px",
+              fontFamily: "var(--havn-font-mono)",
+              color: recentStatus === "success" ? "var(--havn-green)" : "var(--havn-red)",
+            }}>
+              {recentStatus === "success" ? "Done" : "Failed"}
+            </span>
+          </div>
+        )}
+
         {/* Right side: run menu + new + env + user */}
         <div style={styles.headerRight} data-havn-guide="actions">
           <PipelineMenu
             running={running}
-            streams={streams}
-            onRunStream={runStream}
-            onTransform={runTransformAll}
+            onRunPipeline={runPipeline}
             onLint={handleRunLintWithReload}
             onContracts={runContracts}
             onCancel={cancelPipeline}
-            addOutput={addOutput}
           />
           <button
             onClick={() => setAgentSidebarOpen((v) => !v)}
@@ -1008,7 +1069,7 @@ function AppContent() {
             {activeTab === "Quality" && <ErrorBoundary name="Quality"><QualityPanel addOutput={addOutput} /></ErrorBoundary>}
             {activeTab === "Masking" && <ErrorBoundary name="Masking"><MaskingPanel /></ErrorBoundary>}
             {activeTab === "Wiki" && <ErrorBoundary name="Wiki"><WikiPanel /></ErrorBoundary>}
-            {activeTab === "History" && <ErrorBoundary name="History"><HistoryPanel onOpenFile={openFile} /></ErrorBoundary>}
+            {activeTab === "Runs" && <ErrorBoundary name="Runs"><HistoryPanel onOpenFile={openFile} /></ErrorBoundary>}
             {activeTab === "Settings" && <ErrorBoundary name="Settings"><SettingsPanel onShowGuide={showGuide} showConfirm={showConfirm} /></ErrorBoundary>}
           </div>
 
@@ -1060,8 +1121,8 @@ function AppContent() {
         )}
       </div>
 
-      <Hint onNavigate={navigateToTab} />
-      <GuideTour steps={GUIDE_STEPS} onComplete={handleGuideComplete} isOpen={guideOpen} />
+      {!onboardingOpen && <Hint onNavigate={navigateToTab} />}
+      <Onboarding onComplete={handleOnboardingComplete} isOpen={onboardingOpen} onNavigate={navigateToTab} tables={tables} onSelectTable={handleSelectTable} files={files} onOpenFile={openFile} />
 
       {/* Dialog priority system: only one dialog visible at a time */}
       {/* Priority: delete > agent > confirm (highest to lowest) */}
