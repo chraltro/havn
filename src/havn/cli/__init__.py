@@ -43,6 +43,7 @@ def _load_config(project_dir: Path, env: str | None = None):
 from havn.cli import admin  # noqa: E402, F401
 from havn.cli import connectors  # noqa: E402, F401
 from havn.cli import diff  # noqa: E402, F401
+from havn.cli import macros  # noqa: E402, F401
 from havn.cli import models  # noqa: E402, F401
 from havn.cli import pipeline  # noqa: E402, F401
 from havn.cli import project  # noqa: E402, F401

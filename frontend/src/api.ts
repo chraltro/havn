@@ -543,6 +543,7 @@ export const api = {
 
   // Overview
   getOverview: () => request("/overview"),
+  clearSampleProject: () => request("/project/clear-sample", { method: "POST" }),
 
   // Connector health
   getConnectorHealth: () => request("/connectors/health"),

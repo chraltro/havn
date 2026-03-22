@@ -150,4 +150,11 @@ ENV_TEMPLATE = """\
 # POSTGRES_USER="myuser"
 # POSTGRES_PASSWORD="mypassword"
 # API_KEY="sk-..."
+#
+# Alerts (uncomment in project.yml to enable):
+# SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+# ALERT_WEBHOOK_URL="https://your-webhook.example.com/alerts"
+#
+# Environments: use `havn env use prod` to switch database targets
+# PROD_DATABASE_PATH="warehouse_prod.duckdb"
 """

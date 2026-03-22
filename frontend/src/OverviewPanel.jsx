@@ -23,11 +23,12 @@ function formatRows(n) {
   return String(n);
 }
 
-export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, onRunStream, streams }) {
+export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, onRunStream, streams, showConfirm, onClearSample }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [runningDemo, setRunningDemo] = useState(false);
+  const [clearingProject, setClearingProject] = useState(false);
   const [gitStatus, setGitStatus] = useState(null);
   const [showFailed, setShowFailed] = useState(false);
   const setHintTrigger = useHintTriggerFn();
@@ -140,6 +141,37 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
                 </button>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Sample project banner */}
+        {data.is_sample && data.has_data && onClearSample && (
+          <div style={st.sampleBanner}>
+            <span>You're running the sample earthquake project.</span>
+            <button
+              onClick={async () => {
+                if (!showConfirm) { onClearSample(); return; }
+                const ok = await showConfirm(
+                  "Start Fresh",
+                  "This will delete all sample files and the warehouse database. Your config files, .env, and .gitignore will be kept.",
+                  "Clear Sample Data",
+                  true
+                );
+                if (ok) {
+                  setClearingProject(true);
+                  try {
+                    await onClearSample();
+                    await load();
+                  } finally {
+                    setClearingProject(false);
+                  }
+                }
+              }}
+              disabled={clearingProject}
+              style={st.sampleBannerBtn}
+            >
+              {clearingProject ? "Clearing..." : "Start fresh"}
+            </button>
           </div>
         )}
 
@@ -382,6 +414,32 @@ const st = {
     cursor: "pointer",
     fontSize: "12px",
     fontWeight: 500,
+  },
+
+  // Sample banner
+  sampleBanner: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "10px 16px",
+    background: "var(--havn-bg-secondary)",
+    border: "1px solid var(--havn-border)",
+    borderRadius: "var(--havn-radius-lg)",
+    marginBottom: "16px",
+    fontSize: "13px",
+    color: "var(--havn-text-secondary)",
+  },
+  sampleBannerBtn: {
+    padding: "5px 14px",
+    background: "none",
+    border: "1px solid var(--havn-border)",
+    borderRadius: "var(--havn-radius)",
+    color: "var(--havn-text-secondary)",
+    cursor: "pointer",
+    fontSize: "12px",
+    fontWeight: 500,
+    flexShrink: 0,
+    marginLeft: "12px",
   },
 
   // Stats

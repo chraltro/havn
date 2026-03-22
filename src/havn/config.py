@@ -161,6 +161,7 @@ class ProjectConfig(BaseModel):
 
     name: str = "default"
     description: str = ""
+    sample: bool = False
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     connections: dict[str, ConnectionConfig] = Field(default_factory=dict)
     streams: dict[str, StreamConfig] = Field(default_factory=dict)
@@ -383,6 +384,7 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
     config = ProjectConfig(
         name=raw.get("name", project_dir.name),
         description=raw.get("description", ""),
+        sample=bool(raw.get("sample", False)),
         database=database,
         connections=connections,
         streams=streams,

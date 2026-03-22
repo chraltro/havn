@@ -13,6 +13,18 @@ export default function TablesPanel({ selectedTable, onQueryTable }) {
   const [sortDir, setSortDir] = useState("ASC");
   const [stats, setStats] = useState(null);
   const [statsLoading, setStatsLoading] = useState(false);
+  const [maskingPolicies, setMaskingPolicies] = useState({});
+
+  // Load masking policies once on mount, build lookup map
+  useEffect(() => {
+    api.listMaskingPolicies().then(policies => {
+      const map = {};
+      for (const p of policies) {
+        map[`${p.schema_name}.${p.table_name}.${p.column_name}`] = p.method;
+      }
+      setMaskingPolicies(map);
+    }).catch(() => {});
+  }, []);
   const setHintTrigger = useHintTriggerFn();
   const hasTriggeredRef = useRef(false);
 
@@ -143,20 +155,25 @@ export default function TablesPanel({ selectedTable, onQueryTable }) {
         </div>
       </div>
       <div style={st.columnsBar} data-havn-hint="columns-bar">
-        {columns.map((c) => (
-          <button
-            key={c.name}
-            onClick={() => handleColumnClick(c.name)}
-            style={{
-              ...st.colChip,
-              ...(sortCol === c.name ? st.colChipActive : {}),
-            }}
-            title={`Sort by ${c.name}`}
-          >
-            {c.name} <span style={st.colType}>{c.type}</span>
-            {sortCol === c.name && <span style={st.sortArrow}>{sortDir === "ASC" ? " \u2191" : " \u2193"}</span>}
-          </button>
-        ))}
+        {columns.map((c) => {
+          const maskKey = selectedTable ? `${selectedTable}.${c.name}` : '';
+          const maskMethod = maskingPolicies[maskKey];
+          return (
+            <button
+              key={c.name}
+              onClick={() => handleColumnClick(c.name)}
+              style={{
+                ...st.colChip,
+                ...(sortCol === c.name ? st.colChipActive : {}),
+              }}
+              title={maskMethod ? `Sort by ${c.name} (masked: ${maskMethod})` : `Sort by ${c.name}`}
+            >
+              {maskMethod && <span style={st.maskIcon} title={`Masked: ${maskMethod}`}>&#x1F6E1;</span>}
+              {c.name} <span style={st.colType}>{c.type}</span>
+              {sortCol === c.name && <span style={st.sortArrow}>{sortDir === "ASC" ? " \u2191" : " \u2193"}</span>}
+            </button>
+          );
+        })}
       </div>
       {stats && stats.length > 0 && (
         <div style={st.statsBar}>
@@ -204,6 +221,7 @@ const st = {
   colChip: { background: "var(--havn-btn-bg)", border: "1px solid var(--havn-border)", padding: "3px 8px", borderRadius: "var(--havn-radius)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", cursor: "pointer", color: "var(--havn-text)" },
   colChipActive: { borderColor: "var(--havn-accent)", color: "var(--havn-accent)", fontWeight: 600 },
   colType: { color: "var(--havn-text-secondary)", marginLeft: "2px" },
+  maskIcon: { marginRight: "3px", fontSize: "10px", opacity: 0.7 },
   sortArrow: { color: "var(--havn-accent)", fontWeight: 700 },
   statsBar: { padding: "8px 8px 12px", borderTop: "1px solid var(--havn-border)", marginBottom: "4px" },
   statsLabel: { fontSize: "11px", color: "var(--havn-text-secondary)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.3px" },

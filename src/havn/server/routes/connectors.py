@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from havn.server.deps import (
     DbConn,
+    DbConnAutoCreate,
     DbConnReadOnly,
     _get_project_dir,
     _require_permission,
@@ -83,9 +84,9 @@ def preview_file_endpoint(request: Request, req: ImportFileRequest) -> dict:
 
 @router.post("/api/import/file")
 def import_file_endpoint(
-    request: Request, req: ImportFileRequest, conn: DbConn
+    request: Request, req: ImportFileRequest, conn: DbConnAutoCreate
 ) -> dict:
-    """Import a file into the warehouse."""
+    """Import a file into the warehouse (creates database if needed)."""
     _require_permission(request, "execute")
     from havn.engine.importer import import_file
 
@@ -105,9 +106,9 @@ def test_connection_endpoint(
 
 @router.post("/api/import/from-connection")
 def import_from_connection_endpoint(
-    request: Request, req: ImportFromConnectionRequest, conn: DbConn
+    request: Request, req: ImportFromConnectionRequest, conn: DbConnAutoCreate
 ) -> dict:
-    """Import from an external database."""
+    """Import from an external database (creates database if needed)."""
     _require_permission(request, "execute")
     from havn.engine.importer import import_from_connection
 
