@@ -98,7 +98,7 @@ function PolicyModal({ mode, initial, methods, onSave, onClose, saving }) {
   // Load all schemas on mount
   useEffect(() => {
     api.listTables().then(tables => {
-      const unique = [...new Set(tables.map(t => t.schema))].filter(s => s !== '_dp_internal' && s !== 'information_schema').sort();
+      const unique = [...new Set(tables.map(t => t.schema))].filter(s => s !== '_dp_internal' && s !== 'information_schema').sort(schemaCompare);
       setSchemas(unique);
     }).catch(() => {});
   }, []);

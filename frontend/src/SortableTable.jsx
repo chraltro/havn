@@ -84,7 +84,7 @@ function inferTypeDisplay(rows, colIndex) {
   return { label: "VARCHAR", color: CLR.text };
 }
 
-export default function SortableTable({ columns, rows, columnTypes }) {
+export default function SortableTable({ columns, rows, columnTypes, maskedColumns }) {
   const [sortCol, setSortCol] = useState(null);
   const [sortDir, setSortDir] = useState("asc");
 
@@ -121,6 +121,7 @@ export default function SortableTable({ columns, rows, columnTypes }) {
             return (
               <th key={col} style={styles.th} onClick={() => handleSort(i)} role="columnheader" scope="col" aria-sort={isActive ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
                 <span style={styles.thInner}>
+                  {maskedColumns && maskedColumns[col] && <span style={styles.maskIcon} title={`Masked: ${maskedColumns[col]}`}>&#x1F6E1;</span>}
                   <span>{col}</span>
                   <span style={{ ...styles.typeSymbol, color: sym.color }}>{sym.label}</span>
                   <span style={{ ...styles.sortIcon, color: isActive ? "var(--havn-accent)" : "var(--havn-text-dim)" }}>
@@ -151,6 +152,7 @@ const styles = {
   table: { width: "100%", borderCollapse: "collapse", fontSize: "12px", fontFamily: "var(--havn-font-mono)" },
   th: { textAlign: "left", padding: "6px 12px", borderBottom: "2px solid var(--havn-border-light)", color: "var(--havn-text-secondary)", fontWeight: 600, position: "sticky", top: 0, background: "var(--havn-bg)", cursor: "pointer", userSelect: "none" },
   thInner: { display: "flex", alignItems: "center", gap: "6px", width: "100%" },
+  maskIcon: { fontSize: "10px", opacity: 0.7, flexShrink: 0 },
   typeSymbol: { fontSize: "9px", fontWeight: 500, opacity: 0.8 },
   sortIcon: { fontSize: "8px", lineHeight: 1, marginLeft: "auto", flexShrink: 0 },
   td: { padding: "4px 12px", borderBottom: "1px solid var(--havn-border)", color: "var(--havn-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "300px" },

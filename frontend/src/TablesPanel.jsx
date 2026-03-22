@@ -201,6 +201,11 @@ export default function TablesPanel({ selectedTable, onQueryTable }) {
             columns={preview.columns}
             rows={preview.rows}
             columnTypes={columns.map((c) => c.type)}
+            maskedColumns={selectedTable ? preview.columns.reduce((acc, col) => {
+              const m = maskingPolicies[`${selectedTable}.${col}`];
+              if (m) acc[col] = m;
+              return acc;
+            }, {}) : undefined}
           />
         </div>
       )}
