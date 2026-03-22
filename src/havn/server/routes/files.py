@@ -70,7 +70,7 @@ def _scan_dir(base: Path, rel: Path | None = None) -> list[FileInfo]:
     if not target.exists():
         return []
     items = []
-    for entry in sorted(target.iterdir()):
+    for entry in sorted(target.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())):
         if entry.name.startswith(".") or entry.name in _SKIP_DIRS:
             continue
         # Skip DuckDB temp/WAL dirs and binary artifacts
