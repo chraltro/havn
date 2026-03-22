@@ -205,7 +205,7 @@ const pmStyles = {
   menu: {
     position: "absolute", top: "100%", right: 0, marginTop: "4px",
     background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)",
-    borderRadius: "var(--havn-radius)", zIndex: 100, minWidth: "220px",
+    borderRadius: "var(--havn-radius)", zIndex: 10000, minWidth: "220px",
     boxShadow: "0 4px 16px rgba(0,0,0,0.3)", padding: "4px 0",
   },
   groupLabel: {
@@ -392,8 +392,18 @@ function AppContent() {
   const editorRef = useRef(null);
   const [goToLine, setGoToLine] = useState(null);
 
-  // Onboarding state
-  const [onboardingOpen, setOnboardingOpen] = useState(() => !localStorage.getItem("dp_onboarding_completed"));
+  // Onboarding state — per-project, keyed by project name
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const onboardingProjectRef = useRef(null);
+  useEffect(() => {
+    api.getOverview().then((overview) => {
+      const name = overview.project_name || "__default__";
+      onboardingProjectRef.current = name;
+      if (!localStorage.getItem(`dp_onboarding_completed:${name}`)) {
+        setOnboardingOpen(true);
+      }
+    }).catch(() => {});
+  }, []);
 
   // Hint system triggers
   const setHintTrigger = useHintTriggerFn();
@@ -454,7 +464,8 @@ function AppContent() {
 
   function handleOnboardingComplete() {
     setOnboardingOpen(false);
-    localStorage.setItem("dp_onboarding_completed", "true");
+    const name = onboardingProjectRef.current || "__default__";
+    localStorage.setItem(`dp_onboarding_completed:${name}`, "true");
   }
 
   function showGuide() {
@@ -510,6 +521,7 @@ function AppContent() {
     path = path.replace(/\\/g, "/");
     if (path.endsWith(".dpnb")) {
       setNotebookPath(path);
+      setActiveFile(path);
       setActiveTab("Notebooks");
       return;
     }
@@ -929,7 +941,7 @@ function AppContent() {
               <button onClick={refreshAll} style={styles.sidebarRefreshBtn} title="Refresh files &amp; tables" aria-label="Refresh files and tables">&#x21BB;</button>
             </div>
           </div>
-          <div style={styles.sidebarPane}>
+          <div style={styles.sidebarPane} data-havn-guide="files-pane">
             <div style={styles.sidebarSectionHeader}>
               <span>FILES</span>
               <button onClick={() => setShowNewDialog(true)} style={styles.sidebarNewBtn} title="Create new file" aria-label="Create new file">+</button>
@@ -939,7 +951,7 @@ function AppContent() {
             </div>
           </div>
           <div style={styles.sidebarDivider} />
-          <div style={styles.sidebarPane}>
+          <div style={styles.sidebarPane} data-havn-guide="tables-pane">
             <div style={styles.sidebarSectionHeader}>TABLES</div>
             <div style={styles.sidebarPaneContent}>
               <SchemaTree
@@ -962,7 +974,7 @@ function AppContent() {
         <div style={styles.content} role="main">
           {/* Sub-tab bar (shown when section has multiple tabs) */}
           {subTabs.length > 0 && (
-            <div style={styles.subTabBar} data-havn-hint="tab-bar">
+            <div style={styles.subTabBar} data-havn-hint="tab-bar" data-havn-guide="sub-tab-bar">
               {subTabs.map((tab) => (
                 <button
                   key={tab}
@@ -998,7 +1010,7 @@ function AppContent() {
           )}
 
           {/* Panel */}
-          <div style={styles.panel} data-havn-guide="editor">
+          <div style={styles.panel} data-havn-guide="main-panel">
             {activeTab === "Overview" && (
               <ErrorBoundary name="Overview">
                 <OverviewPanel
