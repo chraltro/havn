@@ -112,7 +112,7 @@ function CDCSection() {
  * into a single flow. Users pick a method (file, database, connector) and
  * can optionally make it recurring at the end.
  */
-export default function DataSourcesPanel({ addOutput, showConfirm }) {
+export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged }) {
   const [view, setView] = useState("home"); // "home", "file", "database", "connector-catalog", "connector-setup", "manage"
   const [configured, setConfigured] = useState([]);
   const [available, setAvailable] = useState([]);
@@ -219,6 +219,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm }) {
       if (result.status === "success") {
         addOutput("info", `Imported ${result.rows} rows into ${result.table} (${result.duration_ms}ms)`);
         setSuccessBanner({ rows: result.rows, table: result.table });
+        onDataChanged?.();
         goHome();
       } else {
         addOutput("error", `Import failed: ${result.error}`);
@@ -254,6 +255,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm }) {
       if (result.status === "success") {
         addOutput("info", `Imported ${result.rows} rows into ${result.table} (${result.duration_ms}ms)`);
         setSuccessBanner({ rows: result.rows, table: result.table });
+        onDataChanged?.();
         goHome();
       } else {
         addOutput("error", `Import failed: ${result.error}`);
@@ -327,6 +329,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm }) {
       );
       addOutput("info", `Connector "${result.connection_name}" set up — ${result.tables.length} tables, script: ${result.script_path}`);
       setHintTrigger("firstConnectorDone", true);
+      onDataChanged?.();
       await loadData();
       setView("home");
     } catch (e) {
@@ -342,6 +345,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm }) {
       const result = await api.syncConnector(name);
       if (result.status === "success") {
         addOutput("info", `Synced "${name}" (${result.duration_ms}ms)`);
+        onDataChanged?.();
       } else {
         addOutput("error", `Sync failed for "${name}": ${result.error}`);
       }

@@ -16,6 +16,7 @@ import json
 PROJECT_YML_TEMPLATE = """\
 name: {name}
 description: "Earthquake analytics pipeline — a havn sample project"
+sample: true
 
 database:
   path: warehouse.duckdb
@@ -41,6 +42,50 @@ streams:
       - transform: [all]
       - export: [all]
     schedule: null  # on-demand; use cron for scheduled runs, e.g. "0 6 * * *"
+
+  incremental:
+    description: "Quick refresh: ingest new data and rebuild only changed models"
+    steps:
+      - ingest: [all]
+      - transform: [all]
+
+# alerts:
+#   slack:
+#     webhook_url: ${{SLACK_WEBHOOK}}
+#     events: [pipeline_failure, assertion_failed, anomaly]
+#   webhook:
+#     url: ${{ALERT_WEBHOOK_URL}}
+#     events: [pipeline_failure]
+
+lint:
+  dialect: duckdb
+"""
+
+PROJECT_YML_EMPTY_TEMPLATE = """\
+name: {name}
+
+database:
+  path: warehouse.duckdb
+
+connections: {{}}
+  # Example: connect to a PostgreSQL database
+  # prod_postgres:
+  #   type: postgres
+  #   host: localhost
+  #   port: 5432
+  #   database: production
+  #   user: ${{POSTGRES_USER}}
+  #   password: ${{POSTGRES_PASSWORD}}
+
+streams: {{}}
+  # Example: define a pipeline
+  # daily-refresh:
+  #   description: "Daily ETL pipeline"
+  #   steps:
+  #     - ingest: [all]
+  #     - transform: [all]
+  #     - export: [all]
+  #   schedule: "0 6 * * *"
 
 lint:
   dialect: duckdb
@@ -195,7 +240,7 @@ WHERE mag IS NOT NULL
 """
 
 SAMPLE_SILVER_EVENTS_SQL = """\
--- config: materialized=table, schema=silver
+-- config: materialized=table, schema=silver, incremental_strategy=delete+insert, unique_key=event_id
 -- depends_on: bronze.earthquakes
 -- description: Enriched earthquake events with magnitude class, region, and depth classification
 -- assert: row_count > 0
@@ -216,14 +261,7 @@ SELECT
     tsunami_alert,
     significance,
     cast(event_time AS DATE) AS event_date,
-    CASE
-        WHEN magnitude >= 8.0 THEN 'Great'
-        WHEN magnitude >= 7.0 THEN 'Major'
-        WHEN magnitude >= 6.0 THEN 'Strong'
-        WHEN magnitude >= 5.0 THEN 'Moderate'
-        WHEN magnitude >= 4.0 THEN 'Light'
-        ELSE 'Minor'
-    END AS magnitude_class,
+    classify_magnitude(magnitude) AS magnitude_class,  -- Python macro (see macros/geo.py)
     CASE
         WHEN place LIKE '% of %'
             THEN trim(split_part(place, ' of ', 2))
@@ -358,6 +396,7 @@ SAMPLE_GOLD_REGIONS_SQL = """\
 -- description: Regional seismic activity summary for risk assessment
 -- col: region: Geographic region extracted from USGS place description
 -- col: significant_events: Events with magnitude >= 5.0
+-- col: avg_distance_to_ring_of_fire_km: Average distance from the Pacific Ring of Fire (Tokyo reference point)
 -- assert: row_count > 0
 
 SELECT
@@ -373,12 +412,64 @@ SELECT
         WHEN tsunami_alert THEN 1 ELSE 0
     END) AS tsunami_alerts,
     min(event_date) AS first_event,
-    max(event_date) AS last_event
+    max(event_date) AS last_event,
+    round(avg(haversine_km(latitude, longitude, 35.68, 139.69)), 0)  -- Python macro: distance to Tokyo
+        AS avg_distance_to_ring_of_fire_km
 FROM silver.earthquake_events
 GROUP BY region
 HAVING count(*) >= 2
 ORDER BY total_events DESC
 """
+
+# ---------------------------------------------------------------------------
+# Python SQL macro — reusable functions callable directly in SQL
+# ---------------------------------------------------------------------------
+
+SAMPLE_MACRO_GEO = '''\
+"""Geospatial and seismology helpers -- callable directly in SQL.
+
+Usage in SQL:
+    SELECT classify_magnitude(6.5)            -- returns 'Strong'
+    SELECT haversine_km(35.6, -117.6, 0, 0)   -- returns distance in km
+"""
+
+import math
+
+from havn import macro
+
+
+@macro
+def classify_magnitude(mag: float) -> str:
+    """Classify earthquake magnitude on the standard seismological scale."""
+    if mag is None:
+        return "Unknown"
+    if mag >= 8.0:
+        return "Great"
+    if mag >= 7.0:
+        return "Major"
+    if mag >= 6.0:
+        return "Strong"
+    if mag >= 5.0:
+        return "Moderate"
+    if mag >= 4.0:
+        return "Light"
+    return "Minor"
+
+
+@macro
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance between two points in kilometers."""
+    R = 6371.0  # Earth radius in km
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(dlon / 2) ** 2
+    )
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+'''
 
 # ---------------------------------------------------------------------------
 # Export script
@@ -515,8 +606,9 @@ SAMPLE_EXPLORE_NOTEBOOK = json.dumps({
             "id": "cell_5",
             "type": "sql",
             "source": (
-                "-- Most active regions\n"
-                "SELECT region, total_events, max_magnitude, avg_magnitude\n"
+                "-- Most active regions (with distance from Ring of Fire)\n"
+                "SELECT region, total_events, max_magnitude, avg_magnitude,\n"
+                "       avg_distance_to_ring_of_fire_km\n"
                 "FROM gold.region_risk\n"
                 "ORDER BY total_events DESC\n"
                 "LIMIT 10"
@@ -525,12 +617,27 @@ SAMPLE_EXPLORE_NOTEBOOK = json.dumps({
         },
         {
             "id": "cell_6",
+            "type": "sql",
+            "source": (
+                "-- Python macros in action: call classify_magnitude() and haversine_km() directly in SQL\n"
+                "-- These are plain Python functions from macros/geo.py, auto-registered as DuckDB UDFs\n"
+                "SELECT\n"
+                "    classify_magnitude(7.5) AS major_class,\n"
+                "    classify_magnitude(3.2) AS minor_class,\n"
+                "    round(haversine_km(35.68, 139.69, 37.77, -122.42), 0) AS tokyo_to_sf_km"
+            ),
+            "outputs": [],
+        },
+        {
+            "id": "cell_7",
             "type": "markdown",
             "source": (
                 "## Next steps\n\n"
                 "- Add new SQL models in `transform/` to explore different angles\n"
+                "- Create Python macros in `macros/` for reusable SQL functions\n"
+                "- Run `havn stream incremental` for a fast re-run (only changed models)\n"
+                "- Run `havn diff` to see what changed in the data\n"
                 "- Use `havn query \"SELECT ...\"` for quick ad-hoc queries\n"
-                "- Check `havn tables` to see all available tables\n"
                 "- Run `havn contracts` to validate data quality rules"
             ),
         },
@@ -548,17 +655,26 @@ You are working on a havn data platform project. havn uses DuckDB + plain SQL tr
 # -- config: materialized=table, schema=silver
 # -- depends_on: bronze.customers
 # Folder name = default schema. No Jinja — plain SQL only.
+# Incremental: -- config: materialized=table, schema=silver, incremental_strategy=delete+insert, unique_key=id
+
+# Python SQL macros go in macros/ with @macro decorator:
+# from havn import macro
+# @macro
+# def my_func(x: str) -> int: ...
+# Then call directly in SQL: SELECT my_func(col) FROM table
 
 # Python scripts go in ingest/ or export/:
 # A DuckDB connection is available as `db` — just write top-level code.
 # Legacy `def run(db)` scripts are also supported.
 
 # Key commands:
-# havn transform        — build SQL models in dependency order
+# havn transform        — build SQL models (incremental change detection)
 # havn run <script>     — run an ingest or export script
-# havn stream <name>    — run a full pipeline
+# havn stream <name>    — run a pipeline (full-refresh or incremental)
 # havn query "<sql>"    — run ad-hoc SQL queries
+# havn macros           — list Python SQL macros
 # havn tables           — list warehouse tables
+# havn diff             — diff changed models
 # havn lint             — lint SQL (SQLFluff, DuckDB dialect)
 # havn serve            — start web UI on :3000
 
@@ -568,7 +684,7 @@ You are working on a havn data platform project. havn uses DuckDB + plain SQL tr
 # - Tests: pytest tests/ — uses real temp DuckDB, no mocks
 
 # Don't:
-# - Add Jinja/templating to SQL
+# - Add Jinja/templating to SQL — use Python macros for reusable logic
 # - Mock DuckDB in tests
 # - Modify _dp_internal schema from user-facing code
 """
@@ -586,7 +702,22 @@ havn uses DuckDB + plain SQL transforms + Python ingest/export. All data in a si
 SELECT * FROM bronze.customers WHERE active = true
 ```
 
-Folder name = default schema. No Jinja — plain SQL only.
+Folder name = default schema. No Jinja — plain SQL only. Use Python macros for reusable logic.
+
+### Incremental models:
+```sql
+-- config: materialized=table, schema=silver, incremental_strategy=delete+insert, unique_key=id
+```
+
+### Python SQL macros go in `macros/` with `@macro` decorator:
+```python
+from havn import macro
+
+@macro
+def my_func(x: str) -> str:
+    return x.upper()
+```
+Then call directly in SQL: `SELECT my_func(col) FROM table`
 
 ### Python scripts go in `ingest/` or `export/`:
 
@@ -595,7 +726,7 @@ Folder name = default schema. No Jinja — plain SQL only.
 db.execute("CREATE OR REPLACE TABLE landing.x AS SELECT * FROM ...")
 ```
 
-### Key commands: `havn transform`, `havn run <script>`, `havn query "<sql>"`, `havn lint`, `havn tables`, `havn serve`
+### Key commands: `havn transform`, `havn run <script>`, `havn stream <name>`, `havn query "<sql>"`, `havn macros`, `havn diff`, `havn lint`, `havn tables`, `havn serve`
 
 ### Code patterns:
 - `from __future__ import annotations` in all Python files
@@ -603,7 +734,7 @@ db.execute("CREATE OR REPLACE TABLE landing.x AS SELECT * FROM ...")
 - Tests: `pytest tests/` — uses real temp DuckDB, no mocks
 
 ### Don't:
-- Add Jinja/templating to SQL
+- Add Jinja/templating to SQL — use Python macros instead
 - Mock DuckDB in tests
 - Modify `_dp_internal` schema from user-facing code
 """
@@ -620,16 +751,23 @@ havn transform              # build SQL models in dependency order
 havn transform --force      # force rebuild all
 havn run ingest/script.py   # run a single script
 havn stream full-refresh    # run full pipeline (seed -> ingest -> transform -> export)
+havn stream incremental     # quick refresh (only changed models)
 havn seed                   # load CSV files from seeds/ into DuckDB
 havn query "SELECT 1"       # ad-hoc SQL query
 havn tables                 # list warehouse objects
+havn macros                 # list Python SQL macros (UDFs)
 havn lint                   # lint SQL (SQLFluff, DuckDB dialect)
 havn lint --fix             # auto-fix lint violations
+havn diff                   # diff changed models + downstream
+havn diff gold.orders       # diff a single model
 havn serve                  # start web UI on :3000
 havn history                # show run log
 havn contracts              # evaluate data quality contracts
+havn snapshot create "name" # create warehouse snapshot
 havn validate               # check project structure and DAG
 havn context                # generate AI-friendly project summary
+havn ci generate            # generate GitHub Actions workflow
+havn env list               # show available environments
 ```
 
 ## Project Layout
@@ -641,10 +779,11 @@ transform/
   silver/         Business logic, joins, enrichment
   gold/           Consumption-ready models
 export/           Python scripts that export data out
+macros/           Python SQL macros — functions callable directly in SQL queries
 seeds/            CSV reference data (loaded with havn seed)
 contracts/        YAML data quality rules (evaluated with havn contracts)
 notebooks/        Interactive .dpnb notebooks for exploration
-project.yml       Streams, connections, schedules
+project.yml       Streams, connections, schedules, alerts
 .env              Secrets (never committed)
 warehouse.duckdb  The database (single file)
 ```
@@ -667,13 +806,46 @@ LEFT JOIN bronze.orders o ON c.customer_id = o.customer_id
 GROUP BY 1, 2
 ```
 
-- `-- config:` sets materialization (view/table/incremental) and schema
+- `-- config:` sets materialization (view/table) and schema
 - `-- depends_on:` declares upstream dependencies for DAG ordering
 - `-- description:` documents what the model does
 - `-- col: name: desc` documents individual columns
 - `-- assert:` defines data quality checks (row_count, unique, no_nulls, accepted_values)
 - Folder name = default schema (e.g., transform/bronze/ -> schema=bronze)
-- No Jinja, no templating — plain SQL only
+- No Jinja, no templating — plain SQL only (use Python macros for reusable logic)
+
+### Incremental Models
+
+For models that should only process new/changed rows:
+```sql
+-- config: materialized=table, schema=silver, incremental_strategy=delete+insert, unique_key=event_id
+```
+
+Strategies: `delete+insert` (default), `append`, `merge` (true upsert), `partition_by`.
+Second pipeline run only rebuilds what changed — see `silver/earthquake_events.sql` for an example.
+
+## Python SQL Macros
+
+Python functions in `macros/` are auto-registered as DuckDB UDFs, callable directly in SQL:
+
+```python
+# macros/geo.py
+from havn import macro
+
+@macro
+def classify_magnitude(mag: float) -> str:
+    if mag >= 8.0: return "Great"
+    if mag >= 7.0: return "Major"
+    ...
+```
+```sql
+-- Use in any SQL model:
+SELECT event_id, classify_magnitude(magnitude) AS magnitude_class FROM bronze.earthquakes
+```
+
+- `@macro` decorator marks functions for registration
+- Type hints map to DuckDB types (str->VARCHAR, int->INTEGER, float->DOUBLE)
+- Run `havn macros` to list all available macros
 
 ## Python Script Convention
 
@@ -728,23 +900,24 @@ contracts:
 **Transforming data:**
 - "Create a silver model that joins customers with their orders"
 - "Add a gold table that shows monthly revenue by product category"
-- "Fix the SQL error in transform/silver/dim_customer.sql"
+- "Create a Python macro to mask email addresses, then use it in a gold model"
 
 **Data quality:**
 - "Add assertions to check that order amounts are positive"
 - "Create a contract that validates customer data completeness"
-- "Why did the last assertion fail?"
+- "Set up a masking policy to redact PII columns for non-admin users"
 
 **Querying & exploring:**
 - "Show me the top 10 customers by order count"
 - "What tables are in the warehouse and what columns do they have?"
-- "Write a query to find duplicate records in landing.customers"
+- "Run a diff to see what changed since the last transform"
 
 **Operations:**
 - "Run the full pipeline and show me what happened"
-- "Why did the last transform fail?"
+- "Run the incremental stream to pick up only new data"
 - "Set up a daily schedule for the full-refresh stream"
-- "Add a new export that writes the gold.revenue table to CSV"
+- "Create a snapshot before I make changes"
+- "Generate a CI workflow for GitHub Actions"
 
 **Tip:** Run `havn context` to generate a summary of your project that you can
 paste into any AI chat (ChatGPT, Claude, etc.) for instant context.
