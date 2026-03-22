@@ -12,702 +12,973 @@
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  --bg: #fafbfc;
-  --bg-warm: #f5f6f8;
-  --surface: #ffffff;
-  --border: #e8ecf1;
-  --border-hover: #d0d7e0;
-  --teal: #0d9373;
-  --teal-light: #e8f5f1;
-  --teal-bg: #f0faf6;
-  --text: #1a2332;
-  --text-secondary: #4a5568;
-  --text-muted: #8494a7;
-  --code-bg: #1a2332;
-  --code-text: #c4cdd9;
-  --code-teal: #5ee6c0;
-  --code-comment: #5a6a7e;
-  --code-string: #f0c674;
+  --bg: #0c0f14;
+  --surface: #12151c;
+  --border: #1e2333;
+  --teal: #3ECFB4;
+  --text-bright: #e8ecf2;
+  --text: #c8cdd8;
+  --text-dim: #6b7a90;
+  --text-xdim: #4a5568;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'Outfit', sans-serif;
 }
 
 html { scroll-behavior: smooth; }
 
 body {
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--mono);
   background: var(--bg);
   color: var(--text);
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.7;
   -webkit-font-smoothing: antialiased;
 }
 
+/* --- Fade-in --- */
+.fade-up {
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.45s ease, transform 0.45s ease;
+}
+.fade-up.visible { opacity: 1; transform: translateY(0); }
+.fade-up.d1 { transition-delay: 0.08s; }
+.fade-up.d2 { transition-delay: 0.16s; }
+
 /* --- Nav --- */
 nav {
-  position: fixed;
+  position: sticky;
   top: 0;
-  left: 0;
-  right: 0;
   z-index: 50;
-  padding: 0 2rem;
-  height: 64px;
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: rgba(250, 251, 252, 0.85);
+  padding: 0 2rem;
+  background: rgba(12, 15, 20, 0.9);
   backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--border);
 }
 
 .nav-logo {
-  font-size: 1.35rem;
-  font-weight: 700;
-  letter-spacing: -0.04em;
-  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--teal);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.03em;
 }
-
-.nav-logo span { color: var(--teal); }
 
 .nav-right {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0;
 }
 
 .nav-right a {
-  color: var(--text-secondary);
+  color: var(--text-dim);
   text-decoration: none;
-  font-size: 0.88rem;
-  font-weight: 400;
-  padding: 0.4rem 0.85rem;
-  border-radius: 6px;
-  transition: color 0.15s, background 0.15s;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
 }
 
-.nav-right a:hover {
-  color: var(--text);
-  background: var(--bg-warm);
-}
+.nav-right a:hover { color: var(--text); }
 
 .nav-right .gh-link {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 5px;
 }
 
 .nav-right .gh-link svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   fill: currentColor;
 }
 
-.nav-right .nav-cta {
-  color: var(--surface);
-  background: var(--text);
-  font-weight: 500;
-  margin-left: 0.5rem;
+.nav-cta {
+  color: var(--bg) !important;
+  background: var(--teal);
+  font-weight: 600;
+  margin-left: 6px;
 }
 
-.nav-right .nav-cta:hover {
-  background: #2d3a4a;
-  color: var(--surface);
-}
+.nav-cta:hover { opacity: 0.9; }
 
-/* --- Container --- */
-.container {
-  max-width: 980px;
-  margin: 0 auto;
+/* --- Separator --- */
+.sep {
+  color: var(--text-xdim);
+  margin: 3rem 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 11px;
+  user-select: none;
+  max-width: 880px;
+  margin-left: auto;
+  margin-right: auto;
   padding: 0 2rem;
 }
 
 /* --- Hero --- */
 .hero {
-  padding: 9rem 0 5rem;
-  text-align: center;
+  padding: 7.5rem 0 2rem;
+}
+
+.hero-inner {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 0 2rem;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3rem;
+  align-items: center;
 }
 
 .hero h1 {
-  font-size: clamp(2.6rem, 5.5vw, 4rem);
+  font-family: var(--sans);
+  font-size: clamp(2.2rem, 5vw, 3rem);
   font-weight: 700;
   line-height: 1.1;
   letter-spacing: -0.04em;
-  color: var(--text);
+  color: var(--text-bright);
+  margin-bottom: 1rem;
+}
+
+.hero h1 span { color: var(--teal); }
+
+.hero-sub {
+  font-family: var(--sans);
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  max-width: 420px;
+  line-height: 1.65;
+  font-weight: 300;
+  margin-bottom: 2rem;
+}
+
+.install-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px 8px 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 1.25rem;
 }
 
-.hero-sub {
-  font-size: 1.15rem;
-  color: var(--text-secondary);
-  max-width: 520px;
-  margin: 0 auto 2.5rem;
-  line-height: 1.65;
-  font-weight: 300;
-}
+.install-box .prompt { color: var(--text-xdim); }
+.install-box .cmd { color: var(--teal); font-weight: 500; }
 
-.hero-actions {
-  display: flex;
-  gap: 0.75rem;
-  justify-content: center;
-  align-items: center;
-  margin-bottom: 2.5rem;
-}
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.65rem 1.5rem;
-  border-radius: 8px;
-  font-family: 'Outfit', sans-serif;
-  font-size: 0.92rem;
-  font-weight: 500;
-  text-decoration: none;
-  transition: all 0.15s;
-  cursor: pointer;
-  border: none;
-}
-
-.btn-primary {
-  background: var(--teal);
-  color: #fff;
-}
-
-.btn-primary:hover { background: #0ba881; }
-
-.btn-ghost {
-  background: transparent;
-  color: var(--text-secondary);
+.copy-btn {
+  background: #181c26;
   border: 1px solid var(--border);
-}
-
-.btn-ghost:hover {
-  border-color: var(--border-hover);
-  background: var(--surface);
-}
-
-/* --- Install snippet --- */
-.install-snippet {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.75rem;
-  background: var(--code-bg);
-  border-radius: 10px;
-  padding: 0.6rem 0.6rem 0.6rem 1.25rem;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.85rem;
-  color: var(--code-text);
-}
-
-.install-snippet .prompt { color: var(--code-comment); }
-.install-snippet .cmd { color: var(--code-teal); }
-
-.install-snippet button {
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.1);
-  color: var(--code-text);
-  padding: 0.45rem 0.75rem;
-  border-radius: 6px;
+  color: var(--text-dim);
+  padding: 4px 8px;
+  border-radius: 3px;
   cursor: pointer;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
-  transition: background 0.15s;
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
-.install-snippet button:hover { background: rgba(255,255,255,0.14); }
+.copy-btn:hover { color: var(--text); }
+
+.hero-links {
+  display: flex;
+  gap: 1.5rem;
+}
+
+.hero-links a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.hero-links .arrow { color: var(--text-xdim); }
+
+.hero-img {
+  width: 320px;
+  height: 320px;
+  flex-shrink: 0;
+  margin-right: 2rem;
+}
+
+.hero-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 32px rgba(62, 207, 180, 0.08));
+}
+
+/* --- Section headers --- */
+.section-comment {
+  color: var(--text-xdim);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.section-title {
+  font-family: var(--sans);
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--text-bright);
+  letter-spacing: -0.02em;
+  margin-bottom: 2rem;
+}
 
 /* --- Pillars --- */
 .pillars {
-  padding: 4rem 0;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 0 2rem;
 }
 
 .pillars-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 1.5rem;
+  gap: 1rem;
 }
 
 .pillar {
-  text-align: center;
-  padding: 2.5rem 1.75rem;
-  border-radius: 14px;
-  border: 1px solid var(--border);
   background: var(--surface);
-  transition: border-color 0.2s, box-shadow 0.2s;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
 }
 
-.pillar:hover {
-  border-color: var(--border-hover);
-  box-shadow: 0 4px 24px rgba(0,0,0,0.04);
+.pillar-img {
+  width: 100%;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 8px;
 }
 
-.pillar-label {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+.pillar-img img {
+  max-height: 130%;
+  max-width: 130%;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 16px rgba(0, 0, 0, 0.3));
+}
+
+.pillar-body {
+  padding: 1.25rem;
+}
+
+.pillar-key {
   color: var(--teal);
-  font-weight: 600;
-  margin-bottom: 0.75rem;
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
 }
 
-.pillar h3 {
-  font-size: 1.15rem;
+.pillar-body h3 {
+  font-family: var(--sans);
+  font-size: 0.95rem;
   font-weight: 600;
-  color: var(--text);
-  margin-bottom: 0.6rem;
-  letter-spacing: -0.015em;
+  color: var(--text-bright);
+  margin-bottom: 4px;
 }
 
-.pillar p {
-  font-size: 0.88rem;
-  color: var(--text-muted);
+.pillar-body p {
+  font-family: var(--sans);
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  line-height: 1.55;
+  font-weight: 300;
+}
+
+/* --- Stack --- */
+.stack {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
+.stack-headline {
+  font-family: var(--sans);
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  font-weight: 300;
+  max-width: 520px;
   line-height: 1.6;
-  font-weight: 300;
+  margin-bottom: 2rem;
 }
 
-/* --- How it works --- */
-.how-section {
-  padding: 5rem 0;
-}
-
-.how-header {
-  text-align: center;
-  margin-bottom: 3rem;
-}
-
-.how-header h2 {
-  font-size: 1.75rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  margin-bottom: 0.5rem;
-}
-
-.how-header p {
-  color: var(--text-secondary);
-  font-size: 1rem;
-  font-weight: 300;
-}
-
-.how-cols {
+.stack-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2.5rem;
-  align-items: start;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.stack-cell {
+  background: var(--surface);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stack-cell-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-bright);
+}
+
+.stack-cell-desc {
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 300;
+  line-height: 1.5;
+}
+
+.stack-cell-tag {
+  font-size: 10px;
+  color: var(--teal);
+  margin-top: 4px;
+}
+
+.stack-access {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.stack-access-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.stack-access-badge .icon {
+  color: var(--teal);
+  font-size: 11px;
+}
+
+@media (max-width: 768px) {
+  .stack-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* --- How --- */
+.how {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 0 2rem;
 }
 
 .code-window {
-  background: var(--code-bg);
-  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 8px 40px rgba(0,0,0,0.12);
+  margin-bottom: 2rem;
 }
 
 .code-titlebar {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0.85rem 1.15rem;
-  background: rgba(255,255,255,0.04);
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
 }
 
+.code-copy {
+  margin-left: auto;
+  background: #181c26;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.code-copy:hover { color: var(--text); }
+
 .code-dot {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  background: rgba(255,255,255,0.12);
+  background: var(--border);
+}
+
+.code-label {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 .code-window pre {
-  padding: 1.25rem 1.35rem;
-  overflow-x: auto;
-}
-
-.code-window code {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.82rem;
-  line-height: 1.9;
-  color: var(--code-text);
-}
-
-.code-window .c { color: var(--code-comment); }
-.code-window .t { color: var(--code-teal); }
-.code-window .s { color: var(--code-string); }
-
-.how-steps {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 1.75rem;
-  padding-top: 0.5rem;
-}
-
-.how-steps li {
-  display: flex;
-  gap: 1rem;
-}
-
-.how-step-marker {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: var(--teal-light);
-  color: var(--teal);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.8rem;
-  font-weight: 600;
-  margin-top: 0.15rem;
-}
-
-.how-step-body h4 {
-  font-size: 0.95rem;
-  font-weight: 600;
+  padding: 1.25rem;
+  margin: 0;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 2;
   color: var(--text);
-  margin-bottom: 0.25rem;
 }
 
-.how-step-body p {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  line-height: 1.55;
+.code-window .c { color: var(--text-xdim); }
+.code-window .t { color: var(--teal); }
+.code-window .s { color: #FBBF24; }
+.code-window .g { color: #34D399; }
+
+.steps-list {
+  list-style: none;
+}
+
+.step-row {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.step-row:last-child { border-bottom: none; }
+
+.step-n {
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 500;
+  padding-top: 1px;
+}
+
+.step-title {
+  font-family: var(--sans);
+  color: var(--text-bright);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.step-desc {
+  font-family: var(--sans);
+  color: var(--text-dim);
   font-weight: 300;
+  font-size: 12px;
+  margin-left: 8px;
 }
 
-/* --- Install section --- */
+/* --- Comparison --- */
+.compare {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
+.compare-table {
+  width: 100%;
+}
+
+.compare-header {
+  display: grid;
+  grid-template-columns: 100px 1fr 1fr 1fr 1fr;
+  border-bottom: 1px solid var(--border);
+}
+
+.compare-header div {
+  padding: 8px 12px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-xdim);
+}
+
+.compare-header .col-havn { color: var(--teal); }
+
+.compare-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 1fr 1fr 1fr;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.compare-row:last-child { border-bottom: none; }
+
+.compare-row div { padding: 10px 12px; }
+.compare-row .label { color: var(--text-dim); font-weight: 500; }
+.compare-row .havn-val { color: var(--teal); font-weight: 500; }
+.compare-row .other-val { color: var(--text-xdim); }
+
+/* --- Install --- */
 .install-section {
-  padding: 5rem 0;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 0 2rem;
 }
 
 .install-cards {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1.5rem;
-  margin-top: 2.5rem;
+  gap: 1rem;
 }
 
 .install-card {
-  border: 1px solid var(--border);
-  border-radius: 14px;
   background: var(--surface);
-  padding: 2rem;
-  transition: border-color 0.2s;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
 }
 
-.install-card:hover { border-color: var(--border-hover); }
-
-.install-card-label {
-  font-size: 0.72rem;
+.install-card-tag {
+  font-size: 10px;
+  color: var(--text-xdim);
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--text-muted);
-  font-weight: 500;
-  margin-bottom: 0.25rem;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
 }
 
 .install-card h3 {
-  font-size: 1.05rem;
+  font-family: var(--sans);
+  font-size: 0.95rem;
   font-weight: 600;
-  color: var(--text);
-  margin-bottom: 0.3rem;
+  color: var(--text-bright);
+  margin-bottom: 2px;
 }
 
-.install-card .install-note {
-  font-size: 0.82rem;
-  color: var(--text-muted);
-  margin-bottom: 1.25rem;
+.install-card-note {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--text-dim);
   font-weight: 300;
+  margin-bottom: 1rem;
 }
 
 .install-cmd {
-  background: var(--code-bg);
-  border-radius: 8px;
-  padding: 1rem 1.15rem;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8rem;
-  color: var(--code-text);
-  line-height: 1.75;
-  overflow-x: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--text);
+  overflow: auto;
   white-space: pre;
 }
 
-.install-cmd .t { color: var(--code-teal); }
-.install-cmd .c { color: var(--code-comment); }
-.install-cmd .s { color: var(--code-string); }
+.install-cmd .t { color: var(--teal); }
+.install-cmd .s { color: #FBBF24; }
 
 /* --- CTA --- */
 .cta {
-  padding: 5rem 0 6rem;
+  padding: 4rem 0 5rem;
   text-align: center;
 }
 
+.cta-inner {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
 .cta-box {
-  background: var(--teal-bg);
-  border: 1px solid rgba(13, 147, 115, 0.12);
-  border-radius: 18px;
-  padding: 4rem 2rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3rem 2rem;
+  background: var(--surface);
 }
 
 .cta-box h2 {
-  font-size: 1.75rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  margin-bottom: 0.6rem;
+  font-family: var(--sans);
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--text-bright);
+  margin-bottom: 8px;
 }
 
 .cta-box p {
-  color: var(--text-secondary);
-  font-size: 1rem;
-  margin-bottom: 2rem;
+  font-family: var(--sans);
+  color: var(--text-dim);
+  font-size: 0.9rem;
   font-weight: 300;
+  margin-bottom: 1.75rem;
 }
+
+.cta-links {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: center;
+}
+
+.cta-links a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.cta-links .arrow { color: var(--text-xdim); }
 
 /* --- Footer --- */
 footer {
-  padding: 2rem;
+  padding: 1.5rem 2rem;
   border-top: 1px solid var(--border);
-}
-
-.footer-inner {
-  max-width: 980px;
-  margin: 0 auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+  gap: 2rem;
+  font-size: 11px;
+  color: var(--text-xdim);
 }
 
-.footer-left {
-  font-size: 0.82rem;
-  color: var(--text-muted);
-  font-weight: 300;
-}
-
-.footer-links {
-  display: flex;
-  gap: 1.5rem;
-  list-style: none;
-}
-
-.footer-links a {
-  color: var(--text-muted);
+footer a {
+  color: var(--text-dim);
   text-decoration: none;
-  font-size: 0.82rem;
-  transition: color 0.15s;
 }
 
-.footer-links a:hover { color: var(--text); }
-
-/* --- Divider --- */
-.divider {
-  border: none;
-  border-top: 1px solid var(--border);
-  margin: 0 auto;
-  max-width: 980px;
-}
+footer a:hover { color: var(--text); }
 
 /* --- Responsive --- */
 @media (max-width: 768px) {
-  nav { padding: 0 1.25rem; }
-  .container { padding: 0 1.25rem; }
-  .hero { padding: 7rem 0 3.5rem; }
+  .hero-inner { grid-template-columns: 1fr; }
+  .hero-img { display: none; }
   .pillars-grid { grid-template-columns: 1fr; }
-  .how-cols { grid-template-columns: 1fr; }
   .install-cards { grid-template-columns: 1fr; }
-  .footer-inner { flex-direction: column; gap: 1rem; }
-  .nav-right a.hide-mobile { display: none; }
-}
-
-/* --- Fade-in --- */
-.fade-up {
-  opacity: 0;
-  transform: translateY(16px);
-  transition: opacity 0.5s ease, transform 0.5s ease;
-}
-
-.fade-up.visible {
-  opacity: 1;
-  transform: translateY(0);
+  .compare-header, .compare-row { grid-template-columns: 80px 1fr 1fr 1fr 1fr; font-size: 11px; }
+  .nav-right .hide-mobile { display: none; }
 }
 </style>
 </head>
 <body>
 
+<!-- Nav -->
 <nav>
-  <div class="nav-logo">havn<span>.</span></div>
+  <div class="nav-logo">
+    <svg width="16" height="13.7" viewBox="0 0 14 12" shape-rendering="crispEdges">
+      <rect x="1" y="0" width="12" height="2" fill="#3ECFB4"/>
+      <rect x="1" y="2" width="2" height="4" fill="#3ECFB4"/><rect x="11" y="2" width="2" height="4" fill="#3ECFB4"/>
+      <rect x="3" y="3" width="2" height="2" fill="#3ECFB4"/><rect x="5" y="4" width="2" height="2" fill="#3ECFB4"/>
+      <rect x="7" y="5" width="2" height="2" fill="#3ECFB4"/><rect x="9" y="4" width="2" height="2" fill="#3ECFB4"/>
+      <rect x="11" y="3" width="2" height="2" fill="#3ECFB4"/>
+      <rect x="2" y="6" width="2" height="2" fill="#3ECFB4"/><rect x="10" y="6" width="2" height="2" fill="#3ECFB4"/>
+      <rect x="3" y="8" width="2" height="2" fill="#3ECFB4"/><rect x="9" y="8" width="2" height="2" fill="#3ECFB4"/>
+      <rect x="4" y="9" width="2" height="2" fill="#3ECFB4"/><rect x="8" y="9" width="2" height="2" fill="#3ECFB4"/>
+      <rect x="5" y="10" width="4" height="2" fill="#3ECFB4"/>
+    </svg>
+    havn
+  </div>
   <div class="nav-right">
-    <a href="#how" class="hide-mobile">How It Works</a>
-    <a href="#install">Install</a>
-    <a href="./docs/">Docs</a>
+    <a href="#how" class="hide-mobile">how</a>
+    <a href="#install">install</a>
+    <a href="./docs/">docs</a>
     <a href="https://github.com/chraltro/havn" class="gh-link" target="_blank" rel="noopener">
       <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      github
     </a>
-    <a href="#install" class="nav-cta">Get Started</a>
+    <a href="#install" class="nav-cta">get started</a>
   </div>
 </nav>
 
 <!-- Hero -->
 <section class="hero">
-  <div class="container">
-    <h1>Data in safe waters</h1>
-    <p class="hero-sub">
-      A self-hosted data platform powered by DuckDB.
-      Plain SQL transforms, Python ingest, single-file warehouse.
-      Your data never leaves your machine.
-    </p>
-    <div class="hero-actions">
-      <a href="#install" class="btn btn-primary">Get Started</a>
-      <a href="./docs/" class="btn btn-ghost">Read the Docs</a>
+  <div class="hero-inner fade-up">
+    <div>
+      <h1>Data in <span>safe waters</span></h1>
+      <p class="hero-sub">
+        Self-hosted data platform. DuckDB engine, plain SQL transforms,
+        Python ingest. Single-file warehouse. Nothing leaves your machine.
+      </p>
+      <div class="install-box">
+        <code><span class="prompt">$</span> <span class="cmd">pip install havn</span></code>
+        <button class="copy-btn" onclick="navigator.clipboard.writeText('pip install havn').then(()=>{this.textContent='ok';setTimeout(()=>this.textContent='cp',1500)})">cp</button>
+      </div>
+      <div class="hero-links">
+        <a href="./docs/getting-started/"><span class="arrow">&rarr; </span>quickstart</a>
+        <a href="./docs/"><span class="arrow">&rarr; </span>full docs</a>
+        <a href="https://github.com/chraltro/havn"><span class="arrow">&rarr; </span>source</a>
+      </div>
     </div>
-    <div class="install-snippet">
-      <code><span class="prompt">$</span> <span class="cmd">pip install havn</span></code>
-      <button onclick="navigator.clipboard.writeText('pip install havn').then(()=>{this.textContent='copied';setTimeout(()=>this.textContent='copy',1500)})">copy</button>
+    <div class="hero-img">
+      <img src="https://raw.githubusercontent.com/chraltro/havn/main/frontend/public/onboarding/welcome.png" alt="havn harbour">
     </div>
   </div>
 </section>
 
-<!-- Three pillars -->
+<div class="sep fade-up">─────────────────────────────────────────────────────────────────────────────────</div>
+
+<!-- Pillars -->
 <section class="pillars">
-  <div class="container">
-    <div class="pillars-grid fade-up">
-      <div class="pillar">
-        <div class="pillar-label">Engine</div>
+  <div class="fade-up">
+    <div class="section-comment">// what</div>
+    <div class="section-title">Three building blocks</div>
+  </div>
+  <div class="pillars-grid">
+    <div class="pillar fade-up">
+      <div class="pillar-img">
+        <img src="https://raw.githubusercontent.com/chraltro/havn/main/frontend/public/onboarding/warehouse.png" alt="Data warehouse">
+      </div>
+      <div class="pillar-body">
+        <div class="pillar-key">engine</div>
         <h3>DuckDB</h3>
-        <p>Blazing-fast OLAP analytics in a single embedded file. No servers, no clusters.</p>
+        <p>Embedded OLAP analytics in a single file. No servers, no clusters.</p>
       </div>
-      <div class="pillar">
-        <div class="pillar-label">Transforms</div>
+    </div>
+    <div class="pillar fade-up d1">
+      <div class="pillar-img">
+        <img src="https://raw.githubusercontent.com/chraltro/havn/main/frontend/public/onboarding/transforms.png" alt="SQL transforms">
+      </div>
+      <div class="pillar-body">
+        <div class="pillar-key">transforms</div>
         <h3>Plain SQL</h3>
-        <p>Write standard SQL with dependency comments. Automatic DAG ordering with change detection.</p>
+        <p>Standard SQL with dependency comments. Automatic DAG ordering, change detection.</p>
       </div>
-      <div class="pillar">
-        <div class="pillar-label">Pipeline</div>
+    </div>
+    <div class="pillar fade-up d2">
+      <div class="pillar-img">
+        <img src="https://raw.githubusercontent.com/chraltro/havn/main/frontend/public/onboarding/data-flow.png" alt="Data pipeline">
+      </div>
+      <div class="pillar-body">
+        <div class="pillar-key">pipeline</div>
         <h3>Python</h3>
-        <p>Ingest and export with plain Python scripts. Pre-built connectors for databases, APIs, and files.</p>
+        <p>Ingest and export with plain scripts. Connectors for databases, APIs, files.</p>
       </div>
     </div>
   </div>
 </section>
 
-<hr class="divider">
+<div class="sep fade-up">─────────────────────────────────────────────────────────────────────────────────</div>
+
+<!-- Stack -->
+<section class="stack">
+  <div class="fade-up">
+    <div class="section-comment">// everything</div>
+    <div class="section-title">One platform, zero glue</div>
+    <p class="stack-headline">
+      Ingestion through monitoring - every stage of the data lifecycle in a single tool.
+      No stitching together five services. Access everything from the web UI or the CLI.
+    </p>
+  </div>
+  <div class="stack-grid fade-up">
+    <div class="stack-cell">
+      <div class="stack-cell-label">Ingest</div>
+      <div class="stack-cell-desc">Python scripts + 10 built-in connectors pull data into landing</div>
+      <div class="stack-cell-tag">havn ingest &middot; havn connect</div>
+    </div>
+    <div class="stack-cell">
+      <div class="stack-cell-label">Transform</div>
+      <div class="stack-cell-desc">SQL DAG with change detection, incremental builds, schema evolution</div>
+      <div class="stack-cell-tag">havn transform</div>
+    </div>
+    <div class="stack-cell">
+      <div class="stack-cell-label">Export</div>
+      <div class="stack-cell-desc">Push results to APIs, databases, or files with plain Python</div>
+      <div class="stack-cell-tag">havn export</div>
+    </div>
+    <div class="stack-cell">
+      <div class="stack-cell-label">Lint</div>
+      <div class="stack-cell-desc">SQLFluff integration catches style and syntax issues before they ship</div>
+      <div class="stack-cell-tag">havn lint --fix</div>
+    </div>
+    <div class="stack-cell">
+      <div class="stack-cell-label">Test &amp; Quality</div>
+      <div class="stack-cell-desc">Inline assertions, YAML contracts, anomaly detection on every run</div>
+      <div class="stack-cell-tag">-- assert: &middot; contracts/</div>
+    </div>
+    <div class="stack-cell">
+      <div class="stack-cell-label">Monitor</div>
+      <div class="stack-cell-desc">Run history, freshness checks, schema sentinel, Slack alerts</div>
+      <div class="stack-cell-tag">havn history &middot; alerts</div>
+    </div>
+    <div class="stack-cell">
+      <div class="stack-cell-label">Version Control</div>
+      <div class="stack-cell-desc">Full git workflow from the web UI - commit, branch, diff, push</div>
+      <div class="stack-cell-tag">git panel &middot; havn diff</div>
+    </div>
+    <div class="stack-cell">
+      <div class="stack-cell-label">CI/CD</div>
+      <div class="stack-cell-desc">Auto-generate GitHub Actions, data diff PR comments on every push</div>
+      <div class="stack-cell-tag">havn ci generate</div>
+    </div>
+  </div>
+  <div class="stack-access fade-up">
+    <div class="stack-access-badge"><span class="icon">&gt;_</span> CLI</div>
+    <div class="stack-access-badge"><span class="icon">&#9671;</span> Web UI</div>
+    <span style="font-size: 12px; color: var(--text-dim);">Every capability available from both.</span>
+  </div>
+</section>
+
+<div class="sep fade-up">─────────────────────────────────────────────────────────────────────────────────</div>
 
 <!-- How it works -->
-<section class="how-section" id="how">
-  <div class="container">
-    <div class="how-header fade-up">
-      <h2>Up and running in four commands</h2>
-      <p>From install to a live web dashboard — under a minute.</p>
-    </div>
+<section id="how" class="how">
+  <div class="fade-up">
+    <div class="section-comment">// how</div>
+    <div class="section-title">Four commands</div>
+  </div>
 
-    <div class="how-cols fade-up">
-      <div class="code-window">
-        <div class="code-titlebar">
-          <div class="code-dot"></div>
-          <div class="code-dot"></div>
-          <div class="code-dot"></div>
-        </div>
-        <pre><code><span class="c"># Install from PyPI</span>
+  <div class="code-window fade-up">
+    <div class="code-titlebar">
+      <div class="code-dot"></div>
+      <div class="code-dot"></div>
+      <div class="code-dot"></div>
+      <span class="code-label">terminal</span>
+      <button class="code-copy" onclick="navigator.clipboard.writeText('pip install havn\nhavn init my-project && cd my-project\nhavn stream full-refresh\nhavn serve').then(()=>{this.textContent='ok';setTimeout(()=>this.textContent='cp',1500)})">cp</button>
+    </div>
+    <pre><span class="c"># install</span>
 <span class="t">pip install</span> havn
 
-<span class="c"># Create a new project</span>
-<span class="t">havn init</span> <span class="s">my-project</span>
-<span class="t">cd</span> my-project
+<span class="c"># scaffold</span>
+<span class="t">havn init</span> <span class="s">my-project</span> && <span class="t">cd</span> my-project
 
-<span class="c"># Run the full pipeline</span>
+<span class="c"># run pipeline</span>
 <span class="t">havn stream</span> full-refresh
+  <span style="color:var(--text-dim)">bronze.raw_orders</span>       <span class="g">done</span>  0.2s
+  <span style="color:var(--text-dim)">silver.fct_orders</span>       <span class="g">done</span>  0.6s
+  <span style="color:var(--text-dim)">gold.revenue_daily</span>      <span class="g">done</span>  0.4s
+  <span class="g">&#10003;</span> 3 models built in 1.2s
 
-<span class="c"># Open the web UI</span>
+<span class="c"># serve UI</span>
 <span class="t">havn serve</span>
-<span class="c"># → http://localhost:3000</span></code></pre>
-      </div>
+  <span style="color:var(--text-dim)">&bull;</span> http://localhost:3000</pre>
+  </div>
 
-      <ul class="how-steps">
-        <li>
-          <span class="how-step-marker">1</span>
-          <div class="how-step-body">
-            <h4>Install</h4>
-            <p>One pip command. No system dependencies beyond Python 3.10+.</p>
-          </div>
-        </li>
-        <li>
-          <span class="how-step-marker">2</span>
-          <div class="how-step-body">
-            <h4>Scaffold</h4>
-            <p>Creates ingest, transform, and export directories with a project.yml config.</p>
-          </div>
-        </li>
-        <li>
-          <span class="how-step-marker">3</span>
-          <div class="how-step-body">
-            <h4>Run</h4>
-            <p>Ingest scripts pull data, SQL transforms build the warehouse — landing through gold.</p>
-          </div>
-        </li>
-        <li>
-          <span class="how-step-marker">4</span>
-          <div class="how-step-body">
-            <h4>Explore</h4>
-            <p>Browse tables, run queries, and visualize the DAG in the built-in web UI.</p>
-          </div>
-        </li>
-      </ul>
+  <div class="fade-up">
+    <ul class="steps-list">
+      <li class="step-row">
+        <div class="step-n">01</div>
+        <div><span class="step-title">Install</span><span class="step-desc">One pip command. Python 3.10+ only.</span></div>
+      </li>
+      <li class="step-row">
+        <div class="step-n">02</div>
+        <div><span class="step-title">Scaffold</span><span class="step-desc">Creates ingest/, transform/, export/ with project.yml.</span></div>
+      </li>
+      <li class="step-row">
+        <div class="step-n">03</div>
+        <div><span class="step-title">Run</span><span class="step-desc">Ingest pulls data, SQL transforms build landing through gold.</span></div>
+      </li>
+      <li class="step-row">
+        <div class="step-n">04</div>
+        <div><span class="step-title">Explore</span><span class="step-desc">Browse tables, query data, visualize DAG in the web UI.</span></div>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<div class="sep fade-up">─────────────────────────────────────────────────────────────────────────────────</div>
+
+<!-- Comparison -->
+<section class="compare">
+  <div class="fade-up">
+    <div class="section-comment">// vs</div>
+    <div class="section-title">Why havn?</div>
+  </div>
+  <div class="fade-up">
+    <div class="compare-header">
+      <div></div>
+      <div class="col-havn">havn</div>
+      <div>databricks</div>
+      <div>dbt+airflow</div>
+      <div>snowflake</div>
+    </div>
+    <div class="compare-row">
+      <div class="label">runs on</div>
+      <div class="havn-val">local</div>
+      <div class="other-val">cloud</div>
+      <div class="other-val">cloud/self</div>
+      <div class="other-val">cloud</div>
+    </div>
+    <div class="compare-row">
+      <div class="label">data stays</div>
+      <div class="havn-val">local</div>
+      <div class="other-val">vendor</div>
+      <div class="other-val">depends</div>
+      <div class="other-val">vendor</div>
+    </div>
+    <div class="compare-row">
+      <div class="label">setup</div>
+      <div class="havn-val">1 min</div>
+      <div class="other-val">hours</div>
+      <div class="other-val">hours</div>
+      <div class="other-val">hours</div>
+    </div>
+    <div class="compare-row">
+      <div class="label">cost</div>
+      <div class="havn-val">free</div>
+      <div class="other-val">$$$</div>
+      <div class="other-val">$-$$$</div>
+      <div class="other-val">$$$</div>
+    </div>
+    <div class="compare-row">
+      <div class="label">sql</div>
+      <div class="havn-val">duckdb</div>
+      <div class="other-val">spark</div>
+      <div class="other-val">varies</div>
+      <div class="other-val">snowflake</div>
     </div>
   </div>
 </section>
 
-<hr class="divider">
+<div class="sep fade-up">─────────────────────────────────────────────────────────────────────────────────</div>
 
 <!-- Install -->
-<section class="install-section" id="install">
-  <div class="container">
-    <div class="how-header fade-up">
-      <h2>Install</h2>
-      <p>PyPI for local development. Docker for isolated deployments.</p>
-    </div>
-
-    <div class="install-cards fade-up">
-      <div class="install-card">
-        <div class="install-card-label">Recommended</div>
-        <h3>PyPI</h3>
-        <p class="install-note">Python 3.10+ required</p>
-        <div class="install-cmd"><span class="t">pip install</span> havn
+<section id="install" class="install-section">
+  <div class="fade-up">
+    <div class="section-comment">// install</div>
+    <div class="section-title" style="margin-bottom:1.5rem">Get started</div>
+  </div>
+  <div class="install-cards fade-up">
+    <div class="install-card">
+      <div class="install-card-tag">recommended</div>
+      <h3>PyPI</h3>
+      <div class="install-card-note">Python 3.10+</div>
+      <pre class="install-cmd"><span class="t">pip install</span> havn
 <span class="t">havn init</span> <span class="s">my-project</span>
-<span class="t">cd</span> my-project && <span class="t">havn serve</span></div>
-      </div>
-      <div class="install-card">
-        <div class="install-card-label">Alternative</div>
-        <h3>Docker</h3>
-        <p class="install-note">No Python required</p>
-        <div class="install-cmd"><span class="t">docker run</span> \
+<span class="t">cd</span> my-project && <span class="t">havn serve</span></pre>
+    </div>
+    <div class="install-card">
+      <div class="install-card-tag">alternative</div>
+      <h3>Docker</h3>
+      <div class="install-card-note">No Python required</div>
+      <pre class="install-cmd"><span class="t">docker run</span> \
   -v $(pwd):/project \
   -p 3000:3000 \
-  ghcr.io/chraltro/havn <span class="t">serve</span></div>
-      </div>
+  ghcr.io/chraltro/havn <span class="t">serve</span></pre>
     </div>
   </div>
 </section>
 
 <!-- CTA -->
 <section class="cta">
-  <div class="container">
+  <div class="cta-inner">
     <div class="cta-box fade-up">
       <h2>Your data, your machine</h2>
-      <p>Free, open-source, and built for privacy. No cloud account needed.</p>
-      <div class="hero-actions">
-        <a href="./docs/getting-started/" class="btn btn-primary">Read the Guide</a>
-        <a href="https://github.com/chraltro/havn" class="btn btn-ghost" target="_blank" rel="noopener">View on GitHub</a>
+      <p>Free, open-source, MIT licensed. No cloud account needed.</p>
+      <div class="cta-links">
+        <a href="./docs/getting-started/"><span class="arrow">&rarr; </span>read the guide</a>
+        <a href="https://github.com/chraltro/havn"><span class="arrow">&rarr; </span>view source</a>
+        <a href="https://pypi.org/project/havn/"><span class="arrow">&rarr; </span>pypi</a>
       </div>
     </div>
   </div>
 </section>
 
+<!-- Footer -->
 <footer>
-  <div class="footer-inner">
-    <span class="footer-left">havn — Data in safe waters</span>
-    <ul class="footer-links">
-      <li><a href="./docs/">Docs</a></li>
-      <li><a href="https://github.com/chraltro/havn" target="_blank" rel="noopener">GitHub</a></li>
-      <li><a href="https://pypi.org/project/havn/" target="_blank" rel="noopener">PyPI</a></li>
-    </ul>
-  </div>
+  <span>havn v0.1.2</span>
+  <a href="./docs/">docs</a>
+  <a href="https://github.com/chraltro/havn" target="_blank" rel="noopener">github</a>
+  <a href="https://pypi.org/project/havn/" target="_blank" rel="noopener">pypi</a>
+  <span>MIT license</span>
 </footer>
 
 <script>
