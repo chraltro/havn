@@ -28,7 +28,7 @@ function saveHistory(h) {
  * Schema sidebar — lists schemas/tables. Click table name to insert
  * `schema.table` at cursor. Expand to see columns.
  */
-function SchemaSidebar({ tables, onInsert, maskingPolicies }) {
+function SchemaSidebar({ tables, onInsert, maskingPolicies, onOpenModel }) {
   const [expanded, setExpanded] = useState({});
   const [search, setSearch] = useState("");
 
@@ -115,7 +115,7 @@ function SchemaSidebar({ tables, onInsert, maskingPolicies }) {
                     <button onClick={() => toggleExpand(key)} style={sbSt.expandBtn}>
                       {cols ? "\u25BE" : "\u25B8"}
                     </button>
-                    <button onClick={() => onInsert(key)} style={sbSt.tableName} title={`Insert ${key}`}>
+                    <button onClick={(e) => { if ((e.ctrlKey || e.metaKey) && onOpenModel) { e.preventDefault(); onOpenModel(key); } else { onInsert(key); } }} style={sbSt.tableName} title={`Insert ${key} (Ctrl+click to open model)`}>
                       {t.name}
                     </button>
                   </div>
@@ -164,7 +164,7 @@ const sbSt = {
   maskIcon: { fontSize: "9px", opacity: 0.7, flexShrink: 0, marginRight: "2px" },
 };
 
-export default function QueryPanel({ addOutput }) {
+export default function QueryPanel({ addOutput, onOpenModel }) {
   // Use ref-based value to preserve browser undo stack (controlled textarea breaks Ctrl+Z)
   const sqlRef = useRef("");
   const [sql, _setSql] = useState("");
@@ -542,7 +542,7 @@ export default function QueryPanel({ addOutput }) {
       <div style={st.main}>
         {/* Schema sidebar */}
         <div data-havn-hint="query-sidebar" style={{ display: "flex", flexDirection: "column", width: sidebarWidth, flexShrink: 0 }}>
-          <SchemaSidebar tables={tables} onInsert={insertAtCursor} maskingPolicies={maskingPolicies} />
+          <SchemaSidebar tables={tables} onInsert={insertAtCursor} maskingPolicies={maskingPolicies} onOpenModel={onOpenModel} />
         </div>
         <ResizeHandle direction="horizontal" onResize={onSidebarResize} onResizeStart={onSidebarResizeStart} />
 
@@ -723,7 +723,7 @@ export default function QueryPanel({ addOutput }) {
                 <span>{results.rows.length} row{results.rows.length !== 1 ? "s" : ""}, {results.columns.length} column{results.columns.length !== 1 ? "s" : ""}</span>
               </div>
               <div style={st.resultsBody}>
-                <SortableTable columns={results.columns} rows={results.rows} />
+                <SortableTable columns={results.columns} rows={results.rows} maskedColumns={maskingPolicies ? Object.entries(maskingPolicies).reduce((acc, [key, method]) => { const col = key.split(".").pop(); if (!acc[col]) acc[col] = method; return acc; }, {}) : undefined} />
               </div>
             </div>
           )}

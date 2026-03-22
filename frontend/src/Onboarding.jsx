@@ -77,7 +77,7 @@ const ONBOARDING_STEPS = [
     id: "connectors",
     title: "Connect Your Sources",
     description: "When you're ready for your own data, pick a {connector|Pre-built integrations for databases, APIs, files, and SaaS tools like Stripe and HubSpot.}: Postgres, MySQL, REST APIs, CSV, S3, and more. havn generates the ingest script for you. Just add credentials to your {.env file|A local file for secrets like passwords and API keys. Never committed to git.}.",
-    illustration: "connectors",
+    illustration: "data-flow",
     navigate: "Data Sources",
     highlight: ['[data-havn-guide="main-panel"]', '[data-havn-guide="sub-tab-bar"]'],
     position: "bottom-center",
@@ -137,7 +137,7 @@ const ONBOARDING_STEPS = [
     id: "ready",
     title: "You're Ready",
     description: "Edit a SQL file. Run the pipeline. Query the results. That's the core loop.\nPress {Ctrl+K|Opens the command palette: search for files, tables, and commands from anywhere.} to find anything fast. Replay this tour anytime from Settings.\nData in safe waters.",
-    illustration: "control",
+    illustration: "welcome",
     navigate: "Editor",
     highlight: null,
     position: "center",
@@ -648,7 +648,7 @@ export default function Onboarding({ onComplete, isOpen, onNavigate, tables, onS
         const actEl = document.querySelector('[data-havn-guide="actions"]');
         if (actEl) {
           const r = actEl.getBoundingClientRect();
-          return { position: "fixed", top: `${r.bottom + 12}px`, right: "24px", zIndex: 9999 };
+          return { position: "fixed", top: `${r.bottom + 12}px`, right: "280px", zIndex: 9999 };
         }
         return { position: "fixed", top: "60px", right: "24px", zIndex: 9999 };
       }
@@ -778,7 +778,7 @@ const styles = {
   illustrationArea: {
     flexShrink: 0,
     display: "flex",
-    alignItems: "flex-end",
+    alignItems: "center",
     justifyContent: "flex-end",
   },
   title: {

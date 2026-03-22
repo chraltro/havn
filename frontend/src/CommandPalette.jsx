@@ -182,9 +182,10 @@ export default function CommandPalette({ isOpen, onClose, files, tables, streams
     if (el) el.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
 
-  // Clamp selectedIndex when results change
+  // Reset selection and scroll to top when query changes
   useEffect(() => {
     setSelectedIndex(0);
+    if (listRef.current) listRef.current.scrollTop = 0;
   }, [query]);
 
   function handleKeyDown(e) {
