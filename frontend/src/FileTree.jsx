@@ -7,7 +7,7 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
   const containsActive = _af && node.type === "dir" && node.children?.some(function check(n) {
     return n.path?.replace(/\\/g, "/") === _af || (n.children && n.children.some(check));
   });
-  const [expanded, setExpanded] = useState(depth < 2 || !!containsActive);
+  const [expanded, setExpanded] = useState(!!containsActive);
 
   // Expand when active file changes to be inside this dir
   useEffect(() => {
@@ -91,7 +91,11 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
           </div>
         )}
         {expanded &&
-          (node.path === "transform" ? [...(node.children || [])].sort((a, b) => a.type === "dir" && b.type === "dir" ? schemaCompare(a.name, b.name) : 0) : node.children)?.map((child) => (
+          [...(node.children || [])].sort((a, b) => {
+            if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+            if (a.type === "dir" && node.path === "transform") return schemaCompare(a.name, b.name);
+            return 0;
+          }).map((child) => (
             <FileNode
               key={child.path}
               node={child}
@@ -192,9 +196,11 @@ function FilteredFileNode({ node, depth, onSelect, activeFile, onNewFile, onDele
   }
   // Directory: only show if it's an ancestor of a matching file
   if (!visibleDirs.has(normalizedPath)) return null;
-  const children = (node.path === "transform"
-    ? [...(node.children || [])].sort((a, b) => a.type === "dir" && b.type === "dir" ? schemaCompare(a.name, b.name) : 0)
-    : node.children || []);
+  const children = [...(node.children || [])].sort((a, b) => {
+    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+    if (a.type === "dir" && node.path === "transform") return schemaCompare(a.name, b.name);
+    return 0;
+  });
   return (
     <div>
       <div data-havn-file="" style={{ ...styles.item, paddingLeft: 8 + depth * 16 }}>
