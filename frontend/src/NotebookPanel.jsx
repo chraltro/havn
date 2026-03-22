@@ -645,7 +645,7 @@ export default function NotebookPanel({ openPath }) {
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="notebook name..."
+              placeholder="Notebook name..."
               style={s.input}
               onKeyDown={(e) => e.key === "Enter" && createNotebook()}
             />

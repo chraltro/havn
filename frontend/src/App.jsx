@@ -827,7 +827,7 @@ function AppContent() {
 
   function queryTable(schema, table) {
     navigateToTab("Query");
-    window.__dp_prefill_query = { sql: `SELECT * FROM ${schema}.${table} LIMIT 1000`, run: true };
+    window.__dp_prefill_query = { sql: `SELECT * FROM ${schema}.${table}`, run: true };
   }
 
   async function handleRunLintWithReload(fix = false) {
@@ -1082,7 +1082,7 @@ function AppContent() {
                 </div>
               </ErrorBoundary>
             )}
-            {activeTab === "Query" && <ErrorBoundary name="Query"><QueryPanel addOutput={addOutput} /></ErrorBoundary>}
+            {activeTab === "Query" && <ErrorBoundary name="Query"><QueryPanel addOutput={addOutput} onOpenModel={(key) => { const [s, t] = key.split("."); openFile(`transform/${s}/${t}.sql`); }} /></ErrorBoundary>}
             {activeTab === "Tables" && <ErrorBoundary name="Tables"><TablesPanel selectedTable={selectedTable} onQueryTable={queryTable} /></ErrorBoundary>}
             {activeTab === "Data Sources" && <ErrorBoundary name="Data Sources"><DataSourcesPanel addOutput={addOutput} showConfirm={showConfirm} onDataChanged={refreshAll} /></ErrorBoundary>}
             {activeTab === "Notebooks" && <ErrorBoundary name="Notebooks"><NotebookPanel openPath={notebookPath} /></ErrorBoundary>}

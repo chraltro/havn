@@ -602,7 +602,6 @@ const st = {
     gap: "10px",
     padding: "8px 16px",
     fontSize: "13px",
-    borderBottom: "1px solid var(--havn-border)",
   },
   schemaName: {
     fontWeight: 600,
