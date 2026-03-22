@@ -53,7 +53,7 @@ const ONBOARDING_STEPS = [
     id: "project",
     title: "Your Project",
     description: "{Ingest scripts|Python files in ingest/ that pull raw data from external sources into landing/} bring data in, {SQL transforms|.sql files in transform/ that define how data moves between schema layers} shape it layer by layer, and {export scripts|Python files in export/ that send finished data to external systems} send it out. The file tree on the left is your pipeline.",
-    illustration: "project",
+    illustration: "data-flow",
     navigate: "Overview",
     highlight: '[data-havn-guide="files-pane"]',
     position: "beside-sidebar",
