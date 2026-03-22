@@ -4,7 +4,7 @@ import { useHintTriggerFn } from "./HintSystem";
 
 const SCHEMA_COLORS = {
   landing: "#8b949e",
-  bronze: "#d2a04a",
+  bronze: "#cd6445",
   silver: "#8b949e",
   gold: "#e3b341",
   source: "#484f58",
