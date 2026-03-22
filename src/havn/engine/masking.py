@@ -421,7 +421,7 @@ def create_policy(
         raise ValueError(f"Unknown masking method: {method!r}. Must be one of {list(_MASKING_FNS)}")
 
     ensure_masking_table(conn)
-    exempted = exempted_roles or ["admin"]
+    exempted = exempted_roles if exempted_roles is not None else ["admin"]
     config_json = json.dumps(method_config) if method_config else None
     exempted_json = json.dumps(exempted)
 

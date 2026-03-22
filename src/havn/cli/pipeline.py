@@ -192,6 +192,14 @@ def transform(
     db_path = project_dir / config.database.path
     conn = connect(db_path, memory_limit=config.database.memory_limit, threads=config.database.threads)
 
+    # Register Python SQL macros (macros/ directory) so they're available in transforms
+    macros_dir = project_dir / "macros"
+    if macros_dir.is_dir():
+        from havn.engine.macros import register_macros
+        n_macros = register_macros(conn, project_dir)
+        if n_macros:
+            console.print(f"  [dim]{n_macros} macro(s) registered[/dim]")
+
     # Schema Sentinel: check for upstream schema changes before executing
     if config.sentinel.enabled:
         try:
@@ -365,6 +373,15 @@ def stream(
     conn = connect(db_path)
     has_error = False
     start = _time.perf_counter()
+
+    # Register Python SQL macros (macros/ directory)
+    macros_dir = project_dir / "macros"
+    if macros_dir.is_dir():
+        from havn.engine.macros import register_macros
+        n_macros = register_macros(conn, project_dir)
+        if n_macros:
+            console.print(f"  [dim]{n_macros} macro(s) registered[/dim]")
+            console.print()
 
     # Start rewind run tracking for streams
     run_id = None

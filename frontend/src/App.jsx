@@ -394,11 +394,13 @@ function AppContent() {
 
   // Onboarding state — per-project, keyed by project name
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [isSampleProject, setIsSampleProject] = useState(false);
   const onboardingProjectRef = useRef(null);
   useEffect(() => {
     api.getOverview().then((overview) => {
       const name = overview.project_name || "__default__";
       onboardingProjectRef.current = name;
+      setIsSampleProject(!!overview.is_sample);
       if (!localStorage.getItem(`dp_onboarding_completed:${name}`)) {
         setOnboardingOpen(true);
       }
@@ -466,6 +468,15 @@ function AppContent() {
     setOnboardingOpen(false);
     const name = onboardingProjectRef.current || "__default__";
     localStorage.setItem(`dp_onboarding_completed:${name}`, "true");
+  }
+
+  async function handleClearSample() {
+    try {
+      await api.clearSampleProject();
+      window.location.reload();
+    } catch (e) {
+      addOutput("error", `Failed to clear sample project: ${e.message || e}`);
+    }
   }
 
   function showGuide() {
@@ -1026,6 +1037,8 @@ function AppContent() {
                     }
                   }}
                   streams={streams}
+                  showConfirm={showConfirm}
+                  onClearSample={handleClearSample}
                 />
               </ErrorBoundary>
             )}
@@ -1071,7 +1084,7 @@ function AppContent() {
             )}
             {activeTab === "Query" && <ErrorBoundary name="Query"><QueryPanel addOutput={addOutput} /></ErrorBoundary>}
             {activeTab === "Tables" && <ErrorBoundary name="Tables"><TablesPanel selectedTable={selectedTable} onQueryTable={queryTable} /></ErrorBoundary>}
-            {activeTab === "Data Sources" && <ErrorBoundary name="Data Sources"><DataSourcesPanel addOutput={addOutput} showConfirm={showConfirm} /></ErrorBoundary>}
+            {activeTab === "Data Sources" && <ErrorBoundary name="Data Sources"><DataSourcesPanel addOutput={addOutput} showConfirm={showConfirm} onDataChanged={refreshAll} /></ErrorBoundary>}
             {activeTab === "Notebooks" && <ErrorBoundary name="Notebooks"><NotebookPanel openPath={notebookPath} /></ErrorBoundary>}
             {activeTab === "DAG" && <ErrorBoundary name="DAG"><DAGPanel onOpenFile={openFile} showConfirm={showConfirm} /></ErrorBoundary>}
             {activeTab === "Git" && <ErrorBoundary name="Git"><GitPanel /></ErrorBoundary>}
@@ -1134,7 +1147,7 @@ function AppContent() {
       </div>
 
       {!onboardingOpen && <Hint onNavigate={navigateToTab} />}
-      <Onboarding onComplete={handleOnboardingComplete} isOpen={onboardingOpen} onNavigate={navigateToTab} tables={tables} onSelectTable={handleSelectTable} files={files} onOpenFile={openFile} />
+      <Onboarding onComplete={handleOnboardingComplete} isOpen={onboardingOpen} onNavigate={navigateToTab} tables={tables} onSelectTable={handleSelectTable} files={files} onOpenFile={openFile} isSample={isSampleProject} onClearSample={handleClearSample} />
 
       {/* Dialog priority system: only one dialog visible at a time */}
       {/* Priority: delete > agent > confirm (highest to lowest) */}

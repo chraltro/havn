@@ -14,12 +14,14 @@ from havn.cli import _load_config, _resolve_project, app, console
 def init(
     name: Annotated[str, typer.Argument(help="Project name")] = "my-project",
     directory: Annotated[Optional[Path], typer.Option("--dir", "-d", help="Target directory")] = None,
+    empty: Annotated[bool, typer.Option("--empty", help="Create empty project without sample data")] = False,
 ) -> None:
     """Scaffold a new data platform project."""
     from havn.templates import (
         CLAUDE_MD_TEMPLATE,
         COPILOT_INSTRUCTIONS_TEMPLATE,
         CURSORRULES_TEMPLATE,
+        PROJECT_YML_EMPTY_TEMPLATE,
         PROJECT_YML_TEMPLATE,
         SAMPLE_BRONZE_SQL,
         SAMPLE_CONTRACTS_YML,
@@ -29,6 +31,7 @@ def init(
         SAMPLE_GOLD_SUMMARY_SQL,
         SAMPLE_GOLD_TOP_SQL,
         SAMPLE_INGEST_NOTEBOOK,
+        SAMPLE_MACRO_GEO,
         SAMPLE_SEED_CSV,
         SAMPLE_SILVER_DAILY_SQL,
         SAMPLE_SILVER_EVENTS_SQL,
@@ -40,35 +43,35 @@ def init(
 
     dirs = [
         "ingest", "transform/bronze", "transform/silver", "transform/gold",
-        "export", "seeds", "contracts", "notebooks",
+        "export", "seeds", "contracts", "notebooks", "macros",
     ]
     for d in dirs:
         (target / d).mkdir(parents=True, exist_ok=True)
 
-    # project.yml
-    (target / "project.yml").write_text(PROJECT_YML_TEMPLATE.format(name=name))
-    # Sample pipeline: earthquake data from USGS API (with offline fallback)
-    (target / "ingest" / "earthquakes.dpnb").write_text(SAMPLE_INGEST_NOTEBOOK)
-    (target / "transform" / "bronze" / "earthquakes.sql").write_text(SAMPLE_BRONZE_SQL)
-    (target / "transform" / "silver" / "earthquake_events.sql").write_text(SAMPLE_SILVER_EVENTS_SQL)
-    (target / "transform" / "silver" / "earthquake_daily.sql").write_text(SAMPLE_SILVER_DAILY_SQL)
-    (target / "transform" / "gold" / "earthquake_summary.sql").write_text(SAMPLE_GOLD_SUMMARY_SQL)
-    (target / "transform" / "gold" / "top_earthquakes.sql").write_text(SAMPLE_GOLD_TOP_SQL)
-    (target / "transform" / "gold" / "region_risk.sql").write_text(SAMPLE_GOLD_REGIONS_SQL)
-    (target / "export" / "earthquake_report.py").write_text(SAMPLE_EXPORT_SCRIPT)
-    # Seed data: magnitude scale reference table
-    (target / "seeds" / "magnitude_scale.csv").write_text(SAMPLE_SEED_CSV)
-    # Data quality contracts
-    (target / "contracts" / "quality.yml").write_text(SAMPLE_CONTRACTS_YML)
-    # Interactive exploration notebook
-    (target / "notebooks" / "explore.dpnb").write_text(SAMPLE_EXPLORE_NOTEBOOK)
-    # .env secrets file
+    if empty:
+        # Empty project: config files only, no sample data
+        (target / "project.yml").write_text(PROJECT_YML_EMPTY_TEMPLATE.format(name=name))
+    else:
+        # Sample project: full earthquake analytics pipeline
+        (target / "project.yml").write_text(PROJECT_YML_TEMPLATE.format(name=name))
+        (target / "ingest" / "earthquakes.dpnb").write_text(SAMPLE_INGEST_NOTEBOOK)
+        (target / "transform" / "bronze" / "earthquakes.sql").write_text(SAMPLE_BRONZE_SQL)
+        (target / "transform" / "silver" / "earthquake_events.sql").write_text(SAMPLE_SILVER_EVENTS_SQL)
+        (target / "transform" / "silver" / "earthquake_daily.sql").write_text(SAMPLE_SILVER_DAILY_SQL)
+        (target / "transform" / "gold" / "earthquake_summary.sql").write_text(SAMPLE_GOLD_SUMMARY_SQL)
+        (target / "transform" / "gold" / "top_earthquakes.sql").write_text(SAMPLE_GOLD_TOP_SQL)
+        (target / "transform" / "gold" / "region_risk.sql").write_text(SAMPLE_GOLD_REGIONS_SQL)
+        (target / "export" / "earthquake_report.py").write_text(SAMPLE_EXPORT_SCRIPT)
+        (target / "macros" / "geo.py").write_text(SAMPLE_MACRO_GEO, encoding="utf-8")
+        (target / "seeds" / "magnitude_scale.csv").write_text(SAMPLE_SEED_CSV)
+        (target / "contracts" / "quality.yml").write_text(SAMPLE_CONTRACTS_YML)
+        (target / "notebooks" / "explore.dpnb").write_text(SAMPLE_EXPLORE_NOTEBOOK)
+
+    # Config files (both empty and sample projects)
     (target / ".env").write_text(ENV_TEMPLATE)
-    # .gitignore
     (target / ".gitignore").write_text(
         "warehouse.duckdb\nwarehouse.duckdb.wal\n__pycache__/\n*.pyc\n.venv/\n.env\noutput/\n_snapshots/\n"
     )
-    # Agent instructions for LLM tools (Claude Code, Cursor, GitHub Copilot)
     (target / "CLAUDE.md").write_text(CLAUDE_MD_TEMPLATE.format(name=name))
     (target / ".cursorrules").write_text(CURSORRULES_TEMPLATE)
     (target / ".github").mkdir(parents=True, exist_ok=True)
@@ -80,15 +83,26 @@ def init(
     for d in dirs:
         console.print(f"  {d}/")
     console.print()
-    console.print("Quick start:")
-    console.print(f"  cd {name}")
-    console.print("  havn stream full-refresh    # run the full earthquake pipeline")
-    console.print("  havn tables                 # see what was built")
-    console.print("  havn serve                  # open web UI")
-    console.print("  havn contracts              # check data quality")
-    console.print()
-    console.print("[dim]Works offline — the ingest notebook falls back to sample data if the USGS API is unavailable.[/dim]")
-    console.print("[dim]AI assistant ready — CLAUDE.md included for Claude Code, Cursor, and others.[/dim]")
+    if empty:
+        console.print("Quick start:")
+        console.print(f"  cd {name}")
+        console.print("  havn connect              # connect a data source")
+        console.print("  havn serve                # open web UI")
+        console.print()
+        console.print("[dim]AI assistant ready — CLAUDE.md included for Claude Code, Cursor, and others.[/dim]")
+    else:
+        console.print("Quick start:")
+        console.print(f"  cd {name}")
+        console.print("  havn stream full-refresh    # run the full earthquake pipeline")
+        console.print("  havn stream incremental     # quick re-run (only changed models)")
+        console.print("  havn tables                 # see what was built")
+        console.print("  havn macros                 # see Python functions usable in SQL")
+        console.print("  havn serve                  # open web UI")
+        console.print("  havn contracts              # check data quality")
+        console.print()
+        console.print("[dim]Works offline — the ingest notebook falls back to sample data if the USGS API is unavailable.[/dim]")
+        console.print("[dim]Includes Python SQL macros, incremental models, data quality contracts, and more.[/dim]")
+        console.print("[dim]AI assistant ready — CLAUDE.md included for Claude Code, Cursor, and others.[/dim]")
 
 
 @app.command()
@@ -568,3 +582,69 @@ def restore(
 
     size_mb = db_path.stat().st_size / (1024 * 1024)
     console.print(f"[green]Database restored from {backup_path} ({size_mb:.1f} MB)[/green]")
+
+
+@app.command()
+def clear(
+    project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
+) -> None:
+    """Clear sample project files and start fresh with an empty project."""
+    import shutil
+
+    from havn.config import load_project
+
+    project_dir = _resolve_project(project_dir)
+    config = load_project(project_dir)
+
+    if not config.sample:
+        console.print("[red]This is not a sample project (no sample: true in project.yml).[/red]")
+        raise typer.Exit(1)
+
+    confirm = typer.confirm("This will delete all sample files and the warehouse database. Continue?")
+    if not confirm:
+        raise typer.Abort()
+
+    # Delete warehouse database
+    db_path = project_dir / config.database.path
+    if db_path.exists():
+        db_path.unlink()
+        console.print(f"  Deleted {config.database.path}")
+    wal_path = Path(str(db_path) + ".wal")
+    if wal_path.exists():
+        wal_path.unlink()
+
+    # Delete snapshot/rewind data
+    for meta_dir in [".dp", "_snapshots", "output"]:
+        meta_path = project_dir / meta_dir
+        if meta_path.exists():
+            shutil.rmtree(meta_path)
+
+    # Clear content directories (keep the dirs, delete contents)
+    for subdir in ["ingest", "transform", "export", "macros", "seeds", "contracts", "notebooks"]:
+        dir_path = project_dir / subdir
+        if dir_path.exists():
+            shutil.rmtree(dir_path)
+            dir_path.mkdir(parents=True, exist_ok=True)
+            console.print(f"  Cleared {subdir}/")
+
+    # Recreate transform subdirectories
+    for layer in ["bronze", "silver", "gold"]:
+        (project_dir / "transform" / layer).mkdir(parents=True, exist_ok=True)
+
+    # Rewrite project.yml: remove sample flag and sample-specific config
+    _rewrite_project_yml_clean(project_dir, config.name)
+
+    console.print()
+    console.print("[green]Sample project cleared. You're starting fresh.[/green]")
+    console.print()
+    console.print("Next steps:")
+    console.print("  havn connect              # connect a data source")
+    console.print("  havn serve                # open web UI")
+
+
+def _rewrite_project_yml_clean(project_dir: Path, name: str) -> None:
+    """Rewrite project.yml without sample flag and sample-specific content."""
+    from havn.templates import PROJECT_YML_EMPTY_TEMPLATE
+
+    (project_dir / "project.yml").write_text(PROJECT_YML_EMPTY_TEMPLATE.format(name=name))
+    console.print("  Updated project.yml")

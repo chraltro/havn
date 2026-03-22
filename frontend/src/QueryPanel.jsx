@@ -28,7 +28,7 @@ function saveHistory(h) {
  * Schema sidebar — lists schemas/tables. Click table name to insert
  * `schema.table` at cursor. Expand to see columns.
  */
-function SchemaSidebar({ tables, onInsert }) {
+function SchemaSidebar({ tables, onInsert, maskingPolicies }) {
   const [expanded, setExpanded] = useState({});
   const [search, setSearch] = useState("");
 
@@ -121,12 +121,16 @@ function SchemaSidebar({ tables, onInsert }) {
                   </div>
                   {cols && cols.length > 0 && (
                     <div style={sbSt.colList}>
-                      {cols.map((c) => (
-                        <div key={c.name} style={sbSt.colItem} onClick={() => onInsert(c.name)} title={`Insert ${c.name}`}>
-                          <span style={sbSt.colName}>{c.name}</span>
-                          <span style={sbSt.colType}>{c.type}</span>
-                        </div>
-                      ))}
+                      {cols.map((c) => {
+                        const maskMethod = maskingPolicies && maskingPolicies[`${key}.${c.name}`];
+                        return (
+                          <div key={c.name} style={sbSt.colItem} onClick={() => onInsert(c.name)} title={maskMethod ? `Insert ${c.name} (masked: ${maskMethod})` : `Insert ${c.name}`}>
+                            {maskMethod && <span style={sbSt.maskIcon} title={`Masked: ${maskMethod}`}>&#x1F6E1;</span>}
+                            <span style={sbSt.colName}>{c.name}</span>
+                            <span style={sbSt.colType}>{c.type}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -157,6 +161,7 @@ const sbSt = {
   colItem: { display: "flex", justifyContent: "space-between", gap: "6px", padding: "1px 8px", cursor: "pointer", borderRadius: "var(--havn-radius)" },
   colName: { fontFamily: "var(--havn-font-mono)", color: "var(--havn-text-secondary)", fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   colType: { color: "var(--havn-text-dim)", fontSize: "10px", flexShrink: 0 },
+  maskIcon: { fontSize: "9px", opacity: 0.7, flexShrink: 0, marginRight: "2px" },
 };
 
 export default function QueryPanel({ addOutput }) {
@@ -184,6 +189,7 @@ export default function QueryPanel({ addOutput }) {
   const [explainResult, setExplainResult] = useState(null);
   const textareaRef = useRef(null);
   const historyRef = useRef(null);
+  const [maskingPolicies, setMaskingPolicies] = useState({});
   const setHintTrigger = useHintTriggerFn();
   const [sidebarWidth, onSidebarResize, onSidebarResizeStart] = useResizable("dp_query_sidebar_width", 200, 120, 400);
   const [editorHeight, onEditorResize, onEditorResizeStart] = useResizable("dp_query_editor_height", 120, 60, 500);
@@ -196,40 +202,52 @@ export default function QueryPanel({ addOutput }) {
 
   useEffect(() => {
     api.listTables().then(setTables).catch((e) => console.warn("Failed to load tables:", e.message));
+    api.listMaskingPolicies().then(policies => {
+      const map = {};
+      for (const p of policies) map[`${p.schema_name}.${p.table_name}.${p.column_name}`] = p.method;
+      setMaskingPolicies(map);
+    }).catch(() => {});
     setHintTrigger("queryPanelOpened", true);
   }, []);
 
-  // Pick up prefilled query on mount (set by "Query this table" before tab switch)
-  const prefillHandled = useRef(false);
+  // Pick up prefilled query — polls briefly to catch async prefills (e.g. onboarding sets it after 200ms)
   useEffect(() => {
-    if (prefillHandled.current) return;
-    const pf = window.__dp_prefill_query;
-    if (!pf) return;
-    prefillHandled.current = true;
-    delete window.__dp_prefill_query;
-    const query = typeof pf === "string" ? pf : pf.sql;
-    const autoRun = typeof pf === "object" && pf.run;
-    setSql(fmt(query));
-    if (autoRun) {
-      // Run after state settles
-      setTimeout(async () => {
-        setQueryRunning(true);
-        setError(null);
-        try {
-          const data = await api.runQuery(query);
-          setResults(data);
-          const newHistory = [{ sql: query.trim(), ts: new Date().toISOString() }, ...getHistory().filter((h) => h.sql !== query.trim())];
-          setHistory(newHistory);
-          saveHistory(newHistory);
-          addOutput("info", `Query: ${data.rows.length} row${data.rows.length !== 1 ? "s" : ""} (${data.columns.length} cols)${data.truncated ? " — results capped for display. Use Export CSV for full results." : ""}`);
-        } catch (e) {
-          setError(e.message);
-          addOutput("error", `Query error: ${e.message}`);
-        } finally {
-          setQueryRunning(false);
-        }
-      }, 0);
+    let attempts = 0;
+    function check() {
+      const pf = window.__dp_prefill_query;
+      if (!pf) return false;
+      delete window.__dp_prefill_query;
+      const query = typeof pf === "string" ? pf : pf.sql;
+      const autoRun = typeof pf === "object" && pf.run;
+      setSql(fmt(query));
+      if (autoRun) {
+        setTimeout(async () => {
+          setQueryRunning(true);
+          setError(null);
+          try {
+            const data = await api.runQuery(query);
+            setResults(data);
+            const newHistory = [{ sql: query.trim(), ts: new Date().toISOString() }, ...getHistory().filter((h) => h.sql !== query.trim())];
+            setHistory(newHistory);
+            saveHistory(newHistory);
+            addOutput("info", `Query: ${data.rows.length} row${data.rows.length !== 1 ? "s" : ""} (${data.columns.length} cols)${data.truncated ? " — results capped for display. Use Export CSV for full results." : ""}`);
+          } catch (e) {
+            setError(e.message);
+            addOutput("error", `Query error: ${e.message}`);
+          } finally {
+            setQueryRunning(false);
+          }
+        }, 0);
+      }
+      return true;
     }
+    if (check()) return;
+    // Poll for up to 500ms in case prefill is set after mount
+    const interval = setInterval(() => {
+      attempts++;
+      if (check() || attempts >= 5) clearInterval(interval);
+    }, 100);
+    return () => clearInterval(interval);
   }, []);
 
   // Close history dropdown on outside click
@@ -524,7 +542,7 @@ export default function QueryPanel({ addOutput }) {
       <div style={st.main}>
         {/* Schema sidebar */}
         <div data-havn-hint="query-sidebar" style={{ display: "flex", flexDirection: "column", width: sidebarWidth, flexShrink: 0 }}>
-          <SchemaSidebar tables={tables} onInsert={insertAtCursor} />
+          <SchemaSidebar tables={tables} onInsert={insertAtCursor} maskingPolicies={maskingPolicies} />
         </div>
         <ResizeHandle direction="horizontal" onResize={onSidebarResize} onResizeStart={onSidebarResizeStart} />
 
