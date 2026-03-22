@@ -1,4 +1,4 @@
-"""Pipeline commands: run, seed, transform, stream, lint, watch, schedule."""
+"""Pipeline commands: run, ingest, export, seed, transform, stream, lint, watch, schedule."""
 
 from __future__ import annotations
 
@@ -52,6 +52,70 @@ def run(
     try:
         result = run_script(conn, script_path, script_type)
         if result["status"] == "error":
+            raise typer.Exit(1)
+    finally:
+        conn.close()
+
+
+@app.command()
+def ingest(
+    targets: Annotated[Optional[list[str]], typer.Argument(help="Specific scripts to run (without extension), or omit for all")] = None,
+    env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use")] = None,
+    project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
+) -> None:
+    """Run all ingest scripts (or specific ones) from ingest/ directory."""
+    from havn.engine.database import connect
+    from havn.engine.runner import run_scripts_in_dir
+
+    project_dir = _resolve_project(project_dir)
+    config = _load_config(project_dir, env)
+    ingest_dir = project_dir / "ingest"
+
+    if not ingest_dir.exists():
+        console.print("[yellow]No ingest/ directory found.[/yellow]")
+        raise typer.Exit(1)
+
+    console.print("[bold]Ingest:[/bold]")
+    db_path = project_dir / config.database.path
+    conn = connect(db_path)
+    try:
+        results = run_scripts_in_dir(conn, ingest_dir, "ingest", targets)
+        errors = sum(1 for r in results if r["status"] == "error")
+        ok = len(results) - errors
+        console.print(f"\n  {ok} succeeded, {errors} failed")
+        if errors:
+            raise typer.Exit(1)
+    finally:
+        conn.close()
+
+
+@app.command()
+def export(
+    targets: Annotated[Optional[list[str]], typer.Argument(help="Specific scripts to run (without extension), or omit for all")] = None,
+    env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use")] = None,
+    project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
+) -> None:
+    """Run all export scripts (or specific ones) from export/ directory."""
+    from havn.engine.database import connect
+    from havn.engine.runner import run_scripts_in_dir
+
+    project_dir = _resolve_project(project_dir)
+    config = _load_config(project_dir, env)
+    export_dir = project_dir / "export"
+
+    if not export_dir.exists():
+        console.print("[yellow]No export/ directory found.[/yellow]")
+        raise typer.Exit(1)
+
+    console.print("[bold]Export:[/bold]")
+    db_path = project_dir / config.database.path
+    conn = connect(db_path)
+    try:
+        results = run_scripts_in_dir(conn, export_dir, "export", targets)
+        errors = sum(1 for r in results if r["status"] == "error")
+        ok = len(results) - errors
+        console.print(f"\n  {ok} succeeded, {errors} failed")
+        if errors:
             raise typer.Exit(1)
     finally:
         conn.close()
