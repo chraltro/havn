@@ -5,14 +5,34 @@ import { createPortal } from "react-dom";
 /* Onboarding Steps                                                    */
 /* ------------------------------------------------------------------ */
 
+// position: where to place the card
+//   "bottom-center"    — bottom center (default for most steps)
+//   "below-overview"   — below the "Overview" nav item, left-aligned
+//   "below-actions"    — right below the actions area (top-right)
+//   "beside-sidebar"   — right of sidebar, vertically centered
+//   "center"           — centered on screen
+
 const ONBOARDING_STEPS = [
   {
     id: "welcome",
     title: "Welcome to havn",
     description: "Your entire data warehouse lives in one file on your machine. No cloud, no accounts, no data leaving your network.\nThis tour takes about two minutes. Let's look around.",
     illustration: "welcome",
-    navigate: null,
+    navigate: "Overview",
     highlight: null,
+    position: "bottom-center",
+    autoSelectTable: false,
+    autoOpenFile: null,
+    prefillQuery: null,
+  },
+  {
+    id: "navigation",
+    title: "Finding Your Way",
+    description: "{Overview|Dashboard with stats, pipeline health, and quick actions.} is your home base. {Develop|Write and edit SQL transforms, ingest scripts, and manage git.} is where you build. {Explore|Run queries, browse tables, and visualize your DAG.} is for discovery. {Observe|Monitor data quality, schema changes, and pipeline history.} keeps things healthy. {Configure|Set up connectors, masking policies, themes, and scheduling.} ties it all together.",
+    illustration: "welcome",
+    navigate: "Overview",
+    highlight: '[data-havn-guide="tabs"]',
+    position: "below-overview",
     autoSelectTable: false,
     autoOpenFile: null,
     prefillQuery: null,
@@ -22,9 +42,10 @@ const ONBOARDING_STEPS = [
     title: "Your Warehouse",
     description: "All your data lives in one file, organized into layers that refine it step by step: landing, bronze, silver, gold. Powered by {DuckDB|A fast, embedded analytics database. Runs in-process, no server needed.} -- everything stays on your machine.",
     illustration: "warehouse",
-    navigate: "Tables",
-    highlight: null,
-    autoSelectTable: "gold.order_summary",
+    navigate: "Overview",
+    highlight: '[data-havn-guide="tables-pane"]',
+    position: "beside-sidebar",
+    autoSelectTable: false,
     autoOpenFile: null,
     prefillQuery: null,
   },
@@ -33,10 +54,11 @@ const ONBOARDING_STEPS = [
     title: "Your Project",
     description: "{Ingest scripts|Python files in ingest/ that pull raw data from external sources into landing/} bring data in, {SQL transforms|.sql files in transform/ that define how data moves between schema layers} shape it layer by layer, and {export scripts|Python files in export/ that send finished data to external systems} send it out. The file tree on the left is your pipeline.",
     illustration: "project",
-    navigate: "Editor",
-    highlight: '[data-havn-guide="sidebar"]',
+    navigate: "Overview",
+    highlight: '[data-havn-guide="files-pane"]',
+    position: "beside-sidebar",
     autoSelectTable: false,
-    autoOpenFile: ["ingest", "transform/bronze", "transform"],
+    autoOpenFile: null,
     prefillQuery: null,
   },
   {
@@ -45,29 +67,20 @@ const ONBOARDING_STEPS = [
     description: "Every .sql file in transform/ becomes a model. Add {-- config:|Sets materialization (table or view), target schema, and incremental strategy} to set options. havn reads your SQL and automatically figures out which models depend on each other. No special syntax, no templates. Just SQL.",
     illustration: "transforms",
     navigate: "Editor",
-    highlight: null,
+    highlight: ['[data-havn-guide="main-panel"]', '[data-havn-guide="sub-tab-bar"]', '[data-havn-guide="files-pane"]'],
+    position: "bottom-center",
     autoSelectTable: false,
     autoOpenFile: ["transform/silver", "transform/bronze", "transform"],
     prefillQuery: null,
   },
   {
-    id: "pipelines",
-    title: "Running Pipelines",
-    description: "Hit Run to execute your full pipeline: {ingest|Python scripts that pull raw data from sources into landing/}, then {transforms|SQL models that process data through bronze, silver, gold}, then {exports|Python scripts that push finished data to dashboards, APIs, or files}. Output streams live so you see every step as it happens.\nGo ahead, try it now, or keep exploring.",
-    illustration: "pipelines",
-    navigate: "Overview",
-    highlight: '[data-havn-guide="actions"]',
-    autoSelectTable: false,
-    autoOpenFile: null,
-    prefillQuery: null,
-  },
-  {
-    id: "dag",
-    title: "The DAG",
-    description: "Every model and its dependencies, visualized. Nodes are colored by layer, the same layers you saw in your warehouse. When you change a SQL file, havn knows exactly which {downstream models|Models that depend on the one you changed. They need rebuilding too.} need rebuilding.",
-    illustration: "dag",
-    navigate: "DAG",
-    highlight: null,
+    id: "connectors",
+    title: "Connect Your Sources",
+    description: "When you're ready for your own data, pick a {connector|Pre-built integrations for databases, APIs, files, and SaaS tools like Stripe and HubSpot.}: Postgres, MySQL, REST APIs, CSV, S3, and more. havn generates the ingest script for you. Just add credentials to your {.env file|A local file for secrets like passwords and API keys. Never committed to git.}.",
+    illustration: "connectors",
+    navigate: "Data Sources",
+    highlight: ['[data-havn-guide="main-panel"]', '[data-havn-guide="sub-tab-bar"]'],
+    position: "bottom-center",
     autoSelectTable: false,
     autoOpenFile: null,
     prefillQuery: null,
@@ -78,10 +91,23 @@ const ONBOARDING_STEPS = [
     description: "Write SQL, get results. The query editor has {autocomplete|Suggests table names, columns, and SQL keywords as you type.} for every table, column, and function in your warehouse. Browse tables, build charts, or inspect {query plans|Shows how DuckDB will execute your SQL, useful for spotting bottlenecks.}.\nTry editing the query, or write your own.",
     illustration: "explore",
     navigate: "Query",
-    highlight: null,
+    highlight: ['[data-havn-guide="main-panel"]', '[data-havn-guide="sub-tab-bar"]', '[data-havn-guide="tables-pane"]'],
+    position: "bottom-center",
     autoSelectTable: false,
     autoOpenFile: null,
-    prefillQuery: "SELECT * FROM gold.order_summary LIMIT 20",
+    prefillQuery: "__auto__",
+  },
+  {
+    id: "dag",
+    title: "The DAG",
+    description: "Every model and its dependencies, visualized. Nodes are colored by layer, the same layers you saw in your warehouse. When you change a SQL file, havn knows exactly which {downstream models|Models that depend on the one you changed. They need rebuilding too.} need rebuilding.\nTry clicking a node to see its {column lineage|Traces each column back to its source, showing exactly where every field comes from across your pipeline.}.",
+    illustration: "dag",
+    navigate: "DAG",
+    highlight: ['[data-havn-guide="main-panel"]', '[data-havn-guide="sub-tab-bar"]'],
+    position: "bottom-center",
+    autoSelectTable: false,
+    autoOpenFile: null,
+    prefillQuery: null,
   },
   {
     id: "quality",
@@ -89,18 +115,20 @@ const ONBOARDING_STEPS = [
     description: "Add {assertions|Checks written as SQL comments, like: -- assert: row_count > 0. Validated on every pipeline run.} to your SQL files and havn validates them automatically. Set up {contracts|YAML files that define expected row counts, freshness thresholds, and column rules.} for stricter guarantees across models. When something breaks, you'll know before your stakeholders do.",
     illustration: "quality",
     navigate: "Quality",
-    highlight: null,
+    highlight: ['[data-havn-guide="main-panel"]', '[data-havn-guide="sub-tab-bar"]'],
+    position: "bottom-center",
     autoSelectTable: false,
     autoOpenFile: null,
     prefillQuery: null,
   },
   {
-    id: "connectors",
-    title: "Connect Your Sources",
-    description: "When you're ready for your own data, pick a {connector|Pre-built integrations for databases, APIs, files, and SaaS tools like Stripe and HubSpot.}: Postgres, MySQL, REST APIs, CSV, S3, and more. havn generates the ingest script for you. Just add credentials to your {.env file|A local file for secrets like passwords and API keys. Never committed to git.}.",
-    illustration: "connectors",
-    navigate: "Data Sources",
-    highlight: null,
+    id: "pipelines",
+    title: "Running Pipelines",
+    description: "Hit Run to execute your full pipeline: {ingest|Python scripts that pull raw data from sources into landing/}, then {transforms|SQL models that process data through bronze, silver, gold}, then {exports|Python scripts that push finished data to dashboards, APIs, or files}. Output streams live so you see every step as it happens.\nGo ahead, try it now, or keep exploring.",
+    illustration: "pipelines",
+    navigate: "Overview",
+    highlight: '[data-havn-guide="actions"]',
+    position: "below-actions",
     autoSelectTable: false,
     autoOpenFile: null,
     prefillQuery: null,
@@ -112,6 +140,7 @@ const ONBOARDING_STEPS = [
     illustration: "control",
     navigate: "Editor",
     highlight: null,
+    position: "center",
     autoSelectTable: false,
     autoOpenFile: ["transform/silver", "transform/bronze", "transform"],
     prefillQuery: null,
@@ -156,7 +185,7 @@ function parseDescription(text) {
 
   lines.forEach((line, lineIdx) => {
     if (lineIdx > 0) {
-      result.push(<br key={`br-${lineIdx}`} />);
+      result.push(<div key={`br-${lineIdx}`} style={{ height: "8px" }} />);
     }
     const parts = parseGlossaryLine(line, key);
     result.push(...parts.elements);
@@ -314,8 +343,13 @@ const ONBOARDING_KEYFRAMES = `
 `;
 
 function HighlightOverlay({ selector }) {
-  const [rect, setRect] = useState(null);
+  const prevElsRef = useRef([]);
   const styleRef = useRef(null);
+
+  // Normalize selector to array
+  const selectors = selector
+    ? (Array.isArray(selector) ? selector : [selector])
+    : [];
 
   // Inject keyframes once
   useEffect(() => {
@@ -333,68 +367,66 @@ function HighlightOverlay({ selector }) {
     };
   }, []);
 
+  // Lift target elements above the overlay, restore on change/unmount
   useEffect(() => {
-    if (!selector) {
-      setRect(null);
+    function restore() {
+      for (const el of prevElsRef.current) {
+        el.style.removeProperty("z-index");
+        el.style.removeProperty("position");
+      }
+      prevElsRef.current = [];
+    }
+
+    if (selectors.length === 0) {
+      restore();
       return;
     }
 
-    function measure() {
-      const el = document.querySelector(selector);
-      if (!el) {
-        setRect(null);
-        return;
+    function applyOne(sel) {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      const cs = getComputedStyle(el);
+      if (cs.position === "static") {
+        el.style.position = "relative";
       }
-      const r = el.getBoundingClientRect();
-      setRect({ top: r.top, left: r.left, width: r.width, height: r.height });
+      el.style.zIndex = "9999";
+      prevElsRef.current.push(el);
+      return true;
     }
 
-    // Delay to let navigation render
-    const timer = setTimeout(measure, 300);
-    window.addEventListener("resize", measure);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener("resize", measure);
-    };
+    function applyAll() {
+      restore();
+      let allFound = true;
+      for (const sel of selectors) {
+        if (!applyOne(sel)) allFound = false;
+      }
+      return allFound;
+    }
+
+    // Try immediately, retry briefly if elements aren't rendered yet
+    if (!applyAll()) {
+      let attempts = 0;
+      const interval = setInterval(() => {
+        attempts++;
+        if (applyAll() || attempts >= 10) clearInterval(interval);
+      }, 50);
+      return () => { clearInterval(interval); restore(); };
+    }
+
+    return () => restore();
   }, [selector]);
 
-  if (!rect) return null;
+  if (selectors.length === 0) return null;
 
-  const pad = 6;
-  const r = {
-    top: rect.top - pad,
-    left: rect.left - pad,
-    width: rect.width + pad * 2,
-    height: rect.height + pad * 2,
-  };
-  const br = 8; // border radius for the cutout
-
-  // Full-screen overlay with a rectangular hole cut out using clip-path
-  // The polygon traces the outer edge, then traces the inner cutout (with rounded corners approximated)
-  const vw = "100vw";
-  const vh = "100vh";
-
+  // Simple full-screen dim — target elements sit above it via z-index
   return createPortal(
     <div
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0, 0, 0, 0.45)",
+        background: "rgba(0, 0, 0, 0.7)",
         pointerEvents: "none",
         zIndex: 9998,
-        transition: "clip-path 0.3s ease",
-        clipPath: `polygon(
-          0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%,
-          ${r.left + br}px ${r.top}px,
-          ${r.left + r.width - br}px ${r.top}px,
-          ${r.left + r.width}px ${r.top + br}px,
-          ${r.left + r.width}px ${r.top + r.height - br}px,
-          ${r.left + r.width - br}px ${r.top + r.height}px,
-          ${r.left + br}px ${r.top + r.height}px,
-          ${r.left}px ${r.top + r.height - br}px,
-          ${r.left}px ${r.top + br}px,
-          ${r.left + br}px ${r.top}px
-        )`,
       }}
     />,
     document.body
@@ -405,7 +437,7 @@ function HighlightOverlay({ selector }) {
 /* Main Onboarding Component                                           */
 /* ------------------------------------------------------------------ */
 
-export default function Onboarding({ onComplete, isOpen, onNavigate, tables, onSelectTable, files, onOpenFile }) {
+export default function Onboarding({ onComplete, isOpen, onNavigate, tables, onSelectTable, files, onOpenFile, isSample, onClearSample }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [direction, setDirection] = useState(1); // 1 = forward, -1 = backward
   const [contentKey, setContentKey] = useState(0); // triggers content animation
@@ -496,27 +528,27 @@ export default function Onboarding({ onComplete, isOpen, onNavigate, tables, onS
     // Pre-fill query
     if (step.prefillQuery) {
       setTimeout(() => {
-        window.__dp_prefill_query = { sql: step.prefillQuery, run: true };
+        let sql = step.prefillQuery;
+        if (sql === "__auto__" && tables && tables.length > 0) {
+          // Pick first gold table, then silver, then bronze, then any non-internal table
+          const pick = tables.find(t => t.schema === "gold")
+            || tables.find(t => t.schema === "silver")
+            || tables.find(t => t.schema === "bronze")
+            || tables.find(t => t.schema && !t.schema.startsWith("_"));
+          if (pick) {
+            sql = `SELECT * FROM ${pick.schema}.${pick.name} LIMIT 20`;
+          } else {
+            sql = `SELECT * FROM ${tables[0].schema}.${tables[0].name} LIMIT 20`;
+          }
+        } else if (sql === "__auto__") {
+          sql = "SELECT 'Run a pipeline first to see data here' AS hint";
+        }
+        window.__dp_prefill_query = { sql, run: true };
       }, 200);
     }
 
-    // Delay highlight to let the page render after navigation
-    setHighlightSelector(null);
-    if (highlightTimerRef.current) {
-      clearTimeout(highlightTimerRef.current);
-    }
-    if (step.highlight) {
-      highlightTimerRef.current = setTimeout(() => {
-        setHighlightSelector(step.highlight);
-        highlightTimerRef.current = null;
-      }, 400);
-      return () => {
-        if (highlightTimerRef.current) {
-          clearTimeout(highlightTimerRef.current);
-          highlightTimerRef.current = null;
-        }
-      };
-    }
+    // Set highlight immediately — HighlightOverlay retries if element isn't rendered yet
+    setHighlightSelector(step.highlight || null);
   }, [currentStep, isOpen]);
 
   // Keyboard navigation
@@ -594,12 +626,52 @@ export default function Onboarding({ onComplete, isOpen, onNavigate, tables, onS
     }
   `;
 
+  // Compute card position based on step.position
+  function getPositionStyle() {
+    const pos = step.position || "bottom-center";
+    switch (pos) {
+      case "center":
+        return { position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", zIndex: 9999 };
+      case "bottom-center":
+        return { position: "fixed", bottom: "24px", left: "50%", transform: "translateX(-50%)", zIndex: 9999 };
+      case "below-overview": {
+        // Position under the "Overview" nav button, left-aligned
+        const navEl = document.querySelector('[data-havn-guide="tabs"]');
+        if (navEl) {
+          const firstBtn = navEl.querySelector("button");
+          const r = firstBtn ? firstBtn.getBoundingClientRect() : navEl.getBoundingClientRect();
+          return { position: "fixed", top: `${r.bottom + 12}px`, left: `${r.left}px`, zIndex: 9999 };
+        }
+        return { position: "fixed", top: "60px", left: "24px", zIndex: 9999 };
+      }
+      case "below-actions": {
+        const actEl = document.querySelector('[data-havn-guide="actions"]');
+        if (actEl) {
+          const r = actEl.getBoundingClientRect();
+          return { position: "fixed", top: `${r.bottom + 12}px`, right: "24px", zIndex: 9999 };
+        }
+        return { position: "fixed", top: "60px", right: "24px", zIndex: 9999 };
+      }
+      case "beside-sidebar": {
+        // Right of the sidebar, vertically centered
+        const sidebar = document.querySelector('[data-havn-guide="sidebar"]');
+        if (sidebar) {
+          const r = sidebar.getBoundingClientRect();
+          return { position: "fixed", top: "50%", left: `${r.right + 24}px`, transform: "translateY(-50%)", zIndex: 9999 };
+        }
+        return { position: "fixed", top: "50%", left: "280px", transform: "translateY(-50%)", zIndex: 9999 };
+      }
+      default:
+        return { position: "fixed", bottom: "24px", left: "50%", transform: "translateX(-50%)", zIndex: 9999 };
+    }
+  }
+
   return (
     <>
       <HighlightOverlay selector={highlightSelector} />
       <style>{slideKeyframes}</style>
       <div style={{
-        ...styles.overlay,
+        ...getPositionStyle(),
         animation: cardVisible ? "havn-onboarding-card-enter 300ms ease-out both" : "none",
         opacity: cardVisible ? undefined : 0,
       }}>
@@ -649,6 +721,11 @@ export default function Onboarding({ onComplete, isOpen, onNavigate, tables, onS
                 <button onClick={goNext} style={styles.btnPrimary}>
                   {isLast ? "Start Building" : "Next"}
                 </button>
+                {isLast && isSample && onClearSample && (
+                  <button onClick={() => { onComplete(); onClearSample(); }} style={styles.btnGhost}>
+                    Start Fresh
+                  </button>
+                )}
               </div>
               {!isLast && (
                 <button onClick={onComplete} style={styles.btnSkip}>
@@ -668,12 +745,7 @@ export default function Onboarding({ onComplete, isOpen, onNavigate, tables, onS
 /* ------------------------------------------------------------------ */
 
 const styles = {
-  overlay: {
-    position: "fixed",
-    bottom: "24px",
-    right: "24px",
-    zIndex: 9999,
-  },
+  // overlay position is now computed dynamically by getPositionStyle()
   card: {
     width: "520px",
     maxWidth: "calc(100vw - 48px)",
@@ -696,7 +768,7 @@ const styles = {
   body: {
     display: "flex",
     gap: "16px",
-    alignItems: "flex-end",
+    alignItems: "flex-start",
     minHeight: "160px",
   },
   textArea: {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -282,7 +283,7 @@ def switch_environment(request: Request, env_name: str) -> dict:
 
 
 @router.get("/api/overview")
-def get_overview(request: Request, conn: DbConnReadOnly) -> dict:
+def get_overview(request: Request, conn: DbConnReadOnlyOptional) -> dict:
     """Get an overview of the platform: pipeline health, warehouse stats, recent activity."""
     _require_permission(request, "read")
 
@@ -298,6 +299,7 @@ def get_overview(request: Request, conn: DbConnReadOnly) -> dict:
 
     config = _get_config()
     result["project_name"] = config.name
+    result["is_sample"] = config.sample
     result["streams"] = {
         name: {"description": s.description, "schedule": s.schedule}
         for name, s in config.streams.items()
@@ -311,93 +313,151 @@ def get_overview(request: Request, conn: DbConnReadOnly) -> dict:
     except Exception:
         pass
 
-    try:
-        rows = conn.execute(
-            """
-            SELECT r.run_id, r.run_type, r.target, r.status,
-                   r.started_at, r.duration_ms, r.rows_affected, r.error
-            FROM _dp_internal.run_log r
-            INNER JOIN (
-                SELECT target, MAX(started_at) AS max_started
-                FROM _dp_internal.run_log
-                GROUP BY target
-            ) latest ON r.target = latest.target
-                    AND r.started_at = latest.max_started
-            ORDER BY r.started_at DESC
-            """
-        ).fetchall()
-        result["recent_runs"] = [
-            {
-                "run_id": r[0],
-                "run_type": r[1],
-                "target": r[2],
-                "status": r[3],
-                "started_at": str(r[4]) if r[4] else None,
-                "duration_ms": r[5],
-                "rows_affected": r[6],
-                "error": r[7],
-            }
-            for r in rows
-        ]
-    except Exception:
-        pass
-
-    try:
-        tables = conn.execute(
-            """
-            SELECT table_schema, table_name, table_type
-            FROM information_schema.tables
-            WHERE table_schema NOT IN ('information_schema', '_dp_internal')
-            ORDER BY table_schema, table_name
-            """
-        ).fetchall()
-
-        schema_map: dict[str, dict] = {}
-        for schema, table_name, table_type in tables:
-            if schema not in schema_map:
-                schema_map[schema] = {
-                    "name": schema,
-                    "tables": 0,
-                    "views": 0,
-                    "total_rows": 0,
-                }
-            if table_type == "VIEW":
-                schema_map[schema]["views"] += 1
-            else:
-                schema_map[schema]["tables"] += 1
-
-        # Use cached row counts from model_state — never live COUNT(*)
+    if conn is not None:
         try:
-            cached_rows = conn.execute(
-                "SELECT model_path, row_count FROM _dp_internal.model_state WHERE row_count IS NOT NULL"
+            rows = conn.execute(
+                """
+                SELECT r.run_id, r.run_type, r.target, r.status,
+                       r.started_at, r.duration_ms, r.rows_affected, r.error
+                FROM _dp_internal.run_log r
+                INNER JOIN (
+                    SELECT target, MAX(started_at) AS max_started
+                    FROM _dp_internal.run_log
+                    GROUP BY target
+                ) latest ON r.target = latest.target
+                        AND r.started_at = latest.max_started
+                ORDER BY r.started_at DESC
+                """
             ).fetchall()
-            for model_path, rc in cached_rows:
-                parts = model_path.split(".", 1)
-                if len(parts) == 2 and parts[0] in schema_map:
-                    schema_map[parts[0]]["total_rows"] += rc
+            result["recent_runs"] = [
+                {
+                    "run_id": r[0],
+                    "run_type": r[1],
+                    "target": r[2],
+                    "status": r[3],
+                    "started_at": str(r[4]) if r[4] else None,
+                    "duration_ms": r[5],
+                    "rows_affected": r[6],
+                    "error": r[7],
+                }
+                for r in rows
+            ]
         except Exception:
             pass
 
-        SCHEMA_ORDER = ["landing", "bronze", "silver", "gold"]
-        sorted_schemas = sorted(
-            schema_map.values(),
-            key=lambda s: (
-                SCHEMA_ORDER.index(s["name"])
-                if s["name"] in SCHEMA_ORDER
-                else 100,
-                s["name"],
-            ),
-        )
-        result["schemas"] = sorted_schemas
-        result["total_tables"] = sum(
-            s["tables"] + s["views"] for s in sorted_schemas
-        )
-        result["total_rows"] = sum(s["total_rows"] for s in sorted_schemas)
-        result["has_data"] = result["total_tables"] > 0
-    except Exception:
-        pass
+    if conn is not None:
+        try:
+            tables = conn.execute(
+                """
+                SELECT table_schema, table_name, table_type
+                FROM information_schema.tables
+                WHERE table_schema NOT IN ('information_schema', '_dp_internal')
+                ORDER BY table_schema, table_name
+                """
+            ).fetchall()
+
+            schema_map: dict[str, dict] = {}
+            for schema, table_name, table_type in tables:
+                if schema not in schema_map:
+                    schema_map[schema] = {
+                        "name": schema,
+                        "tables": 0,
+                        "views": 0,
+                        "total_rows": 0,
+                    }
+                if table_type == "VIEW":
+                    schema_map[schema]["views"] += 1
+                else:
+                    schema_map[schema]["tables"] += 1
+
+            # Use cached row counts from model_state — never live COUNT(*)
+            try:
+                cached_rows = conn.execute(
+                    "SELECT model_path, row_count FROM _dp_internal.model_state WHERE row_count IS NOT NULL"
+                ).fetchall()
+                for model_path, rc in cached_rows:
+                    parts = model_path.split(".", 1)
+                    if len(parts) == 2 and parts[0] in schema_map:
+                        schema_map[parts[0]]["total_rows"] += rc
+            except Exception:
+                pass
+
+            SCHEMA_ORDER = ["landing", "bronze", "silver", "gold"]
+            sorted_schemas = sorted(
+                schema_map.values(),
+                key=lambda s: (
+                    SCHEMA_ORDER.index(s["name"])
+                    if s["name"] in SCHEMA_ORDER
+                    else 100,
+                    s["name"],
+                ),
+            )
+            result["schemas"] = sorted_schemas
+            result["total_tables"] = sum(
+                s["tables"] + s["views"] for s in sorted_schemas
+            )
+            result["total_rows"] = sum(s["total_rows"] for s in sorted_schemas)
+            result["has_data"] = result["total_tables"] > 0
+        except Exception:
+            pass
 
     return result
+
+
+@router.post("/api/project/clear-sample")
+def clear_sample_project(request: Request) -> dict:
+    """Clear sample project files and reset to an empty project."""
+    _require_permission(request, "write")
+
+    config = _get_config()
+    if not config.sample:
+        raise HTTPException(400, "This is not a sample project")
+
+    import shutil
+
+    from havn.server.deps import invalidate_config_cache, reset_shared_conn
+
+    project_dir = _get_project_dir()
+
+    # Close shared DB connection before deleting the file
+    reset_shared_conn()
+
+    # Delete warehouse database
+    db_path = project_dir / config.database.path
+    if db_path.exists():
+        db_path.unlink()
+    wal_path = Path(str(db_path) + ".wal")
+    if wal_path.exists():
+        wal_path.unlink()
+
+    # Delete snapshot/rewind data
+    for meta_dir in [".dp", "_snapshots", "output"]:
+        meta_path = project_dir / meta_dir
+        if meta_path.exists():
+            shutil.rmtree(meta_path)
+
+    # Clear content directories (keep the dirs, delete contents)
+    for subdir in ["ingest", "transform", "export", "macros", "seeds", "contracts", "notebooks"]:
+        dir_path = project_dir / subdir
+        if dir_path.exists():
+            shutil.rmtree(dir_path)
+            dir_path.mkdir(parents=True, exist_ok=True)
+
+    # Recreate transform subdirectories
+    for layer in ["bronze", "silver", "gold"]:
+        (project_dir / "transform" / layer).mkdir(parents=True, exist_ok=True)
+
+    # Rewrite project.yml without sample flag
+    from havn.templates import PROJECT_YML_EMPTY_TEMPLATE
+
+    (project_dir / "project.yml").write_text(
+        PROJECT_YML_EMPTY_TEMPLATE.format(name=config.name)
+    )
+
+    # Invalidate caches
+    invalidate_config_cache()
+
+    return {"status": "ok", "message": "Sample project cleared"}
 
 
 # --- Versioning / Time Travel ---

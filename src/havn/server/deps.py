@@ -192,14 +192,14 @@ _shared_conn: duckdb.DuckDBPyConnection | None = None
 _shared_conn_lock = threading.Lock()
 
 
-def _get_shared_conn() -> duckdb.DuckDBPyConnection:
+def _get_shared_conn(*, require_exists: bool = True) -> duckdb.DuckDBPyConnection:
     """Get or create the shared DuckDB connection singleton."""
     global _shared_conn
     with _shared_conn_lock:
         if _shared_conn is None:
             db_path = _get_db_path()
             project_dir = _get_project_dir()
-            if not db_path.exists():
+            if require_exists and not db_path.exists():
                 raise HTTPException(404, "Warehouse database not found. Run a pipeline first.")
             mem, threads = _get_db_resource_limits()
             _shared_conn = connect(db_path, memory_limit=mem, threads=threads)
@@ -238,6 +238,16 @@ def get_db() -> Generator[duckdb.DuckDBPyConnection, None, None]:
         cursor.close()
 
 
+def get_db_autocreate() -> Generator[duckdb.DuckDBPyConnection, None, None]:
+    """FastAPI dependency: yields a cursor, creating the database if it doesn't exist."""
+    conn = _get_shared_conn(require_exists=False)
+    cursor = conn.cursor()
+    try:
+        yield cursor
+    finally:
+        cursor.close()
+
+
 def get_db_readonly() -> Generator[duckdb.DuckDBPyConnection, None, None]:
     """FastAPI dependency: yields a cursor for read operations."""
     db_path = _get_db_path()
@@ -265,6 +275,7 @@ def get_db_readonly_optional() -> Generator[duckdb.DuckDBPyConnection | None, No
 
 
 DbConn = Annotated[duckdb.DuckDBPyConnection, Depends(get_db)]
+DbConnAutoCreate = Annotated[duckdb.DuckDBPyConnection, Depends(get_db_autocreate)]
 DbConnReadOnly = Annotated[duckdb.DuckDBPyConnection, Depends(get_db_readonly)]
 DbConnReadOnlyOptional = Annotated[
     duckdb.DuckDBPyConnection | None, Depends(get_db_readonly_optional)

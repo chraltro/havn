@@ -90,6 +90,36 @@ function PolicyModal({ mode, initial, methods, onSave, onClose, saving }) {
   const [form, setForm] = useState(initial);
   const [showCondition, setShowCondition] = useState(!!(initial.condition_column));
 
+  // Cascading dropdowns: schemas → tables → columns
+  const [schemas, setSchemas] = useState([]);
+  const [tablesForSchema, setTablesForSchema] = useState([]);
+  const [columnsForTable, setColumnsForTable] = useState([]);
+
+  // Load all schemas on mount
+  useEffect(() => {
+    api.listTables().then(tables => {
+      const unique = [...new Set(tables.map(t => t.schema))].filter(s => s !== '_dp_internal' && s !== 'information_schema').sort();
+      setSchemas(unique);
+    }).catch(() => {});
+  }, []);
+
+  // Load tables when schema changes
+  useEffect(() => {
+    if (!form.schema_name) { setTablesForSchema([]); setColumnsForTable([]); return; }
+    api.listTables(form.schema_name).then(tables => {
+      setTablesForSchema(tables.filter(t => t.schema === form.schema_name).map(t => t.name).sort());
+    }).catch(() => setTablesForSchema([]));
+    setColumnsForTable([]);
+  }, [form.schema_name]);
+
+  // Load columns when table changes
+  useEffect(() => {
+    if (!form.schema_name || !form.table_name) { setColumnsForTable([]); return; }
+    api.describeTable(form.schema_name, form.table_name).then(desc => {
+      setColumnsForTable((desc.columns || []).map(c => c.name).sort());
+    }).catch(() => setColumnsForTable([]));
+  }, [form.schema_name, form.table_name]);
+
   const updateForm = useCallback((key, value) => setForm(f => ({ ...f, [key]: value })), []);
 
   const toggleRole = useCallback((role) => {
@@ -168,15 +198,24 @@ function PolicyModal({ mode, initial, methods, onSave, onClose, saving }) {
             <div style={s.formGrid3}>
               <div>
                 <label style={s.label}>Schema</label>
-                <input style={s.input} value={form.schema_name} onChange={e => updateForm('schema_name', e.target.value)} placeholder="e.g. gold" />
+                <select style={s.select} value={form.schema_name} onChange={e => { updateForm('schema_name', e.target.value); updateForm('table_name', ''); updateForm('column_name', ''); }}>
+                  <option value="">Select schema...</option>
+                  {schemas.map(sc => <option key={sc} value={sc}>{sc}</option>)}
+                </select>
               </div>
               <div>
                 <label style={s.label}>Table</label>
-                <input style={s.input} value={form.table_name} onChange={e => updateForm('table_name', e.target.value)} placeholder="e.g. customers" />
+                <select style={s.select} value={form.table_name} onChange={e => { updateForm('table_name', e.target.value); updateForm('column_name', ''); }} disabled={!form.schema_name}>
+                  <option value="">Select table...</option>
+                  {tablesForSchema.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
               </div>
               <div>
                 <label style={s.label}>Column</label>
-                <input style={s.input} value={form.column_name} onChange={e => updateForm('column_name', e.target.value)} placeholder="e.g. email" />
+                <select style={s.select} value={form.column_name} onChange={e => updateForm('column_name', e.target.value)} disabled={!form.table_name}>
+                  <option value="">Select column...</option>
+                  {columnsForTable.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
               </div>
             </div>
           </div>
