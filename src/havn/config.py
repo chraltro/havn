@@ -364,7 +364,14 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
     # Apply environment overrides
     active_env = env
     if environments and active_env is None:
-        active_env = "dev" if "dev" in environments else None
+        # Check .havn-env file for persisted environment selection
+        havn_env_path = project_dir / ".havn-env"
+        if havn_env_path.exists():
+            file_env = havn_env_path.read_text().strip()
+            if file_env and file_env in environments:
+                active_env = file_env
+        if active_env is None:
+            active_env = "dev" if "dev" in environments else None
     if active_env and active_env in environments:
         env_cfg = environments[active_env]
         if env_cfg.database:
