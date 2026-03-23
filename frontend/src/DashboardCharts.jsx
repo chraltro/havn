@@ -608,8 +608,11 @@ export function Sparkline({ columns, rows, width, height, config }) {
 export function ProgressBar({ columns, rows, width, height, config }) {
   const numIdx = findNumericCol(columns, rows);
   const value = rows?.[0] ? parseNum(rows[0][numIdx]) : 0;
-  const max = config?.max ?? Math.max(value, 100);
-  const pct = Math.max(0, Math.min(1, value / max));
+  // Auto-scale max: use configured max, or compute from all data values (not fixed 100)
+  const allVals = (rows || []).map(r => Math.abs(parseNum(r[numIdx]))).filter(v => !isNaN(v) && v > 0);
+  const dataMax = allVals.length > 0 ? Math.max(...allVals) : Math.abs(value) || 100;
+  const max = config?.max ?? dataMax;
+  const pct = max > 0 ? Math.max(0, Math.min(1, Math.abs(value) / max)) : 0;
   const label = columns.length > 1 ? String(rows[0][1] ?? "") : "";
 
   const barH = Math.min(32, height / 2);
