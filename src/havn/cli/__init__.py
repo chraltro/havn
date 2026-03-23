@@ -12,12 +12,26 @@ from typing import Optional
 import typer
 from rich.console import Console
 
+def _version_callback(value: bool) -> None:
+    if value:
+        from havn import __version__
+        print(f"havn {__version__}")
+        raise typer.Exit()
+
+
 app = typer.Typer(
     name="havn",
     help="havn — self-hosted data platform. Data in safe waters.",
     no_args_is_help=True,
 )
 console = Console()
+
+
+@app.callback(invoke_without_command=True)
+def _main(
+    version: bool = typer.Option(False, "--version", "-V", callback=_version_callback, is_eager=True, help="Show version and exit."),
+) -> None:
+    """havn — self-hosted data platform. Data in safe waters."""
 
 # Global environment override, set by --env on commands that support it.
 _active_env: str | None = None
