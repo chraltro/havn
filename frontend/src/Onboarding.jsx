@@ -720,6 +720,7 @@ export default function Onboarding({ onComplete, isOpen, onNavigate, tables, onS
                 )}
                 <button onClick={goNext} style={styles.btnPrimary}>
                   {isLast ? "Start Building" : "Next"}
+                  <span style={styles.keyHint}>↵</span>
                 </button>
                 {isLast && isSample && onClearSample && (
                   <button onClick={() => { onComplete(); onClearSample(); }} style={styles.btnGhost}>
@@ -827,7 +828,7 @@ const styles = {
     alignItems: "center",
   },
   btnPrimary: {
-    padding: "7px 18px",
+    padding: "7px 12px 7px 18px",
     background: "var(--havn-accent)",
     border: "none",
     borderRadius: "var(--havn-radius, 4px)",
@@ -835,6 +836,9 @@ const styles = {
     cursor: "pointer",
     fontSize: "12px",
     fontWeight: 600,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "8px",
   },
   btnGhost: {
     padding: "7px 14px",
@@ -852,6 +856,20 @@ const styles = {
     color: "var(--havn-text-dim)",
     cursor: "pointer",
     fontSize: "11px",
+    opacity: 0.7,
+  },
+  keyHint: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "18px",
+    height: "18px",
+    borderRadius: "3px",
+    background: "rgba(0, 0, 0, 0.2)",
+    color: "inherit",
+    fontSize: "12px",
+    lineHeight: 1,
+    flexShrink: 0,
     opacity: 0.7,
   },
 };
