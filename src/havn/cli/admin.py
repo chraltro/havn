@@ -61,6 +61,18 @@ def serve(
     if env:
         console.print(f"[bold]Environment: {env}[/bold]")
 
+    # Find an available port if the requested one is in use
+    import socket
+
+    original_port = port
+    for attempt in range(10):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex((host, port)) != 0:
+                break
+            port += 1
+    if port != original_port:
+        console.print(f"[yellow]Port {original_port} in use, using {port}[/yellow]")
+
     console.print(f"[bold]Starting havn server at http://{host}:{port}[/bold]")
     uvicorn.run(server_app.app, host=host, port=port)
 
