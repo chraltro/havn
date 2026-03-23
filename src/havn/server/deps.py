@@ -192,15 +192,13 @@ _shared_conn: duckdb.DuckDBPyConnection | None = None
 _shared_conn_lock = threading.Lock()
 
 
-def _get_shared_conn(*, require_exists: bool = True) -> duckdb.DuckDBPyConnection:
+def _get_shared_conn(*, require_exists: bool = False) -> duckdb.DuckDBPyConnection:
     """Get or create the shared DuckDB connection singleton."""
     global _shared_conn
     with _shared_conn_lock:
         if _shared_conn is None:
             db_path = _get_db_path()
             project_dir = _get_project_dir()
-            if require_exists and not db_path.exists():
-                raise HTTPException(404, "Warehouse database not found. Run a pipeline first.")
             mem, threads = _get_db_resource_limits()
             _shared_conn = connect(db_path, memory_limit=mem, threads=threads)
             from havn.engine.database import ensure_meta_table
