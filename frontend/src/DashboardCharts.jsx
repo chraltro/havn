@@ -42,10 +42,20 @@ function Tooltip({ x, y, children, visible, svgWidth, svgHeight }) {
 // GAUGE
 // ---------------------------------------------------------------------------
 
+// Find first numeric column index
+function findNumericCol(columns, rows) {
+  for (let ci = 0; ci < (columns || []).length; ci++) {
+    const sample = (rows || []).slice(0, 10).map(r => parseNum(r[ci])).filter(v => !isNaN(v));
+    if (sample.length > 0) return ci;
+  }
+  return 0;
+}
+
 export function Gauge({ columns, rows, width, height, config }) {
-  const value = rows?.[0] ? parseNum(rows[0][0]) : 0;
+  const numIdx = findNumericCol(columns, rows);
+  const value = rows?.[0] ? parseNum(rows[0][numIdx]) : 0;
   // Auto-scale if min/max not configured
-  const allVals = rows?.map(r => parseNum(r[0])).filter(v => !isNaN(v)) || [0];
+  const allVals = rows?.map(r => parseNum(r[numIdx])).filter(v => !isNaN(v)) || [0];
   const dataMin = Math.min(...allVals, 0);
   const dataMax = Math.max(...allVals, 100);
   const min = config?.min ?? dataMin;
@@ -596,8 +606,9 @@ export function Sparkline({ columns, rows, width, height, config }) {
 // ---------------------------------------------------------------------------
 
 export function ProgressBar({ columns, rows, width, height, config }) {
-  const value = rows?.[0] ? parseNum(rows[0][0]) : 0;
-  const max = config?.max ?? 100;
+  const numIdx = findNumericCol(columns, rows);
+  const value = rows?.[0] ? parseNum(rows[0][numIdx]) : 0;
+  const max = config?.max ?? Math.max(value, 100);
   const pct = Math.max(0, Math.min(1, value / max));
   const label = columns.length > 1 ? String(rows[0][1] ?? "") : "";
 
@@ -626,9 +637,11 @@ export function ProgressBar({ columns, rows, width, height, config }) {
 // ---------------------------------------------------------------------------
 
 export function Bullet({ columns, rows, width, height, config }) {
-  const actual = rows?.[0] ? parseNum(rows[0][0]) : 0;
-  const target = rows?.[0] && columns.length > 1 ? parseNum(rows[0][1]) : config?.target ?? 100;
-  const max = config?.max ?? Math.max(actual, target) * 1.2;
+  const numIdx = findNumericCol(columns, rows);
+  const actual = rows?.[0] ? parseNum(rows[0][numIdx]) : 0;
+  const numIdx2 = columns?.length > numIdx + 1 ? numIdx + 1 : -1;
+  const target = numIdx2 >= 0 && rows?.[0] ? parseNum(rows[0][numIdx2]) : config?.target ?? (actual * 1.2 || 100);
+  const max = config?.max ?? (Math.max(actual, isNaN(target) ? actual : target) * 1.2 || 100);
 
   const barH = Math.min(28, height / 3);
   const barY = (height - barH) / 2;
