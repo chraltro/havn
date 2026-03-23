@@ -145,7 +145,7 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
         )}
 
         {/* Sample project banner */}
-        {data.is_sample && data.has_data && onClearSample && (
+        {data.is_sample && onClearSample && (
           <div style={st.sampleBanner}>
             <span>You're running the sample earthquake project.</span>
             <button
