@@ -20,7 +20,7 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
-        run: npm ci && npm run build
+        run: npm install && npm run build
 
       - name: Set up Python
         uses: actions/setup-python@v5
