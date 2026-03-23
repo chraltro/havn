@@ -384,9 +384,13 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
     const zeroY = yPos(0);
     // Smart label stepping: estimate pixel width per label, skip if too crowded
     const avgLabelLen = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
-    const estLabelPx = Math.max(avgLabelLen * 6.5, 30);
-    const labelStep = Math.max(1, Math.ceil(estLabelPx / groupW));
-    const shouldRotate = groupW < estLabelPx * 0.8 && n > 4;
+    const estLabelPx = Math.max(avgLabelLen * 7, 36);
+    const shouldRotate = groupW < estLabelPx * 0.7 && n > 4;
+    // Cap visible labels at ~15 max, and ensure no physical overlap
+    const maxLabels = 10;
+    const pixelStep = Math.max(1, Math.ceil((shouldRotate ? estLabelPx * 0.45 : estLabelPx) / (groupW || 1)));
+    const countStep = Math.max(1, Math.ceil(n / maxLabels));
+    const labelStep = Math.max(pixelStep, countStep);
 
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
@@ -450,8 +454,11 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
     const avgLabelLen = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
     const estLabelPx = Math.max(avgLabelLen * 6.5, 30);
     const stepW = n > 1 ? plotW / (n - 1) : plotW;
-    const labelStep = Math.max(1, Math.ceil(estLabelPx / stepW));
-    const shouldRotate = stepW < estLabelPx * 0.8 && n > 4;
+    const shouldRotate = stepW < estLabelPx * 0.7 && n > 4;
+    const maxLabels = 10;
+    const pixelStep = Math.max(1, Math.ceil((shouldRotate ? estLabelPx * 0.45 : estLabelPx) / (stepW || 1)));
+    const countStep = Math.max(1, Math.ceil(n / maxLabels));
+    const labelStep = Math.max(pixelStep, countStep);
 
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
@@ -577,8 +584,16 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
 
   // ─── PIE / DONUT CHART ──────────────────────────────────
   function renderPie(isDonut) {
-    const { slices } = chartData;
+    let { slices } = chartData;
     if (slices.length === 0) return <text x={W / 2} y={H / 2} textAnchor="middle" style={{ fill: "var(--havn-text-dim)", fontSize: "13px" }}>No data for chart</text>;
+
+    // Cap at 10 slices — group the rest as "Other"
+    if (slices.length > 10) {
+      const sorted = [...slices].sort((a, b) => b.value - a.value);
+      const top = sorted.slice(0, 9);
+      const otherValue = sorted.slice(9).reduce((s, d) => s + d.value, 0);
+      slices = [...top, { label: `Other (${sorted.length - 9})`, value: otherValue }];
+    }
 
     const total = slices.reduce((s, d) => s + d.value, 0) || 1;
     const cx = W / 2;
@@ -745,7 +760,14 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
     const groupW = plotW / n;
     const barW = Math.min(groupW * 0.7, 48);
     const yPos = (v) => plotH - ((v - scale.min) / yRange) * plotH;
-    const labelStep = Math.max(1, Math.ceil(n / 24));
+    const avgLabelLen = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
+    const estLabelPx = Math.max(avgLabelLen * 7, 36);
+    const shouldRotate = groupW < estLabelPx * 0.7 && n > 4;
+    // Cap visible labels at ~15 max, and ensure no physical overlap
+    const maxLabels = 10;
+    const pixelStep = Math.max(1, Math.ceil((shouldRotate ? estLabelPx * 0.45 : estLabelPx) / (groupW || 1)));
+    const countStep = Math.max(1, Math.ceil(n / maxLabels));
+    const labelStep = Math.max(pixelStep, countStep);
 
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
@@ -759,7 +781,10 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
         {/* X labels */}
         {labels.map((l, i) => {
           if (i % labelStep !== 0 && i !== n - 1) return null;
-          return <text key={i} x={i * groupW + groupW / 2} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{trunc(l)}</text>;
+          const lx = i * groupW + groupW / 2;
+          return shouldRotate
+            ? <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-35, ${lx}, ${plotH + 10})`}>{trunc(l, 16)}</text>
+            : <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{trunc(l)}</text>;
         })}
         {/* Stacked segments */}
         {labels.map((_, i) => {
