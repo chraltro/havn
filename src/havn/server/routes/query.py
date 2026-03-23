@@ -48,16 +48,30 @@ _QUERY_TIMEOUT_SECONDS = 30
 
 
 @router.post("/api/query/explain")
-def explain_query(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
-    """Run EXPLAIN on a SQL query and return the query plan as text."""
+def explain_endpoint(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
+    """Run EXPLAIN on a SQL query and return structured plan + raw text."""
     _require_permission(request, "read")
     try:
-        result = conn.execute(f"EXPLAIN {req.sql}")
-        rows = result.fetchall()
-        plan = "\n".join(str(row[1]) if len(row) > 1 else str(row[0]) for row in rows)
-        return {"plan": plan}
+        from havn.engine.explain import explain_query as _explain_query, plan_to_dict
+
+        plan_node, raw = _explain_query(conn, req.sql)
+        return {"plan": plan_to_dict(plan_node), "raw": raw}
     except Exception as e:
         logger.warning("EXPLAIN failed: %s", e)
+        raise HTTPException(400, str(e))
+
+
+@router.post("/api/query/explain-analyze")
+def explain_analyze_endpoint(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
+    """Run EXPLAIN ANALYZE on a SQL query and return structured plan + raw text."""
+    _require_permission(request, "read")
+    try:
+        from havn.engine.explain import explain_analyze_query as _explain_analyze, plan_to_dict
+
+        plan_node, raw = _explain_analyze(conn, req.sql)
+        return {"plan": plan_to_dict(plan_node), "raw": raw}
+    except Exception as e:
+        logger.warning("EXPLAIN ANALYZE failed: %s", e)
         raise HTTPException(400, str(e))
 
 
@@ -66,10 +80,10 @@ def profile_query(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -
     """Run EXPLAIN ANALYZE on a SQL query and return the profiled plan."""
     _require_permission(request, "read")
     try:
-        result = conn.execute(f"EXPLAIN ANALYZE {req.sql}")
-        rows = result.fetchall()
-        plan = "\n".join(str(row[1]) if len(row) > 1 else str(row[0]) for row in rows)
-        return {"plan": plan}
+        from havn.engine.explain import explain_analyze_query as _explain_analyze, plan_to_dict
+
+        plan_node, raw = _explain_analyze(conn, req.sql)
+        return {"plan": plan_to_dict(plan_node), "raw": raw}
     except Exception as e:
         logger.warning("EXPLAIN ANALYZE failed: %s", e)
         raise HTTPException(400, str(e))

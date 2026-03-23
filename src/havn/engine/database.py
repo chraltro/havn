@@ -12,6 +12,7 @@ def connect(
     read_only: bool = False,
     memory_limit: str | None = None,
     threads: int | None = None,
+    project_dir: str | Path | None = None,
 ) -> duckdb.DuckDBPyConnection:
     """Open a DuckDB connection to the given path.
 
@@ -21,6 +22,7 @@ def connect(
         memory_limit: Max memory DuckDB can use (e.g. "4GB", "75%", "512MB").
                       Percentage values are resolved to a fraction of system RAM.
         threads: Max number of DuckDB threads (default: all cores).
+        project_dir: If provided, auto-register macros from ``project_dir/macros/``.
     """
     db_path = str(db_path)
     conn = duckdb.connect(db_path, read_only=read_only)
@@ -35,6 +37,11 @@ def connect(
     import os
     max_threads = threads if (threads is not None and threads > 0) else max(1, os.cpu_count() // 2)
     conn.execute(f"SET threads = {max_threads}")
+
+    # Auto-register macros if a project directory is provided
+    if project_dir is not None:
+        from havn.engine.macros import register_macros
+        register_macros(conn, Path(project_dir))
 
     return conn
 
