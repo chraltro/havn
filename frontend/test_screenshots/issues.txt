@@ -1,7 +1,0 @@
-Dashboard UI Test — 2026-03-23T21:54:05.762Z
-==================================================
-
-Issues: 2
-
-1. Stacked chart has 1 overlapping axis labels
-2. Progress bar fill is essentially invisible (< 1px)
