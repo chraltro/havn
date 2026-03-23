@@ -195,8 +195,8 @@ def register_macros(
             conn.create_function(
                 info.name,
                 info.func,
-                parameters=[_duckdb_type(t) for t in param_types],
-                return_type=_duckdb_type(info.return_type),
+                param_types,
+                info.return_type,
             )
             count += 1
             logger.debug("Registered Python macro: %s", info.name)
@@ -219,27 +219,9 @@ def register_macros(
     return count
 
 
-def _duckdb_type(type_str: str) -> Any:
-    """Return a DuckDB type suitable for ``create_function``.
-
-    Tries ``duckdb.typing`` constants first (works across all DuckDB versions),
-    falls back to plain strings.
-    """
-    try:
-        from duckdb.typing import BIGINT, BOOLEAN, DATE, DOUBLE, INTEGER, TIMESTAMP, VARCHAR  # type: ignore[import-untyped]
-
-        _mapping: dict[str, Any] = {
-            "VARCHAR": VARCHAR,
-            "INTEGER": INTEGER,
-            "BIGINT": BIGINT,
-            "DOUBLE": DOUBLE,
-            "BOOLEAN": BOOLEAN,
-            "DATE": DATE,
-            "TIMESTAMP": TIMESTAMP,
-        }
-        return _mapping.get(type_str, VARCHAR)
-    except ImportError:
-        return type_str
+def _duckdb_type(type_str: str) -> str:
+    """Return a DuckDB type string suitable for ``create_function``."""
+    return type_str
 
 
 # ---------------------------------------------------------------------------
