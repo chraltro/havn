@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from havn.server.deps import _detect_language, _get_project_dir, _require_permission
@@ -49,6 +51,7 @@ class FileInfo(BaseModel):
 
 class SaveFileRequest(BaseModel):
     content: str = Field(..., max_length=5_000_000)
+    expected_hash: str | None = None
 
 
 class MoveFileRequest(BaseModel):
@@ -62,6 +65,11 @@ _SKIP_DIRS = {
     "__pycache__", "node_modules", ".venv", ".pytest_cache",
     ".dp", "dist", "build",
 }
+
+
+def _file_hash(content: str) -> str:
+    """Return a short SHA256 hash (16 hex chars) of file content."""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
 
 
 def _scan_dir(base: Path, rel: Path | None = None) -> list[FileInfo]:
@@ -118,11 +126,16 @@ def read_file(request: Request, file_path: str) -> dict:
             content = full_path.read_text(encoding="latin-1")
         except Exception:
             raise HTTPException(422, "Cannot read file: unsupported encoding")
-    return {
-        "path": file_path,
-        "content": content,
-        "language": _detect_language(full_path),
-    }
+    fh = _file_hash(content)
+    return JSONResponse(
+        content={
+            "path": file_path,
+            "content": content,
+            "language": _detect_language(full_path),
+            "file_hash": fh,
+        },
+        headers={"ETag": f'"{fh}"'},
+    )
 
 
 @router.put("/api/files/{file_path:path}")
@@ -137,10 +150,30 @@ def save_file(request: Request, file_path: str, req: SaveFileRequest) -> dict:
     # Only allow known file extensions
     if full_path.suffix not in (".sql", ".py", ".yml", ".yaml", ".dpnb", ".sqlfluff", ".csv", ".md"):
         raise HTTPException(400, f"Unsupported file type: {full_path.suffix}")
+    # Conflict detection: if expected_hash is provided and file exists, compare
+    if req.expected_hash and full_path.exists():
+        try:
+            current_content = full_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            current_content = full_path.read_text(encoding="latin-1")
+        current_hash = _file_hash(current_content)
+        if current_hash != req.expected_hash:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "conflict": True,
+                    "message": "File was modified by another user or process",
+                    "current_hash": current_hash,
+                },
+            )
     full_path.parent.mkdir(parents=True, exist_ok=True)
     full_path.write_text(req.content, encoding="utf-8")
     _audit_file_action(request, user, "file_edit", file_path)
-    return {"path": file_path, "status": "saved"}
+    new_hash = _file_hash(req.content)
+    return JSONResponse(
+        content={"path": file_path, "status": "saved", "file_hash": new_hash},
+        headers={"ETag": f'"{new_hash}"'},
+    )
 
 
 @router.post("/api/files/{file_path:path}/move")
