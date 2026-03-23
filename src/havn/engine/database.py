@@ -246,6 +246,49 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
             detected_at   TIMESTAMP DEFAULT current_timestamp
         )
     """)
+    # Dashboard definitions
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS _dp_internal.dashboards (
+            id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+            name         VARCHAR NOT NULL,
+            description  VARCHAR DEFAULT '',
+            layout       JSON NOT NULL DEFAULT '{"columns":24,"rowHeight":64,"gap":12}',
+            filters      JSON DEFAULT '[]',
+            settings     JSON DEFAULT '{}',
+            created_by   VARCHAR DEFAULT 'anonymous',
+            updated_by   VARCHAR DEFAULT 'anonymous',
+            created_at   TIMESTAMP DEFAULT current_timestamp,
+            updated_at   TIMESTAMP DEFAULT current_timestamp,
+            is_template  BOOLEAN DEFAULT FALSE
+        )
+    """)
+    # Dashboard widget instances
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS _dp_internal.dashboard_widgets (
+            id            VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+            dashboard_id  VARCHAR NOT NULL,
+            widget_type   VARCHAR NOT NULL,
+            chart_type    VARCHAR,
+            title         VARCHAR DEFAULT '',
+            sql_query     VARCHAR,
+            config        JSON DEFAULT '{}',
+            position      JSON NOT NULL,
+            filters       JSON DEFAULT '[]',
+            cache_ttl     INTEGER DEFAULT 0,
+            sort_order    INTEGER DEFAULT 0,
+            created_at    TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
+    # Dashboard query result cache
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS _dp_internal.dashboard_cache (
+            cache_key   VARCHAR PRIMARY KEY,
+            result_json JSON NOT NULL,
+            row_count   INTEGER DEFAULT 0,
+            cached_at   TIMESTAMP DEFAULT current_timestamp,
+            expires_at  TIMESTAMP NOT NULL
+        )
+    """)
 
 
 def ensure_circuit_state_table(conn: duckdb.DuckDBPyConnection) -> None:

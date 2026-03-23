@@ -224,8 +224,8 @@ function exportChart(svgEl, format) {
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════
 
-export default function ChartPanel({ columns, rows }) {
-  const [chartType, setChartType] = useState(null);
+export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLabel, yAxisLabel, onDataClick }) {
+  const [chartType, setChartType] = useState(forcedType || null);
   const [xCol, setXCol] = useState(0);
   const [yCols, setYCols] = useState([1]);
   const [hoveredIndex, setHoveredIndex] = useState(null);
@@ -241,15 +241,20 @@ export default function ChartPanel({ columns, rows }) {
   // Analyze columns
   const analysis = useMemo(() => analyzeColumns(columns, rows), [columns, rows]);
 
-  // Auto-detect chart type on data change
+  // Auto-detect chart type on data change (respect forcedType if provided)
   useEffect(() => {
     const d = detectBestChart(analysis, rows.length);
-    setChartType(d.type);
+    if (!forcedType) setChartType(d.type);
     setXCol(d.x);
     setYCols(d.y);
     setHoveredIndex(null);
     setTooltip(null);
-  }, [analysis, rows.length]);
+  }, [analysis, rows.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Update chart type when forcedType prop changes
+  useEffect(() => {
+    if (forcedType) setChartType(forcedType);
+  }, [forcedType]);
 
   // ResizeObserver
   useEffect(() => {
@@ -276,7 +281,24 @@ export default function ChartPanel({ columns, rows }) {
 
   // Prepare chart data
   const chartData = useMemo(() => {
-    const labels = rows.map((r) => String(r[xCol] ?? ""));
+    const labels = rows.map((r) => {
+      const raw = r[xCol];
+      if (raw === null || raw === undefined) return "";
+      const s = String(raw);
+      // Smart date formatting: shorten ISO timestamps
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+        const datePart = s.slice(0, 10); // "2024-01-15"
+        const [yr, mo, dy] = datePart.split("-");
+        const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        // Grouped by year (YYYY-01-01)
+        if (mo === "01" && dy === "01" && rows.length <= 20) return yr;
+        // Grouped by month (YYYY-MM-01) or quarter
+        if (dy === "01") return `${months[parseInt(mo, 10) - 1]} ${yr}`;
+        // Regular dates: compact format
+        return `${months[parseInt(mo, 10) - 1]} ${parseInt(dy, 10)}`;
+      }
+      return s;
+    });
     const series = yCols.map((ci, i) => ({
       name: columns[ci],
       color: COLORS[i % COLORS.length],
@@ -360,7 +382,11 @@ export default function ChartPanel({ columns, rows }) {
     const totalBarW = barW * seriesCount;
     const yPos = (v) => plotH - ((v - scale.min) / yRange) * plotH;
     const zeroY = yPos(0);
-    const labelStep = Math.max(1, Math.ceil(n / 24));
+    // Smart label stepping: estimate pixel width per label, skip if too crowded
+    const avgLabelLen = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
+    const estLabelPx = Math.max(avgLabelLen * 6.5, 30);
+    const labelStep = Math.max(1, Math.ceil(estLabelPx / groupW));
+    const shouldRotate = groupW < estLabelPx * 0.8 && n > 4;
 
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
@@ -374,8 +400,14 @@ export default function ChartPanel({ columns, rows }) {
         {/* X labels */}
         {labels.map((l, i) => {
           if (i % labelStep !== 0 && i !== n - 1) return null;
-          return <text key={i} x={i * groupW + groupW / 2} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{trunc(l)}</text>;
+          const lx = i * groupW + groupW / 2;
+          return shouldRotate
+            ? <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-35, ${lx}, ${plotH + 10})`}>{trunc(l, 16)}</text>
+            : <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{trunc(l)}</text>;
         })}
+        {/* Axis labels */}
+        {(xAxisLabel || columns[xCol]) && <text x={plotW / 2} y={plotH + (shouldRotate ? 48 : 40)} textAnchor="middle" style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{xAxisLabel || columns[xCol]}</text>}
+        {(yAxisLabel || yCols.length > 0) && <text x={-44} y={plotH / 2} textAnchor="middle" transform={`rotate(-90, -44, ${plotH / 2})`} style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{yAxisLabel || (yCols.length === 1 ? columns[yCols[0]] : "Value")}</text>}
         {/* Bars */}
         {series.map((s, si) =>
           s.values.map((v, i) => {
@@ -390,12 +422,13 @@ export default function ChartPanel({ columns, rows }) {
                 rx={Math.min(3, barW / 4)}
                 fill={s.color}
                 opacity={hoveredIndex !== null && !isHovered ? 0.3 : 1}
-                style={{ transition: "opacity 0.15s" }}
+                style={{ transition: "opacity 0.15s", cursor: onDataClick ? "pointer" : undefined }}
                 onMouseMove={(e) => {
                   setHoveredIndex(i);
                   showTip(e, labels[i], series.map((ss, ssi) => ({ name: ss.name, value: ss.values[i], color: ss.color })));
                 }}
                 onMouseLeave={hideTip}
+                onClick={onDataClick ? () => onDataClick(columns[xCol], labels[i]) : undefined}
               />
             );
           })
@@ -414,7 +447,11 @@ export default function ChartPanel({ columns, rows }) {
     const n = labels.length;
     const yPos = (v) => plotH - ((v - scale.min) / yRange) * plotH;
     const xPos = (i) => n === 1 ? plotW / 2 : (i / (n - 1)) * plotW;
-    const labelStep = Math.max(1, Math.ceil(n / 20));
+    const avgLabelLen = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
+    const estLabelPx = Math.max(avgLabelLen * 6.5, 30);
+    const stepW = n > 1 ? plotW / (n - 1) : plotW;
+    const labelStep = Math.max(1, Math.ceil(estLabelPx / stepW));
+    const shouldRotate = stepW < estLabelPx * 0.8 && n > 4;
 
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
@@ -428,8 +465,14 @@ export default function ChartPanel({ columns, rows }) {
         {/* X labels */}
         {labels.map((l, i) => {
           if (i % labelStep !== 0 && i !== n - 1) return null;
-          return <text key={i} x={xPos(i)} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{trunc(l, 10)}</text>;
+          const lx = xPos(i);
+          return shouldRotate
+            ? <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-35, ${lx}, ${plotH + 10})`}>{trunc(l, 16)}</text>
+            : <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{trunc(l, 10)}</text>;
         })}
+        {/* Axis labels */}
+        {(xAxisLabel || columns[xCol]) && <text x={plotW / 2} y={plotH + (shouldRotate ? 48 : 40)} textAnchor="middle" style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{xAxisLabel || columns[xCol]}</text>}
+        {(yAxisLabel || yCols.length > 0) && <text x={-44} y={plotH / 2} textAnchor="middle" transform={`rotate(-90, -44, ${plotH / 2})`} style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{yAxisLabel || (yCols.length === 1 ? columns[yCols[0]] : "Value")}</text>}
         {/* Area fills */}
         {filled && series.map((s, si) => {
           const pts = s.values.map((v, i) => `${xPos(i)},${yPos(v)}`).join(" ");
@@ -571,6 +614,7 @@ export default function ChartPanel({ columns, rows }) {
                 showTip(e, a.label, [{ name: `${a.pct}%`, value: a.value, color: a.color }]);
               }}
               onMouseLeave={hideTip}
+              onClick={onDataClick ? () => onDataClick(columns[xCol], a.label) : undefined}
             />
           );
         })}
@@ -755,8 +799,8 @@ export default function ChartPanel({ columns, rows }) {
   // ─── RENDER ─────────────────────────────────────────────
   return (
     <div style={st.container}>
-      {/* Toolbar */}
-      <div style={st.toolbar}>
+      {/* Toolbar — hidden in compact/dashboard mode */}
+      {!compact && <div style={st.toolbar}>
         {/* Chart type selector */}
         <div style={st.typeGroup}>
           {CHART_TYPES.map((t) => (
@@ -849,7 +893,7 @@ export default function ChartPanel({ columns, rows }) {
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* Chart area */}
       <div ref={containerRef} style={st.chartArea}>

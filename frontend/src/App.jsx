@@ -34,6 +34,11 @@ import GitPanel from "./GitPanel";
 import AgentSidebar from "./AgentSidebar";
 import CommandPalette from "./CommandPalette";
 import FocusTrap from "./FocusTrap";
+import DashboardListPanel from "./DashboardListPanel";
+import DashboardCanvas from "./DashboardCanvas";
+import WidgetEditor from "./WidgetEditor";
+import DashboardFilterBar from "./DashboardFilterBar";
+import { DashboardProvider, useDashboard } from "./DashboardContext";
 import { useAuth } from "./AuthContext";
 import { WarehouseProvider, useWarehouse } from "./WarehouseContext";
 import { schemaCompare } from "./schemaOrder";
@@ -47,7 +52,7 @@ import { PipelineProvider, usePipeline } from "./PipelineContext";
 const SECTIONS = [
   { id: "Overview", label: "Overview", tabs: [] },
   { id: "Develop", label: "Develop", tabs: ["Editor", "Notebooks", "Data Sources", "Git"] },
-  { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "DAG"] },
+  { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "DAG", "Dashboards"] },
   { id: "Observe", label: "Observe", tabs: ["Quality", "Sentinel", "Diff", "Runs"] },
   { id: "Configure", label: "Configure", tabs: ["Masking", "Wiki", "Docs", "Settings"] },
 ];
@@ -355,6 +360,33 @@ const stStyles = {
 /* ------------------------------------------------------------------ */
 /* Main app content                                                    */
 /* ------------------------------------------------------------------ */
+
+function DashboardsSection({ showConfirm }) {
+  const { dashboard, loadDashboard, closeDashboard } = useDashboard();
+  const [editingWidget, setEditingWidget] = useState(null);
+
+  if (!dashboard) {
+    return <DashboardListPanel onOpenDashboard={(id) => loadDashboard(id)} showConfirm={showConfirm} />;
+  }
+
+  return (
+    <>
+      <DashboardFilterBar />
+      <DashboardCanvas
+        onBack={closeDashboard}
+        onEditWidget={setEditingWidget}
+        showConfirm={showConfirm}
+      />
+      {editingWidget && (
+        <WidgetEditor
+          widget={editingWidget}
+          onClose={() => setEditingWidget(null)}
+          onSave={() => setEditingWidget(null)}
+        />
+      )}
+    </>
+  );
+}
 
 function AppContent() {
   const { currentUser, handleLogout } = useAuth();
@@ -1040,6 +1072,13 @@ function AppContent() {
                   showConfirm={showConfirm}
                   onClearSample={handleClearSample}
                 />
+              </ErrorBoundary>
+            )}
+            {activeTab === "Dashboards" && (
+              <ErrorBoundary name="Dashboards">
+                <DashboardProvider>
+                  <DashboardsSection showConfirm={showConfirm} />
+                </DashboardProvider>
               </ErrorBoundary>
             )}
             {activeTab === "Editor" && (
