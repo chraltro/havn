@@ -319,7 +319,12 @@ export default function DashboardWidget({
           </div>
         )}
 
-        {hasData && !hasError && renderWidgetContent(widget, data, handleChartClick)}
+        {hasData && !hasError && data.rows.length === 0 && (
+          <div style={st.center}>
+            <span style={{ opacity: 0.4, fontSize: 13 }}>{widget.config?.emptyStateMessage || "No data available"}</span>
+          </div>
+        )}
+        {hasData && !hasError && data.rows.length > 0 && renderWidgetContent(widget, data, handleChartClick)}
       </div>
 
       {/* Footer — row count + freshness */}
@@ -355,7 +360,12 @@ export default function DashboardWidget({
             </button>
           </div>
           <div style={st.widgetFullscreenContent}>
-            {hasData && !hasError && renderWidgetContent(widget, data, handleChartClick)}
+            {hasData && !hasError && data.rows.length === 0 && (
+              <div style={st.center}>
+                <span style={{ opacity: 0.4, fontSize: 14 }}>{widget.config?.emptyStateMessage || "No data available"}</span>
+              </div>
+            )}
+            {hasData && !hasError && data.rows.length > 0 && renderWidgetContent(widget, data, handleChartClick)}
             {isLoading && !hasData && (
               <div style={st.center}><span style={st.spinner}>↻</span> Loading...</div>
             )}

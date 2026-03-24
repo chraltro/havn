@@ -997,7 +997,7 @@ function SQLBuilder({
 // Chart Style Panel (collapsible sections)
 // ---------------------------------------------------------------------------
 
-function ChartStylePanel({ widgetConfig, setWidgetConfig }) {
+function ChartStylePanel({ widgetConfig, setWidgetConfig, previewData }) {
   const [openSections, setOpenSections] = useState({});
   const toggle = (key) => setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
   const upd = (patch) => setWidgetConfig({ ...widgetConfig, ...patch });
@@ -1033,6 +1033,44 @@ function ChartStylePanel({ widgetConfig, setWidgetConfig }) {
           </select>
         </div>
       )}
+
+      {/* Series Colors */}
+      {previewData?.columns?.length > 1 && (() => {
+        // Detect Y-series columns (numeric columns after the first column, which is typically X)
+        const yCols = previewData.columns.slice(1);
+        if (yCols.length === 0) return null;
+        return (
+          <>
+            {sectionHeader("seriesColors", "Series Colors")}
+            {openSections.seriesColors && (
+              <div style={{ padding: "4px 16px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
+                {yCols.map(col => (
+                  <div key={col} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, color: "var(--havn-text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col}</span>
+                    <input
+                      type="color"
+                      value={(widgetConfig.seriesColors || {})[col] || "#6366f1"}
+                      style={{ width: 32, height: 28, border: "1px solid var(--havn-border)", borderRadius: 4, padding: 1, cursor: "pointer", background: "none" }}
+                      onChange={(e) => {
+                        const updated = { ...(widgetConfig.seriesColors || {}), [col]: e.target.value };
+                        upd({ seriesColors: updated });
+                      }}
+                    />
+                  </div>
+                ))}
+                {Object.keys(widgetConfig.seriesColors || {}).length > 0 && (
+                  <button
+                    style={{ ...st.addSmallBtn, marginTop: 2 }}
+                    onClick={() => upd({ seriesColors: null })}
+                  >
+                    Reset to palette
+                  </button>
+                )}
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       {/* Axis configuration */}
       {sectionHeader("axis", "Axis Configuration")}
@@ -1314,9 +1352,22 @@ function ChartAndTypeConfig({
         </div>
       )}
 
+      {/* Empty state message */}
+      {(widgetType === "chart" || widgetType === "table" || widgetType === "kpi") && (
+        <div style={st.section}>
+          <div style={st.sectionTitle2}>Empty state message</div>
+          <input
+            style={st.input}
+            value={widgetConfig?.emptyStateMessage || ""}
+            onChange={(e) => setWidgetConfig({ ...widgetConfig, emptyStateMessage: e.target.value })}
+            placeholder="No data available"
+          />
+        </div>
+      )}
+
       {/* Chart Style (collapsible) */}
       {widgetType === "chart" && (
-        <ChartStylePanel widgetConfig={widgetConfig} setWidgetConfig={setWidgetConfig} />
+        <ChartStylePanel widgetConfig={widgetConfig} setWidgetConfig={setWidgetConfig} previewData={previewData} />
       )}
 
       {/* KPI config */}

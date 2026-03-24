@@ -78,6 +78,8 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
   const [showRefreshMenu, setShowRefreshMenu] = useState(false);
   const [showEmbedModal, setShowEmbedModal] = useState(false);
   const [embedCopied, setEmbedCopied] = useState(false);
+  const [activePageId, setActivePageId] = useState(null);
+  const [pageContextMenu, setPageContextMenu] = useState(null);
   const gridRef = useRef(null);
   const refreshMenuRef = useRef(null);
 
@@ -96,7 +98,27 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
     return () => ro.disconnect();
   }, [dashboard]);
 
-  const widgets = dashboard?.widgets || [];
+  // Multi-page support
+  const pages = dashboard?.settings?.pages || [{ id: "main", name: "Main" }];
+  const currentPageId = activePageId || pages[0]?.id || "main";
+
+  // Initialize activePageId when dashboard loads
+  useEffect(() => {
+    if (dashboard && !activePageId) {
+      const ps = dashboard.settings?.pages;
+      if (ps && ps.length > 0) setActivePageId(ps[0].id);
+      else setActivePageId("main");
+    }
+  }, [dashboard?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const allWidgets = dashboard?.widgets || [];
+  // Filter widgets to only show those on the active page
+  const widgets = allWidgets.filter(w => {
+    const wPage = w.config?.page_id;
+    // Widgets with no page_id belong to the first page
+    if (!wPage) return currentPageId === pages[0]?.id;
+    return wPage === currentPageId;
+  });
 
   // Fullscreen change listener
   useEffect(() => {
@@ -185,6 +207,32 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
     });
   }
 
+  // Page management
+  function addPage() {
+    const name = prompt("Page name:");
+    if (!name || !name.trim()) return;
+    const newId = "page_" + Date.now();
+    const newPages = [...pages, { id: newId, name: name.trim() }];
+    saveDashboard({ settings: { ...(dashboard.settings || {}), pages: newPages } });
+    setActivePageId(newId);
+  }
+
+  function renamePage(pageId) {
+    const page = pages.find(p => p.id === pageId);
+    if (!page) return;
+    const name = prompt("Rename page:", page.name);
+    if (!name || !name.trim()) return;
+    const newPages = pages.map(p => p.id === pageId ? { ...p, name: name.trim() } : p);
+    saveDashboard({ settings: { ...(dashboard.settings || {}), pages: newPages } });
+  }
+
+  function deletePage(pageId) {
+    if (pages.length <= 1) return; // can't delete last page
+    const newPages = pages.filter(p => p.id !== pageId);
+    saveDashboard({ settings: { ...(dashboard.settings || {}), pages: newPages } });
+    if (activePageId === pageId) setActivePageId(newPages[0]?.id);
+  }
+
   // Name editing
   function startEditName() {
     setNameValue(dashboard?.name || "");
@@ -210,7 +258,7 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
       chart_type: "bar",
       title: "",
       sql_query: "",
-      config: {},
+      config: { page_id: currentPageId },
       position: { x: 1, y: maxY, w: 8, h: 4 },
       filters: [],
       cache_ttl: 0,
@@ -523,6 +571,44 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
         </div>
       </div>}
 
+      {/* Page tab bar */}
+      {pages.length > 0 && (
+        <div style={st.pageTabBar}>
+          {pages.map(page => (
+            <button
+              key={page.id}
+              style={{
+                ...st.pageTab,
+                ...(currentPageId === page.id ? st.pageTabActive : {}),
+              }}
+              onClick={() => setActivePageId(page.id)}
+              onContextMenu={(e) => {
+                if (!editMode) return;
+                e.preventDefault();
+                setPageContextMenu({ pageId: page.id, x: e.clientX, y: e.clientY });
+              }}
+            >
+              {page.name}
+            </button>
+          ))}
+          {editMode && (
+            <button style={st.pageAddBtn} onClick={addPage} title="Add page">
+              +
+            </button>
+          )}
+          {/* Page context menu */}
+          {pageContextMenu && editMode && (
+            <PageContextMenu
+              x={pageContextMenu.x}
+              y={pageContextMenu.y}
+              onRename={() => { renamePage(pageContextMenu.pageId); setPageContextMenu(null); }}
+              onDelete={pages.length > 1 ? () => { deletePage(pageContextMenu.pageId); setPageContextMenu(null); } : null}
+              onClose={() => setPageContextMenu(null)}
+            />
+          )}
+        </div>
+      )}
+
       {/* Canvas Grid */}
       <div
         ref={gridRef}
@@ -690,6 +776,39 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
             </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// Page context menu (right-click on page tab)
+function PageContextMenu({ x, y, onRename, onDelete, onClose }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  return (
+    <div ref={ref} style={{ position: "fixed", left: x, top: y, background: "var(--havn-bg)", border: "1px solid var(--havn-border)", borderRadius: 6, padding: 4, zIndex: 300, minWidth: 120, boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}>
+      <button
+        style={{ display: "block", width: "100%", background: "none", border: "none", color: "var(--havn-text)", cursor: "pointer", padding: "6px 10px", fontSize: 13, textAlign: "left", borderRadius: 4 }}
+        onClick={onRename}
+        onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-bg-secondary, rgba(128,128,128,0.1))"}
+        onMouseLeave={(e) => e.currentTarget.style.background = "none"}
+      >
+        Rename
+      </button>
+      {onDelete && (
+        <button
+          style={{ display: "block", width: "100%", background: "none", border: "none", color: "var(--havn-red)", cursor: "pointer", padding: "6px 10px", fontSize: 13, textAlign: "left", borderRadius: 4 }}
+          onClick={onDelete}
+          onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-bg-secondary, rgba(128,128,128,0.1))"}
+          onMouseLeave={(e) => e.currentTarget.style.background = "none"}
+        >
+          Delete
+        </button>
       )}
     </div>
   );
@@ -916,4 +1035,40 @@ const st = {
   settingsBody: { padding: 20 },
   settingsLabel: { display: "block", fontSize: 12, fontWeight: 600, color: "var(--havn-text-secondary)", marginBottom: 4, marginTop: 12 },
   settingsInput: { width: "100%", padding: "7px 10px", border: "1px solid var(--havn-border)", borderRadius: 6, background: "var(--havn-bg-secondary, var(--havn-bg))", color: "var(--havn-text)", fontSize: 13, outline: "none", boxSizing: "border-box" },
+  pageTabBar: {
+    display: "flex",
+    alignItems: "center",
+    gap: 2,
+    padding: "0 16px",
+    borderBottom: "1px solid var(--havn-border)",
+    flexShrink: 0,
+    background: "var(--havn-bg)",
+    overflowX: "auto",
+  },
+  pageTab: {
+    background: "none",
+    border: "none",
+    borderBottom: "2px solid transparent",
+    color: "var(--havn-text-secondary)",
+    cursor: "pointer",
+    padding: "8px 14px",
+    fontSize: 13,
+    fontWeight: 500,
+    whiteSpace: "nowrap",
+  },
+  pageTabActive: {
+    color: "var(--havn-accent)",
+    borderBottomColor: "var(--havn-accent)",
+    fontWeight: 600,
+  },
+  pageAddBtn: {
+    background: "none",
+    border: "1px dashed var(--havn-border)",
+    color: "var(--havn-text-secondary)",
+    cursor: "pointer",
+    padding: "4px 10px",
+    borderRadius: 4,
+    fontSize: 14,
+    marginLeft: 4,
+  },
 };
