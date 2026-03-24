@@ -141,6 +141,7 @@ export const DASHBOARD_CHART_TYPES = [
   { id: "donut", label: "Donut", group: "Basic", desc: "Like pie with a center hole" },
   { id: "hbar", label: "H-Bar", group: "Basic", desc: "Horizontal bars for long labels" },
   { id: "stacked", label: "Stacked", group: "Basic", desc: "Bars stacked to show composition" },
+  { id: "stacked_area", label: "Stacked Area", group: "Basic", desc: "Stacked filled area chart" },
   // Advanced
   { id: "treemap", label: "Treemap", group: "Advanced", desc: "Proportional sizes as nested rectangles" },
   { id: "heatmap", label: "Heatmap", group: "Advanced", desc: "Color-coded grid of two categories" },
@@ -151,6 +152,8 @@ export const DASHBOARD_CHART_TYPES = [
   { id: "histogram", label: "Histogram", group: "Stats", desc: "Distribution of a single numeric column" },
   { id: "bubble", label: "Bubble", group: "Stats", desc: "Scatter with a third size dimension" },
   { id: "radar", label: "Radar", group: "Stats", desc: "Compare multiple metrics on radial axes" },
+  { id: "boxplot", label: "Box Plot", group: "Stats", desc: "Distribution with quartiles and outliers" },
+  { id: "combo", label: "Combo", group: "Advanced", desc: "Bar + line with dual Y-axis" },
   // Cards & Indicators
   { id: "gauge", label: "Gauge", group: "Cards", desc: "Semicircle meter showing a single value" },
   { id: "progress", label: "Progress", group: "Cards", desc: "Horizontal bar showing completion %" },
