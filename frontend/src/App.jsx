@@ -361,11 +361,23 @@ const stStyles = {
 /* Main app content                                                    */
 /* ------------------------------------------------------------------ */
 
-function DashboardsSection({ showConfirm }) {
-  const { dashboard, loadDashboard, closeDashboard } = useDashboard();
+function DashboardsSection({ showConfirm, embedMode }) {
+  const { dashboard, loadDashboard, closeDashboard, setEditMode } = useDashboard();
   const [editingWidget, setEditingWidget] = useState(null);
 
+  // In embed mode, auto-load the dashboard from the hash and force view mode
+  useEffect(() => {
+    if (!embedMode) return;
+    const hash = window.location.hash.replace(/^#/, "");
+    const params = new URLSearchParams(hash);
+    const dashId = params.get("dashboard");
+    if (dashId && !dashboard) {
+      loadDashboard(dashId).then(() => setEditMode(false));
+    }
+  }, [embedMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!dashboard) {
+    if (embedMode) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", color: "var(--havn-text-secondary)", fontFamily: "var(--havn-font)" }}>Loading dashboard...</div>;
     return <DashboardListPanel onOpenDashboard={(id) => loadDashboard(id)} showConfirm={showConfirm} />;
   }
 
@@ -374,10 +386,11 @@ function DashboardsSection({ showConfirm }) {
       <DashboardFilterBar />
       <DashboardCanvas
         onBack={closeDashboard}
-        onEditWidget={setEditingWidget}
+        onEditWidget={embedMode ? undefined : setEditingWidget}
         showConfirm={showConfirm}
+        embedMode={embedMode}
       />
-      {editingWidget && (
+      {editingWidget && !embedMode && (
         <WidgetEditor
           widget={editingWidget}
           onClose={() => setEditingWidget(null)}
@@ -1291,6 +1304,12 @@ function WarehouseConsumerBridge({ children, onPipelineComplete }) {
   );
 }
 
+/** Detect embed mode from URL hash */
+function isEmbedMode() {
+  const hash = window.location.hash.replace(/^#/, "");
+  return new URLSearchParams(hash).get("embed") === "true";
+}
+
 /** Root App: wraps inner content with Warehouse + Pipeline providers */
 export default function App() {
   const { authChecked, authRequired, needsSetup, handleLogin, isAuthenticated } = useAuth();
@@ -1307,6 +1326,19 @@ export default function App() {
 
   if (authRequired) {
     return <LoginPage onLogin={handleLogin} needsSetup={needsSetup} />;
+  }
+
+  // Embed mode: render only the dashboard with no chrome
+  if (isEmbedMode()) {
+    return (
+      <WarehouseProvider enabled={isAuthenticated}>
+        <div style={{ height: "100vh", background: "var(--havn-bg)", color: "var(--havn-text)", fontFamily: "var(--havn-font)" }}>
+          <DashboardProvider>
+            <DashboardsSection embedMode={true} />
+          </DashboardProvider>
+        </div>
+      </WarehouseProvider>
+    );
   }
 
   return (

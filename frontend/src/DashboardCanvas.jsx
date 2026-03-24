@@ -43,7 +43,7 @@ function _relativeTime(date) {
 // Main Canvas Component
 // ---------------------------------------------------------------------------
 
-export default function DashboardCanvas({ onBack, onEditWidget, showConfirm }) {
+export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, embedMode }) {
   const {
     dashboard,
     editMode,
@@ -76,8 +76,25 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm }) {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsDesc, setSettingsDesc] = useState("");
   const [showRefreshMenu, setShowRefreshMenu] = useState(false);
+  const [showEmbedModal, setShowEmbedModal] = useState(false);
+  const [embedCopied, setEmbedCopied] = useState(false);
   const gridRef = useRef(null);
   const refreshMenuRef = useRef(null);
+
+  // --- Responsive layout: track container width for column breakpoints ---
+  const [effectiveCols, setEffectiveCols] = useState(GRID_COLS);
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      const w = entries[0].contentRect.width;
+      if (w < 768) setEffectiveCols(1);
+      else if (w < 1024) setEffectiveCols(12);
+      else setEffectiveCols(GRID_COLS);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [dashboard]);
 
   const widgets = dashboard?.widgets || [];
 
@@ -152,6 +169,20 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm }) {
     } else {
       document.documentElement.requestFullscreen?.();
     }
+  }
+
+  // Embed helpers
+  function getEmbedUrl() {
+    return `${window.location.origin}/#embed=true&dashboard=${dashboard?.id || ""}`;
+  }
+  function getEmbedSnippet() {
+    return `<iframe src="${getEmbedUrl()}" width="100%" height="600" frameborder="0"></iframe>`;
+  }
+  function copyEmbedSnippet() {
+    navigator.clipboard.writeText(getEmbedSnippet()).then(() => {
+      setEmbedCopied(true);
+      setTimeout(() => setEmbedCopied(false), 2000);
+    });
   }
 
   // Name editing
@@ -352,9 +383,9 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm }) {
   if (!dashboard) return null;
 
   return (
-    <div style={{ ...st.outer, ...(isFullscreen ? st.fullscreen : {}) }}>
-      {/* Toolbar */}
-      <div style={st.toolbar}>
+    <div style={{ ...st.outer, ...(isFullscreen ? st.fullscreen : {}), ...(embedMode ? st.fullscreen : {}) }}>
+      {/* Toolbar — hidden in embed mode */}
+      {!embedMode && <div style={st.toolbar}>
         <div style={st.toolbarLeft}>
           {!isFullscreen && (
             <button style={st.backBtn} onClick={onBack} title="Back to list">
@@ -482,29 +513,40 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm }) {
             </>
           )}
 
+          <button style={st.toolBtn} onClick={() => setShowEmbedModal(true)} title="Embed this dashboard">
+            Embed
+          </button>
+
           <button style={st.toolBtn} onClick={toggleFullscreen} title="Fullscreen (F)">
             {isFullscreen ? "⊡" : "⛶"}
           </button>
         </div>
-      </div>
+      </div>}
 
       {/* Canvas Grid */}
       <div
         ref={gridRef}
         style={{
           ...st.grid,
+          gridTemplateColumns: `repeat(${effectiveCols}, 1fr)`,
           ...(editMode ? st.gridEdit : {}),
         }}
       >
-        {widgets.map(w => {
+        {(() => {
+          // For single-column layout, sort by sort_order and stack
+          const sorted = effectiveCols === 1
+            ? [...widgets].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+            : widgets;
+          return sorted.map(w => {
           const pos = localPositions[w.id] || w.position || { x: 1, y: 1, w: 6, h: 4 };
+          const isNarrow = effectiveCols === 1;
           return (
             <div
               key={w.id}
               style={{
-                gridColumn: `${pos.x} / span ${pos.w}`,
-                gridRow: `${pos.y} / span ${pos.h}`,
-                minHeight: 0,
+                gridColumn: isNarrow ? "1 / -1" : `${pos.x} / span ${Math.min(pos.w, effectiveCols)}`,
+                gridRow: isNarrow ? undefined : `${pos.y} / span ${pos.h}`,
+                minHeight: isNarrow ? pos.h * ROW_HEIGHT : 0,
                 minWidth: 0,
                 position: "relative",
                 userSelect: (dragState || resizeState) ? "none" : undefined,
@@ -536,7 +578,8 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm }) {
               )}
             </div>
           );
-        })}
+        });
+        })()}
 
         {/* Empty state */}
         {widgets.length === 0 && (
@@ -613,6 +656,37 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm }) {
                 <div>Updated: {dashboard?.updated_at || "—"}</div>
                 <div>Widgets: {widgets.length}</div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Embed modal */}
+      {showEmbedModal && (
+        <div style={st.settingsOverlay} onClick={(e) => e.target === e.currentTarget && setShowEmbedModal(false)}>
+          <div style={st.settingsPanel}>
+            <div style={st.settingsHeader}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--havn-text)" }}>Embed Dashboard</h3>
+              <button style={{ background: "none", border: "none", color: "var(--havn-text-secondary)", fontSize: 20, cursor: "pointer" }} onClick={() => setShowEmbedModal(false)}>×</button>
+            </div>
+            <div style={st.settingsBody}>
+              <label style={st.settingsLabel}>Embed URL</label>
+              <input style={st.settingsInput} readOnly value={getEmbedUrl()} onClick={(e) => e.target.select()} />
+
+              <label style={{ ...st.settingsLabel, marginTop: 16 }}>iframe Snippet</label>
+              <textarea
+                style={{ ...st.settingsInput, minHeight: 60, resize: "vertical", fontFamily: "var(--havn-font-mono)", fontSize: 12 }}
+                readOnly
+                value={getEmbedSnippet()}
+                onClick={(e) => e.target.select()}
+              />
+
+              <button
+                style={{ ...st.addBtn, marginTop: 12, width: "100%", textAlign: "center" }}
+                onClick={copyEmbedSnippet}
+              >
+                {embedCopied ? "Copied!" : "Copy iframe snippet"}
+              </button>
             </div>
           </div>
         </div>
@@ -782,7 +856,7 @@ const st = {
   },
   grid: {
     display: "grid",
-    gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,
+    gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,  // default; overridden inline by effectiveCols
     gridAutoRows: `${ROW_HEIGHT}px`,
     gap: GAP,
     padding: 16,
