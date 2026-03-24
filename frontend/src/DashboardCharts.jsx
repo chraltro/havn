@@ -8,6 +8,7 @@
 
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { niceScale, fmtNum, fmtAxis, parseNum, trunc, donutArc, COLORS } from "./chartUtils";
+import { getSeriesColor } from "./chartStyleDefaults";
 
 const PAD = { top: 28, right: 24, bottom: 44, left: 56 };
 
@@ -105,7 +106,7 @@ export function Gauge({ columns, rows, width, height, config }) {
 // TREEMAP (squarified)
 // ---------------------------------------------------------------------------
 
-export function Treemap({ columns, rows, width, height, config }) {
+export function Treemap({ columns, rows, width, height, config = {} }) {
   const [tip, setTip] = useState(null);
   const labelIdx = 0;
   const valueIdx = columns.length > 1 ? 1 : 0;
@@ -132,15 +133,15 @@ export function Treemap({ columns, rows, width, height, config }) {
       totalRemaining -= item.value;
 
       if (remaining.length === 0) {
-        result.push({ ...item, x, y, w, h, color: COLORS[result.length % COLORS.length] });
+        result.push({ ...item, x, y, w, h, color: getSeriesColor(config, result.length, item.label) });
       } else if (isHorizontal) {
         const itemW = w * frac;
-        result.push({ ...item, x, y, w: itemW, h, color: COLORS[result.length % COLORS.length] });
+        result.push({ ...item, x, y, w: itemW, h, color: getSeriesColor(config, result.length, item.label) });
         x += itemW;
         w -= itemW;
       } else {
         const itemH = h * frac;
-        result.push({ ...item, x, y, w, h: itemH, color: COLORS[result.length % COLORS.length] });
+        result.push({ ...item, x, y, w, h: itemH, color: getSeriesColor(config, result.length, item.label) });
         y += itemH;
         h -= itemH;
       }
@@ -153,6 +154,7 @@ export function Treemap({ columns, rows, width, height, config }) {
       {rects.map((r, i) => (
         <g key={i}
           onMouseEnter={() => setTip({ x: r.x + r.w / 2, y: r.y + r.h / 2, label: r.label, value: r.value })}
+          onTouchStart={() => setTip({ x: r.x + r.w / 2, y: r.y + r.h / 2, label: r.label, value: r.value })}
           onMouseLeave={() => setTip(null)}
         >
           <rect x={r.x + 1} y={r.y + 1} width={Math.max(0, r.w - 2)} height={Math.max(0, r.h - 2)}
@@ -178,7 +180,7 @@ export function Treemap({ columns, rows, width, height, config }) {
 // HEATMAP
 // ---------------------------------------------------------------------------
 
-export function Heatmap({ columns, rows, width, height }) {
+export function Heatmap({ columns, rows, width, height, config }) {
   const [tip, setTip] = useState(null);
 
   // Expect: col0 = Y category, col1 = X category, col2 = value
@@ -233,10 +235,11 @@ export function Heatmap({ columns, rows, width, height }) {
               y={topPad + yi * cellH + 1}
               width={Math.max(0, cellW - 2)}
               height={Math.max(0, cellH - 2)}
-              fill={COLORS[0]}
+              fill={getSeriesColor(config, 0, null)}
               opacity={0.1 + intensity * 0.85}
               rx={2}
               onMouseEnter={() => setTip({ x: leftPad + xi * cellW + cellW / 2, y: topPad + yi * cellH, label: `${yLabel} / ${xLabel}`, value: v })}
+              onTouchStart={() => setTip({ x: leftPad + xi * cellW + cellW / 2, y: topPad + yi * cellH, label: `${yLabel} / ${xLabel}`, value: v })}
               onMouseLeave={() => setTip(null)}
             />
           );
@@ -251,7 +254,7 @@ export function Heatmap({ columns, rows, width, height }) {
 // FUNNEL
 // ---------------------------------------------------------------------------
 
-export function Funnel({ columns, rows, width, height }) {
+export function Funnel({ columns, rows, width, height, config }) {
   const [tip, setTip] = useState(null);
   const labelIdx = 0;
   const valueIdx = columns.length > 1 ? 1 : 0;
@@ -276,10 +279,11 @@ export function Funnel({ columns, rows, width, height }) {
         return (
           <g key={i}
             onMouseEnter={() => setTip({ x: x + barW / 2, y, label: item.label, value: item.value })}
+            onTouchStart={() => setTip({ x: x + barW / 2, y, label: item.label, value: item.value })}
             onMouseLeave={() => setTip(null)}
           >
             <rect x={x} y={y} width={barW} height={barH} rx={4}
-              fill={COLORS[i % COLORS.length]} opacity={0.85} />
+              fill={getSeriesColor(config, i, item.label)} opacity={0.85} />
             <text x={width / 2} y={y + barH / 2 + 4} textAnchor="middle" fill="#fff" fontSize={12} fontWeight={600}>
               {trunc(item.label, 20)} — {fmtNum(item.value)}
             </text>
@@ -298,7 +302,7 @@ export function Funnel({ columns, rows, width, height }) {
 // WATERFALL
 // ---------------------------------------------------------------------------
 
-export function Waterfall({ columns, rows, width, height }) {
+export function Waterfall({ columns, rows, width, height, config }) {
   const [tip, setTip] = useState(null);
   const labelIdx = 0;
   const valueIdx = columns.length > 1 ? 1 : 0;
@@ -347,6 +351,7 @@ export function Waterfall({ columns, rows, width, height }) {
         return (
           <g key={i}
             onMouseEnter={() => setTip({ x: x + barW / 2, y, label: bar.label, value: bar.value })}
+            onTouchStart={() => setTip({ x: x + barW / 2, y, label: bar.label, value: bar.value })}
             onMouseLeave={() => setTip(null)}
           >
             <rect x={x} y={y} width={barW} height={h} fill={color} rx={2} opacity={0.85} />
@@ -365,7 +370,7 @@ export function Waterfall({ columns, rows, width, height }) {
 // HISTOGRAM
 // ---------------------------------------------------------------------------
 
-export function Histogram({ columns, rows, width, height }) {
+export function Histogram({ columns, rows, width, height, config }) {
   const [tip, setTip] = useState(null);
 
   // Find the first numeric column
@@ -422,9 +427,10 @@ export function Histogram({ columns, rows, width, height }) {
         return (
           <g key={i}
             onMouseEnter={() => setTip({ x: x + barW / 2, y, label: `${fmtNum(binStart)} - ${fmtNum(binEnd)}`, value: count })}
+            onTouchStart={() => setTip({ x: x + barW / 2, y, label: `${fmtNum(binStart)} - ${fmtNum(binEnd)}`, value: count })}
             onMouseLeave={() => setTip(null)}
           >
-            <rect x={x + 0.5} y={y} width={Math.max(0, barW - 1)} height={h} fill={COLORS[0]} opacity={0.8} />
+            <rect x={x + 0.5} y={y} width={Math.max(0, barW - 1)} height={h} fill={getSeriesColor(config, 0, null)} opacity={0.8} />
           </g>
         );
       })}
@@ -444,7 +450,7 @@ export function Histogram({ columns, rows, width, height }) {
 // RADAR / SPIDER
 // ---------------------------------------------------------------------------
 
-export function Radar({ columns, rows, width, height }) {
+export function Radar({ columns, rows, width, height, config }) {
   if (!rows.length) return null;
   const metrics = columns.filter((_, i) => {
     const v = parseNum(rows[0][i]);
@@ -506,9 +512,9 @@ export function Radar({ columns, rows, width, height }) {
         );
       })}
       {/* Data polygon */}
-      <polygon points={polyStr} fill={COLORS[0]} fillOpacity={0.25} stroke={COLORS[0]} strokeWidth={2} />
+      <polygon points={polyStr} fill={getSeriesColor(config, 0, null)} fillOpacity={0.25} stroke={getSeriesColor(config, 0, null)} strokeWidth={2} />
       {points.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r={3.5} fill={COLORS[0]} stroke="#fff" strokeWidth={1} />
+        <circle key={i} cx={p.x} cy={p.y} r={3.5} fill={getSeriesColor(config, 0, null)} stroke="#fff" strokeWidth={1} />
       ))}
     </svg>
   );
@@ -518,7 +524,7 @@ export function Radar({ columns, rows, width, height }) {
 // BUBBLE (scatter with size)
 // ---------------------------------------------------------------------------
 
-export function Bubble({ columns, rows, width, height }) {
+export function Bubble({ columns, rows, width, height, config }) {
   const [tip, setTip] = useState(null);
 
   // Expect: col0 = x, col1 = y, col2 = size
@@ -557,8 +563,9 @@ export function Bubble({ columns, rows, width, height }) {
         const r = 4 + (d.size / maxSize) * 24;
         return (
           <circle key={i} cx={xPos(d.x)} cy={yPos(d.y)} r={r}
-            fill={COLORS[i % COLORS.length]} fillOpacity={0.6} stroke={COLORS[i % COLORS.length]} strokeWidth={1}
+            fill={getSeriesColor(config, i, d.label)} fillOpacity={0.6} stroke={getSeriesColor(config, i, d.label)} strokeWidth={1}
             onMouseEnter={() => setTip({ x: xPos(d.x), y: yPos(d.y), label: d.label, value: d.size })}
+            onTouchStart={() => setTip({ x: xPos(d.x), y: yPos(d.y), label: d.label, value: d.size })}
             onMouseLeave={() => setTip(null)}
           />
         );
@@ -684,7 +691,7 @@ export function Bullet({ columns, rows, width, height, config }) {
 // SANKEY (simplified — 2-column flow)
 // ---------------------------------------------------------------------------
 
-export function Sankey({ columns, rows, width, height }) {
+export function Sankey({ columns, rows, width, height, config }) {
   const [tip, setTip] = useState(null);
 
   if (!rows || rows.length === 0 || !columns || columns.length < 3) {
@@ -763,9 +770,10 @@ export function Sankey({ columns, rows, width, height }) {
     const d = `M ${sx} ${sy1} C ${mx} ${sy1}, ${mx} ${ty1}, ${tx} ${ty1} L ${tx} ${ty2} C ${mx} ${ty2}, ${mx} ${sy2}, ${sx} ${sy2} Z`;
 
     return (
-      <path key={i} d={d} fill={COLORS[i % COLORS.length]} fillOpacity={0.35}
-        stroke={COLORS[i % COLORS.length]} strokeWidth={0.5}
+      <path key={i} d={d} fill={getSeriesColor(config, i, l.source)} fillOpacity={0.35}
+        stroke={getSeriesColor(config, i, l.source)} strokeWidth={0.5}
         onMouseEnter={() => setTip({ x: mx, y: (sy1 + ty1) / 2, label: `${l.source} → ${l.target}`, value: l.value })}
+        onTouchStart={() => setTip({ x: mx, y: (sy1 + ty1) / 2, label: `${l.source} → ${l.target}`, value: l.value })}
         onMouseLeave={() => setTip(null)}
       />
     );
@@ -779,7 +787,7 @@ export function Sankey({ columns, rows, width, height }) {
         const p = sourcePos[s];
         return (
           <g key={`s-${i}`}>
-            <rect x={p.x} y={p.y} width={nodeW} height={p.h} fill={COLORS[i % COLORS.length]} rx={3} />
+            <rect x={p.x} y={p.y} width={nodeW} height={p.h} fill={getSeriesColor(config, i, s)} rx={3} />
             <text x={p.x - 4} y={p.y + p.h / 2 + 4} textAnchor="end" fill="var(--havn-text)" fontSize={11}>
               {trunc(s, 14)}
             </text>
@@ -791,7 +799,7 @@ export function Sankey({ columns, rows, width, height }) {
         const p = targetPos[t];
         return (
           <g key={`t-${i}`}>
-            <rect x={p.x} y={p.y} width={nodeW} height={p.h} fill={COLORS[(sources.length + i) % COLORS.length]} rx={3} />
+            <rect x={p.x} y={p.y} width={nodeW} height={p.h} fill={getSeriesColor(config, sources.length + i, t)} rx={3} />
             <text x={p.x + nodeW + 4} y={p.y + p.h / 2 + 4} textAnchor="start" fill="var(--havn-text)" fontSize={11}>
               {trunc(t, 14)}
             </text>

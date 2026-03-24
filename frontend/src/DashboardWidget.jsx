@@ -352,6 +352,7 @@ function renderWidgetContent(widget, data, onChartClick) {
           xAxisLabel={config?.xAxisLabel}
           yAxisLabel={config?.yAxisLabel}
           onDataClick={onChartClick}
+          config={config}
         />
       </div>
     );
