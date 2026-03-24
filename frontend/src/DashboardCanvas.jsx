@@ -193,6 +193,8 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm }) {
     else if (preset === "text") Object.assign(defaults, { widget_type: "text", chart_type: null, position: { x: 1, y: maxY, w: 6, h: 3 } });
     else if (preset === "line") Object.assign(defaults, { chart_type: "line", position: { x: 1, y: maxY, w: 12, h: 5 } });
     else if (preset === "bar") Object.assign(defaults, { chart_type: "bar", position: { x: 1, y: maxY, w: 8, h: 4 } });
+    else if (preset === "image") Object.assign(defaults, { widget_type: "image", chart_type: null, position: { x: 1, y: maxY, w: 8, h: 4 } });
+    else if (preset === "divider") Object.assign(defaults, { widget_type: "divider", chart_type: null, position: { x: 1, y: maxY, w: 24, h: 1 } });
 
     if (onEditWidget) onEditWidget(defaults);
   }
@@ -637,6 +639,8 @@ function AddWidgetMenu({ onAdd }) {
     { id: "kpi", label: "KPI Card", desc: "Big number + delta", icon: "#" },
     { id: "table", label: "Data Table", desc: "Rows and columns", icon: "≡" },
     { id: "text", label: "Text Note", desc: "Markdown content", icon: "¶" },
+    { id: "image", label: "Image", desc: "Embed an image", icon: "🖼" },
+    { id: "divider", label: "Divider", desc: "Horizontal separator", icon: "—" },
   ];
 
   return (
