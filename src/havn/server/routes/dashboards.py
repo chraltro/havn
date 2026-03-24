@@ -40,10 +40,11 @@ class DashboardUpdate(BaseModel):
     layout: dict | None = None
     filters: list | None = None
     settings: dict | None = None
+    is_template: bool | None = None
 
 
 class WidgetCreate(BaseModel):
-    widget_type: str = Field(..., pattern=r"^(chart|kpi|table|text|filter|image)$")
+    widget_type: str = Field(..., pattern=r"^(chart|kpi|table|text|filter|image|divider)$")
     chart_type: str | None = None
     title: str = Field(default="", max_length=500)
     sql_query: str | None = Field(default=None, max_length=100_000)
@@ -63,7 +64,7 @@ class WidgetCreate(BaseModel):
 
 
 class WidgetUpdate(BaseModel):
-    widget_type: str | None = Field(default=None, pattern=r"^(chart|kpi|table|text|filter|image)$")
+    widget_type: str | None = Field(default=None, pattern=r"^(chart|kpi|table|text|filter|image|divider)$")
     chart_type: str | None = None
     title: str | None = Field(default=None, max_length=500)
     sql_query: str | None = Field(default=None, max_length=100_000)
@@ -362,6 +363,9 @@ def update_dashboard(
     if req.settings is not None:
         sets.append("settings = ?")
         params.append(json.dumps(req.settings))
+    if req.is_template is not None:
+        sets.append("is_template = ?")
+        params.append(req.is_template)
 
     params.append(dashboard_id)
     row = conn.execute(
