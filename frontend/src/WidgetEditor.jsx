@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { api } from "./api";
 import { useDashboard } from "./DashboardContext";
 import { DASHBOARD_CHART_TYPES, analyzeColumns, detectBestChart, fmtNum, COLORS } from "./chartUtils";
+import { DASHBOARD_CHART_TYPES_SET } from "./DashboardWidget";
 import ChartPanel from "./ChartPanel";
 import DashboardChart from "./DashboardCharts";
 import SortableTable from "./SortableTable";
@@ -112,19 +113,33 @@ function buildSQL(config) {
     .map(f => {
       if (f.op === "IS NULL") return `${f.column} IS NULL`;
       if (f.op === "IS NOT NULL") return `${f.column} IS NOT NULL`;
-      if (f.op === "LIKE") return `${f.column} ILIKE '%${(f.value || "").replace(/'/g, "''")}%'`;
-      return `${f.column} ${f.op} '${(f.value || "").replace(/'/g, "''")}'`;
+      if (f.op === "LIKE") {
+        const escaped = (f.value || "").replace(/'/g, "''").replace(/%/g, "\\%").replace(/_/g, "\\_");
+        return `${f.column} ILIKE '%${escaped}%' ESCAPE '\\'`;
+      }
+      // Use unquoted value for numeric comparisons
+      const val = f.value || "";
+      if (/^-?\d+(\.\d+)?$/.test(val) && [">", "<", ">=", "<=", "=", "!="].includes(f.op)) {
+        return `${f.column} ${f.op} ${val}`;
+      }
+      return `${f.column} ${f.op} '${val.replace(/'/g, "''")}'`;
     });
 
-  // ORDER BY — use expressions for date-truncated columns
+  // ORDER BY — use aliases for aggregated/date-grouped columns
   const orderParts = orderBy
     .filter(o => o.column && o.dir)
     .map(o => {
-      // Find the column to check if it has date grouping
       const col = columns.find(c => c.name === o.column);
       const dg = col && dateGrouping?.[col.name];
+      const agg = col && aggregations[col.name];
+      // Date-grouped columns: use the alias (e.g., order_date_month)
       if (dg && col && isTemporal(col.type)) {
-        return `DATE_TRUNC('${dg}', ${o.column}) ${o.dir}`;
+        return `${col.name}_${dg} ${o.dir}`;
+      }
+      // Aggregated columns: use the alias (e.g., revenue_sum)
+      if (agg) {
+        const alias = agg === "COUNT_DISTINCT" ? `${o.column}_count_distinct` : `${o.column}_${agg.toLowerCase()}`;
+        return `${alias} ${o.dir}`;
       }
       return `${o.column} ${o.dir}`;
     });
@@ -319,7 +334,7 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
       widget_type: widgetType,
       chart_type: widgetType === "chart" ? chartType : null,
       title: title || (selectedTable ? selectedTable.name : "Widget"),
-      sql_query: finalSQL,
+      sql_query: widgetType === "text" ? "" : finalSQL,
       config: configWithVisual,
       cache_ttl: cacheTtl,
     };
@@ -806,7 +821,14 @@ function VisualBuilder({
                 onChange={(e) => setOrderBy(prev => prev.map((x, i) => i === oi ? { ...x, column: e.target.value } : x))}
               >
                 <option value="">Column...</option>
-                {selectedColumns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                {selectedColumns.map(c => {
+                  const agg = aggregations[c.name];
+                  const dg = dateGrouping[c.name];
+                  let label = c.name;
+                  if (agg) label = `${agg}(${c.name})`;
+                  else if (dg) label = `${c.name} (${dg})`;
+                  return <option key={c.name} value={c.name}>{label}</option>;
+                })}
               </select>
               <select
                 style={st.filterOpSelect}
@@ -850,6 +872,7 @@ function VisualBuilder({
             chartType={chartType}
             setChartType={setChartType}
             typeGroups={typeGroups}
+            hideTextContent
             suggestions={suggestions}
             title={title}
             setTitle={setTitle}
@@ -925,7 +948,7 @@ function ChartAndTypeConfig({
   widgetType, setWidgetType, chartType, setChartType,
   typeGroups, suggestions, title, setTitle,
   widgetConfig, setWidgetConfig, cacheTtl, setCacheTtl,
-  previewData,
+  previewData, hideTextContent,
 }) {
   return (
     <>
@@ -1020,19 +1043,23 @@ function ChartAndTypeConfig({
       )}
 
       {/* KPI config */}
-      {widgetType === "kpi" && previewData?.columns && (
+      {widgetType === "kpi" && (
         <div style={st.section}>
           <div style={st.sectionTitle2}>KPI Settings</div>
-          <label style={st.fieldLabel}>Value column</label>
-          <select style={st.select} value={widgetConfig?.value_column || ""} onChange={(e) => setWidgetConfig({ ...widgetConfig, value_column: e.target.value })}>
-            <option value="">Auto (first)</option>
-            {previewData.columns.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <label style={{ ...st.fieldLabel, marginTop: 8 }}>Compare to</label>
-          <select style={st.select} value={widgetConfig?.comparison_column || ""} onChange={(e) => setWidgetConfig({ ...widgetConfig, comparison_column: e.target.value })}>
-            <option value="">None</option>
-            {previewData.columns.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
+          {previewData?.columns && (
+            <>
+              <label style={st.fieldLabel}>Value column</label>
+              <select style={st.select} value={widgetConfig?.value_column || ""} onChange={(e) => setWidgetConfig({ ...widgetConfig, value_column: e.target.value })}>
+                <option value="">Auto (first)</option>
+                {previewData.columns.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <label style={{ ...st.fieldLabel, marginTop: 8 }}>Compare to</label>
+              <select style={st.select} value={widgetConfig?.comparison_column || ""} onChange={(e) => setWidgetConfig({ ...widgetConfig, comparison_column: e.target.value })}>
+                <option value="">None</option>
+                {previewData.columns.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </>
+          )}
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <div style={{ flex: 1 }}>
               <label style={st.fieldLabel}>Prefix</label>
@@ -1046,8 +1073,8 @@ function ChartAndTypeConfig({
         </div>
       )}
 
-      {/* Text content */}
-      {widgetType === "text" && (
+      {/* Text content (skip if already shown by visual builder) */}
+      {widgetType === "text" && !hideTextContent && (
         <div style={st.section}>
           <div style={st.sectionTitle2}>Content</div>
           <textarea
@@ -1098,7 +1125,7 @@ function PreviewArea({ previewing, previewError, previewData, widgetType, chartT
           </div>
         ) : (
           <div style={{ flex: 1, padding: 8, overflow: "hidden" }}>
-            {["gauge", "treemap", "heatmap", "funnel", "waterfall", "histogram", "radar", "bubble", "sparkline", "progress", "bullet", "sankey"].includes(chartType) ? (
+            {DASHBOARD_CHART_TYPES_SET.has(chartType) ? (
               <DashboardChart type={chartType} columns={columns} rows={rows} width={420} height={300} config={widgetConfig} />
             ) : (
               <ChartPanel columns={columns} rows={rows} forcedType={chartType} compact={true} />
@@ -1117,16 +1144,41 @@ function PreviewArea({ previewing, previewError, previewData, widgetType, chartT
 function KPIPreview({ columns, rows, config }) {
   if (!rows?.length) return <span style={{ opacity: 0.4 }}>No data</span>;
   const valCol = config?.value_column || columns[0];
+  const compCol = config?.comparison_column || (columns.length > 1 ? columns[1] : null);
   const idx = columns.indexOf(valCol);
+  const compIdx = compCol ? columns.indexOf(compCol) : -1;
   const value = idx >= 0 ? rows[0][idx] : rows[0][0];
+  const comp = compIdx >= 0 ? rows[0][compIdx] : null;
   const n = Number(value);
   const prefix = config?.prefix || "";
   const suffix = config?.suffix || "";
+
+  let delta = null;
+  let deltaColor = "var(--havn-text-secondary)";
+  if (comp !== null && comp !== undefined) {
+    const nVal = Number(value);
+    const nComp = Number(comp);
+    if (!isNaN(nVal) && !isNaN(nComp) && nComp !== 0) {
+      delta = ((nVal - nComp) / Math.abs(nComp)) * 100;
+      deltaColor = delta > 0 ? "var(--havn-green, #22c55e)" : delta < 0 ? "var(--havn-red, #ef4444)" : "var(--havn-text-secondary)";
+    }
+  }
+
   return (
     <div style={{ textAlign: "center" }}>
       <div style={{ fontSize: 48, fontWeight: 700, color: "var(--havn-text)" }}>
         {prefix}{isNaN(n) ? String(value) : fmtNum(n)}{suffix}
       </div>
+      {delta !== null && (
+        <div style={{ fontSize: 14, color: deltaColor, fontWeight: 500, marginTop: 4 }}>
+          {delta > 0 ? "\u25B2" : delta < 0 ? "\u25BC" : "\u2014"} {Math.abs(delta).toFixed(1)}%
+        </div>
+      )}
+      {compCol && config?.comparison_column && (
+        <div style={{ fontSize: 12, color: "var(--havn-text-secondary)", marginTop: 2 }}>
+          vs {compCol}: {comp !== null ? fmtNum(Number(comp)) : "\u2014"}
+        </div>
+      )}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import SortableTable from "./SortableTable";
 import ChartPanel from "./ChartPanel";
 import DashboardChart from "./DashboardCharts";
 
-const DASHBOARD_CHART_TYPES = new Set([
+export const DASHBOARD_CHART_TYPES_SET = new Set([
   "gauge", "treemap", "heatmap", "funnel", "waterfall", "histogram",
   "radar", "bubble", "sparkline", "progress", "bullet", "sankey",
 ]);
@@ -338,7 +338,7 @@ function renderWidgetContent(widget, data, onChartClick) {
 
   if (widget_type === "chart") {
     // Dashboard-specific chart types (gauge, treemap, etc.) use ResponsiveChart
-    if (DASHBOARD_CHART_TYPES.has(chart_type)) {
+    if (DASHBOARD_CHART_TYPES_SET.has(chart_type)) {
       return <ResponsiveChart type={chart_type} columns={columns} rows={rows} config={config} />;
     }
     // Standard chart types (bar, line, etc.) use ChartPanel
