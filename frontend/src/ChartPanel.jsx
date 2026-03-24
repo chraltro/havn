@@ -144,6 +144,7 @@ const CHART_TYPES = [
   { id: "donut", label: "Donut" },
   { id: "hbar", label: "H-Bar" },
   { id: "stacked", label: "Stacked" },
+  { id: "stacked100", label: "100% Stacked" },
 ];
 
 const PAD = { top: 28, right: 28, bottom: 52, left: 60 };
@@ -172,6 +173,8 @@ function ChartIcon({ type }) {
       return <svg {...p}><rect x="0" y="1" width="10" height="3" rx="0.5" /><rect x="0" y="5.5" width="14" height="3" rx="0.5" /><rect x="0" y="10" width="8" height="3" rx="0.5" /></svg>;
     case "stacked":
       return <svg {...p}><rect x="1" y="5" width="3" height="4" opacity="0.7" /><rect x="1" y="9" width="3" height="5" opacity="0.35" /><rect x="6.5" y="2" width="3" height="5" opacity="0.7" /><rect x="6.5" y="7" width="3" height="7" opacity="0.35" /><rect x="12" y="3" width="3" height="4" opacity="0.7" /><rect x="12" y="7" width="3" height="7" opacity="0.35" /></svg>;
+    case "stacked100":
+      return <svg {...p}><rect x="1" y="0" width="3" height="6" opacity="0.7" /><rect x="1" y="6" width="3" height="8" opacity="0.35" /><rect x="6.5" y="0" width="3" height="8" opacity="0.7" /><rect x="6.5" y="8" width="3" height="6" opacity="0.35" /><rect x="12" y="0" width="3" height="5" opacity="0.7" /><rect x="12" y="5" width="3" height="9" opacity="0.35" /></svg>;
     default:
       return null;
   }
@@ -374,6 +377,7 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
       case "donut": return renderPie(true);
       case "hbar": return renderHBar();
       case "stacked": return renderStacked();
+      case "stacked100": return renderStacked100();
       default: return renderBar();
     }
   }
@@ -860,6 +864,93 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
                   showTip(e.touches[0], labels[i], [
                     ...series.map((ss) => ({ name: ss.name, value: Math.max(0, ss.values[i]), color: ss.color })),
                     { name: "Total", value: total, color: "var(--havn-text-secondary)" },
+                  ]);
+                }}
+                onMouseLeave={hideTip}
+              />
+            );
+          });
+        })}
+      </g>
+    );
+  }
+
+  // ─── 100% STACKED BAR CHART ────────────────────────────
+  function renderStacked100() {
+    const { labels, series } = chartData;
+    const scale = niceScale(0, 100);
+    const yRange = scale.max - scale.min || 1;
+    const n = labels.length;
+    const groupW = plotW / n;
+    const barW = Math.min(groupW * 0.7, 48);
+    const yPos = (v) => plotH - ((v - scale.min) / yRange) * plotH;
+    const avgLabelLen = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
+    const estLabelPx = Math.max(avgLabelLen * 7, 36);
+    const shouldRotate = groupW < estLabelPx * 0.7 && n > 4;
+    const maxLabels = 10;
+    const pixelStep = Math.max(1, Math.ceil((shouldRotate ? estLabelPx * 0.45 : estLabelPx) / (groupW || 1)));
+    const countStep = Math.max(1, Math.ceil(n / maxLabels));
+    const labelStep = Math.max(pixelStep, countStep);
+
+    return (
+      <g transform={`translate(${PAD.left},${PAD.top})`}>
+        {/* Grid */}
+        {showGrid && scale.ticks.map((t) => (
+          <g key={t}>
+            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
+            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{t}%</text>
+          </g>
+        ))}
+        {/* X labels */}
+        {labels.map((l, i) => {
+          if (i % labelStep !== 0 && i !== n - 1) return null;
+          const fullLabel = String(l);
+          const lx = i * groupW + groupW / 2;
+          return shouldRotate
+            ? <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-35, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, 16)}</text>
+            : <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l)}</text>;
+        })}
+        {/* 100% stacked segments */}
+        {labels.map((_, i) => {
+          const stackTotal = series.reduce((sum, s) => sum + Math.max(0, s.values[i]), 0);
+          if (stackTotal === 0) return null;
+          let cumPct = 0;
+          return series.map((s, si) => {
+            const val = Math.max(0, s.values[i]);
+            const pct = (val / stackTotal) * 100;
+            const y0 = yPos(cumPct);
+            cumPct += pct;
+            const y1 = yPos(cumPct);
+            const h = Math.max(y0 - y1, 0);
+            const x = i * groupW + (groupW - barW) / 2;
+            const isHovered = hoveredIndex === i;
+            return (
+              <rect key={`${si}-${i}`}
+                x={x} y={y1} width={barW} height={Math.max(h, val > 0 ? 1 : 0)}
+                fill={s.color}
+                rx={si === series.length - 1 ? Math.min(3, barW / 4) : 0}
+                opacity={hoveredIndex !== null && !isHovered ? 0.3 : 1}
+                style={{ transition: "opacity 0.15s", cursor: "pointer" }}
+                onMouseMove={(e) => {
+                  setHoveredIndex(i);
+                  showTip(e, labels[i], [
+                    ...series.map((ss) => {
+                      const absVal = Math.max(0, ss.values[i]);
+                      const total = series.reduce((sum, s2) => sum + Math.max(0, s2.values[i]), 0);
+                      const p = total > 0 ? ((absVal / total) * 100).toFixed(1) : "0.0";
+                      return { name: ss.name, value: `${p}% (${fmtNum(absVal)})`, color: ss.color };
+                    }),
+                  ]);
+                }}
+                onTouchStart={(e) => {
+                  setHoveredIndex(i);
+                  showTip(e.touches[0], labels[i], [
+                    ...series.map((ss) => {
+                      const absVal = Math.max(0, ss.values[i]);
+                      const total = series.reduce((sum, s2) => sum + Math.max(0, s2.values[i]), 0);
+                      const p = total > 0 ? ((absVal / total) * 100).toFixed(1) : "0.0";
+                      return { name: ss.name, value: `${p}% (${fmtNum(absVal)})`, color: ss.color };
+                    }),
                   ]);
                 }}
                 onMouseLeave={hideTip}
