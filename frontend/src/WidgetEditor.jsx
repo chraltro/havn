@@ -1365,6 +1365,20 @@ function ChartAndTypeConfig({
         </div>
       )}
 
+      {/* Drill-down toggle (chart widgets only) */}
+      {widgetType === "chart" && (
+        <div style={st.section}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 16px", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={!!widgetConfig?.drill_down?.enabled}
+              onChange={(e) => setWidgetConfig({ ...widgetConfig, drill_down: { ...widgetConfig?.drill_down, enabled: e.target.checked } })}
+            />
+            <span style={{ fontSize: 12, color: "var(--havn-text)" }}>Enable drill-down on click</span>
+          </label>
+        </div>
+      )}
+
       {/* Chart Style (collapsible) */}
       {widgetType === "chart" && (
         <ChartStylePanel widgetConfig={widgetConfig} setWidgetConfig={setWidgetConfig} previewData={previewData} />

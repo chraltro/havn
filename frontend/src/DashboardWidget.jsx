@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useDashboard } from "./DashboardContext";
+import { api } from "./api";
 import SortableTable from "./SortableTable";
 import ChartPanel from "./ChartPanel";
 import DashboardChart from "./DashboardCharts";
@@ -145,13 +146,16 @@ export default function DashboardWidget({
   onTitleChange,
   style,
 }) {
-  const { editMode, widgetData, refreshWidget, setCrossFilter, updateWidget } = useDashboard();
+  const { editMode, widgetData, refreshWidget, setCrossFilter, updateWidget, dashboard } = useDashboard();
   const [showMenu, setShowMenu] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(widget.title || "");
   const [isWidgetFullscreen, setIsWidgetFullscreen] = useState(false);
+  const [drillState, setDrillState] = useState(null); // { column, value, level }
+  const [drillData, setDrillData] = useState(null);
   const menuRef = useRef(null);
-  const data = widgetData[widget.id];
+  const rawData = widgetData[widget.id];
+  const data = drillState && drillData ? drillData : rawData;
 
   // Close widget fullscreen on Escape
   useEffect(() => {
@@ -186,8 +190,24 @@ export default function DashboardWidget({
 
   const handleChartClick = (column, value) => {
     if (column && value !== undefined) {
-      setCrossFilter(widget.id, column, value);
+      if (widget.config?.drill_down?.enabled) {
+        // Enter drill-down mode
+        setDrillState({ column, value, level: 0 });
+        // Fetch drilled-down data
+        if (dashboard) {
+          api.queryWidget(dashboard.id, widget.id, { [column]: value }).then(result => {
+            setDrillData({ ...result, loading: false, error: result.error || null, _fetchedAt: new Date().toISOString(), _queryDuration: rawData?._queryDuration });
+          }).catch(() => {});
+        }
+      } else {
+        setCrossFilter(widget.id, column, value);
+      }
     }
+  };
+
+  const resetDrill = () => {
+    setDrillState(null);
+    setDrillData(null);
   };
 
   return (
@@ -287,6 +307,15 @@ export default function DashboardWidget({
         </div>
       </div>}
 
+      {/* Drill-down breadcrumb */}
+      {drillState && (
+        <div style={st.drillBreadcrumb}>
+          <button style={st.drillBreadcrumbBtn} onClick={resetDrill}>All</button>
+          <span style={{ color: "var(--havn-text-secondary)", fontSize: 11 }}>&rsaquo;</span>
+          <span style={{ fontSize: 11, color: "var(--havn-text)", fontWeight: 500 }}>{String(drillState.value)}</span>
+        </div>
+      )}
+
       {/* Content */}
       <div style={st.content}>
         {isLoading && !hasData && (
@@ -327,11 +356,16 @@ export default function DashboardWidget({
         {hasData && !hasError && data.rows.length > 0 && renderWidgetContent(widget, data, handleChartClick)}
       </div>
 
-      {/* Footer — row count + freshness */}
+      {/* Footer — row count + freshness + slow query warning */}
       {hasData && data.row_count > 0 && (widget.position?.h || 4) >= 3 && (
         <div style={st.footer}>
           <span>{data.row_count} row{data.row_count !== 1 ? "s" : ""}</span>
           {data._fetchedAt && <span> · {timeAgo(data._fetchedAt)}</span>}
+          {data._queryDuration > 2000 && (
+            <span style={{ marginLeft: "auto", color: "var(--havn-yellow)", fontWeight: 500 }} title={`Query took ${(data._queryDuration / 1000).toFixed(1)}s`}>
+              {"\u26A0"} {(data._queryDuration / 1000).toFixed(1)}s
+            </span>
+          )}
         </div>
       )}
 
@@ -812,5 +846,24 @@ const st = {
     background: "var(--havn-border)",
     opacity: 0.4,
     animation: "pulse 1.5s ease-in-out infinite",
+  },
+  drillBreadcrumb: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "3px 10px",
+    borderBottom: "1px solid var(--havn-border)",
+    background: "var(--havn-bg)",
+    flexShrink: 0,
+    fontSize: 11,
+  },
+  drillBreadcrumbBtn: {
+    background: "none",
+    border: "none",
+    color: "var(--havn-accent)",
+    cursor: "pointer",
+    fontSize: 11,
+    padding: 0,
+    textDecoration: "underline",
   },
 };
