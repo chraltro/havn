@@ -1016,6 +1016,28 @@ function ChartStylePanel({ widgetConfig, setWidgetConfig, previewData }) {
 
   return (
     <div style={st.section}>
+      {/* Background */}
+      {sectionHeader("background", "Background")}
+      {openSections.background && (
+        <div style={{ padding: "4px 16px 10px", display: "flex", alignItems: "center", gap: 8 }}>
+          <label style={{ fontSize: 12, color: "var(--havn-text)" }}>Background</label>
+          <input
+            type="color"
+            value={widgetConfig.bgColor || "#1e1e2e"}
+            style={{ width: 32, height: 28, border: "1px solid var(--havn-border)", borderRadius: 4, padding: 1, cursor: "pointer", background: "none" }}
+            onChange={(e) => upd({ bgColor: e.target.value })}
+          />
+          {widgetConfig.bgColor && (
+            <button
+              style={{ ...st.addSmallBtn, marginTop: 0 }}
+              onClick={() => upd({ bgColor: null })}
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Palette */}
       {sectionHeader("palette", "Palette")}
       {openSections.palette && (
