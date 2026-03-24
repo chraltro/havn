@@ -1,4 +1,5 @@
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { api } from "./api";
 import { useDashboard } from "./DashboardContext";
 import DashboardWidget from "./DashboardWidget";
 import DashboardFilterManager from "./DashboardFilterManager";
@@ -78,10 +79,30 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
   const [showRefreshMenu, setShowRefreshMenu] = useState(false);
   const [showEmbedModal, setShowEmbedModal] = useState(false);
   const [embedCopied, setEmbedCopied] = useState(false);
+  const [temporalColumns, setTemporalColumns] = useState([]);
   const [activePageId, setActivePageId] = useState(null);
   const [pageContextMenu, setPageContextMenu] = useState(null);
   const gridRef = useRef(null);
   const refreshMenuRef = useRef(null);
+
+  // Load temporal columns when settings panel opens
+  useEffect(() => {
+    if (!showSettings) return;
+    api.getAutocomplete().then(data => {
+      const TEMPORAL_RE = /^(DATE|TIMESTAMP|TIME|INTERVAL)/i;
+      const cols = [];
+      const seen = new Set();
+      for (const item of (data?.columns || [])) {
+        const colName = item.name;
+        const colType = item.type || "";
+        if (colName && TEMPORAL_RE.test(colType) && !seen.has(colName)) {
+          seen.add(colName);
+          cols.push(colName);
+        }
+      }
+      setTemporalColumns(cols);
+    }).catch(() => {});
+  }, [showSettings]);
 
   // --- Responsive layout: track container width for column breakpoints ---
   const [effectiveCols, setEffectiveCols] = useState(GRID_COLS);
@@ -769,6 +790,21 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
                 />
                 Dark mode
               </label>
+
+              <label style={{ ...st.settingsLabel, marginTop: 12 }}>Default time column</label>
+              <select
+                style={st.settingsInput}
+                value={dashboard?.settings?.default_time_column || ""}
+                onChange={(e) => saveDashboard({ settings: { ...dashboard.settings, default_time_column: e.target.value || undefined } })}
+              >
+                <option value="">None</option>
+                {temporalColumns.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <div style={{ fontSize: 10, color: "var(--havn-text-secondary)", marginTop: 2 }}>
+                Auto-select this column when adding widgets via the visual builder
+              </div>
 
               <div style={{ marginTop: 16, fontSize: 12, color: "var(--havn-text-secondary)" }}>
                 <div>Created by: {dashboard?.created_by || "—"}</div>
