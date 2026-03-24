@@ -443,7 +443,7 @@ export default function DashboardWidget({
   );
 }
 
-function PaginatedTable({ columns, rows, conditionalRules }) {
+function PaginatedTable({ columns, rows, conditionalRules, showSummary }) {
   const [page, setPage] = useState(0);
   const pageSize = 50;
   const totalPages = Math.ceil(rows.length / pageSize);
@@ -452,7 +452,7 @@ function PaginatedTable({ columns, rows, conditionalRules }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
       <div style={{ flex: 1, overflow: "auto" }}>
-        <SortableTable columns={columns} rows={pagedRows} conditionalRules={conditionalRules} />
+        <SortableTable columns={columns} rows={pagedRows} conditionalRules={conditionalRules} showSummary={showSummary} />
       </div>
       {totalPages > 1 && (
         <div style={st.pagination}>
@@ -492,7 +492,7 @@ function renderWidgetContent(widget, data, onChartClick) {
   const processedRows = applyNullHandling(rows, nullHandling);
 
   if (widget_type === "table") {
-    return <PaginatedTable columns={displayColumns} rows={processedRows} conditionalRules={config?.conditionalRules} />;
+    return <PaginatedTable columns={displayColumns} rows={processedRows} conditionalRules={config?.conditionalRules} showSummary={config?.showSummary} />;
   }
 
   if (widget_type === "kpi") {

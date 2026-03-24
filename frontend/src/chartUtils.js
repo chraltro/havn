@@ -139,6 +139,7 @@ export const DASHBOARD_CHART_TYPES = [
   { id: "scatter", label: "Scatter", group: "Basic", desc: "Plot two numeric values as points. Best for correlations." },
   { id: "pie", label: "Pie", group: "Basic", desc: "Show proportions of a whole. Best for <7 categories with balanced values." },
   { id: "donut", label: "Donut", group: "Basic", desc: "Like pie with a center total. Best for <7 categories." },
+  { id: "grouped", label: "Grouped", group: "Basic", desc: "Side-by-side bars comparing multiple measures per category." },
   { id: "hbar", label: "H-Bar", group: "Basic", desc: "Horizontal bars — readable labels even with 20+ categories." },
   { id: "stacked", label: "Stacked", group: "Basic", desc: "Bars stacked to show composition of each group." },
   { id: "stacked_area", label: "Stacked Area", group: "Basic", desc: "Stacked filled area chart. Good for part-of-whole trends." },

@@ -1246,14 +1246,58 @@ function ChartStylePanel({ widgetConfig, setWidgetConfig, previewData }) {
         </div>
       )}
 
+      {/* Date format */}
+      {sectionHeader("dateFormat", "Date Format")}
+      {openSections.dateFormat && (
+        <div style={{ padding: "4px 16px 10px" }}>
+          <select
+            style={{ ...st.select, margin: 0, width: "100%" }}
+            value={widgetConfig.dateFormat || "auto"}
+            onChange={(e) => upd({ dateFormat: e.target.value })}
+          >
+            <option value="auto">Auto</option>
+            <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+            <option value="MMM DD">MMM DD (Jan 15)</option>
+            <option value="MMM YYYY">MMM YYYY (Jan 2024)</option>
+            <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+            <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+            <option value="YYYY">YYYY</option>
+            <option value="Q YYYY">Q1 2024</option>
+          </select>
+        </div>
+      )}
+
       {/* Data labels */}
       {sectionHeader("dataLabels", "Data Labels")}
       {openSections.dataLabels && (
-        <div style={{ padding: "4px 16px 10px" }}>
+        <div style={{ padding: "4px 16px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--havn-text)" }}>
             <input type="checkbox" checked={!!widgetConfig.showDataLabels} onChange={(e) => upd({ showDataLabels: e.target.checked })} style={{ accentColor: "var(--havn-accent)" }} />
             Show data labels
           </label>
+          {widgetConfig.showDataLabels && (
+            <>
+              <div>
+                <label style={{ ...st.fieldLabel, marginLeft: 0, marginBottom: 3 }}>Position</label>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {["above", "center", "below"].map(v => (
+                    <label key={v} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 12, color: "var(--havn-text)", cursor: "pointer" }}>
+                      <input type="radio" name="dataLabelPos" checked={(widgetConfig.dataLabelPosition || "above") === v} onChange={() => upd({ dataLabelPosition: v })} style={{ accentColor: "var(--havn-accent)" }} />
+                      {v.charAt(0).toUpperCase() + v.slice(1)}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label style={{ ...st.fieldLabel, marginLeft: 0, marginBottom: 3 }}>Format</label>
+                <select style={{ ...st.select, margin: 0, width: "100%" }} value={widgetConfig.dataLabelFormat || "value"} onChange={(e) => upd({ dataLabelFormat: e.target.value })}>
+                  <option value="value">Value</option>
+                  <option value="percent">Percentage</option>
+                  <option value="both">Value + %</option>
+                </select>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -1318,6 +1362,71 @@ function ChartStylePanel({ widgetConfig, setWidgetConfig, previewData }) {
             onClick={() => upd({ referenceLines: [...refLines, { value: 0, label: "", color: "#ef4444", style: "dashed" }] })}
           >
             + Add reference line
+          </button>
+        </div>
+      )}
+
+      {/* Reference bands (shaded ranges) */}
+      {sectionHeader("refBands", "Reference Bands")}
+      {openSections.refBands && (
+        <div style={{ padding: "4px 16px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
+          {(widgetConfig.referenceBands || []).map((band, idx) => (
+            <div key={idx} style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+              <input
+                type="number"
+                style={{ ...st.input, margin: 0, width: 56, maxWidth: "none", flex: "none" }}
+                value={band.from ?? ""}
+                placeholder="From"
+                onChange={(e) => {
+                  const updated = [...(widgetConfig.referenceBands || [])];
+                  updated[idx] = { ...band, from: e.target.value === "" ? undefined : Number(e.target.value) };
+                  upd({ referenceBands: updated });
+                }}
+              />
+              <span style={{ fontSize: 11, color: "var(--havn-text-secondary)" }}>–</span>
+              <input
+                type="number"
+                style={{ ...st.input, margin: 0, width: 56, maxWidth: "none", flex: "none" }}
+                value={band.to ?? ""}
+                placeholder="To"
+                onChange={(e) => {
+                  const updated = [...(widgetConfig.referenceBands || [])];
+                  updated[idx] = { ...band, to: e.target.value === "" ? undefined : Number(e.target.value) };
+                  upd({ referenceBands: updated });
+                }}
+              />
+              <input
+                style={{ ...st.input, margin: 0, width: 60, maxWidth: "none", flex: 1 }}
+                value={band.label || ""}
+                placeholder="Label"
+                onChange={(e) => {
+                  const updated = [...(widgetConfig.referenceBands || [])];
+                  updated[idx] = { ...band, label: e.target.value };
+                  upd({ referenceBands: updated });
+                }}
+              />
+              <input
+                type="color"
+                value={band.color || "#6366f1"}
+                style={{ width: 28, height: 28, border: "1px solid var(--havn-border)", borderRadius: 4, padding: 1, cursor: "pointer", background: "none" }}
+                onChange={(e) => {
+                  const updated = [...(widgetConfig.referenceBands || [])];
+                  updated[idx] = { ...band, color: e.target.value };
+                  upd({ referenceBands: updated });
+                }}
+              />
+              <button
+                style={st.removeBtn}
+                onClick={() => upd({ referenceBands: (widgetConfig.referenceBands || []).filter((_, j) => j !== idx) })}
+                title="Remove"
+              >&times;</button>
+            </div>
+          ))}
+          <button
+            style={st.addSmallBtn}
+            onClick={() => upd({ referenceBands: [...(widgetConfig.referenceBands || []), { from: 0, to: 100, label: "", color: "#6366f1" }] })}
+          >
+            + Add reference band
           </button>
         </div>
       )}
@@ -1444,6 +1553,20 @@ function ChartAndTypeConfig({
             <option value="zero">Show as zero</option>
             <option value="na">Show as N/A</option>
           </select>
+        </div>
+      )}
+
+      {/* Summary row (tables only) */}
+      {widgetType === "table" && (
+        <div style={st.section}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 16px", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={!!widgetConfig?.showSummary}
+              onChange={(e) => setWidgetConfig({ ...widgetConfig, showSummary: e.target.checked })}
+            />
+            <span style={{ fontSize: 12, color: "var(--havn-text)" }}>Show summary row (totals)</span>
+          </label>
         </div>
       )}
 
