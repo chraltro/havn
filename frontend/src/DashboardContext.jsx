@@ -23,6 +23,9 @@ export function DashboardProvider({ children }) {
   const [isDirty, setIsDirty] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
 
+  // Saved filter views
+  const [savedViews, setSavedViews] = useState([]);
+
   // Push current dashboard state onto undo stack before a mutation
   const pushUndo = useCallback(() => {
     setUndoStack(prev => {
@@ -51,6 +54,8 @@ export function DashboardProvider({ children }) {
         defaults[p.name] = p.default ?? "";
       }
       setParameters(defaults);
+      // Initialize saved views
+      setSavedViews(full.settings?.saved_views || []);
       // Reset undo/redo and dirty state on load
       setUndoStack([]);
       setRedoStack([]);
@@ -71,6 +76,7 @@ export function DashboardProvider({ children }) {
     setGlobalFilters({});
     setCrossFilter(null);
     setParameters({});
+    setSavedViews([]);
     setUndoStack([]);
     setRedoStack([]);
     setIsDirty(false);
@@ -93,16 +99,19 @@ export function DashboardProvider({ children }) {
       ...prev,
       [widgetId]: { ...prev[widgetId], loading: true, error: null },
     }));
+    const startTime = Date.now();
     try {
       const result = await api.queryWidget(dashboard.id, widgetId, _buildFilters(), parameters);
+      const duration = Date.now() - startTime;
       setWidgetData(prev => ({
         ...prev,
-        [widgetId]: { ...result, loading: false, error: result.error || null, _fetchedAt: new Date().toISOString() },
+        [widgetId]: { ...result, loading: false, error: result.error || null, _fetchedAt: new Date().toISOString(), _queryDuration: duration },
       }));
     } catch (e) {
+      const duration = Date.now() - startTime;
       setWidgetData(prev => ({
         ...prev,
-        [widgetId]: { columns: [], rows: [], row_count: 0, loading: false, error: e.message },
+        [widgetId]: { columns: [], rows: [], row_count: 0, loading: false, error: e.message, _queryDuration: duration },
       }));
     }
   }, [dashboard, _buildFilters, parameters]);
@@ -119,13 +128,15 @@ export function DashboardProvider({ children }) {
     }
     setWidgetData(prev => ({ ...prev, ...loadingState }));
 
+    const batchStart = Date.now();
     try {
       const batch = await api.queryDashboardBatch(dashboard.id, _buildFilters(), parameters);
+      const batchDuration = Date.now() - batchStart;
       const results = batch.results || {};
       setWidgetData(prev => {
         const next = { ...prev };
         for (const [wid, result] of Object.entries(results)) {
-          next[wid] = { ...result, loading: false, _fetchedAt: new Date().toISOString() };
+          next[wid] = { ...result, loading: false, _fetchedAt: new Date().toISOString(), _queryDuration: batchDuration };
         }
         return next;
       });
@@ -322,6 +333,49 @@ export function DashboardProvider({ children }) {
   const canUndo = undoStack.length > 0;
   const canRedo = redoStack.length > 0;
 
+  // Saved filter views
+  const saveView = useCallback(async (name) => {
+    if (!dashboard) return;
+    const view = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      name,
+      filters: { ...globalFilters },
+      parameters: { ...parameters },
+      created_at: new Date().toISOString(),
+    };
+    const updated = [...savedViews, view];
+    setSavedViews(updated);
+    try {
+      await api.updateDashboard(dashboard.id, { settings: { ...dashboard.settings, saved_views: updated } });
+      setDashboard(prev => ({ ...prev, settings: { ...prev.settings, saved_views: updated } }));
+    } catch (e) {
+      console.error("Failed to save view:", e);
+    }
+  }, [dashboard, globalFilters, parameters, savedViews]);
+
+  const loadView = useCallback((viewId) => {
+    const view = savedViews.find(v => v.id === viewId);
+    if (!view) return;
+    // Apply filters
+    setGlobalFilters(view.filters || {});
+    // Apply parameters
+    if (view.parameters) {
+      setParameters(view.parameters);
+    }
+  }, [savedViews]);
+
+  const deleteView = useCallback(async (viewId) => {
+    if (!dashboard) return;
+    const updated = savedViews.filter(v => v.id !== viewId);
+    setSavedViews(updated);
+    try {
+      await api.updateDashboard(dashboard.id, { settings: { ...dashboard.settings, saved_views: updated } });
+      setDashboard(prev => ({ ...prev, settings: { ...prev.settings, saved_views: updated } }));
+    } catch (e) {
+      console.error("Failed to delete view:", e);
+    }
+  }, [dashboard, savedViews]);
+
   const value = {
     dashboard,
     editMode,
@@ -351,6 +405,10 @@ export function DashboardProvider({ children }) {
     canRedo,
     isDirty,
     lastSavedAt,
+    savedViews,
+    saveView,
+    loadView,
+    deleteView,
   };
 
   return (
