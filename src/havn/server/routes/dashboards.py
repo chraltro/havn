@@ -82,6 +82,7 @@ class WidgetPositionUpdate(BaseModel):
 class WidgetQueryRequest(BaseModel):
     filters: dict = Field(default_factory=dict)  # {column: value}
     parameters: dict = Field(default_factory=dict)  # {param_name: value}
+    timeout: int | None = Field(default=None, ge=1, le=300)  # per-widget query timeout in seconds
 
 
 class BatchQueryRequest(BaseModel):
@@ -120,6 +121,7 @@ def _execute_widget_query(
     sql_query: str,
     filters: dict,
     parameters: dict,
+    timeout: int | None = None,
 ) -> dict:
     """Execute a widget SQL query with filter injection and parameter substitution.
 
@@ -184,9 +186,10 @@ def _execute_widget_query(
         sql = base_sql
 
     try:
-        # Set query timeout
+        # Set query timeout (per-widget override or global default)
+        effective_timeout = timeout if timeout is not None else _QUERY_TIMEOUT_SECONDS
         try:
-            conn.execute(f"SET statement_timeout={_QUERY_TIMEOUT_SECONDS * 1000}")
+            conn.execute(f"SET statement_timeout={effective_timeout * 1000}")
         except Exception:
             pass  # Older DuckDB versions may not support this
 
@@ -828,8 +831,8 @@ def query_widget(
                 result = json.loads(result)
             return result
 
-    # Execute query
-    result = _execute_widget_query(conn, sql_query, req.filters, req.parameters)
+    # Execute query (pass per-widget timeout if provided)
+    result = _execute_widget_query(conn, sql_query, req.filters, req.parameters, timeout=req.timeout)
 
     # Store in cache
     if cache_ttl > 0:

@@ -508,7 +508,8 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
                 tableSearch={tableSearch}
                 setTableSearch={setTableSearch}
                 selectedTable={selectedTable}
-                setSelectedTable={(t) => { setSelectedTable(t); setSelectedColumns([]); setAggregations({}); setVFilters([]); setOrderBy([]); }}
+                setSelectedTable={setSelectedTable}
+                onTableChange={(t) => { setSelectedTable(t); setSelectedColumns([]); setAggregations({}); setVFilters([]); setOrderBy([]); }}
                 tableColumns={tableColumns}
                 selectedColumns={selectedColumns}
                 toggleColumn={toggleColumn}
@@ -610,7 +611,7 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
 
 function VisualBuilder({
   groupedTables, tableSearch, setTableSearch,
-  selectedTable, setSelectedTable, tableColumns, selectedColumns,
+  selectedTable, setSelectedTable, onTableChange, tableColumns, selectedColumns,
   toggleColumn, selectAllColumns, selectNoColumns, quickSelectNumeric,
   aggregations, setAggregations, dateGrouping, setDateGrouping,
   vFilters, setVFilters,
@@ -621,6 +622,26 @@ function VisualBuilder({
   calculatedFields, setCalculatedFields,
   columnDisplayNames, setColumnDisplayNames,
 }) {
+  // Access dashboard context for default time column
+  const dashCtx = useDashboard();
+  const dashSettings = dashCtx?.dashboard?.settings || {};
+
+  // Auto-apply default time column when a new table is selected
+  const prevTableRef = useRef(selectedTable?.name);
+  useEffect(() => {
+    if (!selectedTable || selectedTable.name === prevTableRef.current) {
+      prevTableRef.current = selectedTable?.name;
+      return;
+    }
+    prevTableRef.current = selectedTable.name;
+    const defaultTimeCol = dashSettings.default_time_column;
+    if (!defaultTimeCol) return;
+    // Check if this table has a column matching the default time column
+    const match = tableColumns.find(c => c.name === defaultTimeCol && isTemporal(c.type));
+    if (match && !selectedColumns.some(c => c.name === match.name)) {
+      toggleColumn(match);
+    }
+  }, [selectedTable, tableColumns, dashSettings.default_time_column]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div style={st.builderScroll}>
       {/* Text widgets skip the entire data section */}
@@ -656,7 +677,7 @@ function VisualBuilder({
                     ...st.tableItem,
                     ...(selectedTable?.name === t.name && selectedTable?.schema === t.schema ? st.tableItemActive : {}),
                   }}
-                  onClick={() => setSelectedTable(t)}
+                  onClick={() => (onTableChange || setSelectedTable)(t)}
                 >
                   <span style={st.tableIcon}>{t.type === "view" ? "◇" : "▦"}</span>
                   {t.name}
@@ -771,6 +792,25 @@ function VisualBuilder({
                       title="Rename column as it appears in charts"
                     />
                   )}
+                  {checked && (
+                    <select
+                      style={{ ...st.inlineSelect, minWidth: 72, fontSize: 10 }}
+                      value={(widgetConfig.dataTypeOverrides || {})[col.name] || "auto"}
+                      onChange={(e) => {
+                        const overrides = { ...(widgetConfig.dataTypeOverrides || {}) };
+                        if (e.target.value === "auto") delete overrides[col.name];
+                        else overrides[col.name] = e.target.value;
+                        setWidgetConfig({ ...widgetConfig, dataTypeOverrides: overrides });
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      title="Override data type for chart rendering"
+                    >
+                      <option value="auto">Auto</option>
+                      <option value="numeric">Numeric</option>
+                      <option value="category">Category</option>
+                      <option value="temporal">Temporal</option>
+                    </select>
+                  )}
                   {!checked && <span style={st.colType}>{col.type}</span>}
                 </div>
               );
@@ -785,6 +825,35 @@ function VisualBuilder({
                 if (dg) return `${c.name} (${dg})`;
                 return c.name;
               }).join(", ") || "(none)"}
+            </div>
+          )}
+
+          {/* Column encoding (X, Y, Color, Size) */}
+          {selectedColumns.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ ...st.formLabel, fontSize: 11, marginBottom: 4 }}>Column Encoding</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {["x", "y", "color", "size"].map(role => (
+                  <div key={role} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: "var(--havn-text-secondary)", width: 40, textTransform: "capitalize" }}>{role === "x" ? "X-axis" : role === "y" ? "Y-axis" : role.charAt(0).toUpperCase() + role.slice(1)}</span>
+                    <select
+                      style={{ ...st.inlineSelect, flex: 1, fontSize: 11 }}
+                      value={(widgetConfig.columnEncoding || {})[role] || ""}
+                      onChange={(e) => {
+                        const enc = { ...(widgetConfig.columnEncoding || {}) };
+                        if (e.target.value) enc[role] = e.target.value;
+                        else delete enc[role];
+                        setWidgetConfig({ ...widgetConfig, columnEncoding: enc });
+                      }}
+                    >
+                      <option value="">Auto</option>
+                      {selectedColumns.map(c => (
+                        <option key={c.name} value={c.name}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -1383,6 +1452,25 @@ function ChartAndTypeConfig({
             value={widgetConfig?.emptyStateMessage || ""}
             onChange={(e) => setWidgetConfig({ ...widgetConfig, emptyStateMessage: e.target.value })}
             placeholder="No data available"
+          />
+        </div>
+      )}
+
+      {/* Query timeout */}
+      {(widgetType === "chart" || widgetType === "table" || widgetType === "kpi") && (
+        <div style={st.section}>
+          <div style={st.sectionTitle2}>Query timeout (seconds)</div>
+          <input
+            type="number"
+            style={st.input}
+            min={1}
+            max={300}
+            value={widgetConfig?.queryTimeout ?? 30}
+            onChange={(e) => {
+              const v = parseInt(e.target.value, 10);
+              setWidgetConfig({ ...widgetConfig, queryTimeout: (isNaN(v) || v < 1) ? 30 : Math.min(v, 300) });
+            }}
+            placeholder="30"
           />
         </div>
       )}
