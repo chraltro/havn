@@ -149,8 +149,19 @@ export default function DashboardWidget({
   const [showMenu, setShowMenu] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(widget.title || "");
+  const [isWidgetFullscreen, setIsWidgetFullscreen] = useState(false);
   const menuRef = useRef(null);
   const data = widgetData[widget.id];
+
+  // Close widget fullscreen on Escape
+  useEffect(() => {
+    if (!isWidgetFullscreen) return;
+    const handler = (e) => {
+      if (e.key === "Escape") setIsWidgetFullscreen(false);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [isWidgetFullscreen]);
 
   // Close menu on outside click
   useEffect(() => {
@@ -228,6 +239,13 @@ export default function DashboardWidget({
         </div>
         <div style={st.actions}>
           {isLoading && <span style={st.spinner}>↻</span>}
+          <button
+            style={st.menuBtn}
+            onClick={() => setIsWidgetFullscreen(true)}
+            title="Expand widget"
+          >
+            ↗
+          </button>
           {editMode && (
             <button
               style={st.menuBtn}
@@ -320,6 +338,38 @@ export default function DashboardWidget({
           title="Drag to resize"
         >
           ⌟
+        </div>
+      )}
+
+      {/* Per-widget fullscreen overlay */}
+      {isWidgetFullscreen && (
+        <div style={st.widgetFullscreenOverlay}>
+          <div style={st.widgetFullscreenHeader}>
+            <span style={{ fontSize: 16, fontWeight: 600, color: "var(--havn-text)" }}>{widget.title || widget.widget_type}</span>
+            <button
+              style={st.widgetFullscreenClose}
+              onClick={() => setIsWidgetFullscreen(false)}
+              title="Close (Escape)"
+            >
+              ×
+            </button>
+          </div>
+          <div style={st.widgetFullscreenContent}>
+            {hasData && !hasError && renderWidgetContent(widget, data, handleChartClick)}
+            {isLoading && !hasData && (
+              <div style={st.center}><span style={st.spinner}>↻</span> Loading...</div>
+            )}
+            {hasError && !isLoading && (
+              <div style={st.center}>
+                <div style={{ color: "var(--havn-red)", fontSize: 14 }}>{data.error}</div>
+              </div>
+            )}
+            {!isLoading && !hasError && !hasData && widget.widget_type === "text" && (
+              <div style={{ padding: 24, fontSize: 16, color: "var(--havn-text)", overflow: "auto", flex: 1 }}>
+                {renderMarkdown(widget.config?.content || widget.sql_query || "*No content*")}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -699,6 +749,44 @@ const st = {
     userSelect: "none",
     background: "linear-gradient(135deg, transparent 50%, var(--havn-border) 50%, var(--havn-border) 55%, transparent 55%, transparent 65%, var(--havn-border) 65%, var(--havn-border) 70%, transparent 70%)",
     borderRadius: "0 0 var(--havn-radius, 8px) 0",
+  },
+  widgetFullscreenOverlay: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 9999,
+    background: "var(--havn-bg)",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+  },
+  widgetFullscreenHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "12px 20px",
+    borderBottom: "1px solid var(--havn-border)",
+    flexShrink: 0,
+  },
+  widgetFullscreenClose: {
+    background: "none",
+    border: "1px solid var(--havn-border)",
+    color: "var(--havn-text-secondary)",
+    cursor: "pointer",
+    fontSize: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  widgetFullscreenContent: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+    padding: 16,
+    minHeight: 0,
   },
   skeleton: {
     flex: 1,
