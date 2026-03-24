@@ -75,7 +75,7 @@ const DATE_GROUPING_OPTIONS = [
 // ---------------------------------------------------------------------------
 
 function buildSQL(config) {
-  const { table, columns, aggregations, dateGrouping, filters, orderBy, limit } = config;
+  const { table, columns, aggregations, dateGrouping, filters, orderBy, limit, calculatedFields } = config;
   if (!table || columns.length === 0) return "";
 
   const fqn = `${table.schema}.${table.name}`;
@@ -98,13 +98,24 @@ function buildSQL(config) {
     return col.name;
   });
 
+  // Calculated fields: add to SELECT
+  const calcFields = (calculatedFields || []).filter(cf => cf.name && cf.expression);
+  for (const cf of calcFields) {
+    selectParts.push(`${cf.expression} AS ${cf.name}`);
+  }
+
   // GROUP BY — all non-aggregated columns (using expressions, not aliases)
+  // Calculated fields that use aggregation functions are excluded from GROUP BY
+  const AGG_RE = /\b(SUM|AVG|COUNT|MIN|MAX|TOTAL|GROUP_CONCAT)\s*\(/i;
   const groupExprs = (hasAgg || hasDateGroup)
-    ? columns.filter(c => !aggregations[c.name]).map(col => {
-        const dg = dateGrouping?.[col.name];
-        if (dg && isTemporal(col.type)) return `DATE_TRUNC('${dg}', ${col.name})`;
-        return col.name;
-      })
+    ? [
+        ...columns.filter(c => !aggregations[c.name]).map(col => {
+          const dg = dateGrouping?.[col.name];
+          if (dg && isTemporal(col.type)) return `DATE_TRUNC('${dg}', ${col.name})`;
+          return col.name;
+        }),
+        ...calcFields.filter(cf => !AGG_RE.test(cf.expression)).map(cf => cf.expression),
+      ]
     : [];
 
   // WHERE
@@ -186,6 +197,12 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
   );
   const [orderBy, setOrderBy] = useState(savedVisual?.orderBy || []);
   const [rowLimit, setRowLimit] = useState(savedVisual?.rowLimit ?? 100);
+  const [calculatedFields, setCalculatedFields] = useState(
+    savedVisual?.calculatedFields || []
+  );
+  const [columnDisplayNames, setColumnDisplayNames] = useState(
+    savedVisual?.columnDisplayNames || {}
+  );
   const [tableSearch, setTableSearch] = useState("");
   const [sampleData, setSampleData] = useState(null);
 
@@ -228,11 +245,12 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
         filters: vFilters,
         orderBy,
         limit: rowLimit,
+        calculatedFields,
       });
       if (sql) runPreview(sql);
     }, 600);
     return () => { if (previewTimerRef.current) clearTimeout(previewTimerRef.current); };
-  }, [selectedTable, selectedColumns, aggregations, dateGrouping, vFilters, orderBy, rowLimit, mode]);
+  }, [selectedTable, selectedColumns, aggregations, dateGrouping, vFilters, orderBy, rowLimit, calculatedFields, mode]);
 
   async function runPreview(overrideSql) {
     const sql = overrideSql || (mode === "sql" ? sqlQuery : buildSQL({
@@ -242,6 +260,7 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
       filters: vFilters,
       orderBy,
       limit: rowLimit,
+      calculatedFields,
     }));
     if (!sql.trim()) return;
     setPreviewing(true);
@@ -281,6 +300,7 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
       filters: vFilters,
       orderBy,
       limit: rowLimit,
+      calculatedFields,
     });
   }
 
@@ -313,6 +333,8 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
           filters: vFilters,
           orderBy,
           rowLimit,
+          calculatedFields,
+          columnDisplayNames,
         }
       } : {}),
     };
@@ -518,6 +540,10 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
                 cacheTtl={cacheTtl}
                 setCacheTtl={setCacheTtl}
                 previewData={previewData}
+                calculatedFields={calculatedFields}
+                setCalculatedFields={setCalculatedFields}
+                columnDisplayNames={columnDisplayNames}
+                setColumnDisplayNames={setColumnDisplayNames}
               />
             ) : (
               <SQLBuilder
@@ -592,6 +618,8 @@ function VisualBuilder({
   applyPreset, widgetType, setWidgetType, chartType, setChartType,
   typeGroups, suggestions, title, setTitle, widgetConfig, setWidgetConfig,
   cacheTtl, setCacheTtl, previewData,
+  calculatedFields, setCalculatedFields,
+  columnDisplayNames, setColumnDisplayNames,
 }) {
   return (
     <div style={st.builderScroll}>
@@ -728,6 +756,21 @@ function VisualBuilder({
                         ))}
                     </select>
                   )}
+                  {checked && (
+                    <input
+                      style={{ ...st.inlineSelect, minWidth: 70, fontSize: 11, padding: "2px 4px" }}
+                      value={columnDisplayNames[col.name] || ""}
+                      onChange={(e) => setColumnDisplayNames(prev => {
+                        const next = { ...prev };
+                        if (e.target.value) next[col.name] = e.target.value;
+                        else delete next[col.name];
+                        return next;
+                      })}
+                      placeholder="Display name..."
+                      onClick={(e) => e.stopPropagation()}
+                      title="Rename column as it appears in charts"
+                    />
+                  )}
                   {!checked && <span style={st.colType}>{col.type}</span>}
                 </div>
               );
@@ -744,6 +787,38 @@ function VisualBuilder({
               }).join(", ") || "(none)"}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ---- Calculated Fields ---- */}
+      {widgetType !== "text" && selectedTable && (
+        <div style={st.formSection}>
+          <div style={{ ...st.formLabel, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            Calculated Fields
+            <button style={st.addSmallBtn} onClick={() => setCalculatedFields(prev => [...prev, { name: "", expression: "" }])}>
+              + Add
+            </button>
+          </div>
+          {calculatedFields.length === 0 && (
+            <div style={st.dimHint}>No calculated fields</div>
+          )}
+          {calculatedFields.map((cf, ci) => (
+            <div key={ci} style={{ ...st.filterRow, flexWrap: "wrap" }}>
+              <input
+                style={{ ...st.filterValueInput, flex: "0 0 120px" }}
+                value={cf.name}
+                placeholder="Field name"
+                onChange={(e) => setCalculatedFields(prev => prev.map((x, i) => i === ci ? { ...x, name: e.target.value } : x))}
+              />
+              <input
+                style={{ ...st.filterValueInput, flex: 1 }}
+                value={cf.expression}
+                placeholder="price * quantity"
+                onChange={(e) => setCalculatedFields(prev => prev.map((x, i) => i === ci ? { ...x, expression: e.target.value } : x))}
+              />
+              <button style={st.removeBtn} onClick={() => setCalculatedFields(prev => prev.filter((_, i) => i !== ci))}>×</button>
+            </div>
+          ))}
         </div>
       )}
 
@@ -1220,6 +1295,22 @@ function ChartAndTypeConfig({
               />
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Null value handling */}
+      {(widgetType === "chart" || widgetType === "table") && (
+        <div style={st.section}>
+          <div style={st.sectionTitle2}>Null values</div>
+          <select
+            style={st.select}
+            value={widgetConfig?.nullHandling || "gap"}
+            onChange={(e) => setWidgetConfig({ ...widgetConfig, nullHandling: e.target.value })}
+          >
+            <option value="gap">Show gap</option>
+            <option value="zero">Show as zero</option>
+            <option value="na">Show as N/A</option>
+          </select>
         </div>
       )}
 
