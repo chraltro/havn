@@ -812,6 +812,165 @@ export function Sankey({ columns, rows, width, height, config }) {
 }
 
 // ---------------------------------------------------------------------------
+// STACKED AREA
+// ---------------------------------------------------------------------------
+
+export function StackedArea({ columns, rows, width, height, config }) {
+  const [tip, setTip] = useState(null);
+  const [hoverIdx, setHoverIdx] = useState(null);
+  const labelIdx = 0;
+  const numericCols = useMemo(() => {
+    return columns.reduce((acc, col, i) => {
+      if (i === 0) return acc;
+      const sample = rows.slice(0, 20).map(r => parseNum(r[i])).filter(v => !isNaN(v));
+      if (sample.length > 0) acc.push(i);
+      return acc;
+    }, []);
+  }, [columns, rows]);
+  const plotW = width - PAD.left - PAD.right;
+  const plotH = height - PAD.top - PAD.bottom;
+  const data = useMemo(() => {
+    const labels = rows.map(r => String(r[labelIdx] ?? ""));
+    const seriesRaw = numericCols.map(ci => rows.map(r => { const n = parseNum(r[ci]); return isNaN(n) ? 0 : Math.max(0, n); }));
+    // Cumulative stacking
+    const stacked = [];
+    for (let si = 0; si < seriesRaw.length; si++) {
+      stacked[si] = seriesRaw[si].map((v, ri) => v + (si > 0 ? stacked[si - 1][ri] : 0));
+    }
+    const maxVal = Math.max(...(stacked[stacked.length - 1] || [0]));
+    return { labels, seriesRaw, stacked, maxVal };
+  }, [rows, numericCols, labelIdx]);
+  if (numericCols.length === 0 || rows.length === 0) return <svg width={width} height={height}><text x={width/2} y={height/2} textAnchor="middle" fill="var(--havn-text-secondary)" fontSize={13}>Need numeric columns for stacked area</text></svg>;
+  const scale = niceScale(0, data.maxVal);
+  const n = data.labels.length;
+  const xPos = (i) => PAD.left + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const yPos = (v) => PAD.top + plotH - ((v - scale.min) / (scale.max - scale.min || 1)) * plotH;
+  return (
+    <svg width={width} height={height} style={{ display: "block" }}>
+      <g>
+        {scale.ticks.map(t => <line key={t} x1={PAD.left} x2={PAD.left + plotW} y1={yPos(t)} y2={yPos(t)} stroke="var(--havn-border)" strokeDasharray="3,3" opacity={0.3} />)}
+        {scale.ticks.map(t => <text key={`l${t}`} x={PAD.left - 6} y={yPos(t) + 4} textAnchor="end" fill="var(--havn-text-secondary)" fontSize={10}>{fmtAxis(t)}</text>)}
+        {data.stacked.map((cumVals, si) => {
+          const prevVals = si > 0 ? data.stacked[si - 1] : cumVals.map(() => 0);
+          const d = `M ${xPos(0)} ${yPos(cumVals[0])} ${cumVals.map((v, i) => `L ${xPos(i)} ${yPos(v)}`).join(" ")} L ${xPos(n - 1)} ${yPos(prevVals[n - 1])} ${[...prevVals].reverse().map((v, i) => `L ${xPos(n - 1 - i)} ${yPos(v)}`).join(" ")} Z`;
+          return <path key={si} d={d} fill={getSeriesColor(config, si, columns[numericCols[si]])} opacity={0.6} />;
+        })}
+      </g>
+      {tip && <Tooltip x={tip.x} y={tip.y} visible={true} svgWidth={width} svgHeight={height}>{tip.label}</Tooltip>}
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BOX PLOT
+// ---------------------------------------------------------------------------
+
+export function BoxPlot({ columns, rows, width, height, config }) {
+  const [tip, setTip] = useState(null);
+  if (!rows || rows.length === 0) return <svg width={width} height={height}><text x={width/2} y={height/2} textAnchor="middle" fill="var(--havn-text-secondary)" fontSize={13}>No data for box plot</text></svg>;
+  // Find text column (category) and numeric column
+  const textIdx = columns.findIndex((_, i) => { const s = rows.slice(0, 10).map(r => parseNum(r[i])).filter(v => !isNaN(v)); return s.length < rows.slice(0, 10).length * 0.3; });
+  const numIdx = columns.findIndex((_, i) => { const s = rows.slice(0, 10).map(r => parseNum(r[i])).filter(v => !isNaN(v)); return s.length > rows.slice(0, 10).length * 0.5; });
+  if (numIdx < 0) return <svg width={width} height={height}><text x={width/2} y={height/2} textAnchor="middle" fill="var(--havn-text-secondary)" fontSize={13}>Need a numeric column</text></svg>;
+  // Group by category
+  const groups = useMemo(() => {
+    const map = {};
+    for (const r of rows) {
+      const key = textIdx >= 0 ? String(r[textIdx] ?? "all") : "all";
+      if (!map[key]) map[key] = [];
+      const v = parseNum(r[numIdx]);
+      if (!isNaN(v)) map[key].push(v);
+    }
+    return Object.entries(map).map(([label, values]) => {
+      values.sort((a, b) => a - b);
+      const n = values.length;
+      const q1 = values[Math.floor(n * 0.25)];
+      const median = values[Math.floor(n * 0.5)];
+      const q3 = values[Math.floor(n * 0.75)];
+      const iqr = q3 - q1;
+      const whiskerLo = Math.max(values[0], q1 - 1.5 * iqr);
+      const whiskerHi = Math.min(values[n - 1], q3 + 1.5 * iqr);
+      const outliers = values.filter(v => v < whiskerLo || v > whiskerHi);
+      return { label, q1, median, q3, whiskerLo, whiskerHi, outliers, min: values[0], max: values[n - 1] };
+    });
+  }, [rows, textIdx, numIdx]);
+  const allVals = groups.flatMap(g => [g.whiskerLo, g.whiskerHi, ...g.outliers]);
+  const scale = niceScale(Math.min(...allVals), Math.max(...allVals));
+  const plotW = width - PAD.left - PAD.right;
+  const plotH = height - PAD.top - PAD.bottom;
+  const boxW = Math.min(40, plotW / groups.length - 8);
+  const yPos = (v) => PAD.top + plotH - ((v - scale.min) / (scale.max - scale.min || 1)) * plotH;
+  return (
+    <svg width={width} height={height} style={{ display: "block" }}>
+      {scale.ticks.map(t => <g key={t}><line x1={PAD.left} x2={PAD.left + plotW} y1={yPos(t)} y2={yPos(t)} stroke="var(--havn-border)" strokeDasharray="3,3" opacity={0.3} /><text x={PAD.left - 6} y={yPos(t) + 4} textAnchor="end" fill="var(--havn-text-secondary)" fontSize={10}>{fmtAxis(t)}</text></g>)}
+      {groups.map((g, i) => {
+        const cx = PAD.left + (i + 0.5) * (plotW / groups.length);
+        const color = getSeriesColor(config, i, g.label);
+        return (
+          <g key={i} onMouseEnter={() => setTip({ x: cx, y: yPos(g.median), label: `${g.label}: Q1=${fmtNum(g.q1)} Med=${fmtNum(g.median)} Q3=${fmtNum(g.q3)}` })} onMouseLeave={() => setTip(null)}>
+            <line x1={cx} y1={yPos(g.whiskerHi)} x2={cx} y2={yPos(g.whiskerLo)} stroke={color} strokeWidth={1.5} />
+            <line x1={cx - boxW/4} y1={yPos(g.whiskerHi)} x2={cx + boxW/4} y2={yPos(g.whiskerHi)} stroke={color} strokeWidth={1.5} />
+            <line x1={cx - boxW/4} y1={yPos(g.whiskerLo)} x2={cx + boxW/4} y2={yPos(g.whiskerLo)} stroke={color} strokeWidth={1.5} />
+            <rect x={cx - boxW/2} y={yPos(g.q3)} width={boxW} height={Math.max(1, yPos(g.q1) - yPos(g.q3))} fill={color} opacity={0.3} stroke={color} strokeWidth={1.5} rx={2} />
+            <line x1={cx - boxW/2} y1={yPos(g.median)} x2={cx + boxW/2} y2={yPos(g.median)} stroke={color} strokeWidth={2.5} />
+            {g.outliers.map((o, oi) => <circle key={oi} cx={cx} cy={yPos(o)} r={3} fill={color} opacity={0.6} />)}
+            <text x={cx} y={PAD.top + plotH + 16} textAnchor="middle" fill="var(--havn-text-secondary)" fontSize={10}>{trunc(g.label, 10)}</text>
+          </g>
+        );
+      })}
+      {tip && <Tooltip x={tip.x} y={tip.y} visible={true} svgWidth={width} svgHeight={height}>{tip.label}</Tooltip>}
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// COMBO CHART (bar + line, dual Y-axis)
+// ---------------------------------------------------------------------------
+
+export function ComboChart({ columns, rows, width, height, config }) {
+  const [tip, setTip] = useState(null);
+  if (!rows || rows.length < 1 || !columns || columns.length < 3) return <svg width={width} height={height}><text x={width/2} y={height/2} textAnchor="middle" fill="var(--havn-text-secondary)" fontSize={13}>Need 3+ columns for combo chart</text></svg>;
+  const labelIdx = 0;
+  const numCols = columns.reduce((acc, _, i) => { if (i > 0) { const s = rows.slice(0, 10).map(r => parseNum(r[i])).filter(v => !isNaN(v)); if (s.length > 0) acc.push(i); } return acc; }, []);
+  if (numCols.length < 2) return <svg width={width} height={height}><text x={width/2} y={height/2} textAnchor="middle" fill="var(--havn-text-secondary)" fontSize={13}>Need 2+ numeric columns</text></svg>;
+  const barCols = config?.comboBarColumns ? numCols.filter(ci => config.comboBarColumns.includes(columns[ci])) : [numCols[0]];
+  const lineCols = numCols.filter(ci => !barCols.includes(ci));
+  const labels = rows.map(r => String(r[labelIdx] ?? ""));
+  const n = labels.length;
+  const plotW = width - PAD.left - PAD.right - 50;
+  const plotH = height - PAD.top - PAD.bottom;
+  const barVals = barCols.flatMap(ci => rows.map(r => parseNum(r[ci]) || 0));
+  const lineVals = lineCols.flatMap(ci => rows.map(r => parseNum(r[ci]) || 0));
+  const barScale = niceScale(Math.min(0, ...barVals), Math.max(...barVals));
+  const lineScale = niceScale(Math.min(...lineVals), Math.max(...lineVals));
+  const groupW = plotW / n;
+  const barW = Math.min(groupW * 0.6, 32);
+  const barYPos = (v) => PAD.top + plotH - ((v - barScale.min) / (barScale.max - barScale.min || 1)) * plotH;
+  const lineYPos = (v) => PAD.top + plotH - ((v - lineScale.min) / (lineScale.max - lineScale.min || 1)) * plotH;
+  const xPos = (i) => PAD.left + i * groupW + groupW / 2;
+  return (
+    <svg width={width} height={height} style={{ display: "block" }}>
+      {barScale.ticks.map(t => <g key={`bg${t}`}><line x1={PAD.left} x2={PAD.left + plotW} y1={barYPos(t)} y2={barYPos(t)} stroke="var(--havn-border)" strokeDasharray="3,3" opacity={0.2} /><text x={PAD.left - 6} y={barYPos(t) + 4} textAnchor="end" fill="var(--havn-text-secondary)" fontSize={10}>{fmtAxis(t)}</text></g>)}
+      {lineScale.ticks.map(t => <text key={`lr${t}`} x={PAD.left + plotW + 8} y={lineYPos(t) + 4} textAnchor="start" fill={getSeriesColor(config, barCols.length, columns[lineCols[0]])} fontSize={10}>{fmtAxis(t)}</text>)}
+      {barCols.map((ci, si) => rows.map((r, ri) => {
+        const v = parseNum(r[ci]) || 0;
+        const h = Math.abs(barYPos(v) - barYPos(0));
+        return <rect key={`b${si}-${ri}`} x={xPos(ri) - barW/2} y={Math.min(barYPos(v), barYPos(0))} width={barW} height={Math.max(1, h)} fill={getSeriesColor(config, si, columns[ci])} opacity={0.8} rx={2}
+          onMouseEnter={() => setTip({ x: xPos(ri), y: barYPos(v), label: `${labels[ri]}: ${columns[ci]}=${fmtNum(v)}` })} onMouseLeave={() => setTip(null)} />;
+      }))}
+      {lineCols.map((ci, si) => {
+        const d = rows.map((r, ri) => `${ri === 0 ? "M" : "L"} ${xPos(ri)} ${lineYPos(parseNum(r[ci]) || 0)}`).join(" ");
+        return <g key={`l${si}`}><path d={d} fill="none" stroke={getSeriesColor(config, barCols.length + si, columns[ci])} strokeWidth={2} strokeLinecap="round" />
+          {rows.map((r, ri) => <circle key={ri} cx={xPos(ri)} cy={lineYPos(parseNum(r[ci]) || 0)} r={3} fill={getSeriesColor(config, barCols.length + si, columns[ci])} stroke="var(--havn-bg)" strokeWidth={1.5}
+            onMouseEnter={() => setTip({ x: xPos(ri), y: lineYPos(parseNum(r[ci]) || 0), label: `${labels[ri]}: ${columns[ci]}=${fmtNum(parseNum(r[ci]))}` })} onMouseLeave={() => setTip(null)} />)}</g>;
+      })}
+      {labels.map((l, i) => <text key={i} x={xPos(i)} y={PAD.top + plotH + 16} textAnchor="middle" fill="var(--havn-text-secondary)" fontSize={10}>{trunc(l, 8)}</text>)}
+      {tip && <Tooltip x={tip.x} y={tip.y} visible={true} svgWidth={width} svgHeight={height}>{tip.label}</Tooltip>}
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Chart dispatcher — picks the right renderer for dashboard chart types
 // ---------------------------------------------------------------------------
 
@@ -831,6 +990,9 @@ export default function DashboardChart({ type, columns, rows, width, height, con
     case "progress": return <ProgressBar {...props} />;
     case "bullet": return <Bullet {...props} />;
     case "sankey": return <Sankey {...props} />;
+    case "stacked_area": return <StackedArea {...props} />;
+    case "boxplot": return <BoxPlot {...props} />;
+    case "combo": return <ComboChart {...props} />;
     default:
       return (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--havn-text-secondary)", fontSize: 13 }}>
