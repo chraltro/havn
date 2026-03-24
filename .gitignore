@@ -27,3 +27,5 @@ docs/internal/
 test_screenshots/
 frontend/test_screenshots/
 test_dashboard_ui.mjs
+.playwright-mcp/
+dashboard-*.png

@@ -1,2 +1,0 @@
-[  167777ms] [ERROR] Failed to load resource: the server responded with a status of 400 (Bad Request) @ http://localhost:3000/api/dashboards/e7ceb5d7-ce80-4bbf-b4f2-9c034d42622d/widgets/e7286055-921d-4b2a-a833-e2b5dd652850/query:0
-[  206144ms] [ERROR] Failed to load resource: the server responded with a status of 400 (Bad Request) @ http://localhost:3000/api/dashboards/e7ceb5d7-ce80-4bbf-b4f2-9c034d42622d/widgets/11687b38-6c33-4609-bbd2-f4a3d2fda385/query:0
