@@ -29,3 +29,5 @@ frontend/test_screenshots/
 test_dashboard_ui.mjs
 .playwright-mcp/
 dashboard-*.png
+*.png
+qa-*.md
