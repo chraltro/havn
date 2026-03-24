@@ -146,7 +146,7 @@ export default function DashboardWidget({
   onTitleChange,
   style,
 }) {
-  const { editMode, widgetData, refreshWidget, setCrossFilter, updateWidget, dashboard } = useDashboard();
+  const { editMode, widgetData, refreshWidget, setCrossFilter, updateWidget, dashboard, showToast } = useDashboard();
   const [showMenu, setShowMenu] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(widget.title || "");
@@ -268,7 +268,9 @@ export default function DashboardWidget({
           <button
             style={st.menuBtn}
             onClick={() => setIsWidgetFullscreen(true)}
-            title="Expand widget"
+            title="Expand to fullscreen (Escape to close)"
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--havn-bg)"; e.currentTarget.style.color = "var(--havn-text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--havn-text-secondary)"; }}
           >
             ↗
           </button>
@@ -276,7 +278,9 @@ export default function DashboardWidget({
             <button
               style={st.menuBtn}
               onClick={() => setShowMenu(!showMenu)}
-              title="Widget options"
+              title="Widget menu — Edit, Refresh, Duplicate, Export, Delete"
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--havn-bg)"; e.currentTarget.style.color = "var(--havn-text)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--havn-text-secondary)"; }}
             >
               ⋮
             </button>
@@ -304,7 +308,7 @@ export default function DashboardWidget({
                 {widget.config?.locked ? "Unlock" : "Lock"}
               </button>
               {hasData && (
-                <button style={st.menuItem} onClick={() => { setShowMenu(false); exportWidgetCSV(widget, data); }}
+                <button style={st.menuItem} onClick={() => { setShowMenu(false); exportWidgetCSV(widget, data); showToast?.("CSV exported", "success"); }}
                   onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-bg-secondary, rgba(128,128,128,0.1))"}
                   onMouseLeave={(e) => e.currentTarget.style.background = "none"}>
                   Export CSV
@@ -355,7 +359,15 @@ export default function DashboardWidget({
 
         {!isLoading && !hasError && !hasData && widget.widget_type !== "text" && !widget.sql_query && (
           <div style={st.center}>
-            <span style={{ opacity: 0.4, fontSize: 13 }}>No query configured</span>
+            {editMode ? (
+              <>
+                <span style={{ opacity: 0.5, fontSize: 22 }}>+</span>
+                <span style={{ opacity: 0.5, fontSize: 13 }}>No query configured</span>
+                <span style={{ opacity: 0.35, fontSize: 11 }}>Click ⋮ &gt; Edit to set up this widget</span>
+              </>
+            ) : (
+              <span style={{ opacity: 0.25, fontSize: 12, fontStyle: "italic" }}>Not configured</span>
+            )}
           </div>
         )}
 
@@ -431,7 +443,7 @@ export default function DashboardWidget({
   );
 }
 
-function PaginatedTable({ columns, rows }) {
+function PaginatedTable({ columns, rows, conditionalRules }) {
   const [page, setPage] = useState(0);
   const pageSize = 50;
   const totalPages = Math.ceil(rows.length / pageSize);
@@ -440,7 +452,7 @@ function PaginatedTable({ columns, rows }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
       <div style={{ flex: 1, overflow: "auto" }}>
-        <SortableTable columns={columns} rows={pagedRows} />
+        <SortableTable columns={columns} rows={pagedRows} conditionalRules={conditionalRules} />
       </div>
       {totalPages > 1 && (
         <div style={st.pagination}>
@@ -480,7 +492,7 @@ function renderWidgetContent(widget, data, onChartClick) {
   const processedRows = applyNullHandling(rows, nullHandling);
 
   if (widget_type === "table") {
-    return <PaginatedTable columns={displayColumns} rows={processedRows} />;
+    return <PaginatedTable columns={displayColumns} rows={processedRows} conditionalRules={config?.conditionalRules} />;
   }
 
   if (widget_type === "kpi") {
@@ -736,8 +748,9 @@ const st = {
     color: "var(--havn-text-secondary)",
     cursor: "pointer",
     fontSize: 16,
-    padding: "2px 4px",
+    padding: "2px 6px",
     borderRadius: 4,
+    transition: "background 0.1s, color 0.1s",
   },
   menu: {
     position: "absolute",
@@ -787,6 +800,7 @@ const st = {
     padding: "4px 12px",
     borderRadius: 4,
     fontSize: 12,
+    transition: "background 0.1s",
   },
   resizeHandle: {
     position: "absolute",
