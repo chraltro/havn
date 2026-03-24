@@ -349,12 +349,33 @@ function PaginatedTable({ columns, rows }) {
   );
 }
 
+function applyNullHandling(rows, nullHandling) {
+  if (!nullHandling || nullHandling === "gap") return rows;
+  return rows.map(row => row.map(v => {
+    if (v === null || v === undefined) {
+      if (nullHandling === "zero") return 0;
+      if (nullHandling === "na") return "N/A";
+    }
+    return v;
+  }));
+}
+
+function applyDisplayNames(columns, displayNames) {
+  if (!displayNames || Object.keys(displayNames).length === 0) return columns;
+  return columns.map(c => displayNames[c] || c);
+}
+
 function renderWidgetContent(widget, data, onChartClick) {
   const { widget_type, chart_type, config } = widget;
   const { columns, rows } = data;
 
+  const displayNames = config?._visual?.columnDisplayNames || {};
+  const nullHandling = config?.nullHandling || "gap";
+  const displayColumns = applyDisplayNames(columns, displayNames);
+  const processedRows = applyNullHandling(rows, nullHandling);
+
   if (widget_type === "table") {
-    return <PaginatedTable columns={columns} rows={rows} />;
+    return <PaginatedTable columns={displayColumns} rows={processedRows} />;
   }
 
   if (widget_type === "kpi") {
@@ -364,14 +385,14 @@ function renderWidgetContent(widget, data, onChartClick) {
   if (widget_type === "chart") {
     // Dashboard-specific chart types (gauge, treemap, etc.) use ResponsiveChart
     if (DASHBOARD_CHART_TYPES.has(chart_type)) {
-      return <ResponsiveChart type={chart_type} columns={columns} rows={rows} config={config} />;
+      return <ResponsiveChart type={chart_type} columns={displayColumns} rows={processedRows} config={config} />;
     }
     // Standard chart types (bar, line, etc.) use ChartPanel
     return (
       <div style={{ flex: 1, minHeight: 0, overflow: "hidden", position: "relative" }}>
         <ChartPanel
-          columns={columns}
-          rows={rows}
+          columns={displayColumns}
+          rows={processedRows}
           forcedType={chart_type}
           compact={true}
           xAxisLabel={config?.xAxisLabel}
@@ -404,7 +425,7 @@ function renderWidgetContent(widget, data, onChartClick) {
   // Default: table
   return (
     <div style={{ overflow: "auto", flex: 1 }}>
-      <SortableTable columns={columns} rows={rows} />
+      <SortableTable columns={displayColumns} rows={processedRows} />
     </div>
   );
 }
