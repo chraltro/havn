@@ -7,6 +7,7 @@ import DashboardChart from "./DashboardCharts";
 const DASHBOARD_CHART_TYPES = new Set([
   "gauge", "treemap", "heatmap", "funnel", "waterfall", "histogram",
   "radar", "bubble", "sparkline", "progress", "bullet", "sankey",
+  "stacked_area", "boxplot", "combo",
 ]);
 
 // Responsive wrapper for DashboardCharts (uses ResizeObserver)
