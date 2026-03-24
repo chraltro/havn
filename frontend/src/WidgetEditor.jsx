@@ -1372,12 +1372,16 @@ function ChartAndTypeConfig({
           {suggestions.length > 0 && (
             <div style={st.suggestions}>
               <span style={{ fontSize: 11, color: "var(--havn-text-secondary)" }}>Recommended: </span>
-              {suggestions.map(s => (
-                <button key={s} style={{ ...st.suggChip, ...(chartType === s ? st.suggChipActive : {}) }}
-                  onClick={() => setChartType(s)}>
-                  {s}
-                </button>
-              ))}
+              {suggestions.map(s => {
+                const info = DASHBOARD_CHART_TYPES.find(t => t.id === s);
+                return (
+                  <button key={s} style={{ ...st.suggChip, ...(chartType === s ? st.suggChipActive : {}) }}
+                    onClick={() => setChartType(s)}
+                    title={info?.desc || s}>
+                    {info?.label || s}
+                  </button>
+                );
+              })}
             </div>
           )}
           {Object.entries(typeGroups).map(([group, types]) => (
@@ -1440,6 +1444,83 @@ function ChartAndTypeConfig({
             <option value="zero">Show as zero</option>
             <option value="na">Show as N/A</option>
           </select>
+        </div>
+      )}
+
+      {/* Conditional formatting (tables only) */}
+      {widgetType === "table" && (
+        <div style={st.section}>
+          <div style={st.sectionTitle2}>Conditional formatting</div>
+          <div style={{ padding: "0 16px 8px", display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ fontSize: 11, color: "var(--havn-text-secondary)" }}>Color numeric cells by value rules</span>
+            {(widgetConfig?.conditionalRules || []).map((rule, idx) => (
+              <div key={idx} style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                <input
+                  style={{ ...st.input, margin: 0, width: 80, maxWidth: "none", flex: "none" }}
+                  value={rule.column || ""}
+                  placeholder="Column"
+                  onChange={(e) => {
+                    const rules = [...(widgetConfig.conditionalRules || [])];
+                    rules[idx] = { ...rule, column: e.target.value };
+                    setWidgetConfig({ ...widgetConfig, conditionalRules: rules });
+                  }}
+                />
+                <select
+                  style={{ ...st.filterOpSelect, width: 50 }}
+                  value={rule.op || ">"}
+                  onChange={(e) => {
+                    const rules = [...(widgetConfig.conditionalRules || [])];
+                    rules[idx] = { ...rule, op: e.target.value };
+                    setWidgetConfig({ ...widgetConfig, conditionalRules: rules });
+                  }}
+                >
+                  <option value=">">&gt;</option>
+                  <option value="<">&lt;</option>
+                  <option value=">=">&ge;</option>
+                  <option value="<=">&le;</option>
+                  <option value="=">=</option>
+                </select>
+                <input
+                  type="number"
+                  style={{ ...st.input, margin: 0, width: 56, maxWidth: "none", flex: "none" }}
+                  value={rule.value ?? ""}
+                  placeholder="Value"
+                  onChange={(e) => {
+                    const rules = [...(widgetConfig.conditionalRules || [])];
+                    rules[idx] = { ...rule, value: e.target.value === "" ? undefined : Number(e.target.value) };
+                    setWidgetConfig({ ...widgetConfig, conditionalRules: rules });
+                  }}
+                />
+                <input
+                  type="color"
+                  value={rule.bgColor || "#22c55e"}
+                  style={{ width: 28, height: 28, border: "1px solid var(--havn-border)", borderRadius: 4, padding: 1, cursor: "pointer", background: "none" }}
+                  onChange={(e) => {
+                    const rules = [...(widgetConfig.conditionalRules || [])];
+                    rules[idx] = { ...rule, bgColor: e.target.value };
+                    setWidgetConfig({ ...widgetConfig, conditionalRules: rules });
+                  }}
+                />
+                <button
+                  style={st.removeBtn}
+                  onClick={() => {
+                    const rules = (widgetConfig.conditionalRules || []).filter((_, i) => i !== idx);
+                    setWidgetConfig({ ...widgetConfig, conditionalRules: rules });
+                  }}
+                  title="Remove"
+                >&times;</button>
+              </div>
+            ))}
+            <button
+              style={{ ...st.addSmallBtn, marginTop: 4 }}
+              onClick={() => setWidgetConfig({
+                ...widgetConfig,
+                conditionalRules: [...(widgetConfig?.conditionalRules || []), { column: "", op: ">", value: 0, bgColor: "#22c55e" }],
+              })}
+            >
+              + Add rule
+            </button>
+          </div>
         </div>
       )}
 

@@ -211,6 +211,7 @@ export default function SortableTable({
   selectable,
   groupColumns,
   onCellClick,
+  conditionalRules,
 }) {
   /* ─── state ─── */
   const [sortCols, setSortCols] = useState([]);
@@ -619,15 +620,55 @@ export default function SortableTable({
     const isNumeric = ct === TYPE_NUMBER;
     const pinInfo = pinnedOffsets[ci];
 
+    // Conditional formatting: check rules for this column/value
+    let condBg = null;
+    let condColor = null;
+    if (conditionalRules?.length > 0 && value !== null && value !== undefined) {
+      const n = Number(value);
+      const colName = columns[ci];
+      if (!isNaN(n)) {
+        for (const rule of conditionalRules) {
+          // Match if rule targets this column (by name) or applies to all (empty column)
+          if (rule.column && rule.column !== colName) continue;
+          const rv = Number(rule.value);
+          if (isNaN(rv)) continue;
+          let match = false;
+          switch (rule.op) {
+            case ">": match = n > rv; break;
+            case "<": match = n < rv; break;
+            case ">=": match = n >= rv; break;
+            case "<=": match = n <= rv; break;
+            case "=": match = n === rv; break;
+            default: break;
+          }
+          if (match) {
+            condBg = rule.bgColor || "#22c55e";
+            // Auto-contrast text color
+            const hex = condBg.replace("#", "");
+            const r = parseInt(hex.substring(0, 2), 16) / 255;
+            const g = parseInt(hex.substring(2, 4), 16) / 255;
+            const b = parseInt(hex.substring(4, 6), 16) / 255;
+            const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            condColor = lum > 0.4 ? "#000" : "#fff";
+            break;
+          }
+        }
+      }
+    }
+
     const style = {
       ...S.td,
       textAlign: isNumeric ? "right" : "left",
       whiteSpace: wrapText ? "normal" : "nowrap",
-      backgroundColor: isCopied
-        ? "rgba(99,102,241,0.2)"
-        : isOddRow
-          ? "rgba(128,128,128,0.04)"
-          : "transparent",
+      backgroundColor: condBg
+        ? condBg + "33" // 20% opacity background
+        : isCopied
+          ? "rgba(99,102,241,0.2)"
+          : isOddRow
+            ? "rgba(128,128,128,0.04)"
+            : "transparent",
+      color: condBg ? condBg : undefined,
+      fontWeight: condBg ? 600 : undefined,
       transition: isCopied ? "background-color 0.5s" : undefined,
       width: columnWidths ? columnWidths[ci] : undefined,
       minWidth: columnWidths ? columnWidths[ci] : undefined,
@@ -635,7 +676,7 @@ export default function SortableTable({
       left: pinInfo?.side === "left" ? pinInfo.offset : undefined,
       right: pinInfo?.side === "right" ? pinInfo.offset : undefined,
       zIndex: pinInfo ? 1 : undefined,
-      background: pinInfo ? "var(--havn-bg)" : undefined,
+      background: pinInfo && !condBg ? "var(--havn-bg)" : undefined,
     };
 
     return (
