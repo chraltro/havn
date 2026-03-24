@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { api } from "./api";
 import { useDashboard } from "./DashboardContext";
 
@@ -11,12 +11,26 @@ import { useDashboard } from "./DashboardContext";
 const _optionsSqlCache = new Map();
 
 export default function DashboardFilterBar() {
-  const { dashboard, globalFilters, setFilter, parameters, setParameter, clearCrossFilter, crossFilter } = useDashboard();
+  const { dashboard, globalFilters, setFilter, parameters, setParameter, clearCrossFilter, crossFilter, savedViews, saveView, loadView, deleteView } = useDashboard();
 
   const filters = dashboard?.filters || [];
   const params = dashboard?.settings?.parameters || [];
 
-  if (filters.length === 0 && params.length === 0 && !crossFilter) return null;
+  // Determine if any filter is active
+  const hasActiveFilters = useMemo(() => {
+    const hasGlobal = Object.values(globalFilters).some(v => v !== null && v !== undefined && v !== "");
+    return hasGlobal || !!crossFilter;
+  }, [globalFilters, crossFilter]);
+
+  const handleResetAll = useCallback(() => {
+    // Clear all global filters
+    for (const key of Object.keys(globalFilters)) {
+      setFilter(key, null);
+    }
+    clearCrossFilter();
+  }, [globalFilters, setFilter, clearCrossFilter]);
+
+  if (filters.length === 0 && params.length === 0 && !crossFilter && (!savedViews || savedViews.length === 0)) return null;
 
   return (
     <div style={st.bar}>
@@ -37,6 +51,97 @@ export default function DashboardFilterBar() {
             Filtered: {crossFilter.column} = {String(crossFilter.value)}
           </span>
           <button style={st.clearBtn} onClick={clearCrossFilter} title="Clear cross-filter">×</button>
+        </div>
+      )}
+
+      {/* Reset all filters */}
+      {hasActiveFilters && (
+        <button style={st.resetAllBtn} onClick={handleResetAll} title="Reset all filters">
+          Reset all
+        </button>
+      )}
+
+      {/* Saved views */}
+      {(hasActiveFilters || (savedViews && savedViews.length > 0)) && (
+        <SavedViewsDropdown savedViews={savedViews || []} onSave={saveView} onLoad={loadView} onDelete={deleteView} />
+      )}
+    </div>
+  );
+}
+
+// ---------- SavedViewsDropdown ----------
+
+function SavedViewsDropdown({ savedViews, onSave, onLoad, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const [naming, setNaming] = useState(false);
+  const [viewName, setViewName] = useState("");
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) { setOpen(false); setNaming(false); }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const handleSave = () => {
+    if (viewName.trim()) {
+      onSave(viewName.trim());
+      setViewName("");
+      setNaming(false);
+    }
+  };
+
+  return (
+    <div ref={ref} style={{ position: "relative", alignSelf: "flex-end" }}>
+      <button style={st.viewsBtn} onClick={() => setOpen(prev => !prev)}>
+        Views {savedViews.length > 0 && <span style={{ opacity: 0.6 }}>({savedViews.length})</span>}
+        <span style={{ fontSize: 10, marginLeft: 4 }}>{open ? "\u25B2" : "\u25BC"}</span>
+      </button>
+      {open && (
+        <div style={st.viewsDropdown}>
+          {savedViews.map(v => (
+            <div key={v.id} style={st.viewItem}>
+              <button
+                style={st.viewNameBtn}
+                onClick={() => { onLoad(v.id); setOpen(false); }}
+                title={`Load "${v.name}"`}
+              >
+                {v.name}
+              </button>
+              <button
+                style={st.viewDeleteBtn}
+                onClick={(e) => { e.stopPropagation(); onDelete(v.id); }}
+                title="Delete view"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {savedViews.length === 0 && (
+            <div style={{ padding: "6px 10px", fontSize: 11, color: "var(--havn-text-secondary)" }}>No saved views</div>
+          )}
+          <div style={{ borderTop: "1px solid var(--havn-border)", padding: 4 }}>
+            {naming ? (
+              <div style={{ display: "flex", gap: 4 }}>
+                <input
+                  style={{ ...st.filterInput, flex: 1, minWidth: 80 }}
+                  value={viewName}
+                  onChange={(e) => setViewName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") setNaming(false); }}
+                  placeholder="View name"
+                  autoFocus
+                />
+                <button style={st.viewSaveConfirmBtn} onClick={handleSave}>Save</button>
+              </div>
+            ) : (
+              <button style={st.viewSaveBtn} onClick={() => setNaming(true)}>
+                Save current view
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -526,5 +631,95 @@ const st = {
     borderRadius: 3,
     cursor: "pointer",
     fontSize: 12,
+  },
+
+  // Reset all button
+  resetAllBtn: {
+    background: "none",
+    border: "none",
+    color: "var(--havn-text-secondary)",
+    cursor: "pointer",
+    fontSize: 11,
+    padding: "4px 8px",
+    alignSelf: "flex-end",
+    textDecoration: "underline",
+    opacity: 0.8,
+  },
+
+  // Saved views
+  viewsBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    padding: "4px 10px",
+    border: "1px solid var(--havn-border)",
+    borderRadius: 4,
+    background: "var(--havn-bg-secondary, var(--havn-bg))",
+    color: "var(--havn-text)",
+    fontSize: 12,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  viewsDropdown: {
+    position: "absolute",
+    top: "100%",
+    right: 0,
+    zIndex: 100,
+    marginTop: 2,
+    minWidth: 180,
+    maxHeight: 280,
+    border: "1px solid var(--havn-border)",
+    borderRadius: 4,
+    background: "var(--havn-bg-secondary, var(--havn-bg))",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+  },
+  viewItem: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "0 4px",
+    borderBottom: "1px solid var(--havn-border)",
+  },
+  viewNameBtn: {
+    flex: 1,
+    background: "none",
+    border: "none",
+    color: "var(--havn-text)",
+    cursor: "pointer",
+    padding: "6px 6px",
+    fontSize: 12,
+    textAlign: "left",
+  },
+  viewDeleteBtn: {
+    background: "none",
+    border: "none",
+    color: "var(--havn-text-secondary)",
+    cursor: "pointer",
+    fontSize: 14,
+    padding: "2px 4px",
+    opacity: 0.6,
+  },
+  viewSaveBtn: {
+    width: "100%",
+    background: "none",
+    border: "none",
+    color: "var(--havn-accent)",
+    cursor: "pointer",
+    padding: "6px 8px",
+    fontSize: 12,
+    textAlign: "left",
+  },
+  viewSaveConfirmBtn: {
+    padding: "4px 8px",
+    border: "1px solid var(--havn-accent)",
+    borderRadius: 4,
+    background: "var(--havn-accent)",
+    color: "#fff",
+    fontSize: 11,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
   },
 };
