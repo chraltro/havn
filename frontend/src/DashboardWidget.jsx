@@ -32,6 +32,22 @@ function ResponsiveChart({ type, columns, rows, config }) {
   );
 }
 
+function exportWidgetCSV(widget, data) {
+  if (!data?.columns || !data?.rows) return;
+  const header = data.columns.join(",");
+  const body = data.rows.map(r => r.map(v => {
+    const s = String(v ?? "");
+    return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+  }).join(",")).join("\n");
+  const blob = new Blob([header + "\n" + body], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${widget.title || "data"}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function timeAgo(dateStr) {
   if (!dateStr) return "";
   const now = new Date();
@@ -170,8 +186,8 @@ export default function DashboardWidget({
         border: hasError ? "1px solid var(--havn-red)" : "1px solid var(--havn-border)",
       }}
     >
-      {/* Title bar */}
-      <div style={st.titleBar}>
+      {/* Title bar (hidden for dividers) */}
+      {widget.widget_type !== "divider" && <div style={st.titleBar}>
         <div
           style={{ ...st.dragHandle, ...(editMode ? { cursor: "grab" } : {}) }}
           onPointerDown={editMode && !editingTitle ? onMoveStart : undefined}
@@ -237,13 +253,20 @@ export default function DashboardWidget({
                 onMouseLeave={(e) => e.currentTarget.style.background = "none"}>
                 Duplicate
               </button>
+              {hasData && (
+                <button style={st.menuItem} onClick={() => { setShowMenu(false); exportWidgetCSV(widget, data); }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-bg-secondary, rgba(128,128,128,0.1))"}
+                  onMouseLeave={(e) => e.currentTarget.style.background = "none"}>
+                  Export CSV
+                </button>
+              )}
               <button style={{ ...st.menuItem, color: "var(--havn-red)" }} onClick={() => { setShowMenu(false); onDelete?.(widget); }}>
                 Delete
               </button>
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* Content */}
       <div style={st.content}>
@@ -365,6 +388,16 @@ function renderWidgetContent(widget, data, onChartClick) {
         {renderMarkdown(config?.content || "")}
       </div>
     );
+  }
+
+  if (widget_type === "image") {
+    const url = config?.image_url;
+    if (!url) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, opacity: 0.4, fontSize: 13 }}>No image configured</div>;
+    return <img src={url} alt={widget.title || "Image"} style={{ objectFit: config?.fit || "contain", width: "100%", height: "100%", display: "block" }} />;
+  }
+
+  if (widget_type === "divider") {
+    return <hr style={{ border: "none", borderTop: "1px solid var(--havn-border)", margin: "auto 0", width: "100%" }} />;
   }
 
   // Default: table
