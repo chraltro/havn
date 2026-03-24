@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { getSeriesColor } from "./chartStyleDefaults";
 
 // ═══════════════════════════════════════════════════════════════════
 // UTILITIES
@@ -130,6 +131,8 @@ function detectBestChart(analysis, rowCount) {
 const COLORS = [
   "#6366f1", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6",
   "#06b6d4", "#ec4899", "#14b8a6", "#f97316", "#a855f7",
+  "#3b82f6", "#10b981", "#eab308", "#f43f5e", "#8b5cf6",
+  "#0ea5e9",
 ];
 
 const CHART_TYPES = [
@@ -224,7 +227,7 @@ function exportChart(svgEl, format) {
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════
 
-export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLabel, yAxisLabel, onDataClick }) {
+export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLabel, yAxisLabel, onDataClick, config }) {
   const [chartType, setChartType] = useState(forcedType || null);
   const [xCol, setXCol] = useState(0);
   const [yCols, setYCols] = useState([1]);
@@ -301,7 +304,7 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
     });
     const series = yCols.map((ci, i) => ({
       name: columns[ci],
-      color: COLORS[i % COLORS.length],
+      color: getSeriesColor(config, i, columns[ci]),
       values: rows.map((r) => { const n = parseNum(r[ci]); return isNaN(n) ? 0 : n; }),
     }));
     const allVals = series.flatMap((s) => s.values);
@@ -323,7 +326,7 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
     const stackMax = Math.max(0, ...stackedTotals);
 
     return { labels, series, yMin, yMax, scatterPoints, slices, stackMax };
-  }, [rows, columns, xCol, yCols]);
+  }, [rows, columns, xCol, yCols, config]);
 
   // Tooltip handlers
   const showTip = useCallback((e, label, values) => {
@@ -342,6 +345,11 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
 
   const isPieType = chartType === "pie" || chartType === "donut";
   const isCartesian = !isPieType;
+
+  // Gridline helpers
+  const gridColor = config?.gridlineColor || "var(--havn-border-light)";
+  const gridDash = config?.gridlineStyle === "solid" ? "none" : config?.gridlineStyle === "dotted" ? "1,3" : "3,3";
+  const showGrid = config?.showGridlines !== false;
 
   // No data guard
   if (!columns || columns.length < 2 || rows.length === 0) {
@@ -395,19 +403,20 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
         {/* Grid */}
-        {scale.ticks.map((t) => (
+        {showGrid && scale.ticks.map((t) => (
           <g key={t}>
-            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke="var(--havn-border-light)" strokeDasharray="3,3" opacity={0.5} />
+            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
             <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxis(t)}</text>
           </g>
         ))}
         {/* X labels */}
         {labels.map((l, i) => {
           if (i % labelStep !== 0 && i !== n - 1) return null;
+          const fullLabel = String(l);
           const lx = i * groupW + groupW / 2;
           return shouldRotate
-            ? <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-35, ${lx}, ${plotH + 10})`}>{trunc(l, 16)}</text>
-            : <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{trunc(l)}</text>;
+            ? <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-35, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, 16)}</text>
+            : <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l)}</text>;
         })}
         {/* Axis labels */}
         {(xAxisLabel || columns[xCol]) && <text x={plotW / 2} y={plotH + (shouldRotate ? 48 : 40)} textAnchor="middle" style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{xAxisLabel || columns[xCol]}</text>}
@@ -430,6 +439,10 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
                 onMouseMove={(e) => {
                   setHoveredIndex(i);
                   showTip(e, labels[i], series.map((ss, ssi) => ({ name: ss.name, value: ss.values[i], color: ss.color })));
+                }}
+                onTouchStart={(e) => {
+                  setHoveredIndex(i);
+                  showTip(e.touches[0], labels[i], series.map((ss, ssi) => ({ name: ss.name, value: ss.values[i], color: ss.color })));
                 }}
                 onMouseLeave={hideTip}
                 onClick={onDataClick ? () => onDataClick(columns[xCol], labels[i]) : undefined}
@@ -463,19 +476,20 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
         {/* Grid */}
-        {scale.ticks.map((t) => (
+        {showGrid && scale.ticks.map((t) => (
           <g key={t}>
-            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke="var(--havn-border-light)" strokeDasharray="3,3" opacity={0.5} />
+            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
             <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxis(t)}</text>
           </g>
         ))}
         {/* X labels */}
         {labels.map((l, i) => {
           if (i % labelStep !== 0 && i !== n - 1) return null;
+          const fullLabel = String(l);
           const lx = xPos(i);
           return shouldRotate
-            ? <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-35, ${lx}, ${plotH + 10})`}>{trunc(l, 16)}</text>
-            : <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{trunc(l, 10)}</text>;
+            ? <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-35, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, 16)}</text>
+            : <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l, 10)}</text>;
         })}
         {/* Axis labels */}
         {(xAxisLabel || columns[xCol]) && <text x={plotW / 2} y={plotH + (shouldRotate ? 48 : 40)} textAnchor="middle" style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{xAxisLabel || columns[xCol]}</text>}
@@ -520,6 +534,14 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
             setHoveredIndex(ci);
             showTip(e, labels[ci], series.map((s) => ({ name: s.name, value: s.values[ci], color: s.color })));
           }}
+          onTouchStart={(e) => {
+            const svgRect = e.currentTarget.ownerSVGElement.getBoundingClientRect();
+            const mx = e.touches[0].clientX - svgRect.left - PAD.left;
+            const idx = n === 1 ? 0 : Math.round(mx / (plotW / (n - 1)));
+            const ci = Math.max(0, Math.min(n - 1, idx));
+            setHoveredIndex(ci);
+            showTip(e.touches[0], labels[ci], series.map((s) => ({ name: s.name, value: s.values[ci], color: s.color })));
+          }}
           onMouseLeave={hideTip}
         />
       </g>
@@ -542,21 +564,24 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
 
     const labelStepX = Math.max(1, Math.ceil(xScale.ticks.length / 10));
 
+    const scatterColor = getSeriesColor(config, 0, columns[xCol]);
+    const scatterColor2 = getSeriesColor(config, 1, columns[yCols[0]]);
+
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
         {/* Y grid */}
-        {yScale.ticks.map((t) => (
+        {showGrid && yScale.ticks.map((t) => (
           <g key={`y${t}`}>
-            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke="var(--havn-border-light)" strokeDasharray="3,3" opacity={0.5} />
+            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
             <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxis(t)}</text>
           </g>
         ))}
         {/* X grid */}
-        {xScale.ticks.map((t, i) => {
+        {showGrid && xScale.ticks.map((t, i) => {
           if (i % labelStepX !== 0) return null;
           return (
             <g key={`x${t}`}>
-              <line x1={xPos(t)} y1={0} x2={xPos(t)} y2={plotH} stroke="var(--havn-border-light)" strokeDasharray="3,3" opacity={0.3} />
+              <line x1={xPos(t)} y1={0} x2={xPos(t)} y2={plotH} stroke={gridColor} strokeDasharray={gridDash} opacity={0.3} />
               <text x={xPos(t)} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{fmtAxis(t)}</text>
             </g>
           );
@@ -565,14 +590,21 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
         {scatterPoints.map((p, i) => (
           <circle key={i} cx={xPos(p.x)} cy={yPos(p.y)}
             r={hoveredIndex === i ? 6 : 4}
-            fill={COLORS[0]} opacity={hoveredIndex !== null && hoveredIndex !== i ? 0.2 : 0.7}
-            stroke={COLORS[0]} strokeWidth={1}
+            fill={scatterColor} opacity={hoveredIndex !== null && hoveredIndex !== i ? 0.2 : 0.7}
+            stroke={scatterColor} strokeWidth={1}
             style={{ transition: "r 0.15s, opacity 0.15s", cursor: "pointer" }}
             onMouseMove={(e) => {
               setHoveredIndex(i);
               showTip(e, `Point ${i + 1}`, [
-                { name: columns[xCol], value: p.x, color: COLORS[0] },
-                { name: columns[yCols[0]], value: p.y, color: COLORS[1] },
+                { name: columns[xCol], value: p.x, color: scatterColor },
+                { name: columns[yCols[0]], value: p.y, color: scatterColor2 },
+              ]);
+            }}
+            onTouchStart={(e) => {
+              setHoveredIndex(i);
+              showTip(e.touches[0], `Point ${i + 1}`, [
+                { name: columns[xCol], value: p.x, color: scatterColor },
+                { name: columns[yCols[0]], value: p.y, color: scatterColor2 },
               ]);
             }}
             onMouseLeave={hideTip}
@@ -608,7 +640,7 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
       angle += sliceAngle;
       const end = angle;
       const midAngle = start + sliceAngle / 2;
-      return { ...s, start, end, midAngle, pct: ((s.value / total) * 100).toFixed(1), color: COLORS[i % COLORS.length], index: i };
+      return { ...s, start, end, midAngle, pct: ((s.value / total) * 100).toFixed(1), color: getSeriesColor(config, i, s.label), index: i };
     });
 
     return (
@@ -627,6 +659,10 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
               onMouseMove={(e) => {
                 setHoveredIndex(a.index);
                 showTip(e, a.label, [{ name: `${a.pct}%`, value: a.value, color: a.color }]);
+              }}
+              onTouchStart={(e) => {
+                setHoveredIndex(a.index);
+                showTip(e.touches[0], a.label, [{ name: `${a.pct}%`, value: a.value, color: a.color }]);
               }}
               onMouseLeave={hideTip}
               onClick={onDataClick ? () => onDataClick(columns[xCol], a.label) : undefined}
@@ -712,16 +748,17 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
     return (
       <g transform={`translate(${hPad.left},${PAD.top})`}>
         {/* X grid (value axis) */}
-        {scale.ticks.map((t) => (
+        {showGrid && scale.ticks.map((t) => (
           <g key={t}>
-            <line x1={xPosH(t)} y1={0} x2={xPosH(t)} y2={plotH} stroke="var(--havn-border-light)" strokeDasharray="3,3" opacity={0.5} />
+            <line x1={xPosH(t)} y1={0} x2={xPosH(t)} y2={plotH} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
             <text x={xPosH(t)} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{fmtAxis(t)}</text>
           </g>
         ))}
         {/* Y labels (categories) */}
-        {labels.map((l, i) => (
-          <text key={i} x={-8} y={i * groupH + groupH / 2 + 4} textAnchor="end" style={axLabelStyle}>{trunc(l, 14)}</text>
-        ))}
+        {labels.map((l, i) => {
+          const fullLabel = String(l);
+          return <text key={i} x={-8} y={i * groupH + groupH / 2 + 4} textAnchor="end" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l, 14)}</text>;
+        })}
         {/* Bars */}
         {series.map((s, si) =>
           s.values.map((v, i) => {
@@ -739,6 +776,10 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
                 onMouseMove={(e) => {
                   setHoveredIndex(i);
                   showTip(e, labels[i], series.map((ss) => ({ name: ss.name, value: ss.values[i], color: ss.color })));
+                }}
+                onTouchStart={(e) => {
+                  setHoveredIndex(i);
+                  showTip(e.touches[0], labels[i], series.map((ss) => ({ name: ss.name, value: ss.values[i], color: ss.color })));
                 }}
                 onMouseLeave={hideTip}
               />
@@ -772,19 +813,20 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
         {/* Grid */}
-        {scale.ticks.map((t) => (
+        {showGrid && scale.ticks.map((t) => (
           <g key={t}>
-            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke="var(--havn-border-light)" strokeDasharray="3,3" opacity={0.5} />
+            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
             <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxis(t)}</text>
           </g>
         ))}
         {/* X labels */}
         {labels.map((l, i) => {
           if (i % labelStep !== 0 && i !== n - 1) return null;
+          const fullLabel = String(l);
           const lx = i * groupW + groupW / 2;
           return shouldRotate
-            ? <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-35, ${lx}, ${plotH + 10})`}>{trunc(l, 16)}</text>
-            : <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{trunc(l)}</text>;
+            ? <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-35, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, 16)}</text>
+            : <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l)}</text>;
         })}
         {/* Stacked segments */}
         {labels.map((_, i) => {
@@ -808,6 +850,14 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
                   setHoveredIndex(i);
                   const total = series.reduce((sum, ss) => sum + Math.max(0, ss.values[i]), 0);
                   showTip(e, labels[i], [
+                    ...series.map((ss) => ({ name: ss.name, value: Math.max(0, ss.values[i]), color: ss.color })),
+                    { name: "Total", value: total, color: "var(--havn-text-secondary)" },
+                  ]);
+                }}
+                onTouchStart={(e) => {
+                  setHoveredIndex(i);
+                  const total = series.reduce((sum, ss) => sum + Math.max(0, ss.values[i]), 0);
+                  showTip(e.touches[0], labels[i], [
                     ...series.map((ss) => ({ name: ss.name, value: Math.max(0, ss.values[i]), color: ss.color })),
                     { name: "Total", value: total, color: "var(--havn-text-secondary)" },
                   ]);
@@ -924,6 +974,7 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
       <div ref={containerRef} style={st.chartArea}>
         <svg ref={svgRef} width={W} height={H} style={{ display: "block" }}
           xmlns="http://www.w3.org/2000/svg">
+          <rect width="100%" height="100%" fill={config?.bgColor || "transparent"} />
           {renderSVGContent()}
         </svg>
 

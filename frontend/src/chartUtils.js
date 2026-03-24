@@ -124,7 +124,12 @@ export function detectBestChart(analysis, rowCount) {
 export const COLORS = [
   "#6366f1", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6",
   "#06b6d4", "#ec4899", "#14b8a6", "#f97316", "#a855f7",
+  "#3b82f6", "#10b981", "#eab308", "#f43f5e", "#8b5cf6",
+  "#0ea5e9",
 ];
+
+// Re-export key utilities from chartStyleDefaults
+export { getSeriesColor, formatNumber, autoContrast, PALETTES, DEFAULT_CHART_STYLE } from "./chartStyleDefaults";
 
 export const DASHBOARD_CHART_TYPES = [
   // Basic
