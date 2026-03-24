@@ -26,6 +26,15 @@ export function DashboardProvider({ children }) {
   // Saved filter views
   const [savedViews, setSavedViews] = useState([]);
 
+  // Toast notifications
+  const [toasts, setToasts] = useState([]);
+  const toastIdRef = useRef(0);
+  const showToast = useCallback((message, type = "info", duration = 3000) => {
+    const id = ++toastIdRef.current;
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
+  }, []);
+
   // Push current dashboard state onto undo stack before a mutation
   const pushUndo = useCallback(() => {
     setUndoStack(prev => {
@@ -409,11 +418,34 @@ export function DashboardProvider({ children }) {
     saveView,
     loadView,
     deleteView,
+    toasts,
+    showToast,
   };
 
   return (
     <DashboardContext.Provider value={value}>
       {children}
+      {/* Toast notifications */}
+      {toasts.length > 0 && (
+        <div style={{
+          position: "fixed", bottom: 20, right: 20, zIndex: 10001,
+          display: "flex", flexDirection: "column", gap: 8, pointerEvents: "none",
+        }}>
+          {toasts.map(t => (
+            <div key={t.id} style={{
+              background: t.type === "error" ? "var(--havn-red)" : t.type === "success" ? "var(--havn-green)" : "var(--havn-bg-secondary, #1e1e2e)",
+              color: t.type === "error" || t.type === "success" ? "#fff" : "var(--havn-text)",
+              border: "1px solid var(--havn-border)",
+              borderRadius: 8, padding: "8px 16px", fontSize: 13,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+              animation: "fadeInUp 0.2s ease-out",
+              pointerEvents: "auto",
+            }}>
+              {t.message}
+            </div>
+          ))}
+        </div>
+      )}
     </DashboardContext.Provider>
   );
 }

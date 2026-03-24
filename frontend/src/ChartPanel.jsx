@@ -147,8 +147,36 @@ const CHART_TYPES = [
   { id: "stacked100", label: "100% Stacked" },
 ];
 
-const PAD = { top: 28, right: 28, bottom: 52, left: 60 };
+const PAD_BASE = { top: 28, right: 28, bottom: 52, left: 60 };
 const PIE_PAD = { top: 16, bottom: 16 };
+
+// Compute dynamic bottom padding based on label characteristics
+function dynamicPad(labels, plotWidth) {
+  const n = labels.length;
+  if (n === 0) return PAD_BASE;
+  const avgLen = labels.reduce((s, l) => s + String(l).length, 0) / n;
+  const maxLen = Math.max(...labels.map(l => String(l).length));
+  const groupW = plotWidth / n;
+  const estPx = Math.max(avgLen * 7, 36);
+  // No rotation needed
+  if (groupW >= estPx * 0.9 || n <= 4) return PAD_BASE;
+  // 45° rotation — need more room based on label length
+  const extraBottom = Math.min(maxLen * 3.5, 60);
+  return { ...PAD_BASE, bottom: PAD_BASE.bottom + extraBottom };
+}
+
+// Determine label rotation angle: 0 (none), -45, or -90
+function labelRotation(labels, groupW) {
+  const n = labels.length;
+  if (n <= 4) return 0;
+  const avgLen = labels.reduce((s, l) => s + String(l).length, 0) / n;
+  const maxLen = Math.max(...labels.map(l => String(l).length));
+  const estPx = Math.max(avgLen * 7, 36);
+  if (groupW >= estPx * 0.9) return 0;
+  // Very narrow bars or very long labels → 90°
+  if (groupW < 20 || maxLen > 20) return -90;
+  return -45;
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // CHART TYPE ICONS (mini SVG)
@@ -357,15 +385,44 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
   const gridDash = config?.gridlineStyle === "solid" ? "none" : config?.gridlineStyle === "dotted" ? "1,3" : "3,3";
   const showGrid = config?.showGridlines !== false;
 
+  // Reference lines from config
+  const refLines = config?.referenceLines || [];
+
   // No data guard
   if (!columns || columns.length < 2 || rows.length === 0) {
     return <div style={st.empty}>Need at least 2 columns and 1 row to chart.</div>;
   }
 
-  // Dimensions
+  // Dimensions — compute dynamic padding based on chart data
   const { width: W, height: H } = dims;
+  const PAD = useMemo(() => {
+    if (isPieType || !chartData?.labels) return PAD_BASE;
+    const estPlotW = W - PAD_BASE.left - PAD_BASE.right;
+    return dynamicPad(chartData.labels, estPlotW);
+  }, [W, chartData?.labels, isPieType]);
   const plotW = W - PAD.left - PAD.right;
   const plotH = H - PAD.top - PAD.bottom;
+
+  // ─── REFERENCE LINES ────────────────────────────────────
+  function renderRefLines(yPosFunc) {
+    if (refLines.length === 0) return null;
+    return refLines.map((rl, i) => {
+      if (rl.value === undefined || rl.value === null) return null;
+      const y = yPosFunc(rl.value);
+      if (y < -2 || y > plotH + 2) return null;
+      const dash = rl.style === "solid" ? "none" : "6,4";
+      return (
+        <g key={`ref-${i}`}>
+          <line x1={0} y1={y} x2={plotW} y2={y} stroke={rl.color || "#ef4444"} strokeWidth={1.5} strokeDasharray={dash} opacity={0.8} />
+          {rl.label && (
+            <text x={plotW - 4} y={y - 4} textAnchor="end" style={{ fill: rl.color || "#ef4444", fontSize: "9px", fontWeight: 600, fontFamily: "var(--havn-font-mono)" }}>
+              {rl.label}
+            </text>
+          )}
+        </g>
+      );
+    });
+  }
 
   // ─── RENDERING ──────────────────────────────────────────
   function renderSVGContent() {
@@ -397,15 +454,15 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
     const totalBarW = barW * seriesCount;
     const yPos = (v) => plotH - ((v - scale.min) / yRange) * plotH;
     const zeroY = yPos(0);
-    // Smart label stepping: estimate pixel width per label, skip if too crowded
+    // Smart label rotation: 0°, -45°, or -90° based on available space
+    const rotAngle = labelRotation(labels, groupW);
+    const isRotated = rotAngle !== 0;
+    // Label stepping: skip labels to avoid physical overlap
     const avgLabelLen = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
     const estLabelPx = Math.max(avgLabelLen * 7, 36);
-    const shouldRotate = groupW < estLabelPx * 0.7 && n > 4;
-    // Cap visible labels at ~15 max, and ensure no physical overlap
-    const maxLabels = 10;
-    const pixelStep = Math.max(1, Math.ceil((shouldRotate ? estLabelPx * 0.45 : estLabelPx) / (groupW || 1)));
-    const countStep = Math.max(1, Math.ceil(n / maxLabels));
-    const labelStep = Math.max(pixelStep, countStep);
+    const maxLabels = Math.max(6, Math.floor(plotW / (isRotated ? 24 : Math.max(estLabelPx, 40))));
+    const labelStep = Math.max(1, Math.ceil(n / maxLabels));
+    const truncLen = rotAngle === -90 ? 12 : rotAngle === -45 ? 18 : 12;
 
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
@@ -421,13 +478,19 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
           if (i % labelStep !== 0 && i !== n - 1) return null;
           const fullLabel = String(l);
           const lx = i * groupW + groupW / 2;
-          return shouldRotate
-            ? <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-35, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, 16)}</text>
-            : <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l)}</text>;
+          if (rotAngle === -90) {
+            return <text key={i} x={lx} y={plotH + 8} textAnchor="end" dominantBaseline="central" style={axLabelStyle} transform={`rotate(-90, ${lx}, ${plotH + 8})`}><title>{fullLabel}</title>{trunc(l, truncLen)}</text>;
+          }
+          if (rotAngle === -45) {
+            return <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-45, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, truncLen)}</text>;
+          }
+          return <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l, truncLen)}</text>;
         })}
         {/* Axis labels */}
-        {(xAxisLabel || columns[xCol]) && <text x={plotW / 2} y={plotH + (shouldRotate ? 48 : 40)} textAnchor="middle" style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{xAxisLabel || columns[xCol]}</text>}
+        {(xAxisLabel || columns[xCol]) && <text x={plotW / 2} y={plotH + PAD.bottom - 8} textAnchor="middle" style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{xAxisLabel || columns[xCol]}</text>}
         {(yAxisLabel || yCols.length > 0) && <text x={-44} y={plotH / 2} textAnchor="middle" transform={`rotate(-90, -44, ${plotH / 2})`} style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{yAxisLabel || (yCols.length === 1 ? columns[yCols[0]] : "Value")}</text>}
+        {/* Reference lines */}
+        {renderRefLines(yPos)}
         {/* Bars */}
         {series.map((s, si) =>
           s.values.map((v, i) => {
@@ -471,14 +534,14 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
     const n = labels.length;
     const yPos = (v) => plotH - ((v - scale.min) / yRange) * plotH;
     const xPos = (i) => n === 1 ? plotW / 2 : (i / (n - 1)) * plotW;
+    const stepW = n > 1 ? plotW / (n - 1) : plotW;
+    const rotAngleLine = labelRotation(labels, stepW);
+    const isRotatedLine = rotAngleLine !== 0;
     const avgLabelLen = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
     const estLabelPx = Math.max(avgLabelLen * 6.5, 30);
-    const stepW = n > 1 ? plotW / (n - 1) : plotW;
-    const shouldRotate = stepW < estLabelPx * 0.7 && n > 4;
-    const maxLabels = 10;
-    const pixelStep = Math.max(1, Math.ceil((shouldRotate ? estLabelPx * 0.45 : estLabelPx) / (stepW || 1)));
-    const countStep = Math.max(1, Math.ceil(n / maxLabels));
-    const labelStep = Math.max(pixelStep, countStep);
+    const maxLabels = Math.max(6, Math.floor(plotW / (isRotatedLine ? 24 : Math.max(estLabelPx, 40))));
+    const labelStep = Math.max(1, Math.ceil(n / maxLabels));
+    const truncLenLine = rotAngleLine === -90 ? 12 : rotAngleLine === -45 ? 18 : 10;
 
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
@@ -494,13 +557,19 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
           if (i % labelStep !== 0 && i !== n - 1) return null;
           const fullLabel = String(l);
           const lx = xPos(i);
-          return shouldRotate
-            ? <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-35, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, 16)}</text>
-            : <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l, 10)}</text>;
+          if (rotAngleLine === -90) {
+            return <text key={i} x={lx} y={plotH + 8} textAnchor="end" dominantBaseline="central" style={axLabelStyle} transform={`rotate(-90, ${lx}, ${plotH + 8})`}><title>{fullLabel}</title>{trunc(l, truncLenLine)}</text>;
+          }
+          if (rotAngleLine === -45) {
+            return <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-45, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, truncLenLine)}</text>;
+          }
+          return <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l, truncLenLine)}</text>;
         })}
         {/* Axis labels */}
-        {(xAxisLabel || columns[xCol]) && <text x={plotW / 2} y={plotH + (shouldRotate ? 48 : 40)} textAnchor="middle" style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{xAxisLabel || columns[xCol]}</text>}
+        {(xAxisLabel || columns[xCol]) && <text x={plotW / 2} y={plotH + PAD.bottom - 8} textAnchor="middle" style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{xAxisLabel || columns[xCol]}</text>}
         {(yAxisLabel || yCols.length > 0) && <text x={-44} y={plotH / 2} textAnchor="middle" transform={`rotate(-90, -44, ${plotH / 2})`} style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{yAxisLabel || (yCols.length === 1 ? columns[yCols[0]] : "Value")}</text>}
+        {/* Reference lines */}
+        {renderRefLines(yPos)}
         {/* Area fills */}
         {filled && series.map((s, si) => {
           const pts = s.values.map((v, i) => `${xPos(i)},${yPos(v)}`).join(" ");
@@ -626,6 +695,12 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
     let { slices } = chartData;
     if (slices.length === 0) return <text x={W / 2} y={H / 2} textAnchor="middle" style={{ fill: "var(--havn-text-dim)", fontSize: "13px" }}>No data for chart</text>;
 
+    // Check for dominant slice — warn if >70%
+    const sliceTotal = slices.reduce((s, d) => s + d.value, 0) || 1;
+    const topSlice = Math.max(...slices.map(s => s.value));
+    const topPct = (topSlice / sliceTotal) * 100;
+    const hasDominant = topPct > 70 && slices.length > 1;
+
     // Cap at 10 slices — group the rest as "Other"
     if (slices.length > 10) {
       const sorted = [...slices].sort((a, b) => b.value - a.value);
@@ -702,6 +777,19 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
         )}
         {/* Legend */}
         {renderPieLegend(arcs)}
+        {/* Dominant slice warning */}
+        {hasDominant && (
+          <foreignObject x={4} y={4} width={Math.min(W - 8, 260)} height={28}>
+            <div xmlns="http://www.w3.org/1999/xhtml" style={{
+              background: "rgba(234, 179, 8, 0.15)", border: "1px solid rgba(234, 179, 8, 0.3)",
+              borderRadius: 4, padding: "3px 8px", fontSize: 10, color: "var(--havn-yellow)",
+              display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
+            }}>
+              <span>{"\u26A0"}</span>
+              <span>Top slice is {topPct.toFixed(0)}%. Consider Bar or Treemap for readability.</span>
+            </div>
+          </foreignObject>
+        )}
       </g>
     );
   }
@@ -808,14 +896,13 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
     const groupW = plotW / n;
     const barW = Math.min(groupW * 0.7, 48);
     const yPos = (v) => plotH - ((v - scale.min) / yRange) * plotH;
-    const avgLabelLen = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
-    const estLabelPx = Math.max(avgLabelLen * 7, 36);
-    const shouldRotate = groupW < estLabelPx * 0.7 && n > 4;
-    // Cap visible labels at ~15 max, and ensure no physical overlap
-    const maxLabels = 10;
-    const pixelStep = Math.max(1, Math.ceil((shouldRotate ? estLabelPx * 0.45 : estLabelPx) / (groupW || 1)));
-    const countStep = Math.max(1, Math.ceil(n / maxLabels));
-    const labelStep = Math.max(pixelStep, countStep);
+    const rotAngleStk = labelRotation(labels, groupW);
+    const isRotatedStk = rotAngleStk !== 0;
+    const avgLabelLenStk = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
+    const estLabelPxStk = Math.max(avgLabelLenStk * 7, 36);
+    const maxLabelsStk = Math.max(6, Math.floor(plotW / (isRotatedStk ? 24 : Math.max(estLabelPxStk, 40))));
+    const labelStep = Math.max(1, Math.ceil(n / maxLabelsStk));
+    const truncLenStk = rotAngleStk === -90 ? 12 : rotAngleStk === -45 ? 18 : 12;
 
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
@@ -831,9 +918,13 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
           if (i % labelStep !== 0 && i !== n - 1) return null;
           const fullLabel = String(l);
           const lx = i * groupW + groupW / 2;
-          return shouldRotate
-            ? <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-35, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, 16)}</text>
-            : <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l)}</text>;
+          if (rotAngleStk === -90) {
+            return <text key={i} x={lx} y={plotH + 8} textAnchor="end" dominantBaseline="central" style={axLabelStyle} transform={`rotate(-90, ${lx}, ${plotH + 8})`}><title>{fullLabel}</title>{trunc(l, truncLenStk)}</text>;
+          }
+          if (rotAngleStk === -45) {
+            return <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-45, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, truncLenStk)}</text>;
+          }
+          return <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l, truncLenStk)}</text>;
         })}
         {/* Stacked segments */}
         {labels.map((_, i) => {
@@ -887,13 +978,13 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
     const groupW = plotW / n;
     const barW = Math.min(groupW * 0.7, 48);
     const yPos = (v) => plotH - ((v - scale.min) / yRange) * plotH;
-    const avgLabelLen = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
-    const estLabelPx = Math.max(avgLabelLen * 7, 36);
-    const shouldRotate = groupW < estLabelPx * 0.7 && n > 4;
-    const maxLabels = 10;
-    const pixelStep = Math.max(1, Math.ceil((shouldRotate ? estLabelPx * 0.45 : estLabelPx) / (groupW || 1)));
-    const countStep = Math.max(1, Math.ceil(n / maxLabels));
-    const labelStep = Math.max(pixelStep, countStep);
+    const rotAngle100 = labelRotation(labels, groupW);
+    const isRotated100 = rotAngle100 !== 0;
+    const avgLabelLen100 = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
+    const estLabelPx100 = Math.max(avgLabelLen100 * 7, 36);
+    const maxLabels100 = Math.max(6, Math.floor(plotW / (isRotated100 ? 24 : Math.max(estLabelPx100, 40))));
+    const labelStep = Math.max(1, Math.ceil(n / maxLabels100));
+    const truncLen100 = rotAngle100 === -90 ? 12 : rotAngle100 === -45 ? 18 : 12;
 
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
@@ -909,9 +1000,13 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
           if (i % labelStep !== 0 && i !== n - 1) return null;
           const fullLabel = String(l);
           const lx = i * groupW + groupW / 2;
-          return shouldRotate
-            ? <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-35, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, 16)}</text>
-            : <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l)}</text>;
+          if (rotAngle100 === -90) {
+            return <text key={i} x={lx} y={plotH + 8} textAnchor="end" dominantBaseline="central" style={axLabelStyle} transform={`rotate(-90, ${lx}, ${plotH + 8})`}><title>{fullLabel}</title>{trunc(l, truncLen100)}</text>;
+          }
+          if (rotAngle100 === -45) {
+            return <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-45, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, truncLen100)}</text>;
+          }
+          return <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l, truncLen100)}</text>;
         })}
         {/* 100% stacked segments */}
         {labels.map((_, i) => {
