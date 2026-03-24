@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { getSeriesColor } from "./chartStyleDefaults";
+import { getSeriesColor, formatNumber } from "./chartStyleDefaults";
 
 // ═══════════════════════════════════════════════════════════════════
 // UTILITIES
@@ -350,6 +350,9 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
   const isCartesian = !isPieType;
 
   // Gridline helpers
+  // Config-aware axis formatter: uses formatNumber when numberFormat is set
+  const fmtAxisLabel = (t) => config?.numberFormat ? formatNumber(t, config.numberFormat, config.decimalPrecision) : fmtAxis(t);
+
   const gridColor = config?.gridlineColor || "var(--havn-border-light)";
   const gridDash = config?.gridlineStyle === "solid" ? "none" : config?.gridlineStyle === "dotted" ? "1,3" : "3,3";
   const showGrid = config?.showGridlines !== false;
@@ -410,7 +413,7 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
         {showGrid && scale.ticks.map((t) => (
           <g key={t}>
             <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
-            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxis(t)}</text>
+            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxisLabel(t)}</text>
           </g>
         ))}
         {/* X labels */}
@@ -483,7 +486,7 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
         {showGrid && scale.ticks.map((t) => (
           <g key={t}>
             <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
-            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxis(t)}</text>
+            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxisLabel(t)}</text>
           </g>
         ))}
         {/* X labels */}
@@ -577,7 +580,7 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
         {showGrid && yScale.ticks.map((t) => (
           <g key={`y${t}`}>
             <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
-            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxis(t)}</text>
+            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxisLabel(t)}</text>
           </g>
         ))}
         {/* X grid */}
@@ -586,7 +589,7 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
           return (
             <g key={`x${t}`}>
               <line x1={xPos(t)} y1={0} x2={xPos(t)} y2={plotH} stroke={gridColor} strokeDasharray={gridDash} opacity={0.3} />
-              <text x={xPos(t)} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{fmtAxis(t)}</text>
+              <text x={xPos(t)} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{fmtAxisLabel(t)}</text>
             </g>
           );
         })}
@@ -755,7 +758,7 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
         {showGrid && scale.ticks.map((t) => (
           <g key={t}>
             <line x1={xPosH(t)} y1={0} x2={xPosH(t)} y2={plotH} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
-            <text x={xPosH(t)} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{fmtAxis(t)}</text>
+            <text x={xPosH(t)} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{fmtAxisLabel(t)}</text>
           </g>
         ))}
         {/* Y labels (categories) */}
@@ -820,7 +823,7 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
         {showGrid && scale.ticks.map((t) => (
           <g key={t}>
             <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
-            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxis(t)}</text>
+            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxisLabel(t)}</text>
           </g>
         ))}
         {/* X labels */}

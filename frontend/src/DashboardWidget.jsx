@@ -3,6 +3,7 @@ import { useDashboard } from "./DashboardContext";
 import SortableTable from "./SortableTable";
 import ChartPanel from "./ChartPanel";
 import DashboardChart from "./DashboardCharts";
+import { formatNumber } from "./chartStyleDefaults";
 
 const DASHBOARD_CHART_TYPES = new Set([
   "gauge", "treemap", "heatmap", "funnel", "waterfall", "histogram",
@@ -436,6 +437,11 @@ function KPIDisplay({ columns, rows, config }) {
     return n.toFixed(2);
   }
 
+  // Format value: use formatNumber when kpiValueFormat is configured, else fall back to fmtBig
+  const displayValue = config?.kpiValueFormat
+    ? formatNumber(value, config.kpiValueFormat, config.kpiDecimals ?? null, config.currency)
+    : fmtBig(value);
+
   let delta = null;
   let deltaColor = "var(--havn-text-secondary)";
   if (comp !== null && comp !== undefined) {
@@ -447,10 +453,35 @@ function KPIDisplay({ columns, rows, config }) {
     }
   }
 
+  // Conditional color rules: evaluate first matching rule
+  let valueColor = "var(--havn-text)";
+  if (config?.kpiConditionalRules?.length > 0) {
+    const nVal = Number(value);
+    if (!isNaN(nVal)) {
+      for (const rule of config.kpiConditionalRules) {
+        const rv = Number(rule.value);
+        if (isNaN(rv)) continue;
+        let match = false;
+        switch (rule.op) {
+          case ">": match = nVal > rv; break;
+          case "<": match = nVal < rv; break;
+          case ">=": match = nVal >= rv; break;
+          case "<=": match = nVal <= rv; break;
+          case "=": match = nVal === rv; break;
+          default: break;
+        }
+        if (match) {
+          valueColor = rule.color;
+          break;
+        }
+      }
+    }
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flex: 1, gap: 4 }}>
-      <div style={{ fontSize: 36, fontWeight: 700, color: "var(--havn-text)", lineHeight: 1.1 }}>
-        {prefix}{fmtBig(value)}{suffix}
+      <div style={{ fontSize: 36, fontWeight: 700, color: valueColor, lineHeight: 1.1 }}>
+        {prefix}{displayValue}{suffix}
       </div>
       {delta !== null && (
         <div style={{ fontSize: 14, color: deltaColor, fontWeight: 500 }}>
@@ -460,6 +491,11 @@ function KPIDisplay({ columns, rows, config }) {
       {compCol && (
         <div style={{ fontSize: 12, color: "var(--havn-text-secondary)" }}>
           vs {compCol}: {fmtBig(comp)}
+        </div>
+      )}
+      {config?.kpiSubtitle && (
+        <div style={{ fontSize: 12, color: "var(--havn-text-secondary)", marginTop: 2 }}>
+          {config.kpiSubtitle}
         </div>
       )}
     </div>
