@@ -31,3 +31,5 @@ test_dashboard_ui.mjs
 dashboard-*.png
 *.png
 qa-*.md
+temp_*
+internal_*

@@ -143,6 +143,7 @@ const CHART_TYPES = [
   { id: "pie", label: "Pie" },
   { id: "donut", label: "Donut" },
   { id: "hbar", label: "H-Bar" },
+  { id: "grouped", label: "Grouped" },
   { id: "stacked", label: "Stacked" },
   { id: "stacked100", label: "100% Stacked" },
 ];
@@ -319,17 +320,30 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
       const raw = r[xCol];
       if (raw === null || raw === undefined) return "";
       const s = String(raw);
-      // Smart date formatting: shorten ISO timestamps
+      // Date formatting: use config.dateFormat if set, otherwise auto
       if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-        const datePart = s.slice(0, 10); // "2024-01-15"
+        const datePart = s.slice(0, 10);
         const [yr, mo, dy] = datePart.split("-");
         const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-        // Grouped by year (YYYY-01-01)
+        const moName = months[parseInt(mo, 10) - 1];
+        const dayNum = parseInt(dy, 10);
+        const df = config?.dateFormat;
+        if (df && df !== "auto") {
+          switch (df) {
+            case "YYYY-MM-DD": return datePart;
+            case "MMM DD": return `${moName} ${dayNum}`;
+            case "MMM YYYY": return `${moName} ${yr}`;
+            case "DD/MM/YYYY": return `${dy}/${mo}/${yr}`;
+            case "MM/DD/YYYY": return `${mo}/${dy}/${yr}`;
+            case "YYYY": return yr;
+            case "Q YYYY": return `Q${Math.ceil(parseInt(mo, 10) / 3)} ${yr}`;
+            default: break;
+          }
+        }
+        // Auto: smart format based on grouping
         if (mo === "01" && dy === "01" && rows.length <= 20) return yr;
-        // Grouped by month (YYYY-MM-01) or quarter
-        if (dy === "01") return `${months[parseInt(mo, 10) - 1]} ${yr}`;
-        // Regular dates: compact format
-        return `${months[parseInt(mo, 10) - 1]} ${parseInt(dy, 10)}`;
+        if (dy === "01") return `${moName} ${yr}`;
+        return `${moName} ${dayNum}`;
       }
       return s;
     });
@@ -424,6 +438,28 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
     });
   }
 
+  // ─── REFERENCE BANDS ────────────────────────────────────
+  const refBands = config?.referenceBands || [];
+  function renderRefBands(yPosFunc) {
+    if (refBands.length === 0) return null;
+    return refBands.map((band, i) => {
+      if (band.from == null || band.to == null) return null;
+      const y1 = Math.max(yPosFunc(Math.max(band.from, band.to)), 0);
+      const y2 = Math.min(yPosFunc(Math.min(band.from, band.to)), plotH);
+      if (y1 >= y2) return null;
+      return (
+        <g key={`band-${i}`}>
+          <rect x={0} y={y1} width={plotW} height={y2 - y1} fill={band.color || "#6366f1"} opacity={0.1} />
+          {band.label && (
+            <text x={4} y={y1 + 12} style={{ fill: band.color || "#6366f1", fontSize: "9px", fontWeight: 500, fontFamily: "var(--havn-font-mono)", opacity: 0.7 }}>
+              {band.label}
+            </text>
+          )}
+        </g>
+      );
+    });
+  }
+
   // ─── RENDERING ──────────────────────────────────────────
   function renderSVGContent() {
     if (plotW < 40 || plotH < 40) return null;
@@ -435,6 +471,7 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
       case "scatter": return renderScatter();
       case "pie": return renderPie(false);
       case "donut": return renderPie(true);
+      case "grouped": return renderBar();
       case "hbar": return renderHBar();
       case "stacked": return renderStacked();
       case "stacked100": return renderStacked100();
@@ -489,7 +526,8 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
         {/* Axis labels */}
         {(xAxisLabel || columns[xCol]) && <text x={plotW / 2} y={plotH + PAD.bottom - 8} textAnchor="middle" style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{xAxisLabel || columns[xCol]}</text>}
         {(yAxisLabel || yCols.length > 0) && <text x={-44} y={plotH / 2} textAnchor="middle" transform={`rotate(-90, -44, ${plotH / 2})`} style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{yAxisLabel || (yCols.length === 1 ? columns[yCols[0]] : "Value")}</text>}
-        {/* Reference lines */}
+        {/* Reference bands + lines */}
+        {renderRefBands(yPos)}
         {renderRefLines(yPos)}
         {/* Bars */}
         {series.map((s, si) =>
@@ -518,6 +556,19 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
                 onClick={onDataClick ? () => onDataClick(columns[xCol], labels[i]) : undefined}
               />
             );
+          })
+        )}
+        {/* Data labels */}
+        {config?.showDataLabels && series.map((s, si) =>
+          s.values.map((v, i) => {
+            const x = i * groupW + (groupW - totalBarW) / 2 + si * barW + barW / 2;
+            const pos = config?.dataLabelPosition || "above";
+            const ly = pos === "above" ? yPos(v) - 4 : pos === "below" ? Math.min(yPos(v) + 14, plotH - 2) : (yPos(v) + zeroY) / 2 + 3;
+            const fmt = config?.dataLabelFormat || "value";
+            const total = series.reduce((sum, ss) => sum + Math.abs(ss.values[i]), 0);
+            const pct = total > 0 ? ((Math.abs(v) / total) * 100).toFixed(0) + "%" : "";
+            const label = fmt === "percent" ? pct : fmt === "both" ? `${fmtNum(v)} (${pct})` : fmtNum(v);
+            return <text key={`dl-${si}-${i}`} x={x} y={ly} textAnchor="middle" style={{ fill: "var(--havn-text)", fontSize: "9px", fontWeight: 600, fontFamily: "var(--havn-font-mono)", pointerEvents: "none" }}>{label}</text>;
           })
         )}
         {/* Zero line */}
@@ -568,7 +619,8 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
         {/* Axis labels */}
         {(xAxisLabel || columns[xCol]) && <text x={plotW / 2} y={plotH + PAD.bottom - 8} textAnchor="middle" style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{xAxisLabel || columns[xCol]}</text>}
         {(yAxisLabel || yCols.length > 0) && <text x={-44} y={plotH / 2} textAnchor="middle" transform={`rotate(-90, -44, ${plotH / 2})`} style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{yAxisLabel || (yCols.length === 1 ? columns[yCols[0]] : "Value")}</text>}
-        {/* Reference lines */}
+        {/* Reference bands + lines */}
+        {renderRefBands(yPos)}
         {renderRefLines(yPos)}
         {/* Area fills */}
         {filled && series.map((s, si) => {
