@@ -13,6 +13,7 @@ const FILTER_TYPES = [
   { value: "date_range", label: "Date range", desc: "From/to with presets" },
   { value: "text", label: "Text search", desc: "Free-text filter" },
   { value: "number_range", label: "Number range", desc: "Min/max numeric" },
+  { value: "toggle", label: "Toggle", desc: "On/off boolean switch" },
 ];
 
 export default function DashboardFilterManager({ onClose }) {

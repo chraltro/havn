@@ -212,6 +212,7 @@ export default function SortableTable({
   groupColumns,
   onCellClick,
   conditionalRules,
+  showSummary,
 }) {
   /* ─── state ─── */
   const [sortCols, setSortCols] = useState([]);
@@ -249,6 +250,22 @@ export default function SortableTable({
   const colTypes = useMemo(() => {
     return columns.map((_, i) => inferColumnType(rows, i));
   }, [columns, rows]);
+
+  /* ─── derived: summary row (sum for numeric, count for text) ─── */
+  const summaryRow = useMemo(() => {
+    if (!showSummary || rows.length === 0) return null;
+    return columns.map((_, ci) => {
+      if (colTypes[ci] === TYPE_NUMBER) {
+        let sum = 0, count = 0;
+        for (const row of rows) {
+          const n = Number(row[ci]);
+          if (!isNaN(n)) { sum += n; count++; }
+        }
+        return count > 0 ? sum : null;
+      }
+      return null;
+    });
+  }, [showSummary, rows, columns, colTypes]);
 
   /* ─── derived: column order (respecting reorder + visibility + pinning) ─── */
   const effectiveOrder = useMemo(() => {
@@ -816,6 +833,18 @@ export default function SortableTable({
               ? renderGroupRows()
               : sortedRows.map((row, i) => renderDataRow(row, i, i % 2 === 1))}
           </tbody>
+          {summaryRow && (
+            <tfoot>
+              <tr style={{ borderTop: "2px solid var(--havn-border)", fontWeight: 700, fontSize: 11 }}>
+                {showSelectCol && <td style={S.td} />}
+                {effectiveOrder.map((ci) => (
+                  <td key={ci} style={{ ...S.td, textAlign: colTypes[ci] === TYPE_NUMBER ? "right" : "left", color: "var(--havn-text-secondary)" }}>
+                    {summaryRow[ci] !== null ? numFmt.format(summaryRow[ci]) : (ci === effectiveOrder[0] ? "Total" : "")}
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
     );

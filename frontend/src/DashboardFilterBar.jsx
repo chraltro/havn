@@ -246,6 +246,26 @@ function FilterControl({ filter, value, onChange }) {
     case "number_range":
       return <NumberRangeFilter filter={filter} value={value} onChange={onChange} />;
 
+    case "toggle":
+      return (
+        <div style={st.filterGroup}>
+          <label style={st.filterLabel}>{filter.label}</label>
+          <button
+            style={{
+              ...st.toggleBtn,
+              background: value ? "var(--havn-accent)" : "var(--havn-border)",
+            }}
+            onClick={() => onChange(value ? null : true)}
+            title={value ? "On — click to turn off" : "Off — click to turn on"}
+          >
+            <span style={{
+              ...st.toggleKnob,
+              transform: value ? "translateX(16px)" : "translateX(0)",
+            }} />
+          </button>
+        </div>
+      );
+
     default:
       return (
         <div style={st.filterGroup}>
@@ -332,8 +352,13 @@ function isPresetActive(preset, value) {
 
 function MultiSelectFilter({ filter, options, value, onChange }) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const ref = useRef(null);
   const selected = Array.isArray(value) ? value : [];
+  const showSearch = options.length > 10;
+  const filteredOptions = showSearch && search
+    ? options.filter(o => String(o).toLowerCase().includes(search.toLowerCase()))
+    : options;
 
   // Close popover on outside click
   useEffect(() => {
@@ -380,11 +405,21 @@ function MultiSelectFilter({ filter, options, value, onChange }) {
         </button>
         {open && (
           <div style={st.multiSelectPopover}>
+            {showSearch && (
+              <input
+                type="text"
+                style={{ ...st.filterInput, margin: 4, minWidth: 0, width: "calc(100% - 8px)", fontSize: 11 }}
+                placeholder="Search..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                autoFocus
+              />
+            )}
             <button style={st.multiSelectAllBtn} onClick={selectAll}>
-              Select all
+              Select all ({options.length})
             </button>
             <div style={st.multiSelectList}>
-              {options.map(opt => (
+              {filteredOptions.map(opt => (
                 <label key={opt} style={st.multiSelectOption}>
                   <input
                     type="checkbox"
@@ -395,8 +430,8 @@ function MultiSelectFilter({ filter, options, value, onChange }) {
                   <span style={{ fontSize: 12 }}>{opt}</span>
                 </label>
               ))}
-              {options.length === 0 && (
-                <span style={{ fontSize: 11, color: "var(--havn-text-secondary)", padding: 4 }}>No options</span>
+              {filteredOptions.length === 0 && (
+                <span style={{ fontSize: 11, color: "var(--havn-text-secondary)", padding: 4 }}>No matches</span>
               )}
             </div>
           </div>
@@ -631,6 +666,27 @@ const st = {
     borderRadius: 3,
     cursor: "pointer",
     fontSize: 12,
+  },
+
+  // Toggle
+  toggleBtn: {
+    width: 36,
+    height: 20,
+    borderRadius: 10,
+    border: "none",
+    cursor: "pointer",
+    position: "relative",
+    padding: 2,
+    transition: "background 0.15s",
+  },
+  toggleKnob: {
+    display: "block",
+    width: 16,
+    height: 16,
+    borderRadius: "50%",
+    background: "#fff",
+    transition: "transform 0.15s",
+    boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
   },
 
   // Reset all button

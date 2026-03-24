@@ -70,6 +70,17 @@ export function DashboardProvider({ children }) {
       setRedoStack([]);
       setIsDirty(false);
       setLastSavedAt(null);
+      // Restore filters from URL if present
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const restored = {};
+        for (const [key, val] of urlParams.entries()) {
+          if (!key.startsWith("f_")) continue;
+          const filterId = key.slice(2);
+          try { restored[filterId] = JSON.parse(val); } catch { restored[filterId] = val; }
+        }
+        if (Object.keys(restored).length > 0) setGlobalFilters(restored);
+      } catch (_) {}
       return full;
     } catch (e) {
       console.error("Failed to load dashboard:", e);
@@ -154,17 +165,51 @@ export function DashboardProvider({ children }) {
     }
   }, [dashboard, _buildFilters, parameters, widgetData]);
 
+  // Sync filter state to URL search params
+  const syncFiltersToUrl = useCallback((filters) => {
+    try {
+      const url = new URL(window.location.href);
+      // Clear old filter params
+      for (const key of [...url.searchParams.keys()]) {
+        if (key.startsWith("f_")) url.searchParams.delete(key);
+      }
+      // Set new filter params
+      for (const [k, v] of Object.entries(filters)) {
+        if (v !== null && v !== undefined && v !== "") {
+          url.searchParams.set(`f_${k}`, typeof v === "object" ? JSON.stringify(v) : String(v));
+        }
+      }
+      window.history.replaceState(null, "", url.toString());
+    } catch (_) { /* ignore in non-browser env */ }
+  }, []);
+
+  // Restore filters from URL on dashboard load
+  const restoreFiltersFromUrl = useCallback(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const restored = {};
+      for (const [key, val] of params.entries()) {
+        if (!key.startsWith("f_")) continue;
+        const filterId = key.slice(2);
+        try { restored[filterId] = JSON.parse(val); } catch { restored[filterId] = val; }
+      }
+      if (Object.keys(restored).length > 0) setGlobalFilters(restored);
+    } catch (_) {}
+  }, []);
+
   // Set a global filter and re-query
   const setFilter = useCallback((filterId, value) => {
     setGlobalFilters(prev => {
+      const next = { ...prev };
       if (value === null || value === undefined || value === "") {
-        const next = { ...prev };
         delete next[filterId];
-        return next;
+      } else {
+        next[filterId] = value;
       }
-      return { ...prev, [filterId]: value };
+      syncFiltersToUrl(next);
+      return next;
     });
-  }, []);
+  }, [syncFiltersToUrl]);
 
   // Set cross-filter from a chart click
   const setCrossFilterValue = useCallback((widgetId, column, value) => {
