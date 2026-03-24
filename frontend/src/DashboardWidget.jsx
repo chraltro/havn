@@ -4,7 +4,7 @@ import { api } from "./api";
 import SortableTable from "./SortableTable";
 import ChartPanel from "./ChartPanel";
 import DashboardChart from "./DashboardCharts";
-import { formatNumber } from "./chartStyleDefaults";
+import { formatNumber, autoContrast } from "./chartStyleDefaults";
 
 const DASHBOARD_CHART_TYPES = new Set([
   "gauge", "treemap", "heatmap", "funnel", "waterfall", "histogram",
@@ -210,12 +210,17 @@ export default function DashboardWidget({
     setDrillData(null);
   };
 
+  const widgetBg = widget.config?.bgColor;
+  const widgetTextColor = widgetBg ? autoContrast(widgetBg) : undefined;
+
   return (
     <div
       style={{
         ...st.container,
         ...style,
         border: hasError ? "1px solid var(--havn-red)" : "1px solid var(--havn-border)",
+        background: widgetBg || "var(--havn-bg-secondary, var(--havn-bg))",
+        ...(widgetTextColor ? { color: widgetTextColor } : {}),
       }}
     >
       {/* Title bar (hidden for dividers) */}
@@ -256,6 +261,7 @@ export default function DashboardWidget({
               {widget.title || widget.widget_type}
             </span>
           )}
+          {widget.config?.locked && <span title="Locked" style={{ fontSize: 12, opacity: 0.5, marginLeft: 4 }}>&#x1F512;</span>}
         </div>
         <div style={st.actions}>
           {isLoading && <span style={st.spinner}>↻</span>}
@@ -291,6 +297,11 @@ export default function DashboardWidget({
                 onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-bg-secondary, rgba(128,128,128,0.1))"}
                 onMouseLeave={(e) => e.currentTarget.style.background = "none"}>
                 Duplicate
+              </button>
+              <button style={st.menuItem} onClick={() => { setShowMenu(false); updateWidget(widget.id, { config: { ...widget.config, locked: !widget.config?.locked } }); }}
+                onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-bg-secondary, rgba(128,128,128,0.1))"}
+                onMouseLeave={(e) => e.currentTarget.style.background = "none"}>
+                {widget.config?.locked ? "Unlock" : "Lock"}
               </button>
               {hasData && (
                 <button style={st.menuItem} onClick={() => { setShowMenu(false); exportWidgetCSV(widget, data); }}
@@ -369,8 +380,8 @@ export default function DashboardWidget({
         </div>
       )}
 
-      {/* Resize handle (edit mode only) */}
-      {editMode && (
+      {/* Resize handle (edit mode only, hidden for locked widgets) */}
+      {editMode && !widget.config?.locked && (
         <div
           className="dashboard-resize-handle"
           style={st.resizeHandle}

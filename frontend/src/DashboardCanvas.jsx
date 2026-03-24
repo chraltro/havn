@@ -316,6 +316,7 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
 
   function handleMoveStart(e, widget) {
     if (!editMode) return;
+    if (widget.config?.locked) return;
     // Only start from the drag handle (grip icon area)
     e.preventDefault();
     e.stopPropagation();
@@ -371,6 +372,7 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
 
   function handleResizeStart(e, widget) {
     if (!editMode) return;
+    if (widget.config?.locked) return;
     e.preventDefault();
     e.stopPropagation();
     const rect = gridRef.current?.getBoundingClientRect();
@@ -431,7 +433,10 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
   if (!dashboard) return null;
 
   return (
-    <div style={{ ...st.outer, ...(isFullscreen ? st.fullscreen : {}), ...(embedMode ? st.fullscreen : {}) }}>
+    <div
+      style={{ ...st.outer, ...(isFullscreen ? st.fullscreen : {}), ...(embedMode ? st.fullscreen : {}) }}
+      {...(dashboard?.settings?.darkMode ? { "data-havn-dark": "true" } : {})}
+    >
       {/* Toolbar — hidden in embed mode */}
       {!embedMode && <div style={st.toolbar}>
         <div style={st.toolbarLeft}>
@@ -616,6 +621,7 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
           ...st.grid,
           gridTemplateColumns: `repeat(${effectiveCols}, 1fr)`,
           ...(editMode ? st.gridEdit : {}),
+          background: dashboard?.settings?.canvasBgColor || undefined,
         }}
       >
         {(() => {
@@ -648,7 +654,7 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
                 style={{ height: "100%" }}
               />
               {/* Resize handle — pointer events, no browser drag ghost */}
-              {editMode && (
+              {editMode && !w.config?.locked && (
                 <div
                   style={{
                     position: "absolute",
@@ -735,6 +741,34 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
                 onChange={(e) => setSettingsDesc(e.target.value)}
                 onBlur={() => saveDashboard({ description: settingsDesc })}
                 placeholder="What does this dashboard show?" />
+
+              <label style={st.settingsLabel}>Canvas color</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="color"
+                  value={dashboard?.settings?.canvasBgColor || "#1e1e2e"}
+                  style={{ width: 36, height: 32, border: "1px solid var(--havn-border)", borderRadius: 4, padding: 1, cursor: "pointer", background: "none" }}
+                  onChange={(e) => saveDashboard({ settings: { ...dashboard.settings, canvasBgColor: e.target.value } })}
+                />
+                {dashboard?.settings?.canvasBgColor && (
+                  <button
+                    style={{ background: "none", border: "1px solid var(--havn-border)", color: "var(--havn-text-secondary)", cursor: "pointer", padding: "4px 8px", borderRadius: 4, fontSize: 11 }}
+                    onClick={() => saveDashboard({ settings: { ...dashboard.settings, canvasBgColor: undefined } })}
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+
+              <label style={{ ...st.settingsLabel, marginTop: 12, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={!!dashboard?.settings?.darkMode}
+                  onChange={(e) => saveDashboard({ settings: { ...dashboard.settings, darkMode: e.target.checked } })}
+                  style={{ accentColor: "var(--havn-accent)" }}
+                />
+                Dark mode
+              </label>
 
               <div style={{ marginTop: 16, fontSize: 12, color: "var(--havn-text-secondary)" }}>
                 <div>Created by: {dashboard?.created_by || "—"}</div>
