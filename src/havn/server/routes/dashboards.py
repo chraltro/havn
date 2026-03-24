@@ -152,7 +152,34 @@ def _execute_widget_query(
     base_sql = param_pattern.sub(_replace_param, base_sql)
 
     if where_clauses:
-        sql = f"WITH _src AS ({base_sql}) SELECT * FROM _src WHERE {' AND '.join(where_clauses)}"
+        # Try to inject WHERE into the base SQL before GROUP BY/ORDER BY/LIMIT
+        # This avoids the CTE column-name mismatch with aggregated queries
+        import re as _re
+        upper_sql = base_sql.upper()
+        # Find the first GROUP BY, ORDER BY, HAVING, or LIMIT clause
+        insert_pos = None
+        for keyword in [r'\bGROUP\s+BY\b', r'\bORDER\s+BY\b', r'\bHAVING\b', r'\bLIMIT\b']:
+            m = _re.search(keyword, upper_sql)
+            if m and (insert_pos is None or m.start() < insert_pos):
+                insert_pos = m.start()
+
+        filter_clause = " AND ".join(where_clauses)
+
+        if insert_pos is not None:
+            # Check if there's already a WHERE clause
+            where_match = _re.search(r'\bWHERE\b', upper_sql[:insert_pos])
+            if where_match:
+                # Append to existing WHERE
+                sql = base_sql[:insert_pos] + f" AND {filter_clause} " + base_sql[insert_pos:]
+            else:
+                # Insert new WHERE before GROUP BY/ORDER BY
+                sql = base_sql[:insert_pos] + f" WHERE {filter_clause} " + base_sql[insert_pos:]
+        elif _re.search(r'\bWHERE\b', upper_sql):
+            # Has WHERE but no GROUP BY — append with AND
+            sql = base_sql + f" AND {filter_clause}"
+        else:
+            # No WHERE, no GROUP BY — simple CTE wrapper is safe
+            sql = f"WITH _src AS ({base_sql}) SELECT * FROM _src WHERE {filter_clause}"
     else:
         sql = base_sql
 
