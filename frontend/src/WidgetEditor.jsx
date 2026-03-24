@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { api } from "./api";
 import { useDashboard } from "./DashboardContext";
 import { DASHBOARD_CHART_TYPES, analyzeColumns, detectBestChart, fmtNum, COLORS } from "./chartUtils";
+import { formatNumber } from "./chartStyleDefaults";
 import ChartPanel from "./ChartPanel";
 import DashboardChart from "./DashboardCharts";
 import SortableTable from "./SortableTable";
@@ -1251,6 +1252,83 @@ function ChartAndTypeConfig({
               <input style={st.input} value={widgetConfig?.suffix || ""} onChange={(e) => setWidgetConfig({ ...widgetConfig, suffix: e.target.value })} placeholder="%" />
             </div>
           </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <div style={{ flex: 1 }}>
+              <label style={st.fieldLabel}>Format</label>
+              <select style={st.select} value={widgetConfig?.kpiValueFormat || ""} onChange={(e) => setWidgetConfig({ ...widgetConfig, kpiValueFormat: e.target.value || undefined })}>
+                <option value="">Auto</option>
+                <option value="plain">Plain</option>
+                <option value="compact">Compact (K/M/B)</option>
+                <option value="percent">Percentage</option>
+                <option value="currency">Currency</option>
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={st.fieldLabel}>Decimals</label>
+              <input type="number" min={0} max={4} style={st.input} value={widgetConfig?.kpiDecimals ?? ""} onChange={(e) => setWidgetConfig({ ...widgetConfig, kpiDecimals: e.target.value === "" ? undefined : Number(e.target.value) })} placeholder="Auto" />
+            </div>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <label style={st.fieldLabel}>Subtitle</label>
+            <input style={st.input} value={widgetConfig?.kpiSubtitle || ""} onChange={(e) => setWidgetConfig({ ...widgetConfig, kpiSubtitle: e.target.value })} placeholder="e.g. vs last quarter" />
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <label style={st.fieldLabel}>Conditional colors</label>
+            {(widgetConfig?.kpiConditionalRules || []).map((rule, idx) => (
+              <div key={idx} style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
+                <select
+                  style={{ ...st.filterOpSelect, width: 60 }}
+                  value={rule.op || ">"}
+                  onChange={(e) => {
+                    const rules = [...(widgetConfig.kpiConditionalRules || [])];
+                    rules[idx] = { ...rule, op: e.target.value };
+                    setWidgetConfig({ ...widgetConfig, kpiConditionalRules: rules });
+                  }}
+                >
+                  <option value=">">&gt;</option>
+                  <option value="<">&lt;</option>
+                  <option value=">=">&ge;</option>
+                  <option value="<=">&le;</option>
+                  <option value="=">=</option>
+                </select>
+                <input
+                  type="number"
+                  style={{ ...st.input, margin: 0, width: 64, maxWidth: "none", flex: "none" }}
+                  value={rule.value ?? ""}
+                  placeholder="Value"
+                  onChange={(e) => {
+                    const rules = [...(widgetConfig.kpiConditionalRules || [])];
+                    rules[idx] = { ...rule, value: e.target.value === "" ? undefined : Number(e.target.value) };
+                    setWidgetConfig({ ...widgetConfig, kpiConditionalRules: rules });
+                  }}
+                />
+                <input
+                  type="color"
+                  value={rule.color || "#22c55e"}
+                  style={{ width: 28, height: 28, border: "1px solid var(--havn-border)", borderRadius: 4, padding: 1, cursor: "pointer", background: "none" }}
+                  onChange={(e) => {
+                    const rules = [...(widgetConfig.kpiConditionalRules || [])];
+                    rules[idx] = { ...rule, color: e.target.value };
+                    setWidgetConfig({ ...widgetConfig, kpiConditionalRules: rules });
+                  }}
+                />
+                <button
+                  style={st.removeBtn}
+                  onClick={() => {
+                    const rules = (widgetConfig.kpiConditionalRules || []).filter((_, i) => i !== idx);
+                    setWidgetConfig({ ...widgetConfig, kpiConditionalRules: rules });
+                  }}
+                  title="Remove"
+                >&times;</button>
+              </div>
+            ))}
+            <button
+              style={{ ...st.addSmallBtn, marginTop: 6 }}
+              onClick={() => setWidgetConfig({ ...widgetConfig, kpiConditionalRules: [...(widgetConfig?.kpiConditionalRules || []), { op: ">", value: 0, color: "#22c55e" }] })}
+            >
+              + Add rule
+            </button>
+          </div>
         </div>
       )}
 
@@ -1330,11 +1408,39 @@ function KPIPreview({ columns, rows, config }) {
   const n = Number(value);
   const prefix = config?.prefix || "";
   const suffix = config?.suffix || "";
+  const displayValue = config?.kpiValueFormat
+    ? formatNumber(value, config.kpiValueFormat, config.kpiDecimals ?? null, config.currency)
+    : (isNaN(n) ? String(value) : fmtNum(n));
+
+  // Conditional color rules
+  let valueColor = "var(--havn-text)";
+  if (config?.kpiConditionalRules?.length > 0 && !isNaN(n)) {
+    for (const rule of config.kpiConditionalRules) {
+      const rv = Number(rule.value);
+      if (isNaN(rv)) continue;
+      let match = false;
+      switch (rule.op) {
+        case ">": match = n > rv; break;
+        case "<": match = n < rv; break;
+        case ">=": match = n >= rv; break;
+        case "<=": match = n <= rv; break;
+        case "=": match = n === rv; break;
+        default: break;
+      }
+      if (match) { valueColor = rule.color; break; }
+    }
+  }
+
   return (
     <div style={{ textAlign: "center" }}>
-      <div style={{ fontSize: 48, fontWeight: 700, color: "var(--havn-text)" }}>
-        {prefix}{isNaN(n) ? String(value) : fmtNum(n)}{suffix}
+      <div style={{ fontSize: 48, fontWeight: 700, color: valueColor }}>
+        {prefix}{displayValue}{suffix}
       </div>
+      {config?.kpiSubtitle && (
+        <div style={{ fontSize: 13, color: "var(--havn-text-secondary)", marginTop: 4 }}>
+          {config.kpiSubtitle}
+        </div>
+      )}
     </div>
   );
 }
