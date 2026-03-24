@@ -379,7 +379,7 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm }) {
               <button style={st.toolBtn} onClick={() => setShowFilterManager(true)} title="Manage dashboard filters">
                 Filters
               </button>
-              <button style={st.toolBtn} onClick={() => { setSettingsDesc(dashboard?.description || ""); setShowSettings(true); }} title="Dashboard settings">
+              <button style={st.toolBtn} onClick={() => { setNameValue(dashboard?.name || ""); setSettingsDesc(dashboard?.description || ""); setShowSettings(true); }} title="Dashboard settings">
                 ⚙
               </button>
             </>

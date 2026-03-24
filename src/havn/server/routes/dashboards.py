@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import time
 from datetime import datetime, timedelta
 
@@ -140,7 +141,6 @@ def _execute_widget_query(
         where_clauses.append(f'"{col}" = ${len(params)}')
 
     # Substitute ${param_name} placeholders with positional params
-    import re
     param_pattern = re.compile(r"\$\{(\w+)\}")
     def _replace_param(m):
         name = m.group(1)
@@ -889,21 +889,15 @@ def clear_cache(request: Request, dashboard_id: str, conn: DbConn) -> dict:
     """Clear all cache entries for a dashboard's widgets."""
     _require_permission(request, "write")
 
-    widget_ids = [
-        r[0]
-        for r in conn.execute(
-            "SELECT id FROM _dp_internal.dashboard_widgets WHERE dashboard_id = ?",
-            [dashboard_id],
-        ).fetchall()
-    ]
-
-    deleted = 0
-    for wid in widget_ids:
-        # Cache keys are hashes of widget_id + filters; delete all matching this widget
-        # Since cache_key is a hash, we can't easily filter. Clear all cache instead.
-        pass
-
-    # Simple approach: clear all expired + all for this dashboard
+    # Clean up expired entries
     conn.execute("DELETE FROM _dp_internal.dashboard_cache WHERE expires_at < current_timestamp")
 
-    return {"status": "ok"}
+    # Delete all cache entries whose cache_key matches any widget in this dashboard.
+    # Since cache_key = sha256(widget_id + filters + params), we can't filter by widget_id
+    # directly. Instead, delete all remaining cache entries when a specific dashboard is
+    # targeted — this is safe because cache is ephemeral and will be repopulated on next query.
+    deleted = conn.execute(
+        "DELETE FROM _dp_internal.dashboard_cache RETURNING cache_key"
+    ).fetchall()
+
+    return {"status": "ok", "cleared": len(deleted)}

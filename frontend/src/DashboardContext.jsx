@@ -80,14 +80,16 @@ export function DashboardProvider({ children }) {
   // Batch query all widgets
   const refreshAll = useCallback(async () => {
     if (!dashboard) return;
-    // Mark all as loading
-    const loadingState = {};
-    for (const w of dashboard.widgets || []) {
-      if (w.sql_query) {
-        loadingState[w.id] = { ...widgetData[w.id], loading: true, error: null };
+    // Mark all as loading (use functional update to avoid widgetData dependency)
+    setWidgetData(prev => {
+      const loadingState = {};
+      for (const w of dashboard.widgets || []) {
+        if (w.sql_query) {
+          loadingState[w.id] = { ...prev[w.id], loading: true, error: null };
+        }
       }
-    }
-    setWidgetData(prev => ({ ...prev, ...loadingState }));
+      return { ...prev, ...loadingState };
+    });
 
     try {
       const batch = await api.queryDashboardBatch(dashboard.id, _buildFilters(), parameters);
@@ -102,7 +104,7 @@ export function DashboardProvider({ children }) {
     } catch (e) {
       console.error("Batch query failed:", e);
     }
-  }, [dashboard, _buildFilters, parameters, widgetData]);
+  }, [dashboard, _buildFilters, parameters]);
 
   // Set a global filter and re-query
   const setFilter = useCallback((filterId, value) => {

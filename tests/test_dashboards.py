@@ -459,3 +459,249 @@ def test_export_delete_import_roundtrip(client):
     assert full["name"] == "Roundtrip"
     assert len(full["widgets"]) == 1
     assert full["widgets"][0]["title"] == "Metric"
+
+
+# ---------------------------------------------------------------------------
+# Cache functionality
+# ---------------------------------------------------------------------------
+
+def test_widget_query_with_cache(client):
+    """Widget with cache_ttl > 0 should cache results."""
+    resp = client.post("/api/dashboards", json={"name": "Cache Test"})
+    dash_id = resp.json()["id"]
+
+    resp = client.post(f"/api/dashboards/{dash_id}/widgets", json={
+        "widget_type": "chart",
+        "title": "Cached Widget",
+        "sql_query": "SELECT COUNT(*) AS cnt FROM landing.sales",
+        "position": {"x": 1, "y": 1, "w": 6, "h": 4},
+        "cache_ttl": 300,
+    })
+    wid = resp.json()["id"]
+
+    # First query — populates cache
+    resp = client.post(f"/api/dashboards/{dash_id}/widgets/{wid}/query", json={})
+    assert resp.status_code == 200
+    assert int(resp.json()["rows"][0][0]) == 100
+
+    # Second query — should hit cache (same result)
+    resp = client.post(f"/api/dashboards/{dash_id}/widgets/{wid}/query", json={})
+    assert resp.status_code == 200
+    assert int(resp.json()["rows"][0][0]) == 100
+
+
+def test_clear_cache(client):
+    """Clear cache endpoint should succeed and report cleared entries."""
+    resp = client.post("/api/dashboards", json={"name": "Clear Cache Test"})
+    dash_id = resp.json()["id"]
+
+    resp = client.post(f"/api/dashboards/{dash_id}/widgets", json={
+        "widget_type": "chart",
+        "title": "Cached",
+        "sql_query": "SELECT 1",
+        "position": {"x": 1, "y": 1, "w": 6, "h": 4},
+        "cache_ttl": 300,
+    })
+    wid = resp.json()["id"]
+
+    # Populate cache
+    client.post(f"/api/dashboards/{dash_id}/widgets/{wid}/query", json={})
+
+    # Clear cache
+    resp = client.delete(f"/api/dashboards/{dash_id}/cache")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+    assert "cleared" in resp.json()
+
+
+# ---------------------------------------------------------------------------
+# Templates
+# ---------------------------------------------------------------------------
+
+def test_list_templates_empty(client):
+    """Templates endpoint returns empty list when none exist."""
+    resp = client.get("/api/dashboards/templates")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+# ---------------------------------------------------------------------------
+# Widget query edge cases
+# ---------------------------------------------------------------------------
+
+def test_query_widget_not_found(client):
+    """Querying a non-existent widget returns 404."""
+    resp = client.post("/api/dashboards", json={"name": "Widget 404"})
+    dash_id = resp.json()["id"]
+
+    resp = client.post(f"/api/dashboards/{dash_id}/widgets/nonexistent/query", json={})
+    assert resp.status_code == 404
+
+
+def test_update_widget_not_found(client):
+    """Updating a non-existent widget returns 404."""
+    resp = client.post("/api/dashboards", json={"name": "Widget Update 404"})
+    dash_id = resp.json()["id"]
+
+    resp = client.put(f"/api/dashboards/{dash_id}/widgets/nonexistent", json={
+        "title": "Does not exist",
+    })
+    assert resp.status_code == 404
+
+
+def test_delete_widget_not_found(client):
+    """Deleting a non-existent widget returns 404."""
+    resp = client.post("/api/dashboards", json={"name": "Widget Delete 404"})
+    dash_id = resp.json()["id"]
+
+    resp = client.delete(f"/api/dashboards/{dash_id}/widgets/nonexistent")
+    assert resp.status_code == 404
+
+
+def test_update_widget_no_fields(client):
+    """Updating a widget with no fields returns 400."""
+    resp = client.post("/api/dashboards", json={"name": "No Fields"})
+    dash_id = resp.json()["id"]
+
+    resp = client.post(f"/api/dashboards/{dash_id}/widgets", json={
+        "widget_type": "chart",
+        "title": "Test",
+        "position": {"x": 1, "y": 1, "w": 6, "h": 4},
+    })
+    wid = resp.json()["id"]
+
+    resp = client.put(f"/api/dashboards/{dash_id}/widgets/{wid}", json={})
+    assert resp.status_code == 400
+
+
+def test_delete_dashboard_not_found(client):
+    """Deleting a non-existent dashboard returns 404."""
+    resp = client.delete("/api/dashboards/nonexistent")
+    assert resp.status_code == 404
+
+
+def test_clone_nonexistent_dashboard(client):
+    """Cloning a non-existent dashboard returns 404."""
+    resp = client.post("/api/dashboards/nonexistent/clone?name=Copy")
+    assert resp.status_code == 404
+
+
+def test_update_dashboard_filters_and_layout(client):
+    """Updating dashboard filters, layout, and settings persists correctly."""
+    resp = client.post("/api/dashboards", json={"name": "Filters Test"})
+    dash_id = resp.json()["id"]
+
+    filters = [{"id": "f1", "label": "Category", "type": "dropdown", "column": "category"}]
+    layout = {"columns": 24, "rowHeight": 80, "gap": 16}
+    settings = {"parameters": [{"name": "max_id", "default": 10}]}
+
+    resp = client.put(f"/api/dashboards/{dash_id}", json={
+        "filters": filters,
+        "layout": layout,
+        "settings": settings,
+    })
+    assert resp.status_code == 200
+
+    # Verify persisted
+    full = client.get(f"/api/dashboards/{dash_id}").json()
+    assert full["filters"] == filters
+    assert full["layout"] == layout
+    assert full["settings"] == settings
+
+
+def test_batch_query_with_filters(client):
+    """Batch query passes filters to all widgets."""
+    resp = client.post("/api/dashboards", json={"name": "Batch Filter"})
+    dash_id = resp.json()["id"]
+
+    client.post(f"/api/dashboards/{dash_id}/widgets", json={
+        "widget_type": "table",
+        "title": "Filtered Sales",
+        "sql_query": "SELECT id, revenue, category FROM landing.sales",
+        "position": {"x": 1, "y": 1, "w": 12, "h": 6},
+    })
+
+    # Batch query with category filter
+    resp = client.post(f"/api/dashboards/{dash_id}/query-batch", json={
+        "filters": {"category": "A"},
+    })
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    # Should have exactly one result
+    assert len(results) == 1
+    # Category A = even IDs (2,4,...,100) = 50 rows
+    for wid, result in results.items():
+        assert result["row_count"] == 50
+
+
+def test_widget_all_types(client):
+    """Create widgets of all supported types."""
+    resp = client.post("/api/dashboards", json={"name": "All Types"})
+    dash_id = resp.json()["id"]
+
+    types = ["chart", "kpi", "table", "text", "filter", "image"]
+    for i, wtype in enumerate(types):
+        resp = client.post(f"/api/dashboards/{dash_id}/widgets", json={
+            "widget_type": wtype,
+            "title": f"Widget {wtype}",
+            "position": {"x": 1, "y": 1 + i * 4, "w": 6, "h": 4},
+        })
+        assert resp.status_code == 200, f"Failed to create widget type: {wtype}"
+        assert resp.json()["widget_type"] == wtype
+
+    # Verify all widgets created
+    full = client.get(f"/api/dashboards/{dash_id}").json()
+    assert len(full["widgets"]) == len(types)
+
+
+def test_export_format(client):
+    """Export contains expected structure and version field."""
+    resp = client.post("/api/dashboards", json={"name": "Export Format"})
+    dash_id = resp.json()["id"]
+
+    client.post(f"/api/dashboards/{dash_id}/widgets", json={
+        "widget_type": "chart",
+        "chart_type": "bar",
+        "title": "Revenue",
+        "sql_query": "SELECT category, SUM(revenue) FROM landing.sales GROUP BY 1",
+        "position": {"x": 1, "y": 1, "w": 12, "h": 4},
+        "config": {"xAxisLabel": "Category", "yAxisLabel": "Revenue"},
+    })
+
+    exported = client.get(f"/api/dashboards/{dash_id}/export").json()
+    assert "dashboard" in exported
+    assert "widgets" in exported
+    assert "version" in exported
+    assert exported["version"] == 1
+    assert exported["dashboard"]["name"] == "Export Format"
+    assert len(exported["widgets"]) == 1
+    assert exported["widgets"][0]["chart_type"] == "bar"
+    assert exported["widgets"][0]["config"]["xAxisLabel"] == "Category"
+
+
+def test_dashboard_name_validation(client):
+    """Dashboard name must be 1-200 chars."""
+    # Empty name
+    resp = client.post("/api/dashboards", json={"name": ""})
+    assert resp.status_code == 422
+
+    # Name too long
+    resp = client.post("/api/dashboards", json={"name": "x" * 201})
+    assert resp.status_code == 422
+
+    # Valid boundary — 200 chars
+    resp = client.post("/api/dashboards", json={"name": "x" * 200})
+    assert resp.status_code == 200
+
+
+def test_widget_invalid_type_rejected(client):
+    """Widget with invalid type should be rejected by Pydantic validation."""
+    resp = client.post("/api/dashboards", json={"name": "Bad Type"})
+    dash_id = resp.json()["id"]
+
+    resp = client.post(f"/api/dashboards/{dash_id}/widgets", json={
+        "widget_type": "invalid_type",
+        "title": "Bad",
+        "position": {"x": 1, "y": 1, "w": 6, "h": 4},
+    })
+    assert resp.status_code == 422
