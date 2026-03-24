@@ -918,6 +918,209 @@ function SQLBuilder({
 }
 
 // ---------------------------------------------------------------------------
+// Chart Style Panel (collapsible sections)
+// ---------------------------------------------------------------------------
+
+function ChartStylePanel({ widgetConfig, setWidgetConfig }) {
+  const [openSections, setOpenSections] = useState({});
+  const toggle = (key) => setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
+  const upd = (patch) => setWidgetConfig({ ...widgetConfig, ...patch });
+
+  const sectionHeader = (key, label) => (
+    <div
+      onClick={() => toggle(key)}
+      style={{ ...st.sectionTitle2, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", paddingRight: 16, userSelect: "none" }}
+    >
+      <span>{label}</span>
+      <span style={{ fontSize: 10, opacity: 0.6 }}>{openSections[key] ? "\u25B2" : "\u25BC"}</span>
+    </div>
+  );
+
+  const refLines = widgetConfig.referenceLines || [];
+
+  return (
+    <div style={st.section}>
+      {/* Palette */}
+      {sectionHeader("palette", "Palette")}
+      {openSections.palette && (
+        <div style={{ padding: "4px 16px 10px" }}>
+          <select
+            style={{ ...st.select, margin: 0, width: "100%" }}
+            value={widgetConfig.palette || "default"}
+            onChange={(e) => upd({ palette: e.target.value })}
+          >
+            <option value="default">Default</option>
+            <option value="colorblind">Colorblind</option>
+            <option value="categorical">Categorical</option>
+            <option value="sequential">Sequential</option>
+            <option value="diverging">Diverging</option>
+          </select>
+        </div>
+      )}
+
+      {/* Axis configuration */}
+      {sectionHeader("axis", "Axis Configuration")}
+      {openSections.axis && (
+        <div style={{ padding: "4px 16px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ ...st.fieldLabel, marginLeft: 0 }}>Y-axis min</label>
+              <input
+                type="number"
+                style={{ ...st.input, margin: 0, width: "100%", maxWidth: "none" }}
+                value={widgetConfig.yMin ?? ""}
+                onChange={(e) => upd({ yMin: e.target.value === "" ? undefined : Number(e.target.value) })}
+                placeholder="Auto"
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ ...st.fieldLabel, marginLeft: 0 }}>Y-axis max</label>
+              <input
+                type="number"
+                style={{ ...st.input, margin: 0, width: "100%", maxWidth: "none" }}
+                value={widgetConfig.yMax ?? ""}
+                onChange={(e) => upd({ yMax: e.target.value === "" ? undefined : Number(e.target.value) })}
+                placeholder="Auto"
+              />
+            </div>
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--havn-text)" }}>
+            <input type="checkbox" checked={!!widgetConfig.logScale} onChange={(e) => upd({ logScale: e.target.checked })} style={{ accentColor: "var(--havn-accent)" }} />
+            Log scale
+          </label>
+          <div>
+            <label style={{ ...st.fieldLabel, marginLeft: 0, marginBottom: 3 }}>Label rotation</label>
+            <div style={{ display: "flex", gap: 4 }}>
+              {["auto", "0", "45", "90"].map(v => (
+                <label key={v} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 12, color: "var(--havn-text)", cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="labelRotation"
+                    checked={(widgetConfig.labelRotation || "auto") === v}
+                    onChange={() => upd({ labelRotation: v })}
+                    style={{ accentColor: "var(--havn-accent)" }}
+                  />
+                  {v === "auto" ? "Auto" : v + "\u00B0"}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--havn-text)" }}>
+              <input type="checkbox" checked={!!widgetConfig.hideXLabels} onChange={(e) => upd({ hideXLabels: e.target.checked })} style={{ accentColor: "var(--havn-accent)" }} />
+              Hide X labels
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--havn-text)" }}>
+              <input type="checkbox" checked={!!widgetConfig.hideYLabels} onChange={(e) => upd({ hideYLabels: e.target.checked })} style={{ accentColor: "var(--havn-accent)" }} />
+              Hide Y labels
+            </label>
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--havn-text)" }}>
+            <input type="checkbox" checked={widgetConfig.showGridlines !== false} onChange={(e) => upd({ showGridlines: e.target.checked })} style={{ accentColor: "var(--havn-accent)" }} />
+            Show gridlines
+          </label>
+          {widgetConfig.showGridlines !== false && (
+            <div>
+              <label style={{ ...st.fieldLabel, marginLeft: 0, marginBottom: 3 }}>Gridline style</label>
+              <div style={{ display: "flex", gap: 4 }}>
+                {["solid", "dashed", "dotted"].map(v => (
+                  <label key={v} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 12, color: "var(--havn-text)", cursor: "pointer" }}>
+                    <input
+                      type="radio"
+                      name="gridlineStyle"
+                      checked={(widgetConfig.gridlineStyle || "dashed") === v}
+                      onChange={() => upd({ gridlineStyle: v })}
+                      style={{ accentColor: "var(--havn-accent)" }}
+                    />
+                    {v.charAt(0).toUpperCase() + v.slice(1)}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Data labels */}
+      {sectionHeader("dataLabels", "Data Labels")}
+      {openSections.dataLabels && (
+        <div style={{ padding: "4px 16px 10px" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--havn-text)" }}>
+            <input type="checkbox" checked={!!widgetConfig.showDataLabels} onChange={(e) => upd({ showDataLabels: e.target.checked })} style={{ accentColor: "var(--havn-accent)" }} />
+            Show data labels
+          </label>
+        </div>
+      )}
+
+      {/* Reference lines */}
+      {sectionHeader("refLines", "Reference Lines")}
+      {openSections.refLines && (
+        <div style={{ padding: "4px 16px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
+          {refLines.map((rl, idx) => (
+            <div key={idx} style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+              <input
+                type="number"
+                style={{ ...st.input, margin: 0, width: 64, maxWidth: "none", flex: "none" }}
+                value={rl.value ?? ""}
+                placeholder="Value"
+                onChange={(e) => {
+                  const updated = [...refLines];
+                  updated[idx] = { ...rl, value: e.target.value === "" ? undefined : Number(e.target.value) };
+                  upd({ referenceLines: updated });
+                }}
+              />
+              <input
+                style={{ ...st.input, margin: 0, width: 80, maxWidth: "none", flex: 1 }}
+                value={rl.label || ""}
+                placeholder="Label"
+                onChange={(e) => {
+                  const updated = [...refLines];
+                  updated[idx] = { ...rl, label: e.target.value };
+                  upd({ referenceLines: updated });
+                }}
+              />
+              <input
+                type="color"
+                value={rl.color || "#ef4444"}
+                style={{ width: 28, height: 28, border: "1px solid var(--havn-border)", borderRadius: 4, padding: 1, cursor: "pointer", background: "none" }}
+                onChange={(e) => {
+                  const updated = [...refLines];
+                  updated[idx] = { ...rl, color: e.target.value };
+                  upd({ referenceLines: updated });
+                }}
+              />
+              <select
+                style={{ ...st.filterOpSelect, width: 72 }}
+                value={rl.style || "dashed"}
+                onChange={(e) => {
+                  const updated = [...refLines];
+                  updated[idx] = { ...rl, style: e.target.value };
+                  upd({ referenceLines: updated });
+                }}
+              >
+                <option value="solid">Solid</option>
+                <option value="dashed">Dashed</option>
+              </select>
+              <button
+                style={st.removeBtn}
+                onClick={() => upd({ referenceLines: refLines.filter((_, j) => j !== idx) })}
+                title="Remove"
+              >&times;</button>
+            </div>
+          ))}
+          <button
+            style={st.addSmallBtn}
+            onClick={() => upd({ referenceLines: [...refLines, { value: 0, label: "", color: "#ef4444", style: "dashed" }] })}
+          >
+            + Add reference line
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Shared: Chart type + widget type config
 // ---------------------------------------------------------------------------
 
@@ -1017,6 +1220,11 @@ function ChartAndTypeConfig({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Chart Style (collapsible) */}
+      {widgetType === "chart" && (
+        <ChartStylePanel widgetConfig={widgetConfig} setWidgetConfig={setWidgetConfig} />
       )}
 
       {/* KPI config */}

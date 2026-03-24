@@ -142,6 +142,7 @@ export const DASHBOARD_CHART_TYPES = [
   { id: "hbar", label: "H-Bar", group: "Basic", desc: "Horizontal bars for long labels" },
   { id: "stacked", label: "Stacked", group: "Basic", desc: "Bars stacked to show composition" },
   { id: "stacked_area", label: "Stacked Area", group: "Basic", desc: "Stacked filled area chart" },
+  { id: "stacked100", label: "100% Stacked", group: "Basic", desc: "Bars normalized to 100% for proportion comparison" },
   // Advanced
   { id: "treemap", label: "Treemap", group: "Advanced", desc: "Proportional sizes as nested rectangles" },
   { id: "heatmap", label: "Heatmap", group: "Advanced", desc: "Color-coded grid of two categories" },
