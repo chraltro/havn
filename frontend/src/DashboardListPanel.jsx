@@ -15,6 +15,20 @@ function timeAgo(dateStr) {
   return `${days}d ago`;
 }
 
+const FAVORITES_KEY = "havn_favorite_dashboards";
+
+function loadFavorites() {
+  try {
+    return JSON.parse(localStorage.getItem(FAVORITES_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveFavorites(ids) {
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify(ids));
+}
+
 export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
   const [dashboards, setDashboards] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -25,7 +39,17 @@ export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [creating, setCreating] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [favorites, setFavorites] = useState(loadFavorites);
   const fileInputRef = useRef(null);
+
+  function toggleFavorite(id) {
+    setFavorites(prev => {
+      const next = prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id];
+      saveFavorites(next);
+      return next;
+    });
+  }
 
   useEffect(() => { load(); }, []);
 
@@ -130,6 +154,13 @@ export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
       {/* Header */}
       <div style={st.header}>
         <h2 style={st.heading}>Dashboards</h2>
+        <input
+          style={st.searchInput}
+          type="text"
+          placeholder="Search dashboards..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
         <div style={st.headerActions}>
           <button style={st.importBtn} onClick={() => fileInputRef.current?.click()}>
             Import
@@ -218,25 +249,46 @@ export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
             + Create Dashboard
           </button>
         </div>
-      ) : (
-        <div style={st.grid}>
-          {dashboards.map(d => (
-            <DashboardCard
-              key={d.id}
-              dashboard={d}
-              onOpen={() => onOpenDashboard(d.id)}
-              onClone={() => handleClone(d.id, d.name)}
-              onExport={() => handleExport(d.id)}
-              onDelete={() => handleDelete(d.id, d.name)}
-            />
-          ))}
-        </div>
-      )}
+      ) : (() => {
+        const term = searchTerm.trim().toLowerCase();
+        const filtered = term
+          ? dashboards.filter(d => (d.name || "").toLowerCase().includes(term))
+          : dashboards;
+        // Sort: favorites first, then original order
+        const sorted = [...filtered].sort((a, b) => {
+          const aFav = favorites.includes(a.id) ? 0 : 1;
+          const bFav = favorites.includes(b.id) ? 0 : 1;
+          return aFav - bFav;
+        });
+        if (sorted.length === 0) {
+          return (
+            <div style={{ textAlign: "center", padding: 40, color: "var(--havn-text-secondary)" }}>
+              No matching dashboards
+            </div>
+          );
+        }
+        return (
+          <div style={st.grid}>
+            {sorted.map(d => (
+              <DashboardCard
+                key={d.id}
+                dashboard={d}
+                isFavorite={favorites.includes(d.id)}
+                onToggleFavorite={() => toggleFavorite(d.id)}
+                onOpen={() => onOpenDashboard(d.id)}
+                onClone={() => handleClone(d.id, d.name)}
+                onExport={() => handleExport(d.id)}
+                onDelete={() => handleDelete(d.id, d.name)}
+              />
+            ))}
+          </div>
+        );
+      })()}
     </div>
   );
 }
 
-function DashboardCard({ dashboard, onOpen, onClone, onExport, onDelete }) {
+function DashboardCard({ dashboard, isFavorite, onToggleFavorite, onOpen, onClone, onExport, onDelete }) {
   const [showActions, setShowActions] = useState(false);
   const actionsRef = useRef(null);
 
@@ -254,7 +306,16 @@ function DashboardCard({ dashboard, onOpen, onClone, onExport, onDelete }) {
       onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--havn-accent)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.1)"; }}
       onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--havn-border)"; e.currentTarget.style.boxShadow = "none"; }}>
       <div style={st.cardHeader}>
-        <span style={st.cardName}>{dashboard.name}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, overflow: "hidden", flex: 1 }}>
+          <button
+            style={st.starBtn}
+            onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+            title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+          >
+            {isFavorite ? "\u2605" : "\u2606"}
+          </button>
+          <span style={st.cardName}>{dashboard.name}</span>
+        </div>
         <button
           style={st.cardMenuBtn}
           onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }}
@@ -308,6 +369,28 @@ const st = {
   headerActions: {
     display: "flex",
     gap: 8,
+  },
+  searchInput: {
+    flex: 1,
+    maxWidth: 280,
+    padding: "7px 12px",
+    border: "1px solid var(--havn-border)",
+    borderRadius: 6,
+    background: "var(--havn-bg-secondary, var(--havn-bg))",
+    color: "var(--havn-text)",
+    fontSize: 13,
+    outline: "none",
+    boxSizing: "border-box",
+  },
+  starBtn: {
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    fontSize: 16,
+    padding: 0,
+    color: "var(--havn-yellow, #e5c07b)",
+    lineHeight: 1,
+    flexShrink: 0,
   },
   primaryBtn: {
     background: "var(--havn-accent)",

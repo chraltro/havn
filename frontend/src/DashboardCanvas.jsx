@@ -23,6 +23,23 @@ const AUTO_REFRESH_OPTIONS = [
 ];
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function _relativeTime(date) {
+  if (!date) return "";
+  const now = new Date();
+  const seconds = Math.floor((now - date) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+// ---------------------------------------------------------------------------
 // Main Canvas Component
 // ---------------------------------------------------------------------------
 
@@ -39,6 +56,12 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm }) {
     updatePositions,
     autoRefresh,
     setAutoRefresh,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    isDirty,
+    lastSavedAt,
   } = useDashboard();
 
   const [editingName, setEditingName] = useState(false);
@@ -78,6 +101,22 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm }) {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
+      // Undo/Redo work even in inputs
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && e.shiftKey) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "y") {
+        e.preventDefault();
+        redo();
+        return;
+      }
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       if (e.key === "e" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
@@ -94,7 +133,18 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm }) {
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [editMode, isFullscreen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editMode, isFullscreen, undo, redo]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Warn on unsaved changes before page unload
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
 
   function toggleFullscreen() {
     if (document.fullscreenElement) {
@@ -329,6 +379,51 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm }) {
           )}
         </div>
         <div style={st.toolbarRight}>
+          {/* Save indicator */}
+          <span
+            style={st.saveIndicator}
+            title={lastSavedAt ? `Last saved ${_relativeTime(lastSavedAt)}` : "Not yet saved"}
+          >
+            <span style={{
+              display: "inline-block",
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: isDirty ? "var(--havn-yellow, #e5c07b)" : "var(--havn-green, #98c379)",
+              marginRight: 5,
+            }} />
+            {isDirty ? "Unsaved" : "Saved"}
+          </span>
+
+          {/* Edited by */}
+          {dashboard?.updated_by && (
+            <span style={{ fontSize: 12, color: "var(--havn-text-secondary)", marginRight: 4 }}>
+              Edited by {dashboard.updated_by}
+            </span>
+          )}
+
+          {/* Undo/Redo */}
+          {editMode && (
+            <>
+              <button
+                style={{ ...st.toolBtn, ...(canUndo ? {} : st.toolBtnDisabled) }}
+                onClick={undo}
+                disabled={!canUndo}
+                title="Undo (Ctrl+Z)"
+              >
+                ↶
+              </button>
+              <button
+                style={{ ...st.toolBtn, ...(canRedo ? {} : st.toolBtnDisabled) }}
+                onClick={redo}
+                disabled={!canRedo}
+                title="Redo (Ctrl+Shift+Z)"
+              >
+                ↷
+              </button>
+            </>
+          )}
+
           {/* Auto-refresh */}
           <div style={{ position: "relative" }}>
             <button
@@ -634,6 +729,18 @@ const st = {
     padding: "5px 10px",
     borderRadius: 5,
     fontSize: 13,
+  },
+  toolBtnDisabled: {
+    opacity: 0.35,
+    cursor: "default",
+  },
+  saveIndicator: {
+    fontSize: 12,
+    color: "var(--havn-text-secondary)",
+    display: "flex",
+    alignItems: "center",
+    marginRight: 4,
+    userSelect: "none",
   },
   addBtn: {
     background: "var(--havn-accent)",

@@ -1,7 +1,9 @@
-import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from "react";
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { api } from "./api";
 
 const DashboardContext = createContext(null);
+
+const MAX_UNDO = 30;
 
 export function DashboardProvider({ children }) {
   const [dashboard, setDashboard] = useState(null);
@@ -12,6 +14,25 @@ export function DashboardProvider({ children }) {
   const [parameters, setParameters] = useState({});
   const [autoRefresh, setAutoRefresh] = useState(0);
   const refreshTimerRef = useRef(null);
+
+  // Undo/Redo stacks
+  const [undoStack, setUndoStack] = useState([]);
+  const [redoStack, setRedoStack] = useState([]);
+
+  // Dirty / save tracking
+  const [isDirty, setIsDirty] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState(null);
+
+  // Push current dashboard state onto undo stack before a mutation
+  const pushUndo = useCallback(() => {
+    setUndoStack(prev => {
+      const snapshot = JSON.parse(JSON.stringify(dashboard));
+      const next = [...prev, snapshot];
+      if (next.length > MAX_UNDO) next.shift();
+      return next;
+    });
+    setRedoStack([]);
+  }, [dashboard]);
 
   // Load a dashboard by ID
   const loadDashboard = useCallback(async (id) => {
@@ -30,6 +51,11 @@ export function DashboardProvider({ children }) {
         defaults[p.name] = p.default ?? "";
       }
       setParameters(defaults);
+      // Reset undo/redo and dirty state on load
+      setUndoStack([]);
+      setRedoStack([]);
+      setIsDirty(false);
+      setLastSavedAt(null);
       return full;
     } catch (e) {
       console.error("Failed to load dashboard:", e);
@@ -45,6 +71,10 @@ export function DashboardProvider({ children }) {
     setGlobalFilters({});
     setCrossFilter(null);
     setParameters({});
+    setUndoStack([]);
+    setRedoStack([]);
+    setIsDirty(false);
+    setLastSavedAt(null);
   }, []);
 
   // Build combined filters for a query
@@ -164,47 +194,55 @@ export function DashboardProvider({ children }) {
   // Update dashboard on server
   const saveDashboard = useCallback(async (updates) => {
     if (!dashboard) return;
+    pushUndo();
     try {
       const result = await api.updateDashboard(dashboard.id, updates);
       setDashboard(prev => ({ ...prev, ...updates, ...result }));
+      setIsDirty(false);
+      setLastSavedAt(new Date());
     } catch (e) {
       console.error("Failed to save dashboard:", e);
     }
-  }, [dashboard]);
+  }, [dashboard, pushUndo]);
 
   // Add widget
   const addWidget = useCallback(async (widgetData) => {
     if (!dashboard) return null;
+    pushUndo();
     try {
       const w = await api.addWidget(dashboard.id, widgetData);
       setDashboard(prev => ({
         ...prev,
         widgets: [...(prev.widgets || []), w],
       }));
+      setIsDirty(true);
       return w;
     } catch (e) {
       console.error("Failed to add widget:", e);
       return null;
     }
-  }, [dashboard]);
+  }, [dashboard, pushUndo]);
 
   // Update widget
   const updateWidget = useCallback(async (widgetId, updates) => {
     if (!dashboard) return;
+    pushUndo();
     try {
       const w = await api.updateWidget(dashboard.id, widgetId, updates);
       setDashboard(prev => ({
         ...prev,
         widgets: (prev.widgets || []).map(ww => ww.id === widgetId ? { ...ww, ...w } : ww),
       }));
+      setIsDirty(true);
     } catch (e) {
       console.error("Failed to update widget:", e);
     }
-  }, [dashboard]);
+  }, [dashboard, pushUndo]);
 
   // Delete widget
   const removeWidget = useCallback(async (widgetId) => {
     if (!dashboard) return;
+    pushUndo();
     try {
       await api.deleteWidget(dashboard.id, widgetId);
       setDashboard(prev => ({
@@ -216,14 +254,16 @@ export function DashboardProvider({ children }) {
         delete next[widgetId];
         return next;
       });
+      setIsDirty(true);
     } catch (e) {
       console.error("Failed to delete widget:", e);
     }
-  }, [dashboard]);
+  }, [dashboard, pushUndo]);
 
   // Batch position update
   const updatePositions = useCallback(async (positions) => {
     if (!dashboard) return;
+    pushUndo();
     try {
       await api.updateWidgetPositions(dashboard.id, positions);
       setDashboard(prev => ({
@@ -233,10 +273,54 @@ export function DashboardProvider({ children }) {
           return update ? { ...w, position: update.position } : w;
         }),
       }));
+      setIsDirty(true);
     } catch (e) {
       console.error("Failed to update positions:", e);
     }
-  }, [dashboard]);
+  }, [dashboard, pushUndo]);
+
+  // Undo: pop from undoStack, push current to redoStack, apply popped state and persist
+  const undo = useCallback(async () => {
+    if (undoStack.length === 0 || !dashboard) return;
+    const prev = undoStack[undoStack.length - 1];
+    setUndoStack(s => s.slice(0, -1));
+    setRedoStack(s => {
+      const next = [...s, JSON.parse(JSON.stringify(dashboard))];
+      if (next.length > MAX_UNDO) next.shift();
+      return next;
+    });
+    setDashboard(prev);
+    try {
+      await api.updateDashboard(prev.id, prev);
+      setIsDirty(false);
+      setLastSavedAt(new Date());
+    } catch (e) {
+      console.error("Failed to persist undo:", e);
+    }
+  }, [undoStack, dashboard]);
+
+  // Redo: pop from redoStack, push current to undoStack, apply popped state and persist
+  const redo = useCallback(async () => {
+    if (redoStack.length === 0 || !dashboard) return;
+    const next = redoStack[redoStack.length - 1];
+    setRedoStack(s => s.slice(0, -1));
+    setUndoStack(s => {
+      const n = [...s, JSON.parse(JSON.stringify(dashboard))];
+      if (n.length > MAX_UNDO) n.shift();
+      return n;
+    });
+    setDashboard(next);
+    try {
+      await api.updateDashboard(next.id, next);
+      setIsDirty(false);
+      setLastSavedAt(new Date());
+    } catch (e) {
+      console.error("Failed to persist redo:", e);
+    }
+  }, [redoStack, dashboard]);
+
+  const canUndo = undoStack.length > 0;
+  const canRedo = redoStack.length > 0;
 
   const value = {
     dashboard,
@@ -261,6 +345,12 @@ export function DashboardProvider({ children }) {
     updateWidget,
     removeWidget,
     updatePositions,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    isDirty,
+    lastSavedAt,
   };
 
   return (
