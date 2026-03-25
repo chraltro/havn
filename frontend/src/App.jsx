@@ -431,7 +431,14 @@ function AppContent() {
   // Resizable panels
   const [sidebarWidth, onSidebarResize, onSidebarResizeStart] = useResizable("dp_sidebar_width", 240, 150, 500);
   const [outputHeight, onOutputResize, onOutputResizeStart] = useResizable("dp_output_height", 80, 40, 500);
-  const [outputCollapsed, setOutputCollapsed] = useState(false);
+  const [outputCollapsed, setOutputCollapsed] = useState(() => localStorage.getItem("dp_output_collapsed") === "true");
+  const toggleOutputCollapsed = useCallback(() => {
+    setOutputCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem("dp_output_collapsed", String(next));
+      return next;
+    });
+  }, []);
   const [agentWidth, onAgentResize, onAgentResizeStart] = useResizable("dp_agent_width", 340, 240, 600);
 
   // Editor navigation
@@ -1175,7 +1182,7 @@ function AppContent() {
                 <div style={{ height: 3, background: "#2dd4bf", width: `${Math.round(progress * 100)}%`, transition: "width 0.3s ease" }} />
               </div>
             )}
-            <OutputPanel output={output} onClear={clearOutput} height={outputCollapsed ? 28 : outputHeight} onOpenFile={openFileAtLine} running={running} progress={progress} collapsed={outputCollapsed} onToggleCollapse={() => setOutputCollapsed(c => !c)} />
+            <OutputPanel output={output} onClear={clearOutput} height={outputCollapsed ? 28 : outputHeight} onOpenFile={openFileAtLine} running={running} progress={progress} collapsed={outputCollapsed} onToggleCollapse={toggleOutputCollapsed} />
           </div>
         </div>
 
