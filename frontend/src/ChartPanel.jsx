@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { getSeriesColor, formatNumber } from "./chartStyleDefaults";
 
 // ═══════════════════════════════════════════════════════════════════
 // UTILITIES
@@ -130,6 +131,8 @@ function detectBestChart(analysis, rowCount) {
 const COLORS = [
   "#6366f1", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6",
   "#06b6d4", "#ec4899", "#14b8a6", "#f97316", "#a855f7",
+  "#3b82f6", "#10b981", "#eab308", "#f43f5e", "#8b5cf6",
+  "#0ea5e9",
 ];
 
 const CHART_TYPES = [
@@ -140,11 +143,41 @@ const CHART_TYPES = [
   { id: "pie", label: "Pie" },
   { id: "donut", label: "Donut" },
   { id: "hbar", label: "H-Bar" },
+  { id: "grouped", label: "Grouped" },
   { id: "stacked", label: "Stacked" },
+  { id: "stacked100", label: "100% Stacked" },
 ];
 
-const PAD = { top: 28, right: 28, bottom: 52, left: 60 };
+const PAD_BASE = { top: 28, right: 28, bottom: 52, left: 60 };
 const PIE_PAD = { top: 16, bottom: 16 };
+
+// Compute dynamic bottom padding based on label characteristics
+function dynamicPad(labels, plotWidth) {
+  const n = labels.length;
+  if (n === 0) return PAD_BASE;
+  const avgLen = labels.reduce((s, l) => s + String(l).length, 0) / n;
+  const maxLen = Math.max(...labels.map(l => String(l).length));
+  const groupW = plotWidth / n;
+  const estPx = Math.max(avgLen * 7, 36);
+  // No rotation needed
+  if (groupW >= estPx * 0.9 || n <= 4) return PAD_BASE;
+  // 45° rotation — need more room based on label length
+  const extraBottom = Math.min(maxLen * 3.5, 60);
+  return { ...PAD_BASE, bottom: PAD_BASE.bottom + extraBottom };
+}
+
+// Determine label rotation angle: 0 (none), -45, or -90
+function labelRotation(labels, groupW) {
+  const n = labels.length;
+  if (n <= 4) return 0;
+  const avgLen = labels.reduce((s, l) => s + String(l).length, 0) / n;
+  const maxLen = Math.max(...labels.map(l => String(l).length));
+  const estPx = Math.max(avgLen * 7, 36);
+  if (groupW >= estPx * 0.9) return 0;
+  // Very narrow bars or very long labels → 90°
+  if (groupW < 20 || maxLen > 20) return -90;
+  return -45;
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // CHART TYPE ICONS (mini SVG)
@@ -169,6 +202,8 @@ function ChartIcon({ type }) {
       return <svg {...p}><rect x="0" y="1" width="10" height="3" rx="0.5" /><rect x="0" y="5.5" width="14" height="3" rx="0.5" /><rect x="0" y="10" width="8" height="3" rx="0.5" /></svg>;
     case "stacked":
       return <svg {...p}><rect x="1" y="5" width="3" height="4" opacity="0.7" /><rect x="1" y="9" width="3" height="5" opacity="0.35" /><rect x="6.5" y="2" width="3" height="5" opacity="0.7" /><rect x="6.5" y="7" width="3" height="7" opacity="0.35" /><rect x="12" y="3" width="3" height="4" opacity="0.7" /><rect x="12" y="7" width="3" height="7" opacity="0.35" /></svg>;
+    case "stacked100":
+      return <svg {...p}><rect x="1" y="0" width="3" height="6" opacity="0.7" /><rect x="1" y="6" width="3" height="8" opacity="0.35" /><rect x="6.5" y="0" width="3" height="8" opacity="0.7" /><rect x="6.5" y="8" width="3" height="6" opacity="0.35" /><rect x="12" y="0" width="3" height="5" opacity="0.7" /><rect x="12" y="5" width="3" height="9" opacity="0.35" /></svg>;
     default:
       return null;
   }
@@ -224,8 +259,8 @@ function exportChart(svgEl, format) {
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════
 
-export default function ChartPanel({ columns, rows }) {
-  const [chartType, setChartType] = useState(null);
+export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLabel, yAxisLabel, onDataClick, config }) {
+  const [chartType, setChartType] = useState(forcedType || null);
   const [xCol, setXCol] = useState(0);
   const [yCols, setYCols] = useState([1]);
   const [hoveredIndex, setHoveredIndex] = useState(null);
@@ -241,15 +276,20 @@ export default function ChartPanel({ columns, rows }) {
   // Analyze columns
   const analysis = useMemo(() => analyzeColumns(columns, rows), [columns, rows]);
 
-  // Auto-detect chart type on data change
+  // Auto-detect chart type on data change (respect forcedType if provided)
   useEffect(() => {
     const d = detectBestChart(analysis, rows.length);
-    setChartType(d.type);
+    if (!forcedType) setChartType(d.type);
     setXCol(d.x);
     setYCols(d.y);
     setHoveredIndex(null);
     setTooltip(null);
-  }, [analysis, rows.length]);
+  }, [analysis, rows.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Update chart type when forcedType prop changes
+  useEffect(() => {
+    if (forcedType) setChartType(forcedType);
+  }, [forcedType]);
 
   // ResizeObserver
   useEffect(() => {
@@ -276,10 +316,40 @@ export default function ChartPanel({ columns, rows }) {
 
   // Prepare chart data
   const chartData = useMemo(() => {
-    const labels = rows.map((r) => String(r[xCol] ?? ""));
+    const labels = rows.map((r) => {
+      const raw = r[xCol];
+      if (raw === null || raw === undefined) return "";
+      const s = String(raw);
+      // Date formatting: use config.dateFormat if set, otherwise auto
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+        const datePart = s.slice(0, 10);
+        const [yr, mo, dy] = datePart.split("-");
+        const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        const moName = months[parseInt(mo, 10) - 1];
+        const dayNum = parseInt(dy, 10);
+        const df = config?.dateFormat;
+        if (df && df !== "auto") {
+          switch (df) {
+            case "YYYY-MM-DD": return datePart;
+            case "MMM DD": return `${moName} ${dayNum}`;
+            case "MMM YYYY": return `${moName} ${yr}`;
+            case "DD/MM/YYYY": return `${dy}/${mo}/${yr}`;
+            case "MM/DD/YYYY": return `${mo}/${dy}/${yr}`;
+            case "YYYY": return yr;
+            case "Q YYYY": return `Q${Math.ceil(parseInt(mo, 10) / 3)} ${yr}`;
+            default: break;
+          }
+        }
+        // Auto: smart format based on grouping
+        if (mo === "01" && dy === "01" && rows.length <= 20) return yr;
+        if (dy === "01") return `${moName} ${yr}`;
+        return `${moName} ${dayNum}`;
+      }
+      return s;
+    });
     const series = yCols.map((ci, i) => ({
       name: columns[ci],
-      color: COLORS[i % COLORS.length],
+      color: getSeriesColor(config, i, columns[ci]),
       values: rows.map((r) => { const n = parseNum(r[ci]); return isNaN(n) ? 0 : n; }),
     }));
     const allVals = series.flatMap((s) => s.values);
@@ -301,7 +371,7 @@ export default function ChartPanel({ columns, rows }) {
     const stackMax = Math.max(0, ...stackedTotals);
 
     return { labels, series, yMin, yMax, scatterPoints, slices, stackMax };
-  }, [rows, columns, xCol, yCols]);
+  }, [rows, columns, xCol, yCols, config]);
 
   // Tooltip handlers
   const showTip = useCallback((e, label, values) => {
@@ -321,15 +391,74 @@ export default function ChartPanel({ columns, rows }) {
   const isPieType = chartType === "pie" || chartType === "donut";
   const isCartesian = !isPieType;
 
+  // Gridline helpers
+  // Config-aware axis formatter: uses formatNumber when numberFormat is set
+  const fmtAxisLabel = (t) => config?.numberFormat ? formatNumber(t, config.numberFormat, config.decimalPrecision) : fmtAxis(t);
+
+  const gridColor = config?.gridlineColor || "var(--havn-border-light)";
+  const gridDash = config?.gridlineStyle === "solid" ? "none" : config?.gridlineStyle === "dotted" ? "1,3" : "3,3";
+  const showGrid = config?.showGridlines !== false;
+
+  // Reference lines from config
+  const refLines = config?.referenceLines || [];
+
   // No data guard
   if (!columns || columns.length < 2 || rows.length === 0) {
     return <div style={st.empty}>Need at least 2 columns and 1 row to chart.</div>;
   }
 
-  // Dimensions
+  // Dimensions — compute dynamic padding based on chart data
   const { width: W, height: H } = dims;
+  const PAD = useMemo(() => {
+    if (isPieType || !chartData?.labels) return PAD_BASE;
+    const estPlotW = W - PAD_BASE.left - PAD_BASE.right;
+    return dynamicPad(chartData.labels, estPlotW);
+  }, [W, chartData?.labels, isPieType]);
   const plotW = W - PAD.left - PAD.right;
   const plotH = H - PAD.top - PAD.bottom;
+
+  // ─── REFERENCE LINES ────────────────────────────────────
+  function renderRefLines(yPosFunc) {
+    if (refLines.length === 0) return null;
+    return refLines.map((rl, i) => {
+      if (rl.value === undefined || rl.value === null) return null;
+      const y = yPosFunc(rl.value);
+      if (y < -2 || y > plotH + 2) return null;
+      const dash = rl.style === "solid" ? "none" : "6,4";
+      return (
+        <g key={`ref-${i}`}>
+          <line x1={0} y1={y} x2={plotW} y2={y} stroke={rl.color || "#ef4444"} strokeWidth={1.5} strokeDasharray={dash} opacity={0.8} />
+          {rl.label && (
+            <text x={plotW - 4} y={y - 4} textAnchor="end" style={{ fill: rl.color || "#ef4444", fontSize: "9px", fontWeight: 600, fontFamily: "var(--havn-font-mono)" }}>
+              {rl.label}
+            </text>
+          )}
+        </g>
+      );
+    });
+  }
+
+  // ─── REFERENCE BANDS ────────────────────────────────────
+  const refBands = config?.referenceBands || [];
+  function renderRefBands(yPosFunc) {
+    if (refBands.length === 0) return null;
+    return refBands.map((band, i) => {
+      if (band.from == null || band.to == null) return null;
+      const y1 = Math.max(yPosFunc(Math.max(band.from, band.to)), 0);
+      const y2 = Math.min(yPosFunc(Math.min(band.from, band.to)), plotH);
+      if (y1 >= y2) return null;
+      return (
+        <g key={`band-${i}`}>
+          <rect x={0} y={y1} width={plotW} height={y2 - y1} fill={band.color || "#6366f1"} opacity={0.1} />
+          {band.label && (
+            <text x={4} y={y1 + 12} style={{ fill: band.color || "#6366f1", fontSize: "9px", fontWeight: 500, fontFamily: "var(--havn-font-mono)", opacity: 0.7 }}>
+              {band.label}
+            </text>
+          )}
+        </g>
+      );
+    });
+  }
 
   // ─── RENDERING ──────────────────────────────────────────
   function renderSVGContent() {
@@ -342,8 +471,10 @@ export default function ChartPanel({ columns, rows }) {
       case "scatter": return renderScatter();
       case "pie": return renderPie(false);
       case "donut": return renderPie(true);
+      case "grouped": return renderBar();
       case "hbar": return renderHBar();
       case "stacked": return renderStacked();
+      case "stacked100": return renderStacked100();
       default: return renderBar();
     }
   }
@@ -360,22 +491,44 @@ export default function ChartPanel({ columns, rows }) {
     const totalBarW = barW * seriesCount;
     const yPos = (v) => plotH - ((v - scale.min) / yRange) * plotH;
     const zeroY = yPos(0);
-    const labelStep = Math.max(1, Math.ceil(n / 24));
+    // Smart label rotation: 0°, -45°, or -90° based on available space
+    const rotAngle = labelRotation(labels, groupW);
+    const isRotated = rotAngle !== 0;
+    // Label stepping: skip labels to avoid physical overlap
+    const avgLabelLen = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
+    const estLabelPx = Math.max(avgLabelLen * 7, 36);
+    const maxLabels = Math.max(6, Math.floor(plotW / (isRotated ? 24 : Math.max(estLabelPx, 40))));
+    const labelStep = Math.max(1, Math.ceil(n / maxLabels));
+    const truncLen = rotAngle === -90 ? 12 : rotAngle === -45 ? 18 : 12;
 
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
         {/* Grid */}
-        {scale.ticks.map((t) => (
+        {showGrid && scale.ticks.map((t) => (
           <g key={t}>
-            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke="var(--havn-border-light)" strokeDasharray="3,3" opacity={0.5} />
-            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxis(t)}</text>
+            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
+            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxisLabel(t)}</text>
           </g>
         ))}
         {/* X labels */}
         {labels.map((l, i) => {
           if (i % labelStep !== 0 && i !== n - 1) return null;
-          return <text key={i} x={i * groupW + groupW / 2} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{trunc(l)}</text>;
+          const fullLabel = String(l);
+          const lx = i * groupW + groupW / 2;
+          if (rotAngle === -90) {
+            return <text key={i} x={lx} y={plotH + 8} textAnchor="end" dominantBaseline="central" style={axLabelStyle} transform={`rotate(-90, ${lx}, ${plotH + 8})`}><title>{fullLabel}</title>{trunc(l, truncLen)}</text>;
+          }
+          if (rotAngle === -45) {
+            return <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-45, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, truncLen)}</text>;
+          }
+          return <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l, truncLen)}</text>;
         })}
+        {/* Axis labels */}
+        {(xAxisLabel || columns[xCol]) && <text x={plotW / 2} y={plotH + PAD.bottom - 8} textAnchor="middle" style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{xAxisLabel || columns[xCol]}</text>}
+        {(yAxisLabel || yCols.length > 0) && <text x={-44} y={plotH / 2} textAnchor="middle" transform={`rotate(-90, -44, ${plotH / 2})`} style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{yAxisLabel || (yCols.length === 1 ? columns[yCols[0]] : "Value")}</text>}
+        {/* Reference bands + lines */}
+        {renderRefBands(yPos)}
+        {renderRefLines(yPos)}
         {/* Bars */}
         {series.map((s, si) =>
           s.values.map((v, i) => {
@@ -390,14 +543,32 @@ export default function ChartPanel({ columns, rows }) {
                 rx={Math.min(3, barW / 4)}
                 fill={s.color}
                 opacity={hoveredIndex !== null && !isHovered ? 0.3 : 1}
-                style={{ transition: "opacity 0.15s" }}
+                style={{ transition: "opacity 0.15s", cursor: onDataClick ? "pointer" : undefined }}
                 onMouseMove={(e) => {
                   setHoveredIndex(i);
                   showTip(e, labels[i], series.map((ss, ssi) => ({ name: ss.name, value: ss.values[i], color: ss.color })));
                 }}
+                onTouchStart={(e) => {
+                  setHoveredIndex(i);
+                  showTip(e.touches[0], labels[i], series.map((ss, ssi) => ({ name: ss.name, value: ss.values[i], color: ss.color })));
+                }}
                 onMouseLeave={hideTip}
+                onClick={onDataClick ? () => onDataClick(columns[xCol], labels[i]) : undefined}
               />
             );
+          })
+        )}
+        {/* Data labels */}
+        {config?.showDataLabels && series.map((s, si) =>
+          s.values.map((v, i) => {
+            const x = i * groupW + (groupW - totalBarW) / 2 + si * barW + barW / 2;
+            const pos = config?.dataLabelPosition || "above";
+            const ly = pos === "above" ? yPos(v) - 4 : pos === "below" ? Math.min(yPos(v) + 14, plotH - 2) : (yPos(v) + zeroY) / 2 + 3;
+            const fmt = config?.dataLabelFormat || "value";
+            const total = series.reduce((sum, ss) => sum + Math.abs(ss.values[i]), 0);
+            const pct = total > 0 ? ((Math.abs(v) / total) * 100).toFixed(0) + "%" : "";
+            const label = fmt === "percent" ? pct : fmt === "both" ? `${fmtNum(v)} (${pct})` : fmtNum(v);
+            return <text key={`dl-${si}-${i}`} x={x} y={ly} textAnchor="middle" style={{ fill: "var(--havn-text)", fontSize: "9px", fontWeight: 600, fontFamily: "var(--havn-font-mono)", pointerEvents: "none" }}>{label}</text>;
           })
         )}
         {/* Zero line */}
@@ -414,22 +585,43 @@ export default function ChartPanel({ columns, rows }) {
     const n = labels.length;
     const yPos = (v) => plotH - ((v - scale.min) / yRange) * plotH;
     const xPos = (i) => n === 1 ? plotW / 2 : (i / (n - 1)) * plotW;
-    const labelStep = Math.max(1, Math.ceil(n / 20));
+    const stepW = n > 1 ? plotW / (n - 1) : plotW;
+    const rotAngleLine = labelRotation(labels, stepW);
+    const isRotatedLine = rotAngleLine !== 0;
+    const avgLabelLen = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
+    const estLabelPx = Math.max(avgLabelLen * 6.5, 30);
+    const maxLabels = Math.max(6, Math.floor(plotW / (isRotatedLine ? 24 : Math.max(estLabelPx, 40))));
+    const labelStep = Math.max(1, Math.ceil(n / maxLabels));
+    const truncLenLine = rotAngleLine === -90 ? 12 : rotAngleLine === -45 ? 18 : 10;
 
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
         {/* Grid */}
-        {scale.ticks.map((t) => (
+        {showGrid && scale.ticks.map((t) => (
           <g key={t}>
-            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke="var(--havn-border-light)" strokeDasharray="3,3" opacity={0.5} />
-            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxis(t)}</text>
+            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
+            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxisLabel(t)}</text>
           </g>
         ))}
         {/* X labels */}
         {labels.map((l, i) => {
           if (i % labelStep !== 0 && i !== n - 1) return null;
-          return <text key={i} x={xPos(i)} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{trunc(l, 10)}</text>;
+          const fullLabel = String(l);
+          const lx = xPos(i);
+          if (rotAngleLine === -90) {
+            return <text key={i} x={lx} y={plotH + 8} textAnchor="end" dominantBaseline="central" style={axLabelStyle} transform={`rotate(-90, ${lx}, ${plotH + 8})`}><title>{fullLabel}</title>{trunc(l, truncLenLine)}</text>;
+          }
+          if (rotAngleLine === -45) {
+            return <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-45, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, truncLenLine)}</text>;
+          }
+          return <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l, truncLenLine)}</text>;
         })}
+        {/* Axis labels */}
+        {(xAxisLabel || columns[xCol]) && <text x={plotW / 2} y={plotH + PAD.bottom - 8} textAnchor="middle" style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{xAxisLabel || columns[xCol]}</text>}
+        {(yAxisLabel || yCols.length > 0) && <text x={-44} y={plotH / 2} textAnchor="middle" transform={`rotate(-90, -44, ${plotH / 2})`} style={{ ...axLabelStyle, fontWeight: 600, opacity: 0.5, fontSize: "9px" }}>{yAxisLabel || (yCols.length === 1 ? columns[yCols[0]] : "Value")}</text>}
+        {/* Reference bands + lines */}
+        {renderRefBands(yPos)}
+        {renderRefLines(yPos)}
         {/* Area fills */}
         {filled && series.map((s, si) => {
           const pts = s.values.map((v, i) => `${xPos(i)},${yPos(v)}`).join(" ");
@@ -470,6 +662,14 @@ export default function ChartPanel({ columns, rows }) {
             setHoveredIndex(ci);
             showTip(e, labels[ci], series.map((s) => ({ name: s.name, value: s.values[ci], color: s.color })));
           }}
+          onTouchStart={(e) => {
+            const svgRect = e.currentTarget.ownerSVGElement.getBoundingClientRect();
+            const mx = e.touches[0].clientX - svgRect.left - PAD.left;
+            const idx = n === 1 ? 0 : Math.round(mx / (plotW / (n - 1)));
+            const ci = Math.max(0, Math.min(n - 1, idx));
+            setHoveredIndex(ci);
+            showTip(e.touches[0], labels[ci], series.map((s) => ({ name: s.name, value: s.values[ci], color: s.color })));
+          }}
           onMouseLeave={hideTip}
         />
       </g>
@@ -492,22 +692,25 @@ export default function ChartPanel({ columns, rows }) {
 
     const labelStepX = Math.max(1, Math.ceil(xScale.ticks.length / 10));
 
+    const scatterColor = getSeriesColor(config, 0, columns[xCol]);
+    const scatterColor2 = getSeriesColor(config, 1, columns[yCols[0]]);
+
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
         {/* Y grid */}
-        {yScale.ticks.map((t) => (
+        {showGrid && yScale.ticks.map((t) => (
           <g key={`y${t}`}>
-            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke="var(--havn-border-light)" strokeDasharray="3,3" opacity={0.5} />
-            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxis(t)}</text>
+            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
+            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxisLabel(t)}</text>
           </g>
         ))}
         {/* X grid */}
-        {xScale.ticks.map((t, i) => {
+        {showGrid && xScale.ticks.map((t, i) => {
           if (i % labelStepX !== 0) return null;
           return (
             <g key={`x${t}`}>
-              <line x1={xPos(t)} y1={0} x2={xPos(t)} y2={plotH} stroke="var(--havn-border-light)" strokeDasharray="3,3" opacity={0.3} />
-              <text x={xPos(t)} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{fmtAxis(t)}</text>
+              <line x1={xPos(t)} y1={0} x2={xPos(t)} y2={plotH} stroke={gridColor} strokeDasharray={gridDash} opacity={0.3} />
+              <text x={xPos(t)} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{fmtAxisLabel(t)}</text>
             </g>
           );
         })}
@@ -515,14 +718,21 @@ export default function ChartPanel({ columns, rows }) {
         {scatterPoints.map((p, i) => (
           <circle key={i} cx={xPos(p.x)} cy={yPos(p.y)}
             r={hoveredIndex === i ? 6 : 4}
-            fill={COLORS[0]} opacity={hoveredIndex !== null && hoveredIndex !== i ? 0.2 : 0.7}
-            stroke={COLORS[0]} strokeWidth={1}
+            fill={scatterColor} opacity={hoveredIndex !== null && hoveredIndex !== i ? 0.2 : 0.7}
+            stroke={scatterColor} strokeWidth={1}
             style={{ transition: "r 0.15s, opacity 0.15s", cursor: "pointer" }}
             onMouseMove={(e) => {
               setHoveredIndex(i);
               showTip(e, `Point ${i + 1}`, [
-                { name: columns[xCol], value: p.x, color: COLORS[0] },
-                { name: columns[yCols[0]], value: p.y, color: COLORS[1] },
+                { name: columns[xCol], value: p.x, color: scatterColor },
+                { name: columns[yCols[0]], value: p.y, color: scatterColor2 },
+              ]);
+            }}
+            onTouchStart={(e) => {
+              setHoveredIndex(i);
+              showTip(e.touches[0], `Point ${i + 1}`, [
+                { name: columns[xCol], value: p.x, color: scatterColor },
+                { name: columns[yCols[0]], value: p.y, color: scatterColor2 },
               ]);
             }}
             onMouseLeave={hideTip}
@@ -534,8 +744,22 @@ export default function ChartPanel({ columns, rows }) {
 
   // ─── PIE / DONUT CHART ──────────────────────────────────
   function renderPie(isDonut) {
-    const { slices } = chartData;
+    let { slices } = chartData;
     if (slices.length === 0) return <text x={W / 2} y={H / 2} textAnchor="middle" style={{ fill: "var(--havn-text-dim)", fontSize: "13px" }}>No data for chart</text>;
+
+    // Check for dominant slice — warn if >70%
+    const sliceTotal = slices.reduce((s, d) => s + d.value, 0) || 1;
+    const topSlice = Math.max(...slices.map(s => s.value));
+    const topPct = (topSlice / sliceTotal) * 100;
+    const hasDominant = topPct > 70 && slices.length > 1;
+
+    // Cap at 10 slices — group the rest as "Other"
+    if (slices.length > 10) {
+      const sorted = [...slices].sort((a, b) => b.value - a.value);
+      const top = sorted.slice(0, 9);
+      const otherValue = sorted.slice(9).reduce((s, d) => s + d.value, 0);
+      slices = [...top, { label: `Other (${sorted.length - 9})`, value: otherValue }];
+    }
 
     const total = slices.reduce((s, d) => s + d.value, 0) || 1;
     const cx = W / 2;
@@ -550,7 +774,7 @@ export default function ChartPanel({ columns, rows }) {
       angle += sliceAngle;
       const end = angle;
       const midAngle = start + sliceAngle / 2;
-      return { ...s, start, end, midAngle, pct: ((s.value / total) * 100).toFixed(1), color: COLORS[i % COLORS.length], index: i };
+      return { ...s, start, end, midAngle, pct: ((s.value / total) * 100).toFixed(1), color: getSeriesColor(config, i, s.label), index: i };
     });
 
     return (
@@ -570,7 +794,12 @@ export default function ChartPanel({ columns, rows }) {
                 setHoveredIndex(a.index);
                 showTip(e, a.label, [{ name: `${a.pct}%`, value: a.value, color: a.color }]);
               }}
+              onTouchStart={(e) => {
+                setHoveredIndex(a.index);
+                showTip(e.touches[0], a.label, [{ name: `${a.pct}%`, value: a.value, color: a.color }]);
+              }}
               onMouseLeave={hideTip}
+              onClick={onDataClick ? () => onDataClick(columns[xCol], a.label) : undefined}
             />
           );
         })}
@@ -600,6 +829,19 @@ export default function ChartPanel({ columns, rows }) {
         )}
         {/* Legend */}
         {renderPieLegend(arcs)}
+        {/* Dominant slice warning */}
+        {hasDominant && (
+          <foreignObject x={4} y={4} width={Math.min(W - 8, 260)} height={28}>
+            <div xmlns="http://www.w3.org/1999/xhtml" style={{
+              background: "rgba(234, 179, 8, 0.15)", border: "1px solid rgba(234, 179, 8, 0.3)",
+              borderRadius: 4, padding: "3px 8px", fontSize: 10, color: "var(--havn-yellow)",
+              display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
+            }}>
+              <span>{"\u26A0"}</span>
+              <span>Top slice is {topPct.toFixed(0)}%. Consider Bar or Treemap for readability.</span>
+            </div>
+          </foreignObject>
+        )}
       </g>
     );
   }
@@ -653,16 +895,17 @@ export default function ChartPanel({ columns, rows }) {
     return (
       <g transform={`translate(${hPad.left},${PAD.top})`}>
         {/* X grid (value axis) */}
-        {scale.ticks.map((t) => (
+        {showGrid && scale.ticks.map((t) => (
           <g key={t}>
-            <line x1={xPosH(t)} y1={0} x2={xPosH(t)} y2={plotH} stroke="var(--havn-border-light)" strokeDasharray="3,3" opacity={0.5} />
-            <text x={xPosH(t)} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{fmtAxis(t)}</text>
+            <line x1={xPosH(t)} y1={0} x2={xPosH(t)} y2={plotH} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
+            <text x={xPosH(t)} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{fmtAxisLabel(t)}</text>
           </g>
         ))}
         {/* Y labels (categories) */}
-        {labels.map((l, i) => (
-          <text key={i} x={-8} y={i * groupH + groupH / 2 + 4} textAnchor="end" style={axLabelStyle}>{trunc(l, 14)}</text>
-        ))}
+        {labels.map((l, i) => {
+          const fullLabel = String(l);
+          return <text key={i} x={-8} y={i * groupH + groupH / 2 + 4} textAnchor="end" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l, 14)}</text>;
+        })}
         {/* Bars */}
         {series.map((s, si) =>
           s.values.map((v, i) => {
@@ -680,6 +923,10 @@ export default function ChartPanel({ columns, rows }) {
                 onMouseMove={(e) => {
                   setHoveredIndex(i);
                   showTip(e, labels[i], series.map((ss) => ({ name: ss.name, value: ss.values[i], color: ss.color })));
+                }}
+                onTouchStart={(e) => {
+                  setHoveredIndex(i);
+                  showTip(e.touches[0], labels[i], series.map((ss) => ({ name: ss.name, value: ss.values[i], color: ss.color })));
                 }}
                 onMouseLeave={hideTip}
               />
@@ -701,21 +948,35 @@ export default function ChartPanel({ columns, rows }) {
     const groupW = plotW / n;
     const barW = Math.min(groupW * 0.7, 48);
     const yPos = (v) => plotH - ((v - scale.min) / yRange) * plotH;
-    const labelStep = Math.max(1, Math.ceil(n / 24));
+    const rotAngleStk = labelRotation(labels, groupW);
+    const isRotatedStk = rotAngleStk !== 0;
+    const avgLabelLenStk = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
+    const estLabelPxStk = Math.max(avgLabelLenStk * 7, 36);
+    const maxLabelsStk = Math.max(6, Math.floor(plotW / (isRotatedStk ? 24 : Math.max(estLabelPxStk, 40))));
+    const labelStep = Math.max(1, Math.ceil(n / maxLabelsStk));
+    const truncLenStk = rotAngleStk === -90 ? 12 : rotAngleStk === -45 ? 18 : 12;
 
     return (
       <g transform={`translate(${PAD.left},${PAD.top})`}>
         {/* Grid */}
-        {scale.ticks.map((t) => (
+        {showGrid && scale.ticks.map((t) => (
           <g key={t}>
-            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke="var(--havn-border-light)" strokeDasharray="3,3" opacity={0.5} />
-            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxis(t)}</text>
+            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
+            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{fmtAxisLabel(t)}</text>
           </g>
         ))}
         {/* X labels */}
         {labels.map((l, i) => {
           if (i % labelStep !== 0 && i !== n - 1) return null;
-          return <text key={i} x={i * groupW + groupW / 2} y={plotH + 18} textAnchor="middle" style={axLabelStyle}>{trunc(l)}</text>;
+          const fullLabel = String(l);
+          const lx = i * groupW + groupW / 2;
+          if (rotAngleStk === -90) {
+            return <text key={i} x={lx} y={plotH + 8} textAnchor="end" dominantBaseline="central" style={axLabelStyle} transform={`rotate(-90, ${lx}, ${plotH + 8})`}><title>{fullLabel}</title>{trunc(l, truncLenStk)}</text>;
+          }
+          if (rotAngleStk === -45) {
+            return <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-45, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, truncLenStk)}</text>;
+          }
+          return <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l, truncLenStk)}</text>;
         })}
         {/* Stacked segments */}
         {labels.map((_, i) => {
@@ -743,6 +1004,105 @@ export default function ChartPanel({ columns, rows }) {
                     { name: "Total", value: total, color: "var(--havn-text-secondary)" },
                   ]);
                 }}
+                onTouchStart={(e) => {
+                  setHoveredIndex(i);
+                  const total = series.reduce((sum, ss) => sum + Math.max(0, ss.values[i]), 0);
+                  showTip(e.touches[0], labels[i], [
+                    ...series.map((ss) => ({ name: ss.name, value: Math.max(0, ss.values[i]), color: ss.color })),
+                    { name: "Total", value: total, color: "var(--havn-text-secondary)" },
+                  ]);
+                }}
+                onMouseLeave={hideTip}
+              />
+            );
+          });
+        })}
+      </g>
+    );
+  }
+
+  // ─── 100% STACKED BAR CHART ────────────────────────────
+  function renderStacked100() {
+    const { labels, series } = chartData;
+    const scale = niceScale(0, 100);
+    const yRange = scale.max - scale.min || 1;
+    const n = labels.length;
+    const groupW = plotW / n;
+    const barW = Math.min(groupW * 0.7, 48);
+    const yPos = (v) => plotH - ((v - scale.min) / yRange) * plotH;
+    const rotAngle100 = labelRotation(labels, groupW);
+    const isRotated100 = rotAngle100 !== 0;
+    const avgLabelLen100 = labels.reduce((s, l) => s + String(l).length, 0) / Math.max(1, n);
+    const estLabelPx100 = Math.max(avgLabelLen100 * 7, 36);
+    const maxLabels100 = Math.max(6, Math.floor(plotW / (isRotated100 ? 24 : Math.max(estLabelPx100, 40))));
+    const labelStep = Math.max(1, Math.ceil(n / maxLabels100));
+    const truncLen100 = rotAngle100 === -90 ? 12 : rotAngle100 === -45 ? 18 : 12;
+
+    return (
+      <g transform={`translate(${PAD.left},${PAD.top})`}>
+        {/* Grid */}
+        {showGrid && scale.ticks.map((t) => (
+          <g key={t}>
+            <line x1={0} y1={yPos(t)} x2={plotW} y2={yPos(t)} stroke={gridColor} strokeDasharray={gridDash} opacity={0.5} />
+            <text x={-8} y={yPos(t) + 3.5} textAnchor="end" style={axLabelStyle}>{t}%</text>
+          </g>
+        ))}
+        {/* X labels */}
+        {labels.map((l, i) => {
+          if (i % labelStep !== 0 && i !== n - 1) return null;
+          const fullLabel = String(l);
+          const lx = i * groupW + groupW / 2;
+          if (rotAngle100 === -90) {
+            return <text key={i} x={lx} y={plotH + 8} textAnchor="end" dominantBaseline="central" style={axLabelStyle} transform={`rotate(-90, ${lx}, ${plotH + 8})`}><title>{fullLabel}</title>{trunc(l, truncLen100)}</text>;
+          }
+          if (rotAngle100 === -45) {
+            return <text key={i} x={lx} y={plotH + 10} textAnchor="end" style={axLabelStyle} transform={`rotate(-45, ${lx}, ${plotH + 10})`}><title>{fullLabel}</title>{trunc(l, truncLen100)}</text>;
+          }
+          return <text key={i} x={lx} y={plotH + 18} textAnchor="middle" style={axLabelStyle}><title>{fullLabel}</title>{trunc(l, truncLen100)}</text>;
+        })}
+        {/* 100% stacked segments */}
+        {labels.map((_, i) => {
+          const stackTotal = series.reduce((sum, s) => sum + Math.max(0, s.values[i]), 0);
+          if (stackTotal === 0) return null;
+          let cumPct = 0;
+          return series.map((s, si) => {
+            const val = Math.max(0, s.values[i]);
+            const pct = (val / stackTotal) * 100;
+            const y0 = yPos(cumPct);
+            cumPct += pct;
+            const y1 = yPos(cumPct);
+            const h = Math.max(y0 - y1, 0);
+            const x = i * groupW + (groupW - barW) / 2;
+            const isHovered = hoveredIndex === i;
+            return (
+              <rect key={`${si}-${i}`}
+                x={x} y={y1} width={barW} height={Math.max(h, val > 0 ? 1 : 0)}
+                fill={s.color}
+                rx={si === series.length - 1 ? Math.min(3, barW / 4) : 0}
+                opacity={hoveredIndex !== null && !isHovered ? 0.3 : 1}
+                style={{ transition: "opacity 0.15s", cursor: "pointer" }}
+                onMouseMove={(e) => {
+                  setHoveredIndex(i);
+                  showTip(e, labels[i], [
+                    ...series.map((ss) => {
+                      const absVal = Math.max(0, ss.values[i]);
+                      const total = series.reduce((sum, s2) => sum + Math.max(0, s2.values[i]), 0);
+                      const p = total > 0 ? ((absVal / total) * 100).toFixed(1) : "0.0";
+                      return { name: ss.name, value: `${p}% (${fmtNum(absVal)})`, color: ss.color };
+                    }),
+                  ]);
+                }}
+                onTouchStart={(e) => {
+                  setHoveredIndex(i);
+                  showTip(e.touches[0], labels[i], [
+                    ...series.map((ss) => {
+                      const absVal = Math.max(0, ss.values[i]);
+                      const total = series.reduce((sum, s2) => sum + Math.max(0, s2.values[i]), 0);
+                      const p = total > 0 ? ((absVal / total) * 100).toFixed(1) : "0.0";
+                      return { name: ss.name, value: `${p}% (${fmtNum(absVal)})`, color: ss.color };
+                    }),
+                  ]);
+                }}
                 onMouseLeave={hideTip}
               />
             );
@@ -755,8 +1115,8 @@ export default function ChartPanel({ columns, rows }) {
   // ─── RENDER ─────────────────────────────────────────────
   return (
     <div style={st.container}>
-      {/* Toolbar */}
-      <div style={st.toolbar}>
+      {/* Toolbar — hidden in compact/dashboard mode */}
+      {!compact && <div style={st.toolbar}>
         {/* Chart type selector */}
         <div style={st.typeGroup}>
           {CHART_TYPES.map((t) => (
@@ -849,12 +1209,13 @@ export default function ChartPanel({ columns, rows }) {
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* Chart area */}
       <div ref={containerRef} style={st.chartArea}>
         <svg ref={svgRef} width={W} height={H} style={{ display: "block" }}
           xmlns="http://www.w3.org/2000/svg">
+          <rect width="100%" height="100%" fill={config?.bgColor || "transparent"} />
           {renderSVGContent()}
         </svg>
 

@@ -83,6 +83,54 @@ export interface LintResult {
   content?: string;
 }
 
+// ---- Dashboard types ----
+
+export interface Dashboard {
+  id: string;
+  name: string;
+  description: string;
+  created_by: string;
+  updated_by?: string;
+  created_at: string;
+  updated_at: string;
+  is_template: boolean;
+  widget_count: number;
+}
+
+export interface DashboardWidget {
+  id: string;
+  widget_type: string;
+  chart_type: string | null;
+  title: string;
+  sql_query: string | null;
+  config: Record<string, unknown>;
+  position: { x: number; y: number; w: number; h: number };
+  filters: unknown[];
+  cache_ttl: number;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface DashboardFull extends Dashboard {
+  layout: Record<string, unknown>;
+  filters: unknown[];
+  settings: Record<string, unknown>;
+  widgets: DashboardWidget[];
+}
+
+export interface DashboardExport {
+  dashboard: Record<string, unknown>;
+  widgets: Record<string, unknown>[];
+  version: number;
+}
+
+export interface WidgetQueryResult {
+  columns: string[];
+  rows: unknown[][];
+  row_count: number;
+  error?: string;
+}
+
 export interface FileEntry {
   path: string;
   type: string;
@@ -828,4 +876,63 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ diff_id: diffId, model_name: modelName }),
     }),
+
+  // Dashboards
+  listDashboards: (): Promise<Dashboard[]> => request("/dashboards"),
+  listDashboardTemplates: () => request("/dashboards/templates"),
+  createDashboard: (name: string, description: string = "", templateId?: string) =>
+    request("/dashboards", {
+      method: "POST",
+      body: JSON.stringify({ name, description, template_id: templateId }),
+    }),
+  getDashboard: (id: string): Promise<DashboardFull> => request(`/dashboards/${id}`),
+  updateDashboard: (id: string, updates: Record<string, unknown>) =>
+    request(`/dashboards/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(updates),
+    }),
+  deleteDashboard: (id: string) =>
+    request(`/dashboards/${id}`, { method: "DELETE" }),
+  cloneDashboard: (id: string, name: string = "Copy") =>
+    request(`/dashboards/${id}/clone?name=${encodeURIComponent(name)}`, { method: "POST" }),
+  exportDashboard: (id: string): Promise<DashboardExport> =>
+    request(`/dashboards/${id}/export`),
+  importDashboard: (data: { dashboard: Record<string, unknown>; widgets: Record<string, unknown>[] }) =>
+    request("/dashboards/import", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  // Dashboard widgets
+  addWidget: (dashboardId: string, widget: Record<string, unknown>) =>
+    request(`/dashboards/${dashboardId}/widgets`, {
+      method: "POST",
+      body: JSON.stringify(widget),
+    }),
+  updateWidget: (dashboardId: string, widgetId: string, updates: Record<string, unknown>) =>
+    request(`/dashboards/${dashboardId}/widgets/${widgetId}`, {
+      method: "PUT",
+      body: JSON.stringify(updates),
+    }),
+  updateWidgetPositions: (dashboardId: string, positions: { id: string; position: Record<string, number> }[]) =>
+    request(`/dashboards/${dashboardId}/widgets/positions`, {
+      method: "PATCH",
+      body: JSON.stringify({ positions }),
+    }),
+  deleteWidget: (dashboardId: string, widgetId: string) =>
+    request(`/dashboards/${dashboardId}/widgets/${widgetId}`, { method: "DELETE" }),
+
+  // Dashboard widget queries
+  queryWidget: (dashboardId: string, widgetId: string, filters: Record<string, unknown> = {}, parameters: Record<string, unknown> = {}): Promise<WidgetQueryResult> =>
+    request(`/dashboards/${dashboardId}/widgets/${widgetId}/query`, {
+      method: "POST",
+      body: JSON.stringify({ filters, parameters }),
+    }),
+  queryDashboardBatch: (dashboardId: string, filters: Record<string, unknown> = {}, parameters: Record<string, unknown> = {}) =>
+    request(`/dashboards/${dashboardId}/query-batch`, {
+      method: "POST",
+      body: JSON.stringify({ filters, parameters }),
+    }),
+  clearDashboardCache: (dashboardId: string) =>
+    request(`/dashboards/${dashboardId}/cache`, { method: "DELETE" }),
 };

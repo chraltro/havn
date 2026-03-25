@@ -24,3 +24,12 @@ stress_project/
 
 # Internal working files (not distributed)
 docs/internal/
+test_screenshots/
+frontend/test_screenshots/
+test_dashboard_ui.mjs
+.playwright-mcp/
+dashboard-*.png
+*.png
+qa-*.md
+temp_*
+internal_*
