@@ -102,6 +102,7 @@ from havn.server.routes.agent import (  # noqa: E402
 from havn.server.routes.circuits import router as circuits_router  # noqa: E402
 from havn.server.routes.git import router as git_router  # noqa: E402
 from havn.server.routes.macros import router as macros_router  # noqa: E402
+from havn.server.routes.dashboards import router as dashboards_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(files_router)
@@ -125,6 +126,7 @@ app.include_router(audit_router)
 app.include_router(circuits_router)
 app.include_router(git_router)
 app.include_router(macros_router)
+app.include_router(dashboards_router)
 
 # Register WebSocket endpoints (can't use APIRouter for WebSocket)
 register_websocket(app)

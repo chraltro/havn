@@ -34,6 +34,11 @@ import GitPanel from "./GitPanel";
 import AgentSidebar from "./AgentSidebar";
 import CommandPalette from "./CommandPalette";
 import FocusTrap from "./FocusTrap";
+import DashboardListPanel from "./DashboardListPanel";
+import DashboardCanvas from "./DashboardCanvas";
+import WidgetEditor from "./WidgetEditor";
+import DashboardFilterBar from "./DashboardFilterBar";
+import { DashboardProvider, useDashboard } from "./DashboardContext";
 import { useAuth } from "./AuthContext";
 import { WarehouseProvider, useWarehouse } from "./WarehouseContext";
 import { schemaCompare } from "./schemaOrder";
@@ -47,7 +52,7 @@ import { PipelineProvider, usePipeline } from "./PipelineContext";
 const SECTIONS = [
   { id: "Overview", label: "Overview", tabs: [] },
   { id: "Develop", label: "Develop", tabs: ["Editor", "Notebooks", "Data Sources", "Git"] },
-  { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "DAG"] },
+  { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "DAG", "Dashboards"] },
   { id: "Observe", label: "Observe", tabs: ["Quality", "Sentinel", "Diff", "Runs"] },
   { id: "Configure", label: "Configure", tabs: ["Masking", "Wiki", "Docs", "Settings"] },
 ];
@@ -355,6 +360,46 @@ const stStyles = {
 /* ------------------------------------------------------------------ */
 /* Main app content                                                    */
 /* ------------------------------------------------------------------ */
+
+function DashboardsSection({ showConfirm, embedMode }) {
+  const { dashboard, loadDashboard, closeDashboard, setEditMode } = useDashboard();
+  const [editingWidget, setEditingWidget] = useState(null);
+
+  // In embed mode, auto-load the dashboard from the hash and force view mode
+  useEffect(() => {
+    if (!embedMode) return;
+    const hash = window.location.hash.replace(/^#/, "");
+    const params = new URLSearchParams(hash);
+    const dashId = params.get("dashboard");
+    if (dashId && !dashboard) {
+      loadDashboard(dashId).then(() => setEditMode(false));
+    }
+  }, [embedMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!dashboard) {
+    if (embedMode) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", color: "var(--havn-text-secondary)", fontFamily: "var(--havn-font)" }}>Loading dashboard...</div>;
+    return <DashboardListPanel onOpenDashboard={(id) => loadDashboard(id)} showConfirm={showConfirm} />;
+  }
+
+  return (
+    <>
+      <DashboardFilterBar />
+      <DashboardCanvas
+        onBack={closeDashboard}
+        onEditWidget={embedMode ? undefined : setEditingWidget}
+        showConfirm={showConfirm}
+        embedMode={embedMode}
+      />
+      {editingWidget && !embedMode && (
+        <WidgetEditor
+          widget={editingWidget}
+          onClose={() => setEditingWidget(null)}
+          onSave={() => setEditingWidget(null)}
+        />
+      )}
+    </>
+  );
+}
 
 function AppContent() {
   const { currentUser, handleLogout } = useAuth();
@@ -1042,6 +1087,13 @@ function AppContent() {
                 />
               </ErrorBoundary>
             )}
+            {activeTab === "Dashboards" && (
+              <ErrorBoundary name="Dashboards">
+                <DashboardProvider>
+                  <DashboardsSection showConfirm={showConfirm} />
+                </DashboardProvider>
+              </ErrorBoundary>
+            )}
             {activeTab === "Editor" && (
               <ErrorBoundary name="Editor">
                 <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -1252,6 +1304,12 @@ function WarehouseConsumerBridge({ children, onPipelineComplete }) {
   );
 }
 
+/** Detect embed mode from URL hash */
+function isEmbedMode() {
+  const hash = window.location.hash.replace(/^#/, "");
+  return new URLSearchParams(hash).get("embed") === "true";
+}
+
 /** Root App: wraps inner content with Warehouse + Pipeline providers */
 export default function App() {
   const { authChecked, authRequired, needsSetup, handleLogin, isAuthenticated } = useAuth();
@@ -1268,6 +1326,19 @@ export default function App() {
 
   if (authRequired) {
     return <LoginPage onLogin={handleLogin} needsSetup={needsSetup} />;
+  }
+
+  // Embed mode: render only the dashboard with no chrome
+  if (isEmbedMode()) {
+    return (
+      <WarehouseProvider enabled={isAuthenticated}>
+        <div style={{ height: "100vh", background: "var(--havn-bg)", color: "var(--havn-text)", fontFamily: "var(--havn-font)" }}>
+          <DashboardProvider>
+            <DashboardsSection embedMode={true} />
+          </DashboardProvider>
+        </div>
+      </WarehouseProvider>
+    );
   }
 
   return (
