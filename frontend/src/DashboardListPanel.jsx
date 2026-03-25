@@ -191,11 +191,12 @@ export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
               autoFocus
               onKeyDown={(e) => e.key === "Enter" && handleCreate()}
             />
-            <input
-              style={{ ...st.input, marginTop: 8 }}
-              placeholder="Description (optional)"
+            <textarea
+              style={{ ...st.input, marginTop: 8, minHeight: 80, resize: "vertical", fontFamily: "inherit" }}
+              placeholder="Describe what this dashboard tracks, who it's for, key metrics..."
               value={newDesc}
               onChange={(e) => setNewDesc(e.target.value)}
+              rows={4}
             />
             {templates.length > 0 && (
               <div style={{ marginTop: 12 }}>

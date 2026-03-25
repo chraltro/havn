@@ -482,9 +482,65 @@ function applyDisplayNames(columns, displayNames) {
   return columns.map(c => displayNames[c] || c);
 }
 
+/**
+ * Pivot data by a color column to create multi-series charts.
+ * Given columns [date, region, count] with color="region":
+ *   → pivoted columns: [date, "North America", "Europe", "Asia", ...]
+ *   → each row: [date_value, count_for_NA, count_for_EU, count_for_AS, ...]
+ */
+function findColIdx(columns, name) {
+  if (!name) return -1;
+  let idx = columns.indexOf(name);
+  if (idx !== -1) return idx;
+  // Match aliased columns like event_date_month for event_date
+  idx = columns.findIndex(c => c === name || c.startsWith(name + "_"));
+  return idx;
+}
+
+function pivotByColor(columns, rows, encoding) {
+  if (!encoding?.color) return null;
+  const colorIdx = findColIdx(columns, encoding.color);
+  if (colorIdx === -1) return null;
+
+  // Determine X and Y columns from encoding or auto-detect
+  const xIdx = encoding.x ? findColIdx(columns, encoding.x) : columns.findIndex((_, i) => i !== colorIdx);
+  const yIdx = encoding.y ? findColIdx(columns, encoding.y) : columns.findIndex((_, i) => i !== colorIdx && i !== xIdx);
+  if (xIdx === -1 || yIdx === -1) return null;
+
+  // Collect unique color values and build pivot map
+  const colorValues = [...new Set(rows.map(r => String(r[colorIdx] ?? "")))].sort();
+  const pivotMap = new Map(); // xValue -> { colorValue: yValue }
+
+  for (const row of rows) {
+    const xVal = row[xIdx];
+    const cVal = String(row[colorIdx] ?? "");
+    const yVal = row[yIdx];
+    const key = String(xVal);
+    if (!pivotMap.has(key)) pivotMap.set(key, { _x: xVal });
+    pivotMap.get(key)[cVal] = yVal;
+  }
+
+  const pivotedColumns = [columns[xIdx], ...colorValues];
+  const pivotedRows = [...pivotMap.values()].map(entry =>
+    [entry._x, ...colorValues.map(cv => entry[cv] ?? null)]
+  );
+
+  return { columns: pivotedColumns, rows: pivotedRows };
+}
+
 function renderWidgetContent(widget, data, onChartClick) {
   const { widget_type, chart_type, config } = widget;
-  const { columns, rows } = data;
+  let { columns, rows } = data;
+
+  // Apply color encoding pivot if set
+  const encoding = config?.columnEncoding;
+  if (encoding?.color && widget_type === "chart") {
+    const pivoted = pivotByColor(columns, rows, encoding);
+    if (pivoted) {
+      columns = pivoted.columns;
+      rows = pivoted.rows;
+    }
+  }
 
   const displayNames = config?._visual?.columnDisplayNames || {};
   const nullHandling = config?.nullHandling || "gap";

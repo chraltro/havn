@@ -134,9 +134,7 @@ export default function TablesPanel({ selectedTable, onQueryTable }) {
 
   function formatCount(n) {
     if (n == null) return "";
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M rows`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K rows`;
-    return `${n} row${n !== 1 ? "s" : ""}`;
+    return `${n.toLocaleString()} row${n !== 1 ? "s" : ""}`;
   }
 
   return (
@@ -152,6 +150,9 @@ export default function TablesPanel({ selectedTable, onQueryTable }) {
           <button onClick={loadStats} disabled={statsLoading} style={st.actionBtn}>
             {statsLoading ? "Loading..." : stats ? "Refresh Stats" : "Show Stats"}
           </button>
+          {stats && (
+            <button onClick={() => setStats(null)} style={st.actionBtn}>Hide Stats</button>
+          )}
         </div>
       </div>
       <div style={st.columnsBar} data-havn-hint="columns-bar">

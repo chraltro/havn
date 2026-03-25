@@ -77,7 +77,7 @@ for (const s of SECTIONS) {
 function PipelineMenu({ running, onRunPipeline, onLint, onContracts, onCancel }) {
   const [open, setOpen] = useState(false);
   const [selectedSteps, setSelectedSteps] = useState(["ingest", "transform", "export"]);
-  const [onlyChanged, setOnlyChanged] = useState(true);
+  const [onlyChanged, setOnlyChanged] = useState(false);
   const [autoFix, setAutoFix] = useState(true);
   const ref = useRef(null);
 
@@ -99,7 +99,7 @@ function PipelineMenu({ running, onRunPipeline, onLint, onContracts, onCancel })
   }
 
   const defaultRun = () => {
-    onRunPipeline(["ingest", "transform", "export"], false);
+    onRunPipeline(["ingest", "transform", "export"], !onlyChanged);
   };
 
   return (
@@ -430,7 +430,8 @@ function AppContent() {
 
   // Resizable panels
   const [sidebarWidth, onSidebarResize, onSidebarResizeStart] = useResizable("dp_sidebar_width", 240, 150, 500);
-  const [outputHeight, onOutputResize, onOutputResizeStart] = useResizable("dp_output_height", 180, 80, 500);
+  const [outputHeight, onOutputResize, onOutputResizeStart] = useResizable("dp_output_height", 80, 40, 500);
+  const [outputCollapsed, setOutputCollapsed] = useState(false);
   const [agentWidth, onAgentResize, onAgentResizeStart] = useResizable("dp_agent_width", 340, 240, 600);
 
   // Editor navigation
@@ -1084,6 +1085,7 @@ function AppContent() {
                   streams={streams}
                   showConfirm={showConfirm}
                   onClearSample={handleClearSample}
+                  refreshKey={tables}
                 />
               </ErrorBoundary>
             )}
@@ -1162,18 +1164,18 @@ function AppContent() {
           )}
 
           {/* Output */}
-          <ResizeHandle
+          {!outputCollapsed && <ResizeHandle
             direction="vertical"
             onResize={(delta) => onOutputResize(-delta)}
             onResizeStart={onOutputResizeStart}
-          />
+          />}
           <div data-havn-guide="output" style={{ flexShrink: 0 }}>
             {running && progress > 0 && (
               <div style={{ height: 3, background: "#1a1a2e", width: "100%" }}>
                 <div style={{ height: 3, background: "#2dd4bf", width: `${Math.round(progress * 100)}%`, transition: "width 0.3s ease" }} />
               </div>
             )}
-            <OutputPanel output={output} onClear={clearOutput} height={outputHeight} onOpenFile={openFileAtLine} running={running} progress={progress} />
+            <OutputPanel output={output} onClear={clearOutput} height={outputCollapsed ? 28 : outputHeight} onOpenFile={openFileAtLine} running={running} progress={progress} collapsed={outputCollapsed} onToggleCollapse={() => setOutputCollapsed(c => !c)} />
           </div>
         </div>
 
@@ -1296,9 +1298,13 @@ function AppContent() {
 
 /** Bridge component that provides PipelineProvider with access to WarehouseContext */
 function WarehouseConsumerBridge({ children, onPipelineComplete }) {
-  const { loadTables } = useWarehouse();
+  const { loadTables, refreshAll } = useWarehouse();
+  const handleComplete = useCallback(() => {
+    refreshAll();
+    onPipelineComplete?.();
+  }, [refreshAll, onPipelineComplete]);
   return (
-    <PipelineProvider onTablesChanged={loadTables} onPipelineComplete={onPipelineComplete}>
+    <PipelineProvider onTablesChanged={loadTables} onPipelineComplete={handleComplete}>
       {children}
     </PipelineProvider>
   );

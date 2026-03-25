@@ -18,12 +18,10 @@ function timeAgo(dateStr) {
 
 function formatRows(n) {
   if (n == null) return "-";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
+  return n.toLocaleString();
 }
 
-export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, onRunStream, streams, showConfirm, onClearSample }) {
+export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, onRunStream, streams, showConfirm, onClearSample, refreshKey }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -36,7 +34,7 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
   useEffect(() => {
     load();
     loadGitStatus();
-  }, []);
+  }, [refreshKey]);
 
   async function load() {
     setLoading(true);
@@ -137,7 +135,7 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
                   disabled={runningDemo}
                   style={st.heroSecondary}
                 >
-                  {runningDemo ? "Running..." : "or run the sample pipeline"}
+                  {runningDemo ? "Running..." : "Run Sample Pipeline"}
                 </button>
               )}
             </div>
@@ -406,14 +404,14 @@ const st = {
     fontWeight: 600,
   },
   heroSecondary: {
-    padding: "6px 16px",
+    padding: "10px 28px",
     background: "none",
     border: "1px solid var(--havn-border)",
     borderRadius: "var(--havn-radius-lg)",
     color: "var(--havn-text-secondary)",
     cursor: "pointer",
-    fontSize: "12px",
-    fontWeight: 500,
+    fontSize: "14px",
+    fontWeight: 600,
   },
 
   // Sample banner

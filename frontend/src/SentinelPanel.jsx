@@ -126,14 +126,16 @@ export default function SentinelPanel() {
     <div style={st.container}>
       {/* Header */}
       <div style={st.header}>
-        <div style={st.tabs}>
+        <div style={st.tabs} role="tablist">
           {["check", "diffs", "history"].map(t => (
             <button
               key={t}
+              role="tab"
+              aria-selected={view === t}
               onClick={() => setView(t)}
               style={{
                 ...st.tab,
-                borderBottom: view === t ? "2px solid var(--havn-accent, #58a6ff)" : "2px solid transparent",
+                borderBottom: view === t ? "2px solid var(--havn-accent)" : "2px solid transparent",
                 color: view === t ? "var(--havn-text)" : "var(--havn-text-secondary)",
               }}
             >

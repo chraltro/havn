@@ -82,9 +82,20 @@ function buildSQL(config) {
   const hasAgg = columns.some(c => aggregations[c.name]);
   const hasDateGroup = columns.some(c => dateGrouping?.[c.name]);
 
+  // When date grouping is active, auto-aggregate numeric columns that have no explicit aggregation
+  // This prevents the common mistake of grouping by date but getting one row per original value
+  const effectiveAgg = { ...aggregations };
+  if (hasDateGroup) {
+    for (const col of columns) {
+      if (!effectiveAgg[col.name] && !dateGrouping?.[col.name] && isNumeric(col.type)) {
+        effectiveAgg[col.name] = "SUM";
+      }
+    }
+  }
+
   // SELECT clause
   const selectParts = columns.map(col => {
-    const agg = aggregations[col.name];
+    const agg = effectiveAgg[col.name];
     const dg = dateGrouping?.[col.name];
 
     // Date grouping: wrap in DATE_TRUNC
@@ -109,7 +120,7 @@ function buildSQL(config) {
   const AGG_RE = /\b(SUM|AVG|COUNT|MIN|MAX|TOTAL|GROUP_CONCAT)\s*\(/i;
   const groupExprs = (hasAgg || hasDateGroup)
     ? [
-        ...columns.filter(c => !aggregations[c.name]).map(col => {
+        ...columns.filter(c => !effectiveAgg[c.name]).map(col => {
           const dg = dateGrouping?.[col.name];
           if (dg && isTemporal(col.type)) return `DATE_TRUNC('${dg}', ${col.name})`;
           return col.name;
@@ -141,6 +152,17 @@ function buildSQL(config) {
       return `${o.column} ${o.dir}`;
     });
 
+  // Auto-add ORDER BY for date-grouped columns when no explicit order is set
+  if (orderParts.length === 0 && hasDateGroup) {
+    for (const col of columns) {
+      const dg = dateGrouping?.[col.name];
+      if (dg && isTemporal(col.type)) {
+        orderParts.push(`DATE_TRUNC('${dg}', ${col.name}) ASC`);
+        break;
+      }
+    }
+  }
+
   let sql = `SELECT\n    ${selectParts.join(",\n    ")}\nFROM ${fqn}`;
   if (whereParts.length) sql += `\nWHERE ${whereParts.join("\n  AND ")}`;
   if (groupExprs.length) sql += `\nGROUP BY ${groupExprs.join(", ")}`;
@@ -154,7 +176,22 @@ function buildSQL(config) {
 // Main Component
 // ---------------------------------------------------------------------------
 
+// Inject global style to kill focus outlines on toggle buttons in widget editor
+const WIDGET_EDITOR_STYLE_ID = "havn-widget-editor-focus-fix";
+function ensureFocusFixStyle() {
+  if (typeof document === "undefined") return;
+  if (document.getElementById(WIDGET_EDITOR_STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = WIDGET_EDITOR_STYLE_ID;
+  style.textContent = `
+    .havn-widget-editor button:focus { outline: none !important; box-shadow: none !important; }
+    .havn-widget-editor button:focus-visible { outline: none !important; box-shadow: none !important; }
+  `;
+  document.head.appendChild(style);
+}
+
 export default function WidgetEditor({ widget, onClose, onSave }) {
+  useEffect(() => { ensureFocusFixStyle(); }, []);
   const { updateWidget, addWidget, refreshWidget } = useDashboard();
   const isNew = !widget?.id;
 
@@ -196,7 +233,7 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
     savedVisual?.filters || []
   );
   const [orderBy, setOrderBy] = useState(savedVisual?.orderBy || []);
-  const [rowLimit, setRowLimit] = useState(savedVisual?.rowLimit ?? 100);
+  const [rowLimit, setRowLimit] = useState(savedVisual?.rowLimit ?? 0);
   const [calculatedFields, setCalculatedFields] = useState(
     savedVisual?.calculatedFields || []
   );
@@ -473,7 +510,7 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
 
   return (
     <div style={st.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div style={st.panel}>
+      <div style={st.panel} className="havn-widget-editor">
         {/* Header */}
         <div style={st.header}>
           <div style={st.headerLeft}>
@@ -1466,6 +1503,7 @@ function ChartAndTypeConfig({
               key={t.id}
               style={{ ...st.typeBtn, ...(widgetType === t.id ? st.typeBtnActive : {}) }}
               onClick={() => setWidgetType(t.id)}
+              onMouseDown={(e) => e.preventDefault()}
             >
               <span style={{ fontSize: 16 }}>{t.icon}</span>
               <span>{t.label}</span>
@@ -1502,6 +1540,7 @@ function ChartAndTypeConfig({
                     key={t.id}
                     style={{ ...st.chartTypeBtn, ...(chartType === t.id ? st.chartTypeBtnActive : {}) }}
                     onClick={() => setChartType(t.id)}
+                    onMouseDown={(e) => e.preventDefault()}
                     title={t.desc || t.label}
                   >
                     {t.label}
@@ -1824,6 +1863,36 @@ function ChartAndTypeConfig({
 // Preview Area
 // ---------------------------------------------------------------------------
 
+function pivotPreviewByColor(columns, rows, encoding) {
+  if (!encoding?.color) return null;
+  const colorCol = encoding.color;
+  // Find the color column — may be aliased with _suffix
+  let colorIdx = columns.indexOf(colorCol);
+  if (colorIdx === -1) colorIdx = columns.findIndex(c => c === colorCol || c.startsWith(colorCol));
+  if (colorIdx === -1) return null;
+
+  // X = first column that's not the color column (typically the date)
+  const xIdx = encoding.x ? columns.findIndex(c => c === encoding.x || c.startsWith(encoding.x + "_")) : columns.findIndex((_, i) => i !== colorIdx);
+  // Y = first column that's not X and not color
+  const yIdx = encoding.y ? columns.findIndex(c => c === encoding.y || c.startsWith(encoding.y + "_")) : columns.findIndex((_, i) => i !== colorIdx && i !== xIdx);
+  if (xIdx === -1 || yIdx === -1) return null;
+
+  const colorValues = [...new Set(rows.map(r => String(r[colorIdx] ?? "")))].sort();
+  const pivotMap = new Map();
+  for (const row of rows) {
+    const xVal = row[xIdx];
+    const cVal = String(row[colorIdx] ?? "");
+    const yVal = row[yIdx];
+    const key = String(xVal);
+    if (!pivotMap.has(key)) pivotMap.set(key, { _x: xVal });
+    pivotMap.get(key)[cVal] = yVal;
+  }
+  return {
+    columns: [columns[xIdx], ...colorValues],
+    rows: [...pivotMap.values()].map(entry => [entry._x, ...colorValues.map(cv => entry[cv] ?? null)]),
+  };
+}
+
 function PreviewArea({ previewing, previewError, previewData, widgetType, chartType, widgetConfig, mode, hasTable, hasColumns }) {
   if (previewing) return <div style={st.previewCenter}>Running query...</div>;
   if (previewError) return <div style={{ ...st.previewCenter, color: "var(--havn-red)" }}>{previewError}</div>;
@@ -1835,10 +1904,20 @@ function PreviewArea({ previewing, previewError, previewData, widgetType, chartT
     return <div style={st.previewCenter}>Loading...</div>;
   }
 
-  const { columns, rows } = previewData;
+  let { columns, rows } = previewData;
+
+  // Apply color encoding pivot for chart preview
+  const encoding = widgetConfig?.columnEncoding;
+  if (encoding?.color && widgetType === "chart") {
+    const pivoted = pivotPreviewByColor(columns, rows, encoding);
+    if (pivoted) {
+      columns = pivoted.columns;
+      rows = pivoted.rows;
+    }
+  }
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: widgetConfig?.bgColor || undefined, borderRadius: widgetConfig?.bgColor ? 6 : undefined }}>
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {widgetType === "table" ? (
           <div style={{ flex: 1, overflow: "auto" }}>
@@ -1969,9 +2048,9 @@ const st = {
   columnRowChecked: { background: "rgba(99,102,241,0.08)" },
   checkbox: { accentColor: "var(--havn-accent)", margin: 0, cursor: "pointer", flexShrink: 0 },
   colTypeIcon: { fontSize: 11, fontWeight: 700, width: 18, textAlign: "center", flexShrink: 0 },
-  colName: { fontSize: 13, color: "var(--havn-text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  colName: { fontSize: 13, color: "var(--havn-text)", flex: 1, minWidth: 50, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   colType: { fontSize: 10, color: "var(--havn-text-secondary)", flexShrink: 0 },
-  inlineSelect: { padding: "2px 4px", border: "1px solid var(--havn-border)", borderRadius: 4, background: "var(--havn-bg-secondary, var(--havn-bg))", color: "var(--havn-text)", fontSize: 11, minWidth: 80, flexShrink: 0 },
+  inlineSelect: { padding: "2px 4px", border: "1px solid var(--havn-border)", borderRadius: 4, background: "var(--havn-bg-secondary, var(--havn-bg))", color: "var(--havn-text)", fontSize: 11, minWidth: 64, maxWidth: 100, flexShrink: 0 },
   aggNote: { fontSize: 11, color: "var(--havn-text-secondary)", marginTop: 6, fontStyle: "italic" },
 
   // Configure section

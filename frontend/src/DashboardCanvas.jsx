@@ -82,6 +82,8 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
   const [temporalColumns, setTemporalColumns] = useState([]);
   const [activePageId, setActivePageId] = useState(null);
   const [pageContextMenu, setPageContextMenu] = useState(null);
+  const [showNewPage, setShowNewPage] = useState(false);
+  const [newPageName, setNewPageName] = useState("");
   const gridRef = useRef(null);
   const refreshMenuRef = useRef(null);
 
@@ -230,12 +232,13 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
 
   // Page management
   function addPage() {
-    const name = prompt("Page name:");
-    if (!name || !name.trim()) return;
+    if (!newPageName.trim()) return;
     const newId = "page_" + Date.now();
-    const newPages = [...pages, { id: newId, name: name.trim() }];
+    const newPages = [...pages, { id: newId, name: newPageName.trim() }];
     saveDashboard({ settings: { ...(dashboard.settings || {}), pages: newPages } });
     setActivePageId(newId);
+    setShowNewPage(false);
+    setNewPageName("");
   }
 
   function renamePage(pageId) {
@@ -566,13 +569,16 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
           <button
             style={{
               ...st.toolBtn,
-              background: editMode ? "var(--havn-accent)" : undefined,
+              background: editMode ? "var(--havn-green, #16a34a)" : undefined,
               color: editMode ? "#fff" : undefined,
             }}
-            onClick={() => setEditMode(!editMode)}
-            title={editMode ? "View mode (E)" : "Edit mode (E)"}
+            onClick={() => {
+              if (editMode) saveDashboard({});
+              setEditMode(!editMode);
+            }}
+            title={editMode ? "Save & exit edit mode (E)" : "Edit mode (E)"}
           >
-            {editMode ? "Editing" : "Edit"}
+            {editMode ? "Save" : "Edit"}
           </button>
 
           {editMode && (
@@ -617,10 +623,27 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
               {page.name}
             </button>
           ))}
-          {editMode && (
-            <button style={st.pageAddBtn} onClick={addPage} title="Add page">
+          {editMode && !showNewPage && (
+            <button style={st.pageAddBtn} onClick={() => setShowNewPage(true)} title="Add page">
               +
             </button>
+          )}
+          {editMode && showNewPage && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <input
+                style={{ padding: "3px 8px", fontSize: 12, border: "1px solid var(--havn-border)", borderRadius: 4, background: "var(--havn-bg)", color: "var(--havn-text)", width: 120 }}
+                placeholder="Page name"
+                value={newPageName}
+                onChange={(e) => setNewPageName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") addPage();
+                  if (e.key === "Escape") { setShowNewPage(false); setNewPageName(""); }
+                }}
+                autoFocus
+              />
+              <button style={st.pageAddBtn} onClick={addPage} disabled={!newPageName.trim()}>OK</button>
+              <button style={{ ...st.pageAddBtn, color: "var(--havn-text-secondary)" }} onClick={() => { setShowNewPage(false); setNewPageName(""); }}>&times;</button>
+            </span>
           )}
           {/* Page context menu */}
           {pageContextMenu && editMode && (

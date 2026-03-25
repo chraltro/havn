@@ -126,7 +126,7 @@ function renderMessage(message, style, onOpenFile) {
 const START_RE = /(?:Ingesting|Building|Exporting) (.+)\.\.\./;
 const END_RE = /(?:Ingested|Built|Skipped|Failed) ([^\s]+)/;
 
-export default function OutputPanel({ output, onClear, height = 180, onOpenFile, running, progress }) {
+export default function OutputPanel({ output, onClear, height = 80, onOpenFile, running, progress, collapsed, onToggleCollapse }) {
   const endRef = useRef(null);
 
   useEffect(() => {
@@ -153,6 +153,9 @@ export default function OutputPanel({ output, onClear, height = 180, onOpenFile,
   return (
     <div style={{ ...styles.container, height }} role="region" aria-label="Output">
       <div style={styles.header}>
+        <button onClick={onToggleCollapse} style={styles.collapseBtn} aria-label={collapsed ? "Expand output" : "Collapse output"}>
+          {collapsed ? "\u25B2" : "\u25BC"}
+        </button>
         <span style={styles.headerTitle}>Output</span>
         {running && <span style={styles.runningBadge} aria-live="polite">{pctText || "running"}</span>}
         <span style={styles.count}>{output.length > 0 ? `${output.length} entries` : ""}</span>
@@ -160,7 +163,7 @@ export default function OutputPanel({ output, onClear, height = 180, onOpenFile,
           Clear
         </button>
       </div>
-      <div style={styles.log} role="log" aria-live="polite">
+      {!collapsed && <div style={styles.log} role="log" aria-live="polite">
         {output.length === 0 && (
           <div style={styles.placeholder}>Run a script or transform to see output here.</div>
         )}
@@ -193,7 +196,7 @@ export default function OutputPanel({ output, onClear, height = 180, onOpenFile,
           </div>
         )}
         <div ref={endRef} />
-      </div>
+      </div>}
     </div>
   );
 }
@@ -212,6 +215,7 @@ const styles = {
   headerTitle: { fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px" },
   count: { fontSize: "10px", color: "var(--havn-text-dim)", flex: 1 },
   clearBtn: { background: "none", border: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "11px" },
+  collapseBtn: { background: "none", border: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "9px", padding: "0 2px", lineHeight: 1 },
   log: { flex: 1, overflow: "auto", padding: "4px 12px", fontFamily: "var(--havn-font-mono)", fontSize: "12px", lineHeight: "1.7" },
   placeholder: { color: "var(--havn-text-dim)", fontStyle: "italic", padding: "8px 0", fontSize: "12px" },
   entry: { display: "flex", gap: "8px", alignItems: "baseline" },
