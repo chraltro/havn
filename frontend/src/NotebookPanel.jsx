@@ -33,7 +33,7 @@ function CodeArea({ value, onChange, onKeyDown, minLines = 3, language = "plaint
     };
     editor.onDidContentSizeChange(updateHeight);
     updateHeight();
-    editor.updateOptions({ scrollbar: { vertical: "hidden", horizontal: "auto" } });
+    editor.updateOptions({ scrollbar: { vertical: "hidden", horizontal: "auto", alwaysConsumeMouseWheel: false } });
   };
 
   return (
@@ -66,6 +66,7 @@ function CodeArea({ value, onChange, onKeyDown, minLines = 3, language = "plaint
           glyphMargin: false,
           padding: { top: 4, bottom: 4 },
           tabSize: 2,
+          scrollbar: { vertical: "hidden", horizontal: "auto", alwaysConsumeMouseWheel: false },
         }}
       />
     </div>
@@ -609,43 +610,52 @@ function MarkdownCell({ cell, onUpdate, onDelete }) {
   const [editing, setEditing] = useState(false);
   useEffect(() => { setSource(cell.source || ""); }, [cell.id]);
 
+  if (!editing) {
+    // Rendered mode: no container chrome, just the content
+    return (
+      <div
+        style={{ position: "relative", flex: 1, minWidth: 0 }}
+        onDoubleClick={() => setEditing(true)}
+      >
+        <div style={{ position: "absolute", top: 4, right: 4, display: "flex", gap: 4, opacity: 0.3, transition: "opacity 0.15s" }}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = 1}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = 0.3}
+        >
+          <button onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+            style={{ background: "none", border: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: 11, padding: "2px 6px" }}>Edit</button>
+          <button data-havn-danger="" onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            style={{ background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: 14, padding: "0 4px" }}>&times;</button>
+        </div>
+        <div style={{ padding: "4px 0", minHeight: 24, cursor: "text", color: "var(--havn-text)", fontSize: 14, lineHeight: 1.6 }}>
+          {source.trim() ? renderCellMarkdown(source) : (
+            <span style={{ color: "var(--havn-text-dim)", fontStyle: "italic" }}>Double-click to edit...</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={cs.mdCell}>
       <div style={cs.cellHeader}>
         <span style={cs.cellType}>MD</span>
         <span style={{ flex: 1 }} />
         <button
-          onClick={() => setEditing(!editing)}
+          onClick={() => setEditing(false)}
           style={{ ...cs.deleteBtn, color: "var(--havn-text-secondary)", fontSize: 11 }}
-          title={editing ? "Show rendered" : "Edit source"}
-        >
-          {editing ? "Preview" : "Edit"}
-        </button>
+          title="Show rendered"
+        >Preview</button>
         <button data-havn-danger="" onClick={onDelete} style={cs.deleteBtn} title="Delete cell">&times;</button>
       </div>
-      {editing ? (
-        <CodeArea
-          value={source}
-          language="markdown"
-          onChange={(e) => {
-            setSource(e.target.value);
-            onUpdate({ ...cell, source: e.target.value });
-          }}
-          minLines={2}
-        />
-      ) : (
-        <div
-          onDoubleClick={() => setEditing(true)}
-          style={{
-            padding: "8px 16px", minHeight: 32, cursor: "text",
-            color: "var(--havn-text)", fontSize: 14, lineHeight: 1.6,
-          }}
-        >
-          {source.trim() ? renderCellMarkdown(source) : (
-            <span style={{ color: "var(--havn-text-dim)", fontStyle: "italic" }}>Double-click to edit...</span>
-          )}
-        </div>
-      )}
+      <CodeArea
+        value={source}
+        language="markdown"
+        onChange={(e) => {
+          setSource(e.target.value);
+          onUpdate({ ...cell, source: e.target.value });
+        }}
+        minLines={2}
+      />
     </div>
   );
 }
@@ -656,6 +666,8 @@ export default function NotebookPanel({ openPath }) {
   const [notebook, setNotebook] = useState(null);
   const [newName, setNewName] = useState("");
   const [runningAll, setRunningAll] = useState(false);
+  const [cellsWidth, setCellsWidth] = useState(() => parseInt(localStorage.getItem("dp_notebook_width") || "900", 10));
+  const resizingRef = useRef(false);
   const [runningCellId, setRunningCellId] = useState(null);
   const [nbError, setNbError] = useState(null);
 
@@ -768,6 +780,16 @@ export default function NotebookPanel({ openPath }) {
     setNotebook({ ...notebook, cells });
   }
 
+  const [dragFrom, setDragFrom] = useState(null);
+  const [dragOver, setDragOver] = useState(null);
+  function moveCell(fromIdx, toIdx) {
+    if (fromIdx === toIdx) return;
+    const cells = [...notebook.cells];
+    const [moved] = cells.splice(fromIdx, 1);
+    cells.splice(toIdx, 0, moved);
+    setNotebook({ ...notebook, cells });
+  }
+
   if (!notebook) {
     return (
       <div style={s.container}>
@@ -815,13 +837,86 @@ export default function NotebookPanel({ openPath }) {
           </button>
         </div>
       </div>
-      <div style={s.cells}>
+      {/* Table of Contents from markdown headings */}
+      {(() => {
+        const headings = [];
+        notebook.cells.forEach((cell, i) => {
+          if (cell.type === "markdown") {
+            for (const line of (cell.source || "").split("\n")) {
+              const m = line.match(/^(#{1,3})\s+(.+)$/);
+              if (m) headings.push({ level: m[1].length, text: m[2], cellIndex: i });
+            }
+          }
+        });
+        if (headings.length < 2) return null;
+        return (
+          <div style={{ ...s.toc, maxWidth: cellsWidth }}>
+            <span style={s.tocLabel}>Contents</span>
+            {headings.map((h, i) => (
+              <button
+                key={i}
+                style={{ ...s.tocItem, paddingLeft: 8 + (h.level - 1) * 12 }}
+                onClick={() => {
+                  const el = document.querySelector(`[data-cell-index="${h.cellIndex}"]`);
+                  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              >{h.text}</button>
+            ))}
+          </div>
+        );
+      })()}
+      <div style={{ ...s.cells, maxWidth: cellsWidth + 40, position: "relative" }}>
+        {/* Width resize handle — sits in the extra 40px padding, clear of scrollbar */}
+        <div
+          style={{ position: "absolute", top: "50%", right: 6, width: 4, height: 40, marginTop: -20, cursor: "col-resize", zIndex: 5, borderRadius: 2, background: "var(--havn-text-dim)", opacity: 0.25, transition: "opacity 0.15s" }}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = 0.7}
+          onMouseLeave={(e) => { if (!resizingRef.current) e.currentTarget.style.opacity = 0.25; }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            resizingRef.current = true;
+            const startX = e.clientX;
+            const startW = cellsWidth;
+            const handle = e.currentTarget;
+            handle.style.opacity = 0.7;
+            const onMove = (ev) => {
+              if (!resizingRef.current) return;
+              const delta = (ev.clientX - startX) * 2;
+              const newW = Math.max(600, Math.min(1600, startW + delta));
+              setCellsWidth(newW);
+            };
+            const onUp = () => {
+              resizingRef.current = false;
+              handle.style.opacity = 0.25;
+              localStorage.setItem("dp_notebook_width", String(cellsWidth));
+              document.removeEventListener("mousemove", onMove);
+              document.removeEventListener("mouseup", onUp);
+            };
+            document.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseup", onUp);
+          }}
+        />
+        <div style={{ maxWidth: cellsWidth, margin: "0 auto" }}>
         {notebook.cells.length === 0 && (
           <div style={s.empty}>No cells yet. Add a SQL, code, ingest, or markdown cell above.</div>
         )}
         {notebook.cells.map((cell, i) => (
           <React.Fragment key={cell.id || i}>
-            <div style={cs.cellWrap}>
+            {dragFrom != null && dragOver === i && dragFrom !== i && (
+              <div style={{ height: 3, background: "var(--havn-accent)", borderRadius: 2, margin: "2px 24px" }} />
+            )}
+            <div
+              data-cell-index={i}
+              style={{ ...cs.cellWrap, opacity: dragFrom === i ? 0.3 : 1 }}
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragOver !== i) setDragOver(i); }}
+              onDrop={(e) => { e.preventDefault(); if (dragFrom != null && dragFrom !== i) moveCell(dragFrom, i); setDragFrom(null); setDragOver(null); }}
+            >
+              <div
+                draggable
+                onDragStart={(e) => { setDragFrom(i); e.dataTransfer.effectAllowed = "move"; }}
+                onDragEnd={() => { setDragFrom(null); setDragOver(null); }}
+                style={cs.dragHandle}
+                title="Drag to reorder"
+              >⠿</div>
               <NotebookCell
                 cell={cell}
                 notebookName={active}
@@ -833,6 +928,7 @@ export default function NotebookPanel({ openPath }) {
             <CellInsertButton onInsert={(type) => addCell(type, i)} />
           </React.Fragment>
         ))}
+        </div>
       </div>
     </div>
   );
@@ -856,13 +952,17 @@ const s = {
   nbTitle: { fontWeight: 600, fontSize: "14px", flex: 1 },
   nbActions: { display: "flex", gap: "6px" },
   runAllBtn: { padding: "4px 12px", background: "var(--havn-green)", border: "1px solid var(--havn-green-border)", borderRadius: "var(--havn-radius-lg)", color: "#fff", cursor: "pointer", fontSize: "11px", fontWeight: 500 },
-  cells: { flex: 1, overflow: "auto", padding: "12px 16px", maxWidth: "900px", margin: "0 auto", width: "100%", boxSizing: "border-box" },
+  cells: { flex: 1, overflowY: "auto", overflowX: "hidden", padding: "12px 16px", margin: "0 auto", width: "100%", boxSizing: "border-box" },
+  toc: { display: "flex", alignItems: "center", gap: 4, padding: "6px 16px", borderBottom: "1px solid var(--havn-border)", flexWrap: "wrap", maxWidth: "900px", margin: "0 auto", width: "100%", boxSizing: "border-box" },
+  tocLabel: { fontSize: 10, fontWeight: 600, color: "var(--havn-text-dim)", textTransform: "uppercase", letterSpacing: 0.5, marginRight: 4 },
+  tocItem: { background: "none", border: "none", color: "var(--havn-accent)", cursor: "pointer", fontSize: 11, padding: "2px 6px", borderRadius: 4 },
 };
 
 const cs = {
-  cellWrap: { position: "relative", marginBottom: "10px" },
-  codeCell: { border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius-lg)", background: "var(--havn-bg-tertiary)", overflow: "hidden" },
-  mdCell: { border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius-lg)", background: "var(--havn-bg-tertiary)", overflow: "hidden" },
+  cellWrap: { position: "relative", marginBottom: "10px", display: "flex", gap: 0 },
+  dragHandle: { display: "flex", alignItems: "center", padding: "0 4px", cursor: "grab", color: "var(--havn-text-dim)", fontSize: 14, opacity: 0.3, transition: "opacity 0.15s", userSelect: "none", flexShrink: 0 },
+  codeCell: { border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius-lg)", background: "var(--havn-bg-tertiary)", overflow: "hidden", flex: 1, minWidth: 0 },
+  mdCell: { border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius-lg)", background: "var(--havn-bg-tertiary)", overflow: "hidden", flex: 1, minWidth: 0 },
   cellHeader: { display: "flex", alignItems: "center", gap: "8px", padding: "4px 8px", minHeight: "32px", borderBottom: "1px solid var(--havn-border)", background: "var(--havn-bg-secondary)" },
   cellType: { fontSize: "9px", fontWeight: 700, color: "var(--havn-text-dim)", letterSpacing: "0.5px", textTransform: "uppercase" },
   runBtn: { width: "28px", height: "24px", background: "var(--havn-green)", border: "none", borderRadius: "var(--havn-radius)", color: "#fff", cursor: "pointer", fontSize: "11px", fontWeight: 600 },

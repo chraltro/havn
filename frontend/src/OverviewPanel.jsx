@@ -273,8 +273,20 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
                 </div>
               ) : (
                 <div style={st.runList}>
-                  {recentRuns.slice(0, 10).map((run) => (
-                    <div key={run.run_id} style={st.runItem}>
+                  {(() => {
+                    const typeOrder = { seed: 0, ingest: 1, transform: 2, export: 3, contract: 4 };
+                    const sorted = [...recentRuns].slice(0, 12).sort((a, b) => (typeOrder[a.run_type] ?? 9) - (typeOrder[b.run_type] ?? 9));
+                    let lastType = null;
+                    return sorted.map((run) => {
+                      const showSep = lastType !== null && lastType !== run.run_type;
+                      lastType = run.run_type;
+                      return (
+                        <React.Fragment key={run.run_id}>
+                          {showSep && <div style={st.runGroupSep} />}
+                          <div style={{
+                            ...st.runItem,
+                            ...(run.run_type === "ingest" || run.run_type === "export" ? { background: "color-mix(in srgb, var(--havn-accent) 4%, transparent)" } : {}),
+                          }}>
                       <span style={{
                         ...st.statusDot,
                         background: run.status === "success" ? "var(--havn-green)" : "var(--havn-red)",
@@ -290,8 +302,10 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
                           } else if (run.run_type === "transform" && target.includes(".")) {
                             const [s, t] = target.split(".", 2);
                             onSelectTable(s, t);
-                          } else if (run.run_type === "ingest" || run.run_type === "export") {
+                          } else if (run.run_type === "ingest") {
                             onOpenFile("ingest/" + target);
+                          } else if (run.run_type === "export") {
+                            onOpenFile("export/" + target);
                           }
                         }}
                       >{run.target}</span>
@@ -300,8 +314,11 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
                         {run.duration_ms > 0 && <span>{run.duration_ms}ms</span>}
                       </span>
                       <span style={st.runTime}>{timeAgo(run.started_at)}</span>
-                    </div>
-                  ))}
+                          </div>
+                        </React.Fragment>
+                      );
+                    });
+                  })()}
                 </div>
               )}
               {recentRuns.length > 0 && (
@@ -537,7 +554,6 @@ const st = {
     padding: "8px 16px",
     background: "none",
     border: "none",
-    borderTop: "1px solid var(--havn-border)",
     color: "var(--havn-accent)",
     cursor: "pointer",
     fontSize: "12px",
@@ -554,13 +570,14 @@ const st = {
   },
 
   // Runs
-  runList: { padding: "4px 0" },
+  runList: { padding: "0" },
+  runGroupSep: { display: "none" },
   runItem: {
     display: "flex",
     alignItems: "center",
     gap: "8px",
-    padding: "6px 16px",
-    fontSize: "12px",
+    padding: "7px 16px",
+    fontSize: "12.5px",
     borderBottom: "1px solid var(--havn-border)",
   },
   statusDot: { width: "6px", height: "6px", borderRadius: "50%", flexShrink: 0 },
@@ -593,13 +610,14 @@ const st = {
   runTime: { color: "var(--havn-text-dim)", fontSize: "11px", flexShrink: 0 },
 
   // Schemas
-  schemaList: { padding: "4px 0" },
+  schemaList: { padding: "0" },
   schemaItem: {
     display: "flex",
     alignItems: "center",
     gap: "10px",
-    padding: "8px 16px",
-    fontSize: "13px",
+    padding: "7px 16px",
+    fontSize: "12.5px",
+    borderBottom: "1px solid var(--havn-border)",
   },
   schemaName: {
     fontWeight: 600,
@@ -621,12 +639,12 @@ const st = {
     display: "flex",
     alignItems: "center",
     gap: "8px",
-    padding: "14px 16px",
+    padding: "10px 16px",
     background: "var(--havn-bg-secondary)",
     border: "none",
     color: "var(--havn-text)",
     cursor: "pointer",
-    fontSize: "13px",
+    fontSize: "12.5px",
     fontWeight: 500,
     textAlign: "left",
   },
