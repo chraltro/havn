@@ -210,6 +210,7 @@ export default function HistoryPanel({ onOpenFile }) {
           <select
             style={styles.filterSelect}
             value={statusFilter}
+            aria-label="Filter by status"
             onChange={(e) => { setStatusFilter(e.target.value); setVisibleCount(PAGE_SIZE); }}
           >
             <option value="all">All Statuses</option>
@@ -219,6 +220,7 @@ export default function HistoryPanel({ onOpenFile }) {
           <input
             style={styles.filterInput}
             placeholder="Search target..."
+            aria-label="Search target"
             value={targetFilter}
             onChange={(e) => { setTargetFilter(e.target.value); setVisibleCount(PAGE_SIZE); }}
           />

@@ -10,7 +10,7 @@ const SCHEMA_COLORS = {
   source: "#484f58",
   ingest: "#58a6ff",
   import: "#bc8cff",
-  seed: "#92400e",
+  seed: "#16a34a",
   exposure: "#7c3aed",
 };
 
@@ -943,9 +943,6 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
               </span>
               <span style={styles.legendItem}>
                 <span style={{ ...styles.legendDot, background: SCHEMA_COLORS.seed }} />seed
-              </span>
-              <span style={styles.legendItem}>
-                <span style={{ ...styles.legendDot, background: SCHEMA_COLORS.exposure }} />exposure
               </span>
             </div>
           )}

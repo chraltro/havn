@@ -340,8 +340,8 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
             {tab === 'Freshness' && (
               <>
                 <div style={s.toolbar}>
-                  <input style={s.filterInput} placeholder="Filter by model..." value={freshnessFilter} onChange={e => setFreshnessFilter(e.target.value)} />
-                  <select style={s.filterSelect} value={freshnessStatus} onChange={e => setFreshnessStatus(e.target.value)}>
+                  <input style={s.filterInput} placeholder="Filter by model..." aria-label="Filter freshness by model" value={freshnessFilter} onChange={e => setFreshnessFilter(e.target.value)} />
+                  <select style={s.filterSelect} value={freshnessStatus} aria-label="Filter by freshness status" onChange={e => setFreshnessStatus(e.target.value)}>
                     <option value="all">All</option>
                     <option value="stale">Stale Only</option>
                     <option value="fresh">Fresh Only</option>
@@ -361,7 +361,7 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                     filteredFreshness.map((m, i) => (
                       <tr key={i}>
                         <td style={s.td}>{m.model}</td>
-                        <td style={s.td}>{m.last_run_at || '\u2014'}</td>
+                        <td style={s.td}>{m.last_run_at ? m.last_run_at.replace(/\.\d+$/, '') : '\u2014'}</td>
                         <td style={s.td}>{m.hours_since_run != null ? m.hours_since_run.toFixed(1) : '\u2014'}</td>
                         <td style={s.td}>{m.row_count != null ? m.row_count.toLocaleString() : '\u2014'}</td>
                         <td style={s.td}><span style={s.badge(!m.is_stale)}>{m.is_stale ? 'STALE' : 'FRESH'}</span></td>
@@ -376,7 +376,7 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
             {tab === 'Profiles' && (
               <>
                 <div style={s.toolbar}>
-                  <input style={s.filterInput} placeholder="Filter by model..." value={profileFilter} onChange={e => setProfileFilter(e.target.value)} />
+                  <input style={s.filterInput} placeholder="Filter by model..." aria-label="Filter profiles by model" value={profileFilter} onChange={e => setProfileFilter(e.target.value)} />
                   <span style={s.count}>{filteredProfiles.length} of {profiles.length}</span>
                 </div>
                 <table style={s.table}>
@@ -436,8 +436,8 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
             {tab === 'Assertions' && (
               <>
                 <div style={s.toolbar}>
-                  <input style={s.filterInput} placeholder="Filter by model or expression..." value={assertionFilter} onChange={e => setAssertionFilter(e.target.value)} />
-                  <select style={s.filterSelect} value={assertionStatus} onChange={e => setAssertionStatus(e.target.value)}>
+                  <input style={s.filterInput} placeholder="Filter by model or expression..." aria-label="Filter assertions by model or expression" value={assertionFilter} onChange={e => setAssertionFilter(e.target.value)} />
+                  <select style={s.filterSelect} value={assertionStatus} aria-label="Filter by assertion status" onChange={e => setAssertionStatus(e.target.value)}>
                     <option value="all">All</option>
                     <option value="pass">Pass Only</option>
                     <option value="fail">Fail Only</option>
@@ -515,8 +515,8 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                   <button style={s.btn} onClick={() => { setShowHistory(!showHistory); setExpandedContract(null); }}>
                     {showHistory ? 'Show Current' : 'Show Run History'}
                   </button>
-                  <input style={s.filterInput} placeholder="Filter by model or name..." value={contractFilter} onChange={e => setContractFilter(e.target.value)} />
-                  <select style={s.filterSelect} value={contractStatus} onChange={e => setContractStatus(e.target.value)}>
+                  <input style={s.filterInput} placeholder="Filter by model or name..." aria-label="Filter contracts by model or name" value={contractFilter} onChange={e => setContractFilter(e.target.value)} />
+                  <select style={s.filterSelect} value={contractStatus} aria-label="Filter by contract status" onChange={e => setContractStatus(e.target.value)}>
                     <option value="all">All</option>
                     <option value="pass">Pass Only</option>
                     <option value="fail">Fail Only</option>
@@ -702,7 +702,7 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
             {tab === 'Anomalies' && (
               <>
                 <div style={s.toolbar}>
-                  <input style={s.filterInput} placeholder="Filter by model or metric..." value={anomalyFilter} onChange={e => setAnomalyFilter(e.target.value)} />
+                  <input style={s.filterInput} placeholder="Filter by model or metric..." aria-label="Filter anomalies by model or metric" value={anomalyFilter} onChange={e => setAnomalyFilter(e.target.value)} />
                   <span style={s.count}>{filteredAnomalies.length} anomal{filteredAnomalies.length !== 1 ? 'ies' : 'y'}</span>
                 </div>
                 {filteredAnomalies.length === 0 ? (

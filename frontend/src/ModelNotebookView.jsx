@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import MonacoEditor from "@monaco-editor/react";
 import { api } from "./api";
 
 /**
@@ -95,30 +96,33 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
               <span className="cell-label">SQL</span>
               <span className="cell-path">{data.path}</span>
             </div>
-            <textarea
-              className="cell-editor"
-              value={sql}
-              onChange={(e) => { setSql(e.target.value); setDirty(true); }}
-              spellCheck={false}
-              style={{
-                fontFamily: "monospace",
-                fontSize: "13px",
-                width: "100%",
-                minHeight: "200px",
-                resize: "vertical",
-                padding: "8px",
-                border: "1px solid var(--border, #333)",
-                borderRadius: "4px",
-                backgroundColor: "var(--bg-secondary, #1e1e1e)",
-                color: "var(--text, #ccc)",
-              }}
-              onKeyDown={(e) => {
-                if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-                  e.preventDefault();
-                  if (dirty) handleSave();
-                }
-              }}
-            />
+            <div style={{ height: Math.max(200, (sql || "").split("\n").length * 19 + 20), border: "1px solid var(--havn-border, #333)", borderRadius: 4, overflow: "hidden" }}>
+              <MonacoEditor
+                language="sql"
+                value={sql}
+                onChange={(val) => { setSql(val || ""); setDirty(true); }}
+                onMount={(editor, monaco) => {
+                  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+                    if (dirty) handleSave();
+                  });
+                }}
+                theme="vs-dark"
+                options={{
+                  minimap: { enabled: false },
+                  lineNumbers: "on",
+                  lineNumbersMinChars: 3,
+                  fontSize: 13,
+                  lineHeight: 19,
+                  scrollBeyondLastLine: false,
+                  wordWrap: "on",
+                  automaticLayout: true,
+                  renderLineHighlight: "none",
+                  folding: false,
+                  glyphMargin: false,
+                  padding: { top: 4, bottom: 4 },
+                }}
+              />
+            </div>
           </div>
 
           {/* Cell 2: Sample Output */}

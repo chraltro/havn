@@ -115,7 +115,7 @@ export default function WikiPanel() {
       <div style={s.sidebar}>
         <div style={s.sidebarHeader}>
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--havn-text)', marginBottom: 8 }}>Wiki</div>
-          <input style={s.search} placeholder="Search pages..." value={search} onChange={e => setSearch(e.target.value)} />
+          <input style={s.search} placeholder="Search pages..." aria-label="Search wiki pages" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <div style={s.sidebarContent}>
           {loading ? <p style={{ color: 'var(--havn-text-secondary)', padding: 16 }}>Loading...</p> :

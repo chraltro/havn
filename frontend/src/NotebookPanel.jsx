@@ -1,67 +1,117 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import MonacoEditor from "@monaco-editor/react";
 import { api } from "./api";
 
-const LINE_HEIGHT = 19.5; // 13px font * 1.5 line-height
-const MAX_VISIBLE_LINES = 1000;
+const LINE_HEIGHT = 19;
+const MIN_CELL_LINES = 3;
+const MAX_CELL_LINES = 40;
 
-function CodeArea({ value, onChange, onKeyDown, minLines = 3, spellCheck = false }) {
-  const textRef = useRef(null);
-  const gutterRef = useRef(null);
-  const [measuredHeight, setMeasuredHeight] = useState(null);
-  const lineCount = value.split("\n").length;
-  const capped = lineCount > MAX_VISIBLE_LINES;
-  const cappedHeight = MAX_VISIBLE_LINES * LINE_HEIGHT + 16;
-  const minHeight = Math.max(minLines, lineCount) * LINE_HEIGHT + 16;
+function CodeArea({ value, onChange, onKeyDown, minLines = 3, language = "plaintext" }) {
+  const lineCount = (value || "").split("\n").length;
+  const editorLines = Math.max(minLines || MIN_CELL_LINES, Math.min(lineCount + 1, MAX_CELL_LINES));
+  const [height, setHeight] = useState(editorLines * LINE_HEIGHT + 8);
 
+  // Update height when value changes (recompute from line count)
   useEffect(() => {
-    if (!capped && textRef.current) {
-      // Reset height to auto so scrollHeight is accurate
-      textRef.current.style.height = "0px";
-      const sh = textRef.current.scrollHeight;
-      textRef.current.style.height = "";
-      setMeasuredHeight(Math.max(sh, minHeight));
-    }
-  }, [value, capped, minHeight]);
+    const lc = (value || "").split("\n").length;
+    const lines = Math.max(minLines || MIN_CELL_LINES, Math.min(lc + 1, MAX_CELL_LINES));
+    setHeight(lines * LINE_HEIGHT + 8);
+  }, [value, minLines]);
 
-  const height = capped ? cappedHeight : (measuredHeight || minHeight);
-
-  const handleScroll = () => {
-    if (gutterRef.current && textRef.current) {
-      gutterRef.current.scrollTop = textRef.current.scrollTop;
-    }
+  const handleMount = (editor, monaco) => {
+    // Forward Ctrl+Enter to parent handler
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      if (onKeyDown) {
+        onKeyDown({ preventDefault: () => {}, ctrlKey: true, metaKey: true, key: "Enter" });
+      }
+    });
+    // Auto-resize based on content (accounts for word wrap)
+    const updateHeight = () => {
+      const contentHeight = editor.getContentHeight();
+      const newHeight = Math.max((minLines || MIN_CELL_LINES) * LINE_HEIGHT + 8, Math.min(contentHeight + 8, MAX_CELL_LINES * LINE_HEIGHT));
+      setHeight(newHeight);
+    };
+    editor.onDidContentSizeChange(updateHeight);
+    updateHeight();
+    editor.updateOptions({ scrollbar: { vertical: "hidden", horizontal: "auto" } });
   };
 
   return (
-    <div style={{ display: "flex", height }}>
-      <div
-        ref={gutterRef}
-        style={{
-          width: 40, flexShrink: 0, padding: "8px 0",
-          overflow: "hidden",
-          textAlign: "right", fontFamily: "var(--havn-font-mono)", fontSize: "13px",
-          lineHeight: 1.5, color: "var(--havn-text-dim)", userSelect: "none",
-          borderRight: "1px solid var(--havn-border)", background: "var(--havn-bg-secondary)",
-          boxSizing: "border-box",
-        }}
-      >
-        {Array.from({ length: lineCount }, (_, i) => (
-          <div key={i} style={{ paddingRight: 8, height: LINE_HEIGHT }}>{i + 1}</div>
-        ))}
-      </div>
-      <textarea
-        ref={textRef}
+    <div style={{ height, border: "1px solid var(--havn-border)", borderRadius: 4, overflow: "hidden" }}>
+      <MonacoEditor
+        height={height}
+        language={language}
         value={value}
-        onChange={onChange}
-        onKeyDown={onKeyDown}
-        onScroll={handleScroll}
-        spellCheck={spellCheck}
-        style={{
-          flex: 1, padding: "8px 12px", background: "transparent", border: "none",
-          color: "var(--havn-text)", fontFamily: "var(--havn-font-mono)", fontSize: "13px",
-          resize: "none", outline: "none", boxSizing: "border-box", lineHeight: 1.5,
-          height: "100%", overflow: capped ? "auto" : "hidden",
+        onChange={(val) => {
+          if (onChange) {
+            // Mimic textarea onChange event shape
+            onChange({ target: { value: val || "" } });
+          }
+        }}
+        onMount={handleMount}
+        theme="vs-dark"
+        options={{
+          minimap: { enabled: false },
+          lineNumbers: "on",
+          lineNumbersMinChars: 3,
+          fontSize: 13,
+          lineHeight: LINE_HEIGHT,
+          scrollBeyondLastLine: false,
+          wordWrap: "on",
+          automaticLayout: true,
+          renderLineHighlight: "none",
+          overviewRulerLanes: 0,
+          hideCursorInOverviewRuler: true,
+          folding: false,
+          glyphMargin: false,
+          padding: { top: 4, bottom: 4 },
+          tabSize: 2,
         }}
       />
+    </div>
+  );
+}
+
+function CellInsertButton({ onInsert }) {
+  const [open, setOpen] = useState(false);
+  const types = [
+    { type: "sql", label: "SQL" },
+    { type: "code", label: "Python" },
+    { type: "markdown", label: "Markdown" },
+    { type: "ingest", label: "Ingest" },
+  ];
+  return (
+    <div style={{ display: "flex", justifyContent: "center", height: 20, alignItems: "center", position: "relative" }}>
+      <button
+        onClick={() => setOpen(!open)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        style={{
+          background: "none", border: "1px solid transparent", color: "var(--havn-text-dim)",
+          cursor: "pointer", fontSize: 14, padding: "0 8px", borderRadius: 4, lineHeight: 1,
+          opacity: open ? 1 : 0.3, transition: "opacity 0.15s",
+        }}
+        onMouseEnter={(e) => e.target.style.opacity = 1}
+        onMouseLeave={(e) => { if (!open) e.target.style.opacity = 0.3; }}
+        title="Insert cell"
+      >+</button>
+      {open && (
+        <div style={{
+          position: "absolute", top: 20, zIndex: 10,
+          display: "flex", gap: 2, background: "var(--havn-bg)", border: "1px solid var(--havn-border)",
+          borderRadius: 6, padding: 4, boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+        }}>
+          {types.map(t => (
+            <button
+              key={t.type}
+              onClick={() => { onInsert(t.type); setOpen(false); }}
+              style={{
+                background: "none", border: "1px solid var(--havn-border)", borderRadius: 4,
+                color: "var(--havn-text)", cursor: "pointer", fontSize: 11, padding: "3px 8px",
+              }}
+            >{t.label}</button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -411,6 +461,7 @@ function SqlCell({ cell, notebookName, onUpdate, onDelete, externalRunning }) {
       </div>
       <CodeArea
         value={source}
+        language="sql"
         onChange={(e) => {
           setSource(e.target.value);
           onUpdate({ ...cell, source: e.target.value });
@@ -466,6 +517,7 @@ function CodeCell({ cell, notebookName, onUpdate, onDelete, externalRunning }) {
       </div>
       <CodeArea
         value={source}
+        language="python"
         onChange={(e) => {
           setSource(e.target.value);
           onUpdate({ ...cell, source: e.target.value });
@@ -502,8 +554,59 @@ function NotebookCell({ cell, notebookName, onUpdate, onDelete, externalRunning 
   );
 }
 
+function mdInlineFormat(text) {
+  const parts = [];
+  let remaining = text;
+  let key = 0;
+  const re = /(\*\*(.+?)\*\*)|(\*(.+?)\*)|(`(.+?)`)|(\[(.+?)\]\((.+?)\))/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = re.exec(remaining)) !== null) {
+    if (match.index > lastIndex) parts.push(remaining.slice(lastIndex, match.index));
+    if (match[2]) parts.push(<strong key={key++}>{match[2]}</strong>);
+    else if (match[4]) parts.push(<em key={key++}>{match[4]}</em>);
+    else if (match[6]) parts.push(<code key={key++} style={{ background: "var(--havn-bg-secondary)", padding: "1px 4px", borderRadius: 3, fontSize: "0.9em" }}>{match[6]}</code>);
+    else if (match[8]) parts.push(<a key={key++} href={match[9]} target="_blank" rel="noopener noreferrer" style={{ color: "var(--havn-accent)" }}>{match[8]}</a>);
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < remaining.length) parts.push(remaining.slice(lastIndex));
+  return parts.length > 0 ? parts : text;
+}
+
+function renderCellMarkdown(text) {
+  if (!text) return null;
+  const lines = text.split("\n");
+  const elements = [];
+  let listItems = [];
+  function flushList() {
+    if (listItems.length > 0) {
+      elements.push(<ul key={`list-${elements.length}`} style={{ margin: "4px 0", paddingLeft: 20 }}>{listItems}</ul>);
+      listItems = [];
+    }
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const hm = line.match(/^(#{1,3})\s+(.*)$/);
+    if (hm) {
+      flushList();
+      const level = hm[1].length;
+      const Tag = `h${level}`;
+      elements.push(<Tag key={i} style={{ margin: "8px 0 4px", fontSize: level === 1 ? "1.4em" : level === 2 ? "1.15em" : "1em", fontWeight: 600 }}>{mdInlineFormat(hm[2])}</Tag>);
+      continue;
+    }
+    const li = line.match(/^[-*]\s+(.*)$/);
+    if (li) { listItems.push(<li key={i}>{mdInlineFormat(li[1])}</li>); continue; }
+    flushList();
+    if (line.trim() === "") elements.push(<br key={i} />);
+    else elements.push(<p key={i} style={{ margin: "4px 0", lineHeight: 1.6 }}>{mdInlineFormat(line)}</p>);
+  }
+  flushList();
+  return elements;
+}
+
 function MarkdownCell({ cell, onUpdate, onDelete }) {
   const [source, setSource] = useState(cell.source || "");
+  const [editing, setEditing] = useState(false);
   useEffect(() => { setSource(cell.source || ""); }, [cell.id]);
 
   return (
@@ -511,16 +614,38 @@ function MarkdownCell({ cell, onUpdate, onDelete }) {
       <div style={cs.cellHeader}>
         <span style={cs.cellType}>MD</span>
         <span style={{ flex: 1 }} />
+        <button
+          onClick={() => setEditing(!editing)}
+          style={{ ...cs.deleteBtn, color: "var(--havn-text-secondary)", fontSize: 11 }}
+          title={editing ? "Show rendered" : "Edit source"}
+        >
+          {editing ? "Preview" : "Edit"}
+        </button>
         <button data-havn-danger="" onClick={onDelete} style={cs.deleteBtn} title="Delete cell">&times;</button>
       </div>
-      <CodeArea
-        value={source}
-        onChange={(e) => {
-          setSource(e.target.value);
-          onUpdate({ ...cell, source: e.target.value });
-        }}
-        minLines={2}
-      />
+      {editing ? (
+        <CodeArea
+          value={source}
+          language="markdown"
+          onChange={(e) => {
+            setSource(e.target.value);
+            onUpdate({ ...cell, source: e.target.value });
+          }}
+          minLines={2}
+        />
+      ) : (
+        <div
+          onDoubleClick={() => setEditing(true)}
+          style={{
+            padding: "8px 16px", minHeight: 32, cursor: "text",
+            color: "var(--havn-text)", fontSize: 14, lineHeight: 1.6,
+          }}
+        >
+          {source.trim() ? renderCellMarkdown(source) : (
+            <span style={{ color: "var(--havn-text-dim)", fontStyle: "italic" }}>Double-click to edit...</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -615,7 +740,7 @@ export default function NotebookPanel({ openPath }) {
     setRunningAll(false);
   }
 
-  function addCell(type) {
+  function addCell(type, afterIndex) {
     if (!notebook) return;
     const id = "cell_" + Math.random().toString(36).slice(2, 8);
     let source = "";
@@ -623,7 +748,13 @@ export default function NotebookPanel({ openPath }) {
     else if (type === "ingest") source = JSON.stringify(DEFAULT_INGEST, null, 2);
     else if (type === "sql") source = "SELECT 1";
     const cell = { id, type, source, outputs: [] };
-    setNotebook({ ...notebook, cells: [...notebook.cells, cell] });
+    if (afterIndex != null) {
+      const cells = [...notebook.cells];
+      cells.splice(afterIndex + 1, 0, cell);
+      setNotebook({ ...notebook, cells });
+    } else {
+      setNotebook({ ...notebook, cells: [...notebook.cells, cell] });
+    }
   }
 
   function updateCell(idx, updated) {
@@ -689,15 +820,18 @@ export default function NotebookPanel({ openPath }) {
           <div style={s.empty}>No cells yet. Add a SQL, code, ingest, or markdown cell above.</div>
         )}
         {notebook.cells.map((cell, i) => (
-          <div key={cell.id || i} style={cs.cellWrap}>
-            <NotebookCell
-              cell={cell}
-              notebookName={active}
-              onUpdate={(updated) => updateCell(i, updated)}
-              onDelete={() => deleteCell(i)}
-              externalRunning={runningCellId === cell.id}
-            />
-          </div>
+          <React.Fragment key={cell.id || i}>
+            <div style={cs.cellWrap}>
+              <NotebookCell
+                cell={cell}
+                notebookName={active}
+                onUpdate={(updated) => updateCell(i, updated)}
+                onDelete={() => deleteCell(i)}
+                externalRunning={runningCellId === cell.id}
+              />
+            </div>
+            <CellInsertButton onInsert={(type) => addCell(type, i)} />
+          </React.Fragment>
         ))}
       </div>
     </div>

@@ -647,6 +647,18 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
             />
           ))
         )}
+        {/* Data labels (line/area) */}
+        {config?.showDataLabels && series.map((s, si) =>
+          s.values.map((v, i) => {
+            const pos = config?.dataLabelPosition || "above";
+            const ly = pos === "above" ? yPos(v) - 8 : pos === "below" ? Math.min(yPos(v) + 14, plotH - 2) : yPos(v) + 3;
+            const fmt = config?.dataLabelFormat || "value";
+            const total = series.reduce((sum, ss) => sum + Math.abs(ss.values[i]), 0);
+            const pct = total > 0 ? ((Math.abs(v) / total) * 100).toFixed(0) + "%" : "";
+            const label = fmt === "percent" ? pct : fmt === "both" ? `${fmtNum(v)} (${pct})` : fmtNum(v);
+            return <text key={`dl-${si}-${i}`} x={xPos(i)} y={ly} textAnchor="middle" style={{ fill: s.color, fontSize: "9px", fontWeight: 600, fontFamily: "var(--havn-font-mono)", pointerEvents: "none" }}>{label}</text>;
+          })
+        )}
         {/* Crosshair */}
         {hoveredIndex !== null && (
           <line x1={xPos(hoveredIndex)} y1={0} x2={xPos(hoveredIndex)} y2={plotH}
