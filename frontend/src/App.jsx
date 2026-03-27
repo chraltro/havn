@@ -481,10 +481,14 @@ function AppContent() {
   useEffect(() => {
     if (prevRunningRef.current && !running) {
       // Running just went from true to false — determine status from runSummary
-      const status = runSummary?.status === "success" ? "success" : "failed";
-      setRecentStatus(status);
-      const timer = setTimeout(() => setRecentStatus(null), 10000);
-      return () => clearTimeout(timer);
+      // Only show status if we actually have a summary; skip if null (avoids
+      // showing "Failed" when the summary hasn't been set yet)
+      if (runSummary) {
+        setRecentStatus(runSummary.status === "success" ? "success" : "failed");
+        const timer = setTimeout(() => setRecentStatus(null), 10000);
+        prevRunningRef.current = running;
+        return () => clearTimeout(timer);
+      }
     }
     prevRunningRef.current = running;
   }, [running, runSummary]);

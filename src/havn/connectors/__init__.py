@@ -15,6 +15,7 @@ from havn.connectors.stripe import StripeConnector
 from havn.connectors.hubspot import HubSpotConnector
 from havn.connectors.shopify import ShopifyConnector
 from havn.connectors.webhook import WebhookConnector
+from havn.connectors.databricks import DatabricksConnector
 
 __all__ = [
     "PostgresConnector",
@@ -27,4 +28,5 @@ __all__ = [
     "HubSpotConnector",
     "ShopifyConnector",
     "WebhookConnector",
+    "DatabricksConnector",
 ]

@@ -39,7 +39,7 @@ def _git_root(project_dir: Path) -> Path:
     """Resolve the git repository root for a project directory.
 
     When a havn project lives in a subdirectory of a git repo (e.g.
-    ``repo/stress_project/``), git commands must run from the repo root
+    ``repo/internal_stress_project/``), git commands must run from the repo root
     so that file paths from ``git status --porcelain`` resolve correctly.
     Falls back to *project_dir* if the root cannot be determined.
     """

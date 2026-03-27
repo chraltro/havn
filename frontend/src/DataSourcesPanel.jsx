@@ -341,6 +341,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
 
   async function doSync(name) {
     setSyncing(name);
+    addOutput("info", `Syncing connection "${name}"...`);
     try {
       const result = await api.syncConnector(name);
       if (result.status === "success") {
