@@ -29,9 +29,21 @@ from havn.engine.sql_analysis import (
 
 
 class TestParseConfig:
-    def test_basic(self):
+    def test_basic_legacy(self):
         sql = "-- config: materialized=table, schema=silver\nSELECT 1"
         assert parse_config(sql) == {"materialized": "table", "schema": "silver"}
+
+    def test_at_syntax(self):
+        sql = "@config materialized=table, schema=silver\nSELECT 1"
+        assert parse_config(sql) == {"materialized": "table", "schema": "silver"}
+
+    def test_at_syntax_parens(self):
+        sql = "@config(materialized=table, schema=gold)\nSELECT 1"
+        assert parse_config(sql) == {"materialized": "table", "schema": "gold"}
+
+    def test_at_syntax_colon(self):
+        sql = "@config: materialized=view\nSELECT 1"
+        assert parse_config(sql) == {"materialized": "view"}
 
     def test_empty(self):
         assert parse_config("SELECT 1") == {}
@@ -46,8 +58,16 @@ class TestParseConfig:
 
 
 class TestParseDepends:
-    def test_basic(self):
+    def test_basic_legacy(self):
         sql = "-- depends_on: bronze.customers, bronze.orders\nSELECT 1"
+        assert parse_depends(sql) == ["bronze.customers", "bronze.orders"]
+
+    def test_at_syntax(self):
+        sql = "@depends_on bronze.customers, bronze.orders\nSELECT 1"
+        assert parse_depends(sql) == ["bronze.customers", "bronze.orders"]
+
+    def test_at_syntax_parens(self):
+        sql = "@depends_on(bronze.customers, bronze.orders)\nSELECT 1"
         assert parse_depends(sql) == ["bronze.customers", "bronze.orders"]
 
     def test_empty(self):
@@ -59,8 +79,18 @@ class TestParseDepends:
 # ===========================================================================
 
 
-def test_parse_assertions():
+def test_parse_assertions_legacy():
     sql = "-- assert: row_count > 0\n-- assert: unique(id)\nSELECT 1"
+    assert parse_assertions(sql) == ["row_count > 0", "unique(id)"]
+
+
+def test_parse_assertions_at_syntax():
+    sql = "@assert row_count > 0\n@assert unique(id)\nSELECT 1"
+    assert parse_assertions(sql) == ["row_count > 0", "unique(id)"]
+
+
+def test_parse_assertions_at_syntax_parens():
+    sql = "@assert(row_count > 0)\n@assert(unique(id))\nSELECT 1"
     assert parse_assertions(sql) == ["row_count > 0", "unique(id)"]
 
 
@@ -69,8 +99,23 @@ def test_parse_description():
     assert parse_description(sql) == "Customer dimension table"
 
 
+def test_parse_description_at_syntax():
+    sql = "@description Customer dimension table\nSELECT 1"
+    assert parse_description(sql) == "Customer dimension table"
+
+
+def test_parse_description_at_syntax_parens():
+    sql = "@description(Customer dimension table)\nSELECT 1"
+    assert parse_description(sql) == "Customer dimension table"
+
+
 def test_parse_column_docs():
     sql = "-- col: id: Primary key\n-- col: name: Customer name\nSELECT 1"
+    assert parse_column_docs(sql) == {"id": "Primary key", "name": "Customer name"}
+
+
+def test_parse_column_docs_at_syntax():
+    sql = "@col id: Primary key\n@col name: Customer name\nSELECT 1"
     assert parse_column_docs(sql) == {"id": "Primary key", "name": "Customer name"}
 
 
@@ -95,6 +140,25 @@ def test_strip_config_comments():
     assert "-- description:" not in result
     assert "-- col:" not in result
     assert "-- assert:" not in result
+    assert "SELECT id FROM bronze.customers" in result
+
+
+def test_strip_config_comments_at_syntax():
+    sql = textwrap.dedent("""\
+        @config(materialized=table, schema=silver)
+        @depends_on(bronze.customers)
+        @description(Test model)
+        @col(id: Primary key)
+        @assert(row_count > 0)
+
+        SELECT id FROM bronze.customers
+    """)
+    result = strip_config_comments(sql)
+    assert "@config" not in result
+    assert "@depends_on" not in result
+    assert "@description" not in result
+    assert "@col" not in result
+    assert "@assert" not in result
     assert "SELECT id FROM bronze.customers" in result
 
 

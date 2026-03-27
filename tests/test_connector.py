@@ -101,7 +101,7 @@ def test_setup_rejects_bad_schema(tmp_path):
 
 
 def test_list_connectors():
-    """All 10 built-in connectors should be registered."""
+    """All 11 built-in connectors should be registered."""
     available = list_connectors()
     names = {c["name"] for c in available}
     assert "postgres" in names
@@ -114,7 +114,8 @@ def test_list_connectors():
     assert "hubspot" in names
     assert "shopify" in names
     assert "webhook" in names
-    assert len(names) >= 10
+    assert "databricks" in names
+    assert len(names) >= 11
 
 
 def test_get_connector():
@@ -925,3 +926,193 @@ class TestRESTAPIHardening:
         connector = get_connector("rest_api")
         param_names = [p.name for p in connector.params]
         assert "since_param" in param_names
+
+    def test_response_format_param_exists(self):
+        """REST API connector should have response_format param."""
+        connector = get_connector("rest_api")
+        param_names = [p.name for p in connector.params]
+        assert "response_format" in param_names
+
+    def test_generated_script_parquet_format(self):
+        """With response_format=parquet, script should use read_parquet."""
+        connector = get_connector("rest_api")
+        script = connector.generate_script(
+            {"url": "https://api.example.com/data.parquet", "table_name": "data",
+             "response_format": "parquet"},
+            ["data"],
+            "landing",
+        )
+        assert "read_parquet" in script
+        assert "_download_with_retry" in script
+        assert "PARQUET" in script
+        assert ".parquet" in script
+        # Should NOT contain JSON-specific logic
+        assert "json_path" not in script
+        assert "_extract" not in script
+
+    def test_generated_script_csv_format(self):
+        """With response_format=csv, script should use read_csv."""
+        connector = get_connector("rest_api")
+        script = connector.generate_script(
+            {"url": "https://api.example.com/export.csv", "table_name": "export",
+             "response_format": "csv"},
+            ["export"],
+            "landing",
+        )
+        assert "read_csv" in script
+        assert "_download_with_retry" in script
+        assert "CSV" in script
+        assert ".csv" in script
+
+    def test_generated_script_json_format_default(self):
+        """Default (json) format should still use read_json and _extract."""
+        connector = get_connector("rest_api")
+        script = connector.generate_script(
+            {"url": "https://api.example.com/data", "table_name": "data"},
+            ["data"],
+            "landing",
+        )
+        assert "read_json" in script
+        assert "_fetch_with_retry" in script
+        assert "_extract" in script
+
+    def test_binary_format_has_retry(self):
+        """Binary format scripts should include retry logic."""
+        connector = get_connector("rest_api")
+        script = connector.generate_script(
+            {"url": "https://api.example.com/data.parquet", "table_name": "data",
+             "response_format": "parquet"},
+            ["data"],
+            "landing",
+        )
+        assert "max_retries" in script
+        assert "429" in script
+        assert "OSError" in script or "TimeoutError" in script
+
+
+# ---------------------------------------------------------------------------
+# Databricks connector tests
+# ---------------------------------------------------------------------------
+
+
+def test_databricks_connector_exists():
+    """Databricks connector should be registered."""
+    connector = get_connector("databricks")
+    assert connector.name == "databricks"
+    assert connector.display_name == "Databricks"
+
+
+def test_databricks_connector_params():
+    """Databricks connector should have expected params."""
+    connector = get_connector("databricks")
+    param_names = [p.name for p in connector.params]
+    assert "host" in param_names
+    assert "http_path" in param_names
+    assert "access_token" in param_names
+    assert "catalog" in param_names
+    assert "schema" in param_names
+    assert "cdc_column" in param_names
+
+
+def test_databricks_connector_test_missing_params():
+    """Databricks test_connection should fail with missing params."""
+    connector = get_connector("databricks")
+    result = connector.test_connection({})
+    assert result["success"] is False
+    assert "required" in result["error"]
+
+
+def test_databricks_connector_generate_script():
+    """Databricks connector should generate a valid ingest script."""
+    connector = get_connector("databricks")
+    script = connector.generate_script(
+        {
+            "host": "adb-123.4.azuredatabricks.net",
+            "http_path": "/sql/1.0/warehouses/abc123",
+            "access_token": "${DATABRICKS_TOKEN}",
+            "catalog": "main",
+            "schema": "analytics",
+        },
+        ["customers", "orders"],
+        "landing",
+    )
+    assert "adb-123.4.azuredatabricks.net" in script
+    assert "/sql/1.0/warehouses/abc123" in script
+    assert "DATABRICKS_TOKEN" in script
+    assert '"customers"' in script
+    assert '"orders"' in script
+    assert "main" in script
+    assert "analytics" in script
+    assert "_connect_with_retry" in script
+    assert "arrow" in script.lower()
+
+
+def test_databricks_connector_generate_script_incremental():
+    """With cdc_column, Databricks script should use high-watermark sync."""
+    connector = get_connector("databricks")
+    script = connector.generate_script(
+        {
+            "host": "adb-123.4.azuredatabricks.net",
+            "http_path": "/sql/1.0/warehouses/abc123",
+            "access_token": "${DATABRICKS_TOKEN}",
+            "catalog": "main",
+            "schema": "analytics",
+            "cdc_column": "updated_at",
+        },
+        ["customers"],
+        "landing",
+    )
+    assert "Incremental sync" in script
+    assert "get_watermark" in script
+    assert "update_watermark" in script
+    assert "updated_at" in script
+
+
+def test_databricks_connector_generate_script_has_retry():
+    """Generated Databricks script should include retry logic."""
+    connector = get_connector("databricks")
+    script = connector.generate_script(
+        {
+            "host": "adb-123.4.azuredatabricks.net",
+            "http_path": "/sql/1.0/warehouses/abc123",
+            "access_token": "${DATABRICKS_TOKEN}",
+        },
+        ["data"],
+        "landing",
+    )
+    assert "_connect_with_retry" in script
+    assert "max_retries" in script
+    assert "time.sleep" in script
+
+
+def test_databricks_connector_generate_script_has_error_handling():
+    """Generated Databricks script should handle per-table errors."""
+    connector = get_connector("databricks")
+    script = connector.generate_script(
+        {
+            "host": "adb-123.4.azuredatabricks.net",
+            "http_path": "/sql/1.0/warehouses/abc123",
+            "access_token": "${DATABRICKS_TOKEN}",
+        },
+        ["users", "orders"],
+        "landing",
+    )
+    assert "errors = []" in script
+    assert "errors.append" in script
+    assert "ERROR syncing" in script
+
+
+def test_databricks_connector_rejects_bad_cdc_column():
+    """cdc_column with injection characters should be rejected."""
+    connector = get_connector("databricks")
+    with pytest.raises(ValueError, match="Invalid"):
+        connector.generate_script(
+            {
+                "host": "h",
+                "http_path": "/p",
+                "access_token": "t",
+                "cdc_column": "col; DROP TABLE--",
+            },
+            ["users"],
+            "landing",
+        )

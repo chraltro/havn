@@ -20,15 +20,49 @@ logger = logging.getLogger("havn.sql_analysis")
 # Schemas that are never real upstream dependencies
 SKIP_SCHEMAS = frozenset({"information_schema", "_dp_internal", "pg_catalog", "sys"})
 
-# --- Config comment patterns (regex is appropriate here — these are line comments, not SQL) ---
+# --- Config directive patterns ---
+# Primary syntax: bare @decorators on their own lines, before the SQL.
+#   @config materialized=table, schema=silver
+#   @config(materialized=table, schema=silver)
+#   @depends_on bronze.customers, bronze.orders
+#
+# Legacy syntax (still supported): SQL comments with "-- config:" etc.
 
-CONFIG_PATTERN = re.compile(r"^--\s*config:\s*(.+)$", re.MULTILINE)
-DEPENDS_PATTERN = re.compile(r"^--\s*depends_on:\s*(.+)$", re.MULTILINE)
-DESCRIPTION_PATTERN = re.compile(r"^--\s*description:\s*(.+)$", re.MULTILINE)
-COL_PATTERN = re.compile(r"^--\s*col:\s*(\w+):\s*(.+)$", re.MULTILINE)
-ASSERT_PATTERN = re.compile(r"^--\s*assert:\s*(.+)$", re.MULTILINE)
+# Two sub-patterns per directive:
+# 1. Parenthesised: @config(...)  — content is inside parens
+# 2. Space/colon:   @config ...   — content follows directly
+_CONFIG_PAREN = re.compile(r"^@config\s*\(\s*(.+?)\s*\)$", re.MULTILINE)
+_CONFIG_SPACE = re.compile(r"^@config\s*:?\s+(.+)$", re.MULTILINE)
+_DEPENDS_PAREN = re.compile(r"^@depends_on\s*\(\s*(.+?)\s*\)$", re.MULTILINE)
+_DEPENDS_SPACE = re.compile(r"^@depends_on\s*:?\s+(.+)$", re.MULTILINE)
+_DESCRIPTION_PAREN = re.compile(r"^@description\s*\(\s*(.+?)\s*\)$", re.MULTILINE)
+_DESCRIPTION_SPACE = re.compile(r"^@description\s*:?\s+(.+)$", re.MULTILINE)
+_COL_PAREN = re.compile(r"^@col\s*\(\s*(\w+):\s*(.+?)\s*\)$", re.MULTILINE)
+_COL_SPACE = re.compile(r"^@col\s*:?\s+(\w+):\s*(.+)$", re.MULTILINE)
+_ASSERT_PAREN = re.compile(r"^@assert\s*\(\s*(.+?)\s*\)$", re.MULTILINE)
+_ASSERT_SPACE = re.compile(r"^@assert\s*:?\s+(.+)$", re.MULTILINE)
+
+# Combined for use in parse functions (try paren first, then space)
+CONFIG_PATTERN = (_CONFIG_PAREN, _CONFIG_SPACE)
+DEPENDS_PATTERN = (_DEPENDS_PAREN, _DEPENDS_SPACE)
+DESCRIPTION_PATTERN = (_DESCRIPTION_PAREN, _DESCRIPTION_SPACE)
+COL_PATTERN = (_COL_PAREN, _COL_SPACE)
+ASSERT_PATTERN = (_ASSERT_PAREN, _ASSERT_SPACE)
+
+# Legacy "-- config:" syntax (still supported for backward compatibility)
+_LEGACY_CONFIG_PATTERN = re.compile(r"^--\s*config:\s*(.+)$", re.MULTILINE)
+_LEGACY_DEPENDS_PATTERN = re.compile(r"^--\s*depends_on:\s*(.+)$", re.MULTILINE)
+_LEGACY_DESCRIPTION_PATTERN = re.compile(r"^--\s*description:\s*(.+)$", re.MULTILINE)
+_LEGACY_COL_PATTERN = re.compile(r"^--\s*col:\s*(\w+):\s*(.+)$", re.MULTILINE)
+_LEGACY_ASSERT_PATTERN = re.compile(r"^--\s*assert:\s*(.+)$", re.MULTILINE)
 
 _META_PREFIXES = (
+    "@config",
+    "@depends_on",
+    "@description",
+    "@col",
+    "@assert",
+    # Legacy
     "-- config:",
     "-- depends_on:",
     "-- description:",
@@ -37,9 +71,36 @@ _META_PREFIXES = (
 )
 
 
+def _search_patterns(patterns: tuple[re.Pattern, ...], sql: str) -> re.Match | None:
+    """Try multiple patterns in order, returning the first match."""
+    for p in patterns:
+        m = p.search(sql)
+        if m:
+            return m
+    return None
+
+
+def _finditer_patterns(patterns: tuple[re.Pattern, ...], sql: str) -> list[re.Match]:
+    """Collect all matches from multiple patterns."""
+    matches = []
+    for p in patterns:
+        matches.extend(p.finditer(sql))
+    return matches
+
+
 def parse_config(sql: str) -> dict[str, str]:
-    """Parse ``-- config: key=value, key=value`` from SQL header."""
-    match = CONFIG_PATTERN.search(sql)
+    """Parse config from SQL header.
+
+    Primary syntax::
+
+        @config materialized=table, schema=silver
+        @config(materialized=table, schema=silver)
+
+    Legacy syntax (still supported)::
+
+        -- config: materialized=table, schema=silver
+    """
+    match = _search_patterns(CONFIG_PATTERN, sql) or _LEGACY_CONFIG_PATTERN.search(sql)
     if not match:
         return {}
     config: dict[str, str] = {}
@@ -52,27 +113,71 @@ def parse_config(sql: str) -> dict[str, str]:
 
 
 def parse_depends(sql: str) -> list[str]:
-    """Parse ``-- depends_on: schema.table, schema.table`` from SQL header."""
-    match = DEPENDS_PATTERN.search(sql)
+    """Parse dependencies from SQL header.
+
+    Primary syntax::
+
+        @depends_on bronze.customers, bronze.orders
+        @depends_on(bronze.customers, bronze.orders)
+
+    Legacy syntax (still supported)::
+
+        -- depends_on: bronze.customers, bronze.orders
+    """
+    match = _search_patterns(DEPENDS_PATTERN, sql) or _LEGACY_DEPENDS_PATTERN.search(sql)
     if not match:
         return []
     return [dep.strip() for dep in match.group(1).split(",") if dep.strip()]
 
 
 def parse_assertions(sql: str) -> list[str]:
-    """Parse ``-- assert: expression`` lines from SQL header."""
-    return [m.group(1).strip() for m in ASSERT_PATTERN.finditer(sql)]
+    """Parse assertion expressions from SQL header.
+
+    Primary syntax::
+
+        @assert row_count > 0
+        @assert(unique(id))
+
+    Legacy syntax (still supported)::
+
+        -- assert: row_count > 0
+    """
+    results = [m.group(1).strip() for m in _finditer_patterns(ASSERT_PATTERN, sql)]
+    results.extend(m.group(1).strip() for m in _LEGACY_ASSERT_PATTERN.finditer(sql))
+    return results
 
 
 def parse_description(sql: str) -> str:
-    """Parse ``-- description: text`` from SQL header."""
-    match = DESCRIPTION_PATTERN.search(sql)
+    """Parse description from SQL header.
+
+    Primary syntax::
+
+        @description Customer dimension table
+        @description(Customer dimension table)
+
+    Legacy syntax (still supported)::
+
+        -- description: Customer dimension table
+    """
+    match = _search_patterns(DESCRIPTION_PATTERN, sql) or _LEGACY_DESCRIPTION_PATTERN.search(sql)
     return match.group(1).strip() if match else ""
 
 
 def parse_column_docs(sql: str) -> dict[str, str]:
-    """Parse ``-- col: name: description`` lines from SQL header."""
-    return {m.group(1): m.group(2).strip() for m in COL_PATTERN.finditer(sql)}
+    """Parse column documentation from SQL header.
+
+    Primary syntax::
+
+        @col id: Primary key
+        @col(id: Primary key)
+
+    Legacy syntax (still supported)::
+
+        -- col: id: Primary key
+    """
+    docs = {m.group(1): m.group(2).strip() for m in _finditer_patterns(COL_PATTERN, sql)}
+    docs.update({m.group(1): m.group(2).strip() for m in _LEGACY_COL_PATTERN.finditer(sql)})
+    return docs
 
 
 def strip_config_comments(sql: str) -> str:

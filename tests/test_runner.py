@@ -6,7 +6,7 @@ from pathlib import Path
 import duckdb
 
 from havn.engine.database import ensure_meta_table
-from havn.engine.runner import run_script, run_scripts_in_dir
+from havn.engine.runner import _extract_row_count, run_script, run_scripts_in_dir
 
 
 def test_run_script_success(tmp_path):
@@ -153,3 +153,31 @@ def test_run_scripts_in_dir_discovers_notebooks(tmp_path):
     assert len(results) == 2
     assert all(r["status"] == "success" for r in results)
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# _extract_row_count tests
+# ---------------------------------------------------------------------------
+
+
+def test_extract_row_count_loaded():
+    assert _extract_row_count("Loaded 42 rows into landing.data") == 42
+
+
+def test_extract_row_count_got_records():
+    assert _extract_row_count("Got 15 records") == 15
+
+
+def test_extract_row_count_does_not_match_bytes():
+    """'Downloaded X bytes' should NOT be counted as rows."""
+    output = "Downloaded 1048576 bytes\nLoaded 842 rows into landing.data"
+    assert _extract_row_count(output) == 842
+
+
+def test_extract_row_count_bytes_only():
+    """If output only mentions bytes, row count should be 0."""
+    assert _extract_row_count("Downloaded 999999 bytes") == 0
+
+
+def test_extract_row_count_empty():
+    assert _extract_row_count("") == 0

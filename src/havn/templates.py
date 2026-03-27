@@ -192,11 +192,11 @@ SAMPLE_INGEST_NOTEBOOK = json.dumps({
 # ---------------------------------------------------------------------------
 
 SAMPLE_BRONZE_SQL = """\
--- config: materialized=table, schema=bronze
--- depends_on: landing.earthquakes
--- description: Cleaned earthquake records with proper types and readable column names
--- assert: row_count > 0
--- assert: no_nulls(event_id)
+@config materialized=table, schema=bronze
+@depends_on landing.earthquakes
+@description Cleaned earthquake records with proper types and readable column names
+@assert row_count > 0
+@assert no_nulls(event_id)
 
 SELECT
     id AS event_id,
@@ -218,13 +218,13 @@ WHERE mag IS NOT NULL
 """
 
 SAMPLE_SILVER_EVENTS_SQL = """\
--- config: materialized=table, schema=silver, incremental_strategy=delete+insert, unique_key=event_id
--- depends_on: bronze.earthquakes
--- description: Enriched earthquake events with magnitude class, region, and depth classification
--- assert: row_count > 0
--- assert: unique(event_id)
--- assert: accepted_values(magnitude_class, ['Minor', 'Light', 'Moderate', 'Strong', 'Major', 'Great'])
--- assert: accepted_values(depth_class, ['Shallow', 'Intermediate', 'Deep'])
+@config materialized=table, schema=silver, incremental_strategy=delete+insert, unique_key=event_id
+@depends_on bronze.earthquakes
+@description Enriched earthquake events with magnitude class, region, and depth classification
+@assert row_count > 0
+@assert unique(event_id)
+@assert accepted_values(magnitude_class, ['Minor', 'Light', 'Moderate', 'Strong', 'Major', 'Great'])
+@assert accepted_values(depth_class, ['Shallow', 'Intermediate', 'Deep'])
 
 SELECT
     event_id,
@@ -255,12 +255,12 @@ FROM bronze.earthquakes
 """
 
 SAMPLE_SILVER_DAILY_SQL = """\
--- config: materialized=table, schema=silver
--- depends_on: silver.earthquake_events
--- description: Daily earthquake aggregates for dashboard and trend analysis
--- assert: row_count > 0
--- assert: unique(event_date)
--- assert: total_events > 0
+@config materialized=table, schema=silver
+@depends_on silver.earthquake_events
+@description Daily earthquake aggregates for dashboard and trend analysis
+@assert row_count > 0
+@assert unique(event_date)
+@assert total_events > 0
 
 SELECT
     event_date,
@@ -289,14 +289,14 @@ ORDER BY event_date DESC
 """
 
 SAMPLE_GOLD_SUMMARY_SQL = """\
--- config: materialized=table, schema=gold
--- depends_on: silver.earthquake_events, silver.earthquake_daily
--- description: Daily earthquake dashboard with magnitude class breakdown
--- col: event_date: Calendar date
--- col: total_events: Number of earthquakes recorded
--- col: significant_count: Events with magnitude >= 6.0 (Strong, Major, Great)
--- assert: row_count > 0
--- assert: unique(event_date)
+@config materialized=table, schema=gold
+@depends_on silver.earthquake_events, silver.earthquake_daily
+@description Daily earthquake dashboard with magnitude class breakdown
+@col event_date: Calendar date
+@col total_events: Number of earthquakes recorded
+@col significant_count: Events with magnitude >= 6.0 (Strong, Major, Great)
+@assert row_count > 0
+@assert unique(event_date)
 
 SELECT
     d.event_date,
@@ -340,14 +340,14 @@ ORDER BY d.event_date DESC
 """
 
 SAMPLE_GOLD_TOP_SQL = """\
--- config: materialized=table, schema=gold
--- depends_on: silver.earthquake_events
--- description: Significant earthquakes (M4.5+) ranked by magnitude
--- col: event_id: USGS earthquake identifier
--- col: magnitude: Richter scale magnitude
--- col: magnitude_class: Human-readable severity (Moderate/Strong/Major/Great)
--- assert: row_count > 0
--- assert: no_nulls(event_id)
+@config materialized=table, schema=gold
+@depends_on silver.earthquake_events
+@description Significant earthquakes (M4.5+) ranked by magnitude
+@col event_id: USGS earthquake identifier
+@col magnitude: Richter scale magnitude
+@col magnitude_class: Human-readable severity (Moderate/Strong/Major/Great)
+@assert row_count > 0
+@assert no_nulls(event_id)
 
 SELECT
     event_id,
@@ -369,13 +369,13 @@ ORDER BY magnitude DESC, event_time DESC
 """
 
 SAMPLE_GOLD_REGIONS_SQL = """\
--- config: materialized=table, schema=gold
--- depends_on: silver.earthquake_events
--- description: Regional seismic activity summary for risk assessment
--- col: region: Geographic region extracted from USGS place description
--- col: significant_events: Events with magnitude >= 5.0
--- col: avg_distance_to_ring_of_fire_km: Average distance from the Pacific Ring of Fire (Tokyo reference point)
--- assert: row_count > 0
+@config materialized=table, schema=gold
+@depends_on silver.earthquake_events
+@description Regional seismic activity summary for risk assessment
+@col region: Geographic region extracted from USGS place description
+@col significant_events: Events with magnitude >= 5.0
+@col avg_distance_to_ring_of_fire_km: Average distance from the Pacific Ring of Fire (Tokyo reference point)
+@assert row_count > 0
 
 SELECT
     region,
@@ -629,11 +629,11 @@ SAMPLE_EXPLORE_NOTEBOOK = json.dumps({
 CURSORRULES_TEMPLATE = """\
 You are working on a havn data platform project. havn uses DuckDB + plain SQL transforms + Python ingest/export. All data in a single warehouse.duckdb file.
 
-# SQL models go in transform/ with comment-based config:
-# -- config: materialized=table, schema=silver
-# -- depends_on: bronze.customers
+# SQL models go in transform/ with @decorator config:
+# @config materialized=table, schema=silver
+# @depends_on bronze.customers
 # Folder name = default schema. No Jinja — plain SQL only.
-# Incremental: -- config: materialized=table, schema=silver, incremental_strategy=delete+insert, unique_key=id
+# Incremental: @config materialized=table, schema=silver, incremental_strategy=delete+insert, unique_key=id
 
 # Python SQL macros go in macros/ with @macro decorator:
 # from havn import macro
@@ -672,11 +672,11 @@ COPILOT_INSTRUCTIONS_TEMPLATE = """\
 
 havn uses DuckDB + plain SQL transforms + Python ingest/export. All data in a single `warehouse.duckdb` file. Data in safe waters.
 
-### SQL models go in `transform/` with comment-based config:
+### SQL models go in `transform/` with @decorator config:
 
 ```sql
--- config: materialized=table, schema=silver
--- depends_on: bronze.customers
+@config materialized=table, schema=silver
+@depends_on bronze.customers
 SELECT * FROM bronze.customers WHERE active = true
 ```
 
@@ -684,7 +684,7 @@ Folder name = default schema. No Jinja — plain SQL only. Use Python macros for
 
 ### Incremental models:
 ```sql
--- config: materialized=table, schema=silver, incremental_strategy=delete+insert, unique_key=id
+@config materialized=table, schema=silver, incremental_strategy=delete+insert, unique_key=id
 ```
 
 ### Python SQL macros go in `macros/` with `@macro` decorator:
@@ -769,14 +769,14 @@ warehouse.duckdb  The database (single file)
 ## SQL Model Convention
 
 ```sql
--- config: materialized=table, schema=silver
--- depends_on: bronze.customers, bronze.orders
--- description: Customer order summary with aggregates
--- col: customer_id: Unique customer identifier
--- col: order_count: Total orders including cancelled
--- assert: row_count > 0
--- assert: unique(customer_id)
--- assert: no_nulls(customer_id)
+@config materialized=table, schema=silver
+@depends_on bronze.customers, bronze.orders
+@description Customer order summary with aggregates
+@col customer_id: Unique customer identifier
+@col order_count: Total orders including cancelled
+@assert row_count > 0
+@assert unique(customer_id)
+@assert no_nulls(customer_id)
 
 SELECT c.customer_id, c.name, COUNT(o.order_id) AS order_count
 FROM bronze.customers c
@@ -784,11 +784,11 @@ LEFT JOIN bronze.orders o ON c.customer_id = o.customer_id
 GROUP BY 1, 2
 ```
 
-- `-- config:` sets materialization (view/table) and schema
-- `-- depends_on:` declares upstream dependencies for DAG ordering
-- `-- description:` documents what the model does
-- `-- col: name: desc` documents individual columns
-- `-- assert:` defines data quality checks (row_count, unique, no_nulls, accepted_values)
+- `@config` sets materialization (view/table) and schema
+- `@depends_on` declares upstream dependencies for DAG ordering
+- `@description` documents what the model does
+- `@col name: desc` documents individual columns
+- `@assert` defines data quality checks (row_count, unique, no_nulls, accepted_values)
 - Folder name = default schema (e.g., transform/bronze/ -> schema=bronze)
 - No Jinja, no templating — plain SQL only (use Python macros for reusable logic)
 
@@ -796,7 +796,7 @@ GROUP BY 1, 2
 
 For models that should only process new/changed rows:
 ```sql
--- config: materialized=table, schema=silver, incremental_strategy=delete+insert, unique_key=event_id
+@config materialized=table, schema=silver, incremental_strategy=delete+insert, unique_key=event_id
 ```
 
 Strategies: `delete+insert` (default), `append`, `merge` (true upsert), `partition_by`.
@@ -842,10 +842,10 @@ db.execute("CREATE OR REPLACE TABLE landing.data AS SELECT * FROM ...")
 
 **Inline assertions** (in SQL models):
 ```sql
--- assert: row_count > 0
--- assert: unique(order_id)
--- assert: no_nulls(customer_id)
--- assert: accepted_values(status, ['pending', 'shipped', 'delivered'])
+@assert row_count > 0
+@assert unique(order_id)
+@assert no_nulls(customer_id)
+@assert accepted_values(status, ['pending', 'shipped', 'delivered'])
 ```
 
 **Contracts** (in contracts/*.yml):

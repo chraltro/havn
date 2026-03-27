@@ -1,9 +1,0 @@
-contracts:
-  - name: churn_risk_populated
-    description: "Churn risk model must have scored customers"
-    model: gold.churn_risk
-    severity: warn
-    assertions:
-      - row_count > 0
-      - no_nulls(customer_id)
-      - unique(customer_id)

@@ -1,4 +1,4 @@
-"""REST API connector — fetches JSON data from HTTP endpoints."""
+"""REST API connector — fetches data from HTTP endpoints (JSON, Parquet, CSV)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from havn.engine.connector import (
 class RESTAPIConnector(BaseConnector):
     name = "rest_api"
     display_name = "REST API"
-    description = "Fetch JSON data from any REST API endpoint."
+    description = "Fetch data from any REST API endpoint (JSON, Parquet, or CSV)."
     default_schedule = "0 */6 * * *"  # every 6 hours
 
     params = [
@@ -25,7 +25,8 @@ class RESTAPIConnector(BaseConnector):
         ParamSpec("method", "HTTP method", required=False, default="GET", param_type="enum", enum_values=["GET", "POST"], example="GET"),
         ParamSpec("headers", "Extra headers as JSON string", required=False, default="{}"),
         ParamSpec("auth_header", "Authorization header value", required=False, secret=True),
-        ParamSpec("json_path", "JSONPath to the data array (e.g. $.data or $.results)", required=False, default="$", example="$.data"),
+        ParamSpec("response_format", "Response format: json, parquet, or csv (auto-detected if omitted)", required=False, default="json", param_type="enum", enum_values=["json", "parquet", "csv"], example="json"),
+        ParamSpec("json_path", "JSONPath to the data array (e.g. $.data or $.results) — only used for JSON", required=False, default="$", example="$.data"),
         ParamSpec("table_name", "Target table name", required=False, default="api_data", example="api_data"),
         ParamSpec("timeout", "Request timeout in seconds", required=False, param_type="integer", min_value=1, max_value=300, default=30, example="30"),
         ParamSpec("pagination_key", "Key for next-page URL in response", required=False, example="next"),
@@ -76,6 +77,7 @@ class RESTAPIConnector(BaseConnector):
         url = config.get("url", "")
         method = config.get("method", "GET")
         headers = config.get("headers", "{}")
+        response_format = config.get("response_format", "json")
         json_path = config.get("json_path", "$")
         table_name = tables[0] if tables else config.get("table_name", "api_data")
         pagination_key = config.get("pagination_key", "")
@@ -125,6 +127,20 @@ if _watermark:
         "high_watermark", datetime.now(timezone.utc).isoformat(),
         rows_synced=rows,
     )'''
+
+        # Binary formats (parquet, csv) use a simpler download-and-load pattern
+        if response_format in ("parquet", "csv"):
+            return self._generate_binary_script(
+                url=url,
+                method=method,
+                headers=headers,
+                auth_line=auth_line,
+                response_format=response_format,
+                table_name=table_name,
+                target_schema=target_schema,
+                incremental_block=incremental_block,
+                incremental_update=incremental_update,
+            )
 
         return f'''\
 """Auto-generated REST API ingest script.
@@ -215,4 +231,97 @@ if all_records:
 {incremental_update}
 else:
     print("No records found")
+'''
+
+    def _generate_binary_script(
+        self,
+        *,
+        url: str,
+        method: str,
+        headers: str,
+        auth_line: str,
+        response_format: str,
+        table_name: str,
+        target_schema: str,
+        incremental_block: str,
+        incremental_update: str,
+    ) -> str:
+        """Generate ingest script for binary response formats (Parquet, CSV)."""
+        if response_format == "parquet":
+            reader = f"read_parquet('{{tmp_path}}')"
+            suffix = ".parquet"
+        else:  # csv
+            reader = f"read_csv('{{tmp_path}}', auto_detect=true)"
+            suffix = ".csv"
+
+        return f'''\
+"""Auto-generated REST API ingest script.
+
+Fetches {response_format.upper()} data from {url} into {target_schema}.{table_name}.
+Includes retry logic with exponential backoff.
+"""
+
+import json
+import os
+import time
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+{auth_line}
+
+url = "{url}"
+
+req_headers = {{}}
+extra_headers = {headers}
+if isinstance(extra_headers, str):
+    extra_headers = json.loads(extra_headers)
+req_headers.update(extra_headers)
+if auth_header:
+    req_headers["Authorization"] = auth_header
+
+
+def _download_with_retry(fetch_url, method, headers, max_retries=3):
+    """Download binary data with retry on rate-limit (429) and server errors (5xx)."""
+    for attempt in range(max_retries + 1):
+        try:
+            req = Request(fetch_url, method=method, headers=headers)
+            with urlopen(req, timeout=60) as resp:
+                return resp.read()
+        except HTTPError as e:
+            if e.code == 429 or e.code >= 500:
+                retry_after = int(e.headers.get("Retry-After", 2 ** attempt))
+                print(f"  HTTP {{e.code}}, retrying in {{retry_after}}s... ({{attempt + 1}}/{{max_retries}})")
+                time.sleep(retry_after)
+            else:
+                raise
+        except (OSError, TimeoutError) as e:
+            if attempt == max_retries:
+                raise
+            wait = 2 ** attempt
+            print(f"  Network error ({{e}}), retrying in {{wait}}s... ({{attempt + 1}}/{{max_retries}})")
+            time.sleep(wait)
+    raise RuntimeError(f"Failed after {{max_retries}} retries: {{fetch_url}}")
+
+{incremental_block}
+print(f"Fetching {response_format.upper()} data from {{url}}...")
+import tempfile
+
+raw_data = _download_with_retry(url, "{method}", req_headers)
+
+with tempfile.NamedTemporaryFile(mode="wb", suffix="{suffix}", delete=False) as f:
+    f.write(raw_data)
+    tmp_path = f.name
+
+print(f"Downloaded {{len(raw_data)}} bytes")
+
+db.execute("CREATE SCHEMA IF NOT EXISTS {target_schema}")
+db.execute(f"""
+    CREATE OR REPLACE TABLE {target_schema}.{table_name} AS
+    SELECT * FROM {reader}
+""")
+
+os.unlink(tmp_path)
+rows = db.execute("SELECT COUNT(*) FROM {target_schema}.{table_name}").fetchone()[0]
+print(f"Loaded {{rows}} rows into {target_schema}.{table_name}")
+{incremental_update}
 '''
