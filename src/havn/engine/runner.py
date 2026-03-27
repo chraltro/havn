@@ -365,12 +365,15 @@ def _extract_row_count(output: str) -> int:
     - "Exported 100 rows"
     - "42 rows"
     - "Got 15 earthquakes"
+
+    Excludes byte counts (e.g. "Downloaded 1048576 bytes").
     """
     import re
     # Look for patterns: "<number> rows/records/entries" or "Loaded/Exported/Inserted <number>"
+    # Exclude byte counts by requiring row-like units or specific verbs as whole words
     patterns = [
-        r"(?:loaded|exported|inserted|imported|fetched|got|wrote)\s+(\d+)",
-        r"(\d+)\s+(?:rows?|records?|entries|earthquakes|items?)",
+        r"(?<!\w)(?:loaded|exported|inserted|imported|fetched|got|wrote)\s+(\d+)",
+        r"(\d+)\s+(?:rows?|records?|entries|earthquakes|items?)\b",
     ]
     total = 0
     for pattern in patterns:

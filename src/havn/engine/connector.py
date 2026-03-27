@@ -189,8 +189,15 @@ def register_connector(cls: type[BaseConnector]) -> type[BaseConnector]:
     return cls
 
 
+def _ensure_connectors_loaded() -> None:
+    """Ensure built-in connectors are registered (lazy import)."""
+    if not CONNECTORS:
+        import havn.connectors  # noqa: F401
+
+
 def get_connector(name: str) -> BaseConnector:
     """Instantiate a connector by name."""
+    _ensure_connectors_loaded()
     if name not in CONNECTORS:
         raise ValueError(
             f"Unknown connector: {name!r}. "
@@ -201,6 +208,7 @@ def get_connector(name: str) -> BaseConnector:
 
 def list_connectors() -> list[dict[str, Any]]:
     """Return metadata for every registered connector."""
+    _ensure_connectors_loaded()
     results = []
     for name in sorted(CONNECTORS):
         cls = CONNECTORS[name]
@@ -323,18 +331,12 @@ def setup_connector(
         sanitized_tables.append(safe)
     tables = sanitized_tables
 
-    # 4. Generate ingest script
-    script_content = connector.generate_script(config, tables, target_schema)
+    # 4. Separate secrets BEFORE generating script so the script gets
+    #    env-var references (${CONN_NAME_PARAM}) instead of raw values.
     safe_name = _sanitize_name(connection_name)
-    script_filename = f"connector_{safe_name}.py"
-    ingest_dir = project_dir / "ingest"
-    ingest_dir.mkdir(parents=True, exist_ok=True)
-    script_path = ingest_dir / script_filename
-    script_path.write_text(script_content)
-
-    # 5. Separate secrets from non-secret params
     secret_params = {}
     yml_params: dict[str, Any] = {"type": connector_type}
+    script_config = dict(config)
     for pspec in connector.params:
         val = config.get(pspec.name)
         if val is None:
@@ -343,8 +345,17 @@ def setup_connector(
             env_key = f"{safe_name.upper()}_{pspec.name.upper()}"
             secret_params[env_key] = str(val)
             yml_params[pspec.name] = f"${{{env_key}}}"
+            script_config[pspec.name] = f"${{{env_key}}}"
         else:
             yml_params[pspec.name] = val
+
+    # 5. Generate ingest script (secrets are now ${ENV_VAR} references)
+    script_content = connector.generate_script(script_config, tables, target_schema)
+    script_filename = f"connector_{safe_name}.py"
+    ingest_dir = project_dir / "ingest"
+    ingest_dir.mkdir(parents=True, exist_ok=True)
+    script_path = ingest_dir / script_filename
+    script_path.write_text(script_content)
 
     # 6. Write secrets to .env
     if secret_params:
@@ -459,20 +470,22 @@ def regenerate_connector(
     if config_overrides:
         config.update(config_overrides)
 
-    # Resolve env-var references (${VAR} → look up in .env)
+    # Resolve env-var references for discovery (needs real values to connect),
+    # but keep ${...} references for script generation.
     from havn.engine.secrets import load_env
 
     env_vars = load_env(project_dir)
-    for key, val in list(config.items()):
+    resolved_config: dict[str, Any] = {}
+    for key, val in config.items():
         if isinstance(val, str) and val.startswith("${") and val.endswith("}"):
             env_key = val[2:-1]
-            resolved = env_vars.get(env_key)
-            if resolved:
-                config[key] = resolved
+            resolved_config[key] = env_vars.get(env_key, val)
+        else:
+            resolved_config[key] = val
 
-    # Discover resources for regeneration
+    # Discover resources for regeneration (uses resolved secrets)
     try:
-        discovered = connector.discover(config)
+        discovered = connector.discover(resolved_config)
         tables = [r.name for r in discovered]
     except Exception as e:
         logger.warning("Failed to discover connector tables: %s", e)

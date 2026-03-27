@@ -205,7 +205,7 @@ def discover_connector_endpoint(
 
 @router.post("/api/connectors/setup")
 def setup_connector_endpoint(
-    request: Request, req: ConnectorSetupRequest, conn: DbConn
+    request: Request, req: ConnectorSetupRequest, conn: DbConnAutoCreate
 ) -> dict:
     """Set up a new connector: test, generate script, update config."""
     user = _require_permission(request, "execute")
@@ -269,7 +269,12 @@ def sync_connector_endpoint(request: Request, connection_name: str, conn: DbConn
 
     result = sync_connector(_get_project_dir(), connection_name)
     if result.get("status") == "error":
-        raise HTTPException(400, result.get("error", "Sync failed"))
+        # Include log output so the user can see per-table errors
+        error_msg = result.get("error", "Sync failed")
+        log_output = result.get("log_output", "")
+        if log_output:
+            error_msg = f"{error_msg}\n\n{log_output}"
+        raise HTTPException(400, error_msg)
     try:
         from havn.engine.audit import log_audit
 
