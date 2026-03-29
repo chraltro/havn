@@ -222,9 +222,9 @@ def list_dashboards(request: Request, conn: DbConnReadOnly) -> list:
         rows = conn.execute("""
             SELECT d.id, d.name, d.description, d.created_by, d.updated_by,
                    d.created_at, d.updated_at, d.is_template,
-                   (SELECT COUNT(*) FROM _dp_internal.dashboard_widgets w
+                   (SELECT COUNT(*) FROM _havn.dashboard_widgets w
                     WHERE w.dashboard_id = d.id) AS widget_count
-            FROM _dp_internal.dashboards d
+            FROM _havn.dashboards d
             WHERE d.is_template = FALSE
             ORDER BY d.updated_at DESC
         """).fetchall()
@@ -254,9 +254,9 @@ def list_templates(request: Request, conn: DbConnReadOnly) -> list:
     try:
         rows = conn.execute("""
             SELECT d.id, d.name, d.description,
-                   (SELECT COUNT(*) FROM _dp_internal.dashboard_widgets w
+                   (SELECT COUNT(*) FROM _havn.dashboard_widgets w
                     WHERE w.dashboard_id = d.id) AS widget_count
-            FROM _dp_internal.dashboards d
+            FROM _havn.dashboards d
             WHERE d.is_template = TRUE
             ORDER BY d.name
         """).fetchall()
@@ -280,7 +280,7 @@ def create_dashboard(request: Request, req: DashboardCreate, conn: DbConn) -> di
 
     row = conn.execute(
         """
-        INSERT INTO _dp_internal.dashboards (name, description, created_by, updated_by)
+        INSERT INTO _havn.dashboards (name, description, created_by, updated_by)
         VALUES (?, ?, ?, ?)
         RETURNING id, name, description, created_by, created_at, updated_at, is_template
         """,
@@ -308,7 +308,7 @@ def get_dashboard(request: Request, dashboard_id: str, conn: DbConnReadOnly) -> 
         """
         SELECT id, name, description, layout, filters, settings,
                created_by, updated_by, created_at, updated_at, is_template
-        FROM _dp_internal.dashboards WHERE id = ?
+        FROM _havn.dashboards WHERE id = ?
         """,
         [dashboard_id],
     ).fetchone()
@@ -320,7 +320,7 @@ def get_dashboard(request: Request, dashboard_id: str, conn: DbConnReadOnly) -> 
         """
         SELECT id, widget_type, chart_type, title, sql_query, config,
                position, filters, cache_ttl, sort_order, created_at
-        FROM _dp_internal.dashboard_widgets
+        FROM _havn.dashboard_widgets
         WHERE dashboard_id = ?
         ORDER BY sort_order, created_at
         """,
@@ -404,7 +404,7 @@ def update_dashboard(
     params.append(dashboard_id)
     row = conn.execute(
         f"""
-        UPDATE _dp_internal.dashboards
+        UPDATE _havn.dashboards
         SET {', '.join(sets)}
         WHERE id = ?
         RETURNING id, name, description, updated_at
@@ -430,24 +430,24 @@ def delete_dashboard(request: Request, dashboard_id: str, conn: DbConn) -> dict:
 
     # Check exists
     exists = conn.execute(
-        "SELECT 1 FROM _dp_internal.dashboards WHERE id = ?", [dashboard_id]
+        "SELECT 1 FROM _havn.dashboards WHERE id = ?", [dashboard_id]
     ).fetchone()
     if not exists:
         raise HTTPException(404, "Dashboard not found")
 
     # Clean up expired cache entries
     try:
-        conn.execute("DELETE FROM _dp_internal.dashboard_cache WHERE expires_at < current_timestamp")
+        conn.execute("DELETE FROM _havn.dashboard_cache WHERE expires_at < current_timestamp")
     except Exception:
         pass
 
     # Delete widgets then dashboard
     conn.execute(
-        "DELETE FROM _dp_internal.dashboard_widgets WHERE dashboard_id = ?",
+        "DELETE FROM _havn.dashboard_widgets WHERE dashboard_id = ?",
         [dashboard_id],
     )
     conn.execute(
-        "DELETE FROM _dp_internal.dashboards WHERE id = ?", [dashboard_id]
+        "DELETE FROM _havn.dashboards WHERE id = ?", [dashboard_id]
     )
 
     return {"status": "deleted", "id": dashboard_id}
@@ -460,7 +460,7 @@ def _clone_dashboard_impl(
     source = conn.execute(
         """
         SELECT layout, filters, settings
-        FROM _dp_internal.dashboards WHERE id = ?
+        FROM _havn.dashboards WHERE id = ?
         """,
         [source_id],
     ).fetchone()
@@ -469,7 +469,7 @@ def _clone_dashboard_impl(
 
     new_dash = conn.execute(
         """
-        INSERT INTO _dp_internal.dashboards
+        INSERT INTO _havn.dashboards
             (name, description, layout, filters, settings, created_by, updated_by)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         RETURNING id, name, description, created_by, created_at, updated_at
@@ -482,7 +482,7 @@ def _clone_dashboard_impl(
         """
         SELECT widget_type, chart_type, title, sql_query, config,
                position, filters, cache_ttl, sort_order
-        FROM _dp_internal.dashboard_widgets
+        FROM _havn.dashboard_widgets
         WHERE dashboard_id = ?
         ORDER BY sort_order, created_at
         """,
@@ -492,7 +492,7 @@ def _clone_dashboard_impl(
     for w in widgets:
         conn.execute(
             """
-            INSERT INTO _dp_internal.dashboard_widgets
+            INSERT INTO _havn.dashboard_widgets
                 (dashboard_id, widget_type, chart_type, title, sql_query,
                  config, position, filters, cache_ttl, sort_order)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -539,7 +539,7 @@ def import_dashboard(request: Request, req: DashboardImport, conn: DbConn) -> di
     d = req.dashboard
     new_dash = conn.execute(
         """
-        INSERT INTO _dp_internal.dashboards
+        INSERT INTO _havn.dashboards
             (name, description, layout, filters, settings, created_by, updated_by)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         RETURNING id, name, description, created_by, created_at, updated_at
@@ -563,7 +563,7 @@ def import_dashboard(request: Request, req: DashboardImport, conn: DbConn) -> di
             raise HTTPException(400, f"Invalid widget_type: {widget_type}")
         conn.execute(
             """
-            INSERT INTO _dp_internal.dashboard_widgets
+            INSERT INTO _havn.dashboard_widgets
                 (dashboard_id, widget_type, chart_type, title, sql_query,
                  config, position, filters, cache_ttl, sort_order)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -606,14 +606,14 @@ def add_widget(request: Request, dashboard_id: str, req: WidgetCreate, conn: DbC
 
     # Verify dashboard exists
     exists = conn.execute(
-        "SELECT 1 FROM _dp_internal.dashboards WHERE id = ?", [dashboard_id]
+        "SELECT 1 FROM _havn.dashboards WHERE id = ?", [dashboard_id]
     ).fetchone()
     if not exists:
         raise HTTPException(404, "Dashboard not found")
 
     row = conn.execute(
         """
-        INSERT INTO _dp_internal.dashboard_widgets
+        INSERT INTO _havn.dashboard_widgets
             (dashboard_id, widget_type, chart_type, title, sql_query,
              config, position, filters, cache_ttl, sort_order)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -635,7 +635,7 @@ def add_widget(request: Request, dashboard_id: str, req: WidgetCreate, conn: DbC
 
     # Touch dashboard updated_at
     conn.execute(
-        "UPDATE _dp_internal.dashboards SET updated_at = current_timestamp WHERE id = ?",
+        "UPDATE _havn.dashboards SET updated_at = current_timestamp WHERE id = ?",
         [dashboard_id],
     )
 
@@ -698,7 +698,7 @@ def update_widget(
     params.extend([dashboard_id, widget_id])
     row = conn.execute(
         f"""
-        UPDATE _dp_internal.dashboard_widgets
+        UPDATE _havn.dashboard_widgets
         SET {', '.join(sets)}
         WHERE dashboard_id = ? AND id = ?
         RETURNING id, widget_type, chart_type, title, sql_query, config,
@@ -712,7 +712,7 @@ def update_widget(
 
     # Touch dashboard
     conn.execute(
-        "UPDATE _dp_internal.dashboards SET updated_at = current_timestamp WHERE id = ?",
+        "UPDATE _havn.dashboards SET updated_at = current_timestamp WHERE id = ?",
         [dashboard_id],
     )
 
@@ -754,7 +754,7 @@ def update_widget_positions(
         if wid and pos:
             conn.execute(
                 """
-                UPDATE _dp_internal.dashboard_widgets
+                UPDATE _havn.dashboard_widgets
                 SET position = ?
                 WHERE dashboard_id = ? AND id = ?
                 """,
@@ -762,7 +762,7 @@ def update_widget_positions(
             )
 
     conn.execute(
-        "UPDATE _dp_internal.dashboards SET updated_at = current_timestamp WHERE id = ?",
+        "UPDATE _havn.dashboards SET updated_at = current_timestamp WHERE id = ?",
         [dashboard_id],
     )
 
@@ -776,7 +776,7 @@ def delete_widget(request: Request, dashboard_id: str, widget_id: str, conn: DbC
 
     deleted = conn.execute(
         """
-        DELETE FROM _dp_internal.dashboard_widgets
+        DELETE FROM _havn.dashboard_widgets
         WHERE dashboard_id = ? AND id = ?
         RETURNING id
         """,
@@ -787,7 +787,7 @@ def delete_widget(request: Request, dashboard_id: str, widget_id: str, conn: DbC
         raise HTTPException(404, "Widget not found")
 
     conn.execute(
-        "UPDATE _dp_internal.dashboards SET updated_at = current_timestamp WHERE id = ?",
+        "UPDATE _havn.dashboards SET updated_at = current_timestamp WHERE id = ?",
         [dashboard_id],
     )
 
@@ -812,7 +812,7 @@ def query_widget(
 
     widget = conn.execute(
         """
-        SELECT sql_query, cache_ttl FROM _dp_internal.dashboard_widgets
+        SELECT sql_query, cache_ttl FROM _havn.dashboard_widgets
         WHERE dashboard_id = ? AND id = ?
         """,
         [dashboard_id, widget_id],
@@ -829,7 +829,7 @@ def query_widget(
         ck = _cache_key(widget_id, req.filters, req.parameters)
         cached = conn.execute(
             """
-            SELECT result_json, row_count FROM _dp_internal.dashboard_cache
+            SELECT result_json, row_count FROM _havn.dashboard_cache
             WHERE cache_key = ? AND expires_at > current_timestamp
             """,
             [ck],
@@ -849,7 +849,7 @@ def query_widget(
         try:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO _dp_internal.dashboard_cache
+                INSERT OR REPLACE INTO _havn.dashboard_cache
                     (cache_key, result_json, row_count, cached_at, expires_at)
                 VALUES (?, ?, ?, current_timestamp, current_timestamp + INTERVAL ? SECOND)
                 """,
@@ -873,7 +873,7 @@ def query_batch(
 
     widgets = conn.execute(
         """
-        SELECT id, sql_query, cache_ttl FROM _dp_internal.dashboard_widgets
+        SELECT id, sql_query, cache_ttl FROM _havn.dashboard_widgets
         WHERE dashboard_id = ? AND sql_query IS NOT NULL AND sql_query != ''
         ORDER BY sort_order, created_at
         """,
@@ -889,7 +889,7 @@ def query_batch(
             ck = _cache_key(w_id, req.filters, req.parameters)
             cached = conn.execute(
                 """
-                SELECT result_json FROM _dp_internal.dashboard_cache
+                SELECT result_json FROM _havn.dashboard_cache
                 WHERE cache_key = ? AND expires_at > current_timestamp
                 """,
                 [ck],
@@ -911,7 +911,7 @@ def query_batch(
                 try:
                     conn.execute(
                         """
-                        INSERT OR REPLACE INTO _dp_internal.dashboard_cache
+                        INSERT OR REPLACE INTO _havn.dashboard_cache
                             (cache_key, result_json, row_count, cached_at, expires_at)
                         VALUES (?, ?, ?, current_timestamp, current_timestamp + INTERVAL ? SECOND)
                         """,
@@ -935,7 +935,7 @@ def clear_cache(request: Request, dashboard_id: str, conn: DbConn) -> dict:
     widget_ids = [
         r[0]
         for r in conn.execute(
-            "SELECT id FROM _dp_internal.dashboard_widgets WHERE dashboard_id = ?",
+            "SELECT id FROM _havn.dashboard_widgets WHERE dashboard_id = ?",
             [dashboard_id],
         ).fetchall()
     ]
@@ -947,6 +947,6 @@ def clear_cache(request: Request, dashboard_id: str, conn: DbConn) -> dict:
         pass
 
     # Simple approach: clear all expired + all for this dashboard
-    conn.execute("DELETE FROM _dp_internal.dashboard_cache WHERE expires_at < current_timestamp")
+    conn.execute("DELETE FROM _havn.dashboard_cache WHERE expires_at < current_timestamp")
 
     return {"status": "ok"}

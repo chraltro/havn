@@ -158,7 +158,7 @@ The scheduler runs as a daemon thread with a simple polling loop:
 
 ### Huey Integration
 
-havn also includes a Huey-based scheduler (SqliteHuey) for more robust task queuing. The SQLite-backed Huey instance stores task state in `.dp_scheduler.db` at the project root.
+havn also includes a Huey-based scheduler (SqliteHuey) for more robust task queuing. The SQLite-backed Huey instance stores task state in `.havn_scheduler.db` at the project root.
 
 ### FileWatcher
 

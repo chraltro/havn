@@ -56,8 +56,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     checkAuth();
     const handler = () => setAuthRequired(true);
-    window.addEventListener("dp_auth_required", handler);
-    return () => window.removeEventListener("dp_auth_required", handler);
+    window.addEventListener("havn_auth_required", handler);
+    return () => window.removeEventListener("havn_auth_required", handler);
   }, [checkAuth]);
 
   const handleLogin = useCallback((result: { username: string; role?: string }) => {

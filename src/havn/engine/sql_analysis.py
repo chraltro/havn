@@ -18,7 +18,7 @@ from sqlglot import exp
 logger = logging.getLogger("havn.sql_analysis")
 
 # Schemas that are never real upstream dependencies
-SKIP_SCHEMAS = frozenset({"information_schema", "_dp_internal", "pg_catalog", "sys"})
+SKIP_SCHEMAS = frozenset({"information_schema", "_havn", "pg_catalog", "sys"})
 
 # --- Config directive patterns ---
 # Primary syntax: bare @decorators on their own lines, before the SQL.

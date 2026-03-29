@@ -1,6 +1,6 @@
 """Audit logging for tracking user actions.
 
-Writes structured audit entries to _dp_internal.audit_log in DuckDB.
+Writes structured audit entries to _havn.audit_log in DuckDB.
 """
 
 from __future__ import annotations
@@ -39,10 +39,10 @@ VALID_ACTIONS = frozenset({
 
 def ensure_audit_table(conn: duckdb.DuckDBPyConnection) -> None:
     """Create the audit_log table if it doesn't exist."""
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _dp_internal")
+    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.audit_log (
-            id INTEGER PRIMARY KEY DEFAULT nextval('_dp_internal.audit_log_seq'),
+        CREATE TABLE IF NOT EXISTS _havn.audit_log (
+            id INTEGER PRIMARY KEY DEFAULT nextval('_havn.audit_log_seq'),
             "user" VARCHAR NOT NULL,
             action VARCHAR NOT NULL,
             resource VARCHAR,
@@ -55,9 +55,9 @@ def ensure_audit_table(conn: duckdb.DuckDBPyConnection) -> None:
 
 def _ensure_sequence(conn: duckdb.DuckDBPyConnection) -> None:
     """Create the audit_log sequence if it doesn't exist."""
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _dp_internal")
+    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
     try:
-        conn.execute("CREATE SEQUENCE IF NOT EXISTS _dp_internal.audit_log_seq START 1")
+        conn.execute("CREATE SEQUENCE IF NOT EXISTS _havn.audit_log_seq START 1")
     except Exception:
         pass  # sequence already exists
 
@@ -88,7 +88,7 @@ def log_audit(
     ensure_audit_table(conn)
     conn.execute(
         """
-        INSERT INTO _dp_internal.audit_log ("user", action, resource, detail, ip_address)
+        INSERT INTO _havn.audit_log ("user", action, resource, detail, ip_address)
         VALUES (?, ?, ?, ?, ?)
         """,
         [user, action, resource, detail, ip_address],
@@ -141,7 +141,7 @@ def query_audit_log(
     rows = conn.execute(
         f"""
         SELECT id, "user", action, resource, detail, ip_address, "timestamp"
-        FROM _dp_internal.audit_log
+        FROM _havn.audit_log
         {where}
         ORDER BY "timestamp" DESC
         LIMIT ?

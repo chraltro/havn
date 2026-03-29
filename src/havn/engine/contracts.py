@@ -133,7 +133,7 @@ def _resolve_previous(
     try:
         row = conn.execute(
             "SELECT row_count, null_percentages, distinct_counts "
-            "FROM _dp_internal.model_profiles WHERE model_path = ?",
+            "FROM _havn.model_profiles WHERE model_path = ?",
             [model],
         ).fetchone()
     except Exception:
@@ -203,7 +203,7 @@ def _evaluate_freshness(
     # Get last run time from model_state
     try:
         row = conn.execute(
-            "SELECT last_run_at FROM _dp_internal.model_state WHERE model_path = ?",
+            "SELECT last_run_at FROM _havn.model_state WHERE model_path = ?",
             [model],
         ).fetchone()
     except Exception:
@@ -251,7 +251,7 @@ def _get_consecutive_failures(
         row = conn.execute(
             """
             SELECT consecutive_failures
-            FROM _dp_internal.contract_results
+            FROM _havn.contract_results
             WHERE contract_name = ?
             ORDER BY checked_at DESC
             LIMIT 1
@@ -539,7 +539,7 @@ def get_contract_history(
                 """
                 SELECT contract_name, model, passed, severity, detail,
                        checked_at, consecutive_failures
-                FROM _dp_internal.contract_results
+                FROM _havn.contract_results
                 WHERE model = ?
                 ORDER BY checked_at DESC
                 LIMIT ?
@@ -551,7 +551,7 @@ def get_contract_history(
                 """
                 SELECT contract_name, model, passed, severity, detail,
                        checked_at, consecutive_failures
-                FROM _dp_internal.contract_results
+                FROM _havn.contract_results
                 ORDER BY checked_at DESC
                 LIMIT ?
                 """,
@@ -585,9 +585,9 @@ def get_contract_model_history(
 def _ensure_contracts_table(conn: duckdb.DuckDBPyConnection) -> None:
     """Create the contract results metadata table (no-op on read-only connections)."""
     try:
-        conn.execute("CREATE SCHEMA IF NOT EXISTS _dp_internal")
+        conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS _dp_internal.contract_results (
+            CREATE TABLE IF NOT EXISTS _havn.contract_results (
                 id                    VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
                 contract_name         VARCHAR NOT NULL,
                 model                 VARCHAR NOT NULL,
@@ -601,7 +601,7 @@ def _ensure_contracts_table(conn: duckdb.DuckDBPyConnection) -> None:
         # Migrate: add consecutive_failures column if table exists but column doesn't
         try:
             conn.execute("""
-                ALTER TABLE _dp_internal.contract_results
+                ALTER TABLE _havn.contract_results
                 ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER DEFAULT 0
             """)
         except Exception:
@@ -618,7 +618,7 @@ def _save_contract_result(
     import json
     conn.execute(
         """
-        INSERT INTO _dp_internal.contract_results
+        INSERT INTO _havn.contract_results
             (contract_name, model, passed, severity, detail, checked_at, consecutive_failures)
         VALUES (?, ?, ?, ?, ?::JSON, current_timestamp, ?)
         """,

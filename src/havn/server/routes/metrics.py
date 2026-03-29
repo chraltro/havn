@@ -54,10 +54,10 @@ def get_metrics(request: Request, conn: DbConnReadOnly) -> dict:
     try:
         rows = conn.execute(
             "SELECT status, COUNT(*) AS cnt "
-            "FROM _dp_internal.run_log "
+            "FROM _havn.run_log "
             "WHERE run_type = 'transform' "
             "AND started_at = ("
-            "  SELECT MAX(started_at) FROM _dp_internal.run_log WHERE run_type = 'transform'"
+            "  SELECT MAX(started_at) FROM _havn.run_log WHERE run_type = 'transform'"
             ") "
             "GROUP BY status"
         ).fetchall()
@@ -71,7 +71,7 @@ def get_metrics(request: Request, conn: DbConnReadOnly) -> dict:
     avg_build_time_ms: float | None = None
     try:
         row = conn.execute(
-            "SELECT AVG(run_duration_ms) FROM _dp_internal.model_state "
+            "SELECT AVG(run_duration_ms) FROM _havn.model_state "
             "WHERE run_duration_ms > 0"
         ).fetchone()
         if row and row[0] is not None:
@@ -83,7 +83,7 @@ def get_metrics(request: Request, conn: DbConnReadOnly) -> dict:
     total_rows = 0
     try:
         row = conn.execute(
-            "SELECT COALESCE(SUM(row_count), 0) FROM _dp_internal.model_state"
+            "SELECT COALESCE(SUM(row_count), 0) FROM _havn.model_state"
         ).fetchone()
         if row:
             total_rows = int(row[0])
@@ -107,7 +107,7 @@ def get_metrics(request: Request, conn: DbConnReadOnly) -> dict:
     try:
         row = conn.execute(
             "SELECT run_type, target, status, started_at, finished_at, duration_ms, error "
-            "FROM _dp_internal.run_log ORDER BY started_at DESC LIMIT 1"
+            "FROM _havn.run_log ORDER BY started_at DESC LIMIT 1"
         ).fetchone()
         if row:
             last_run = {
@@ -127,7 +127,7 @@ def get_metrics(request: Request, conn: DbConnReadOnly) -> dict:
     try:
         rows = conn.execute(
             "SELECT model_path, run_duration_ms, last_run_at "
-            "FROM _dp_internal.model_state "
+            "FROM _havn.model_state "
             "WHERE run_duration_ms > 0 "
             "ORDER BY run_duration_ms DESC LIMIT 10"
         ).fetchall()
@@ -159,14 +159,14 @@ def get_metrics(request: Request, conn: DbConnReadOnly) -> dict:
 
 @router.get("/api/metrics/models")
 def get_model_metrics(request: Request, conn: DbConnReadOnly) -> list[dict]:
-    """Return per-model stats from _dp_internal.model_state."""
+    """Return per-model stats from _havn.model_state."""
     _require_permission(request, "read")
     ensure_meta_table(conn)
 
     rows = conn.execute(
         "SELECT model_path, materialized_as, last_run_at, run_duration_ms, "
         "row_count, content_hash "
-        "FROM _dp_internal.model_state ORDER BY model_path"
+        "FROM _havn.model_state ORDER BY model_path"
     ).fetchall()
 
     return [

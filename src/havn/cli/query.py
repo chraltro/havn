@@ -111,7 +111,7 @@ def tables(
             sql = """
                 SELECT table_schema, table_name, table_type
                 FROM information_schema.tables
-                WHERE table_schema NOT IN ('information_schema', '_dp_internal')
+                WHERE table_schema NOT IN ('information_schema', '_havn')
                   AND table_schema = ?
                 ORDER BY table_schema, table_name
             """
@@ -120,7 +120,7 @@ def tables(
             sql = """
                 SELECT table_schema, table_name, table_type
                 FROM information_schema.tables
-                WHERE table_schema NOT IN ('information_schema', '_dp_internal')
+                WHERE table_schema NOT IN ('information_schema', '_havn')
                 ORDER BY table_schema, table_name
             """
             result = conn.execute(sql).fetchall()
@@ -165,7 +165,7 @@ def history(
             result = conn.execute(
                 """
                 SELECT run_type, target, status, started_at, duration_ms, rows_affected, error
-                FROM _dp_internal.run_log
+                FROM _havn.run_log
                 ORDER BY started_at DESC
                 LIMIT ?
                 """,

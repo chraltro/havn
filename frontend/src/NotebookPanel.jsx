@@ -666,7 +666,7 @@ export default function NotebookPanel({ openPath }) {
   const [notebook, setNotebook] = useState(null);
   const [newName, setNewName] = useState("");
   const [runningAll, setRunningAll] = useState(false);
-  const [cellsWidth, setCellsWidth] = useState(() => parseInt(localStorage.getItem("dp_notebook_width") || "900", 10));
+  const [cellsWidth, setCellsWidth] = useState(() => parseInt(localStorage.getItem("havn_notebook_width") || "900", 10));
   const resizingRef = useRef(false);
   const [runningCellId, setRunningCellId] = useState(null);
   const [nbError, setNbError] = useState(null);
@@ -887,7 +887,7 @@ export default function NotebookPanel({ openPath }) {
             const onUp = () => {
               resizingRef.current = false;
               handle.style.opacity = 0.25;
-              localStorage.setItem("dp_notebook_width", String(cellsWidth));
+              localStorage.setItem("havn_notebook_width", String(cellsWidth));
               document.removeEventListener("mousemove", onMove);
               document.removeEventListener("mouseup", onUp);
             };

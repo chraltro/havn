@@ -98,7 +98,7 @@ class SchemaDiff:
 # Metadata database
 # ---------------------------------------------------------------------------
 
-_METADATA_DIR = ".dp/metadata"
+_METADATA_DIR = ".havn/metadata"
 
 
 def _sentinel_db_path(project_dir: Path) -> Path:

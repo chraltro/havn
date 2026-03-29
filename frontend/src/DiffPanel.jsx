@@ -23,7 +23,7 @@ export default function DiffPanel({ api, addOutput }) {
   // Get model names from warehouse tables, excluding internal schema
   const modelNames = useMemo(() => {
     return tables
-      .filter((t) => t.schema !== "_dp_internal")
+      .filter((t) => t.schema !== "_havn")
       .map((t) => `${t.schema}.${t.name}`)
       .sort();
   }, [tables]);

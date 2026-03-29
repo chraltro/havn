@@ -10,7 +10,7 @@ CDC modes:
   and only re-ingest when files have changed.
 - **full_refresh**: Always fetch everything (no CDC).
 
-State is stored in ``_dp_internal.cdc_state``.
+State is stored in ``_havn.cdc_state``.
 
 Usage in project.yml::
 
@@ -84,9 +84,9 @@ class CDCSyncResult:
 def ensure_cdc_table(conn: duckdb.DuckDBPyConnection) -> None:
     """Create the CDC state tracking table (no-op on read-only connections)."""
     try:
-        conn.execute("CREATE SCHEMA IF NOT EXISTS _dp_internal")
+        conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS _dp_internal.cdc_state (
+            CREATE TABLE IF NOT EXISTS _havn.cdc_state (
                 connector_name  VARCHAR NOT NULL,
                 table_name      VARCHAR NOT NULL,
                 cdc_mode        VARCHAR NOT NULL DEFAULT 'full_refresh',
@@ -109,7 +109,7 @@ def get_watermark(
     """Get the current high-watermark value for a table."""
     ensure_cdc_table(conn)
     row = conn.execute(
-        "SELECT watermark_value FROM _dp_internal.cdc_state "
+        "SELECT watermark_value FROM _havn.cdc_state "
         "WHERE connector_name = ? AND table_name = ?",
         [connector_name, table_name],
     ).fetchone()
@@ -129,7 +129,7 @@ def update_watermark(
     ensure_cdc_table(conn)
     conn.execute(
         """
-        INSERT OR REPLACE INTO _dp_internal.cdc_state
+        INSERT OR REPLACE INTO _havn.cdc_state
             (connector_name, table_name, cdc_mode, watermark_value, file_mtime, last_sync_at, rows_synced)
         VALUES (?, ?, ?, ?, ?, current_timestamp, ?)
         """,
@@ -149,7 +149,7 @@ def should_sync_file(
         return False
     current_mtime = file_path.stat().st_mtime
     row = conn.execute(
-        "SELECT file_mtime FROM _dp_internal.cdc_state "
+        "SELECT file_mtime FROM _havn.cdc_state "
         "WHERE connector_name = ? AND table_name = ?",
         [connector_name, table_name],
     ).fetchone()
@@ -383,7 +383,7 @@ def get_cdc_status(
             rows = conn.execute(
                 "SELECT connector_name, table_name, cdc_mode, watermark_value, "
                 "file_mtime, last_sync_at, rows_synced "
-                "FROM _dp_internal.cdc_state WHERE connector_name = ? "
+                "FROM _havn.cdc_state WHERE connector_name = ? "
                 "ORDER BY table_name",
                 [connector_name],
             ).fetchall()
@@ -391,7 +391,7 @@ def get_cdc_status(
             rows = conn.execute(
                 "SELECT connector_name, table_name, cdc_mode, watermark_value, "
                 "file_mtime, last_sync_at, rows_synced "
-                "FROM _dp_internal.cdc_state ORDER BY connector_name, table_name"
+                "FROM _havn.cdc_state ORDER BY connector_name, table_name"
             ).fetchall()
     except Exception:
         return []  # Table doesn't exist yet
@@ -422,13 +422,13 @@ def reset_watermark(
     ensure_cdc_table(conn)
     if table_name:
         result = conn.execute(
-            "DELETE FROM _dp_internal.cdc_state "
+            "DELETE FROM _havn.cdc_state "
             "WHERE connector_name = ? AND table_name = ?",
             [connector_name, table_name],
         )
     else:
         result = conn.execute(
-            "DELETE FROM _dp_internal.cdc_state WHERE connector_name = ?",
+            "DELETE FROM _havn.cdc_state WHERE connector_name = ?",
             [connector_name],
         )
     return result.fetchone()[0] if result.description else 0

@@ -150,7 +150,7 @@ def _has_changed(
 ) -> bool:
     """Check if a model has changed since last run."""
     result = conn.execute(
-        "SELECT content_hash, upstream_hash FROM _dp_internal.model_state WHERE model_path = ?",
+        "SELECT content_hash, upstream_hash FROM _havn.model_state WHERE model_path = ?",
         [model.full_name],
     ).fetchone()
     if result is None:
@@ -168,7 +168,7 @@ def _update_state(
     """Update the model state after a successful run."""
     conn.execute(
         """
-        INSERT OR REPLACE INTO _dp_internal.model_state
+        INSERT OR REPLACE INTO _havn.model_state
             (model_path, content_hash, upstream_hash, materialized_as, last_run_at, run_duration_ms, row_count)
         VALUES (?, ?, ?, ?, current_timestamp, ?, ?)
         """,

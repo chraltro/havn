@@ -90,7 +90,7 @@ class TestSnapshotCapture:
         assert result is True
 
         # Check parquet file exists
-        snap_dir = project / ".dp" / "snapshots" / "bronze" / "customers"
+        snap_dir = project / ".havn" / "snapshots" / "bronze" / "customers"
         parquet_files = list(snap_dir.glob("*.parquet"))
         assert len(parquet_files) == 1
         assert run_id in parquet_files[0].name

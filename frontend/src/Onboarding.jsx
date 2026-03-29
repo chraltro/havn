@@ -543,7 +543,7 @@ export default function Onboarding({ onComplete, isOpen, onNavigate, tables, onS
         } else if (sql === "__auto__") {
           sql = "SELECT 'Run a pipeline first to see data here' AS hint";
         }
-        window.__dp_prefill_query = { sql, run: true };
+        window.__havn_prefill_query = { sql, run: true };
       }, 200);
     }
 

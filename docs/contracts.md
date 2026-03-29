@@ -156,7 +156,7 @@ Shows the pass/fail history of all contract evaluations, ordered by most recent.
 
 ## Contract History
 
-Every contract evaluation is recorded in `_dp_internal.contract_results`:
+Every contract evaluation is recorded in `_havn.contract_results`:
 
 | Column | Type | Description |
 |--------|------|-------------|

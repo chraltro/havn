@@ -19,9 +19,9 @@ logger = logging.getLogger("havn.snapshot")
 
 def _ensure_snapshot_table(conn: duckdb.DuckDBPyConnection) -> None:
     """Create the snapshots table if it doesn't exist."""
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _dp_internal")
+    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.snapshots (
+        CREATE TABLE IF NOT EXISTS _havn.snapshots (
             name VARCHAR PRIMARY KEY,
             created_at TIMESTAMP DEFAULT now(),
             project_hash VARCHAR,
@@ -68,7 +68,7 @@ def _build_table_signatures(conn: duckdb.DuckDBPyConnection) -> dict[str, dict]:
         tables = conn.execute(
             "SELECT table_schema, table_name, table_type "
             "FROM information_schema.tables "
-            "WHERE table_schema NOT IN ('information_schema', '_dp_internal')"
+            "WHERE table_schema NOT IN ('information_schema', '_havn')"
         ).fetchall()
     except Exception as e:
         logger.debug("Could not enumerate tables for snapshot: %s", e)
@@ -127,7 +127,7 @@ def create_snapshot(
 
     conn.execute(
         """
-        INSERT OR REPLACE INTO _dp_internal.snapshots
+        INSERT OR REPLACE INTO _havn.snapshots
             (name, project_hash, table_signatures, file_manifest)
         VALUES (?, ?, ?, ?)
         """,
@@ -146,7 +146,7 @@ def list_snapshots(conn: duckdb.DuckDBPyConnection) -> list[dict]:
     _ensure_snapshot_table(conn)
     rows = conn.execute(
         "SELECT name, created_at, project_hash, table_signatures, file_manifest "
-        "FROM _dp_internal.snapshots ORDER BY created_at DESC"
+        "FROM _havn.snapshots ORDER BY created_at DESC"
     ).fetchall()
     return [
         {
@@ -165,7 +165,7 @@ def get_snapshot(conn: duckdb.DuckDBPyConnection, name: str) -> dict | None:
     _ensure_snapshot_table(conn)
     row = conn.execute(
         "SELECT name, created_at, project_hash, table_signatures, file_manifest "
-        "FROM _dp_internal.snapshots WHERE name = ?",
+        "FROM _havn.snapshots WHERE name = ?",
         [name],
     ).fetchone()
     if not row:
@@ -183,11 +183,11 @@ def delete_snapshot(conn: duckdb.DuckDBPyConnection, name: str) -> bool:
     """Delete a snapshot. Returns True if found and deleted."""
     _ensure_snapshot_table(conn)
     existing = conn.execute(
-        "SELECT COUNT(*) FROM _dp_internal.snapshots WHERE name = ?", [name]
+        "SELECT COUNT(*) FROM _havn.snapshots WHERE name = ?", [name]
     ).fetchone()
     if existing[0] == 0:
         return False
-    conn.execute("DELETE FROM _dp_internal.snapshots WHERE name = ?", [name])
+    conn.execute("DELETE FROM _havn.snapshots WHERE name = ?", [name])
     return True
 
 

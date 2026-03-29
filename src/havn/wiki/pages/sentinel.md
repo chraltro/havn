@@ -89,7 +89,7 @@ When you see an impact listed:
 
 ## History Tracking
 
-Every schema change is recorded in `_dp_internal.sentinel_diffs`:
+Every schema change is recorded in `_havn.sentinel_diffs`:
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -106,7 +106,7 @@ Each change object in `changes` contains:
 - `old_value`, `new_value`: before/after values
 - `rename_candidate`: suggested new name (if column likely renamed)
 
-Schema snapshots are stored in `_dp_internal.sentinel_snapshots`:
+Schema snapshots are stored in `_havn.sentinel_snapshots`:
 
 | Column | Type | Description |
 |--------|------|-------------|

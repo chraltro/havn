@@ -218,13 +218,13 @@ def diff_model(
 
     # Step 1: Run the model SQL into a temp table
     try:
-        conn.execute(f"CREATE OR REPLACE TEMP TABLE _dp_diff_new AS\n{model_sql}")
+        conn.execute(f"CREATE OR REPLACE TEMP TABLE _havn_diff_new AS\n{model_sql}")
     except Exception as e:
         return DiffResult(model=model_name, error=f"Model SQL failed: {e}")
 
     # Step 2: Get new table info
-    new_columns = _get_temp_column_info(conn, "_dp_diff_new")
-    total_after = conn.execute("SELECT COUNT(*) FROM _dp_diff_new").fetchone()[0]
+    new_columns = _get_temp_column_info(conn, "_havn_diff_new")
+    total_after = conn.execute("SELECT COUNT(*) FROM _havn_diff_new").fetchone()[0]
 
     # Step 3: Check if target exists
     target_exists = _table_exists(conn, target_schema, target_table)
@@ -232,8 +232,8 @@ def diff_model(
 
     if not target_exists:
         # Everything is new
-        sample_added = _rows_to_dicts(conn, "SELECT * FROM _dp_diff_new", sample_limit)
-        conn.execute("DROP TABLE IF EXISTS _dp_diff_new")
+        sample_added = _rows_to_dicts(conn, "SELECT * FROM _havn_diff_new", sample_limit)
+        conn.execute("DROP TABLE IF EXISTS _havn_diff_new")
         return DiffResult(
             model=model_name,
             added=total_after,
@@ -258,7 +258,7 @@ def diff_model(
 
     if not common_cols:
         # No common columns — can't compare rows
-        conn.execute("DROP TABLE IF EXISTS _dp_diff_new")
+        conn.execute("DROP TABLE IF EXISTS _havn_diff_new")
         return DiffResult(
             model=model_name,
             total_before=total_before,
@@ -270,7 +270,7 @@ def diff_model(
 
     # Added rows: in new but not in old
     added_sql = (
-        f"SELECT {quoted_common} FROM _dp_diff_new "
+        f"SELECT {quoted_common} FROM _havn_diff_new "
         f"EXCEPT "
         f"SELECT {quoted_common} FROM {target_ref}"
     )
@@ -281,7 +281,7 @@ def diff_model(
     removed_sql = (
         f"SELECT {quoted_common} FROM {target_ref} "
         f"EXCEPT "
-        f"SELECT {quoted_common} FROM _dp_diff_new"
+        f"SELECT {quoted_common} FROM _havn_diff_new"
     )
     removed_count = conn.execute(f"SELECT COUNT(*) FROM ({removed_sql}) AS _r").fetchone()[0]
     sample_removed = _rows_to_dicts(conn, removed_sql, sample_limit)
@@ -304,7 +304,7 @@ def diff_model(
                     f'_old."{c}" IS DISTINCT FROM _new."{c}"' for c in non_key_cols
                 )
                 modified_sql = (
-                    f"SELECT _new.* FROM _dp_diff_new AS _new "
+                    f"SELECT _new.* FROM _havn_diff_new AS _new "
                     f"INNER JOIN {target_ref} AS _old ON {join_cond} "
                     f"WHERE {diff_conditions}"
                 )
@@ -339,7 +339,7 @@ def diff_model(
                     logger.debug("Modified row detection failed: %s", e)
 
     # Cleanup
-    conn.execute("DROP TABLE IF EXISTS _dp_diff_new")
+    conn.execute("DROP TABLE IF EXISTS _havn_diff_new")
 
     return DiffResult(
         model=model_name,

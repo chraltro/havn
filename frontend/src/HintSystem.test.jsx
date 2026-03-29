@@ -95,7 +95,7 @@ describe("HintSystem", () => {
   });
 
   it("does not show hint when already dismissed", () => {
-    localStorage.setItem("dp_dismissed_hints", JSON.stringify(["first-pipeline-complete"]));
+    localStorage.setItem("havn_dismissed_hints", JSON.stringify(["first-pipeline-complete"]));
 
     render(
       <HintTestHarness
@@ -121,7 +121,7 @@ describe("HintSystem", () => {
     });
 
     expect(screen.getByTestId("hint-visible")).toHaveTextContent("false");
-    const dismissed = JSON.parse(localStorage.getItem("dp_dismissed_hints"));
+    const dismissed = JSON.parse(localStorage.getItem("havn_dismissed_hints"));
     expect(dismissed).toContain("first-pipeline-complete");
   });
 
@@ -156,7 +156,7 @@ describe("HintSystem", () => {
   });
 
   it("reset clears all dismissed hints", () => {
-    localStorage.setItem("dp_dismissed_hints", JSON.stringify(["first-pipeline-complete", "dag-intro"]));
+    localStorage.setItem("havn_dismissed_hints", JSON.stringify(["first-pipeline-complete", "dag-intro"]));
 
     render(
       <HintTestHarness triggers={{}} />
@@ -169,11 +169,11 @@ describe("HintSystem", () => {
     });
 
     expect(screen.getByTestId("dismissed-count")).toHaveTextContent("0");
-    expect(localStorage.getItem("dp_dismissed_hints")).toBeNull();
+    expect(localStorage.getItem("havn_dismissed_hints")).toBeNull();
   });
 
   it("reports correct total and dismissed counts", () => {
-    localStorage.setItem("dp_dismissed_hints", JSON.stringify(["dag-intro", "first-editor-save", "query-panel-intro"]));
+    localStorage.setItem("havn_dismissed_hints", JSON.stringify(["dag-intro", "first-editor-save", "query-panel-intro"]));
 
     render(<HintTestHarness triggers={{}} />);
 
@@ -198,11 +198,11 @@ describe("HintSystem", () => {
     expect(screen.getByTestId("hint-visible")).toHaveTextContent("false");
 
     // Should NOT be in dismissed_hints (repeatable uses timestamps)
-    const dismissed = JSON.parse(localStorage.getItem("dp_dismissed_hints") || "[]");
+    const dismissed = JSON.parse(localStorage.getItem("havn_dismissed_hints") || "[]");
     expect(dismissed).not.toContain("connector-stale");
 
     // Should have a timestamp stored
-    const timestamps = JSON.parse(localStorage.getItem("dp_hint_stale_timestamps") || "{}");
+    const timestamps = JSON.parse(localStorage.getItem("havn_hint_stale_timestamps") || "{}");
     expect(timestamps["connector-stale"]).toBeDefined();
   });
 

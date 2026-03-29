@@ -32,4 +32,4 @@ def run(db: duckdb.DuckDBPyConnection) -> None:
 - Add Jinja/templating to SQL
 - Add TypeScript to the frontend
 - Mock DuckDB in tests
-- Modify `_dp_internal` schema from user-facing code
+- Modify `_havn` schema from user-facing code

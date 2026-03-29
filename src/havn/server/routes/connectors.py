@@ -26,7 +26,7 @@ router = APIRouter()
 
 # --- Pydantic models ---
 
-_BLOCKED_SCHEMAS = {"_dp_internal", "information_schema"}
+_BLOCKED_SCHEMAS = {"_havn", "information_schema"}
 
 
 def _check_target_schema(v: str) -> str:
@@ -347,7 +347,7 @@ def connector_health_endpoint(
         rows = conn.execute(
             """
             SELECT target, status, started_at, duration_ms, error
-            FROM _dp_internal.run_log
+            FROM _havn.run_log
             WHERE run_type = 'script' AND target LIKE 'ingest/%'
             ORDER BY started_at DESC
             """
