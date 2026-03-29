@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 
 # Re-export the @macro decorator for user-facing macros
 from havn.engine.macros import macro  # noqa: F401

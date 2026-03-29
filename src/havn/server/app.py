@@ -27,7 +27,7 @@ ACTIVE_ENV: str | None = None  # Set by CLI --env flag
 # Create the FastAPI application
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="havn", version="0.2.0")
+app = FastAPI(title="havn", version="0.2.4")
 
 app.add_middleware(
     CORSMiddleware,
