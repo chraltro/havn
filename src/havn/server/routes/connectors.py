@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from havn.server.deps import (
     DbConn,
@@ -26,11 +26,21 @@ router = APIRouter()
 
 # --- Pydantic models ---
 
+_BLOCKED_SCHEMAS = {"_dp_internal", "information_schema"}
+
+
+def _check_target_schema(v: str) -> str:
+    if v.lower() in _BLOCKED_SCHEMAS:
+        raise ValueError(f"Cannot use reserved schema: {v}")
+    return v
+
 
 class ImportFileRequest(BaseModel):
     file_path: str = Field(..., min_length=1, max_length=1000)
     target_schema: str = Field(default="landing", min_length=1, max_length=100)
     target_table: str | None = Field(default=None, max_length=100)
+
+    _validate_schema = field_validator("target_schema")(_check_target_schema)
 
 
 class TestConnectionRequest(BaseModel):
@@ -45,6 +55,8 @@ class ImportFromConnectionRequest(BaseModel):
     target_schema: str = Field(default="landing", min_length=1, max_length=100)
     target_table: str | None = Field(default=None, max_length=100)
 
+    _validate_schema = field_validator("target_schema")(_check_target_schema)
+
 
 class ConnectorSetupRequest(BaseModel):
     connector_type: str = Field(..., min_length=1, max_length=50)
@@ -55,6 +67,8 @@ class ConnectorSetupRequest(BaseModel):
     tables: list[str] | None = None
     target_schema: str = Field(default="landing", min_length=1, max_length=100)
     schedule: str | None = None
+
+    _validate_schema = field_validator("target_schema")(_check_target_schema)
 
 
 class ConnectorTestRequest(BaseModel):
@@ -70,14 +84,30 @@ class ConnectorDiscoverRequest(BaseModel):
 # --- Import endpoints ---
 
 
+def _validate_import_path(file_path: str) -> Path:
+    """Validate that an import file path is within the project directory."""
+    from pathlib import Path
+
+    project_dir = _get_project_dir()
+    resolved = Path(file_path).resolve()
+    # Allow absolute paths only if within project dir
+    if not resolved.is_relative_to(project_dir.resolve()):
+        # Also try relative to project dir
+        resolved = (project_dir / file_path).resolve()
+        if not resolved.is_relative_to(project_dir.resolve()):
+            raise HTTPException(400, "File path must be within the project directory")
+    return resolved
+
+
 @router.post("/api/import/preview-file")
 def preview_file_endpoint(request: Request, req: ImportFileRequest) -> dict:
     """Preview data from a file before importing."""
     _require_permission(request, "execute")
     from havn.engine.importer import preview_file
 
+    validated_path = _validate_import_path(req.file_path)
     try:
-        return preview_file(req.file_path)
+        return preview_file(str(validated_path))
     except Exception as e:
         raise HTTPException(400, str(e))
 
@@ -90,7 +120,8 @@ def import_file_endpoint(
     _require_permission(request, "execute")
     from havn.engine.importer import import_file
 
-    return import_file(conn, req.file_path, req.target_schema, req.target_table)
+    validated_path = _validate_import_path(req.file_path)
+    return import_file(conn, str(validated_path), req.target_schema, req.target_table)
 
 
 @router.post("/api/import/test-connection")

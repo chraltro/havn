@@ -313,6 +313,28 @@ def _require_user(request: Request) -> dict:
     return user
 
 
+def _authenticate_websocket(websocket) -> dict | None:
+    """Validate auth for a WebSocket connection.
+
+    Checks the 'token' query parameter. Returns user dict if valid,
+    or a default admin dict if auth is disabled. Returns None if invalid.
+    """
+    if not _get_auth_enabled():
+        return {"username": "local", "role": "admin", "display_name": "Local User"}
+
+    token = websocket.query_params.get("token", "")
+    if not token:
+        return None
+
+    db_path = _get_db_path()
+    conn = connect(db_path)
+    try:
+        from havn.engine.auth import validate_token
+        return validate_token(conn, token)
+    finally:
+        conn.close()
+
+
 def _require_permission(request: Request, permission: str) -> dict:
     """Require a specific permission."""
     user = _require_user(request)

@@ -84,6 +84,11 @@ def set_secret(project_dir: Path, key: str, value: str) -> None:
         lines.append(f'{key}="{value}"')
 
     env_path.write_text("\n".join(lines) + "\n")
+    # Restrict file permissions to owner-only (no effect on Windows)
+    try:
+        os.chmod(env_path, 0o600)
+    except OSError:
+        pass
     os.environ[key] = value
 
 

@@ -130,6 +130,10 @@ def _execute_widget_query(
     if not sql_query or not sql_query.strip():
         return {"columns": [], "rows": [], "row_count": 0}
 
+    # Validate the SQL is a safe read-only query
+    from havn.server.routes.query import _validate_query_sql
+    _validate_query_sql(sql_query)
+
     # Build parameterized filter injection
     base_sql = sql_query.strip().rstrip(";")
     params: list = []
@@ -551,7 +555,12 @@ def import_dashboard(request: Request, req: DashboardImport, conn: DbConn) -> di
         ],
     ).fetchone()
 
+    _VALID_WIDGET_TYPES = {"chart", "kpi", "table", "text", "filter", "image", "divider"}
+
     for w in req.widgets:
+        widget_type = w.get("widget_type", "chart")
+        if widget_type not in _VALID_WIDGET_TYPES:
+            raise HTTPException(400, f"Invalid widget_type: {widget_type}")
         conn.execute(
             """
             INSERT INTO _dp_internal.dashboard_widgets
@@ -561,7 +570,7 @@ def import_dashboard(request: Request, req: DashboardImport, conn: DbConn) -> di
             """,
             [
                 new_dash[0],
-                w.get("widget_type", "chart"),
+                widget_type,
                 w.get("chart_type"),
                 w.get("title", ""),
                 w.get("sql_query"),
