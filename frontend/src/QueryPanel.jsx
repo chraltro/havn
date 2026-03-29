@@ -192,7 +192,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
   const [maskingPolicies, setMaskingPolicies] = useState({});
   const setHintTrigger = useHintTriggerFn();
   const [sidebarWidth, onSidebarResize, onSidebarResizeStart] = useResizable("havn_query_sidebar_width", 200, 120, 400);
-  const [editorHeight, onEditorResize, onEditorResizeStart] = useResizable("havn_query_editor_height", 120, 60, 500);
+  const [editorHeight, onEditorResize, onEditorResizeStart] = useResizable("havn_query_editor_height", 300, 80, 600);
 
   // Autocomplete state
   const [acItems, setAcItems] = useState([]);
@@ -556,7 +556,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
               onInput={(e) => { const v = e.target.value; const cur = e.target.selectionStart; sqlRef.current = v; _setSql(v); computeAutocomplete(v, cur); }}
               onKeyDown={handleKeyDown}
               onBlur={() => setTimeout(() => setAcItems([]), 150)}
-              placeholder="Write SQL here..."
+              placeholder="SELECT * FROM ..."
               style={{ ...st.textarea, height: "100%", resize: "none" }}
               spellCheck={false}
               aria-label="SQL query editor"
@@ -588,11 +588,11 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
           {/* Toolbar */}
           <div style={st.toolbar}>
             {queryRunning ? (
-              <button onClick={() => { if (queryAbortRef.current) queryAbortRef.current.abort(); }} style={{ ...st.runBtn, background: "var(--havn-red)", borderColor: "var(--havn-red)" }} aria-label="Cancel query">
+              <button onClick={() => { if (queryAbortRef.current) queryAbortRef.current.abort(); }} style={st.cancelBtn} aria-label="Cancel query">
                 Cancel
               </button>
             ) : (
-              <button onClick={runQuery} disabled={!sql.trim()} style={st.runBtn} aria-label="Run query">
+              <button onClick={runQuery} disabled={!sql.trim()} style={!sql.trim() ? st.runBtnDisabled : st.runBtn} aria-label="Run query">
                 Run <span style={st.shortcut}>Ctrl+Enter</span>
               </button>
             )}
@@ -678,13 +678,13 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
           {error && (
             <div style={st.error}>
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
-                <div>
-                  <span style={st.errorLabel}>Query Failed</span>
-                  {error}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: "8px", minWidth: 0 }}>
+                  <span style={st.errorLabel}>Error</span>
+                  <span style={st.errorMessage}>{error}</span>
                 </div>
                 <button
                   onClick={() => setError(null)}
-                  style={{ background: "none", border: "none", color: "var(--havn-red)", cursor: "pointer", fontSize: "14px", lineHeight: 1, flexShrink: 0, padding: "0 2px", opacity: 0.7 }}
+                  style={st.errorDismiss}
                 >{"\u00D7"}</button>
               </div>
             </div>
@@ -720,7 +720,10 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
           {viewMode === "table" && results && (
             <div style={st.results}>
               <div style={st.resultsHeader}>
-                <span>{results.rows.length} row{results.rows.length !== 1 ? "s" : ""}, {results.columns.length} column{results.columns.length !== 1 ? "s" : ""}</span>
+                <span style={st.resultsCount}>{results.rows.length} row{results.rows.length !== 1 ? "s" : ""}</span>
+                <span style={st.resultsSep}>&middot;</span>
+                <span>{results.columns.length} col{results.columns.length !== 1 ? "s" : ""}</span>
+                {results.truncated && <span style={st.resultsTruncated}>results capped</span>}
               </div>
               <div style={st.resultsBody}>
                 <SortableTable columns={results.columns} rows={results.rows} maskedColumns={maskingPolicies ? Object.entries(maskingPolicies).reduce((acc, [key, method]) => { const col = key.split(".").pop(); if (!acc[col]) acc[col] = method; return acc; }, {}) : undefined} />
@@ -731,6 +734,15 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
             <div style={st.results}>
               <div style={st.resultsBody}>
                 <ChartPanel columns={results.columns} rows={results.rows} />
+              </div>
+            </div>
+          )}
+
+          {/* Empty state — no results yet */}
+          {!results && !explainResult && !error && (
+            <div style={st.emptyState}>
+              <div style={st.emptyText}>
+                {sql.trim() ? "Press Ctrl+Enter to run your query" : "Write a SQL query above to get started"}
               </div>
             </div>
           )}
@@ -745,11 +757,38 @@ const st = {
   main: { display: "flex", flex: 1, overflow: "hidden" },
 
   queryArea: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" },
-  toolbar: { display: "flex", alignItems: "center", gap: "8px", padding: "6px 12px", borderBottom: "1px solid var(--havn-border)", flexShrink: 0 },
+  toolbar: { display: "flex", alignItems: "center", gap: "8px", padding: "6px 12px", borderBottom: "1px solid var(--havn-border)", background: "var(--havn-bg-secondary)", flexShrink: 0 },
   runBtn: {
-    padding: "5px 14px",
-    background: "var(--havn-green)",
-    border: "1px solid var(--havn-green-border)",
+    padding: "5px 16px",
+    background: "var(--havn-accent)",
+    border: "1px solid var(--havn-accent)",
+    borderRadius: "var(--havn-radius-lg)",
+    color: "var(--havn-bg)",
+    cursor: "pointer",
+    fontSize: "12px",
+    fontWeight: 600,
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+  },
+  runBtnDisabled: {
+    padding: "5px 16px",
+    background: "var(--havn-btn-bg)",
+    border: "1px solid var(--havn-btn-border)",
+    borderRadius: "var(--havn-radius-lg)",
+    color: "var(--havn-text-dim)",
+    cursor: "default",
+    fontSize: "12px",
+    fontWeight: 600,
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    opacity: 0.6,
+  },
+  cancelBtn: {
+    padding: "5px 16px",
+    background: "var(--havn-red)",
+    border: "1px solid var(--havn-red)",
     borderRadius: "var(--havn-radius-lg)",
     color: "#fff",
     cursor: "pointer",
@@ -762,10 +801,10 @@ const st = {
   shortcut: { fontSize: "10px", opacity: 0.7 },
   fmtBtn: { padding: "5px 10px", background: "var(--havn-btn-bg)", border: "1px solid var(--havn-btn-border)", borderRadius: "var(--havn-radius-lg)", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "12px", fontWeight: 500, display: "flex", alignItems: "center", gap: "6px" },
 
-  historyWrapper: { position: "relative" },
+  historyWrapper: { position: "relative", marginLeft: "auto" },
   historyBtn: { background: "var(--havn-btn-bg)", border: "1px solid var(--havn-btn-border)", borderRadius: "var(--havn-radius-lg)", color: "var(--havn-text-secondary)", cursor: "pointer", padding: "4px 8px", fontSize: "14px", display: "flex", alignItems: "center", gap: "4px" },
   historyCount: { fontSize: "10px", background: "var(--havn-bg-tertiary)", padding: "0 5px", borderRadius: "8px", color: "var(--havn-text-dim)", fontWeight: 500 },
-  historyDropdown: { position: "absolute", top: "100%", left: 0, marginTop: "4px", background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius)", zIndex: 100, width: "400px", maxHeight: "300px", overflow: "auto", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" },
+  historyDropdown: { position: "absolute", top: "100%", right: 0, marginTop: "4px", background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius)", zIndex: 100, width: "400px", maxHeight: "300px", overflow: "auto", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" },
   historyHeader: { padding: "6px 12px", fontSize: "11px", fontWeight: 600, color: "var(--havn-text-secondary)", borderBottom: "1px solid var(--havn-border)" },
   historyEmpty: { padding: "16px", color: "var(--havn-text-dim)", fontSize: "12px", textAlign: "center" },
   historyItem: { display: "block", width: "100%", padding: "6px 12px", background: "none", border: "none", borderBottom: "1px solid var(--havn-border)", color: "var(--havn-text)", cursor: "pointer", textAlign: "left", fontSize: "12px" },
@@ -775,9 +814,9 @@ const st = {
   viewBtn: { padding: "3px 10px", background: "var(--havn-btn-bg)", border: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "11px", fontWeight: 500 },
   viewBtnActive: { padding: "3px 10px", background: "var(--havn-bg-secondary)", border: "none", color: "var(--havn-text)", cursor: "pointer", fontSize: "11px", fontWeight: 600 },
 
-  editorWrapper: { flexShrink: 0 },
-  textarea: { width: "100%", height: "100%", padding: "10px 12px", background: "var(--havn-bg)", border: "none", color: "var(--havn-text)", fontFamily: "var(--havn-font-mono)", fontSize: "13px", resize: "none", outline: "none", boxSizing: "border-box", lineHeight: 1.5, display: "block" },
-  shortcutHint: { height: "22px", display: "flex", alignItems: "center", padding: "0 10px", gap: "2px", fontSize: "10px", color: "var(--havn-text-dim)", background: "var(--havn-bg)", flexShrink: 0 },
+  editorWrapper: { flexShrink: 0, borderBottom: "1px solid var(--havn-border)" },
+  textarea: { width: "100%", height: "100%", padding: "12px 14px", background: "var(--havn-bg)", border: "none", color: "var(--havn-text)", fontFamily: "var(--havn-font-mono)", fontSize: "13px", resize: "none", outline: "none", boxSizing: "border-box", lineHeight: 1.6, display: "block" },
+  shortcutHint: { height: "22px", display: "flex", alignItems: "center", padding: "0 10px", gap: "2px", fontSize: "10px", color: "var(--havn-text-dim)", background: "var(--havn-bg)", borderBottom: "1px solid var(--havn-border)", flexShrink: 0 },
   shortcutKey: { background: "var(--havn-btn-bg)", border: "1px solid var(--havn-btn-border)", borderRadius: "3px", padding: "0 4px", fontSize: "10px", fontFamily: "var(--havn-font-mono)", color: "var(--havn-text-secondary)" },
   acDropdown: { maxHeight: "180px", overflow: "auto", background: "var(--havn-bg-secondary)", borderBottom: "1px solid var(--havn-border)", flexShrink: 0 },
   acItem: { display: "flex", alignItems: "center", gap: "8px", padding: "5px 10px", cursor: "pointer", fontSize: "12px" },
@@ -787,12 +826,20 @@ const st = {
 
   suggestions: { display: "flex", alignItems: "center", gap: "6px", padding: "8px 12px", flexWrap: "wrap", borderBottom: "1px solid var(--havn-border)" },
   suggestLabel: { fontSize: "11px", color: "var(--havn-text-dim)", fontWeight: 500 },
-  suggestBtn: { padding: "3px 10px", background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius-lg)", color: "var(--havn-accent)", cursor: "pointer", fontSize: "11px", fontWeight: 500 },
+  suggestBtn: { padding: "3px 10px", background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius-lg)", color: "var(--havn-accent)", cursor: "pointer", fontSize: "11px", fontFamily: "var(--havn-font-mono)", fontWeight: 500 },
 
-  error: { padding: "8px 12px", background: "rgba(255,0,0,0.05)", borderBottom: "1px solid var(--havn-red)", color: "var(--havn-red)", fontSize: "12px", fontFamily: "var(--havn-font-mono)", whiteSpace: "pre-wrap" },
-  errorLabel: { fontWeight: 600, marginRight: "8px" },
+  error: { padding: "10px 12px", background: "color-mix(in srgb, var(--havn-red) 8%, transparent)", borderLeft: "3px solid var(--havn-red)", margin: "0", color: "var(--havn-text)", fontSize: "12px", fontFamily: "var(--havn-font-mono)", whiteSpace: "pre-wrap", lineHeight: 1.5 },
+  errorLabel: { fontWeight: 600, color: "var(--havn-red)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.3px", flexShrink: 0 },
+  errorMessage: { color: "var(--havn-red)", wordBreak: "break-word" },
+  errorDismiss: { background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "16px", lineHeight: 1, flexShrink: 0, padding: "0 2px" },
 
   results: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" },
-  resultsHeader: { padding: "6px 12px", fontSize: "11px", color: "var(--havn-text-secondary)", borderBottom: "1px solid var(--havn-border)", flexShrink: 0 },
+  resultsHeader: { display: "flex", alignItems: "center", gap: "6px", padding: "6px 12px", fontSize: "11px", color: "var(--havn-text-dim)", borderBottom: "1px solid var(--havn-border)", flexShrink: 0, fontFamily: "var(--havn-font-mono)" },
+  resultsCount: { color: "var(--havn-text-secondary)", fontWeight: 500 },
+  resultsSep: { opacity: 0.4 },
+  resultsTruncated: { marginLeft: "4px", color: "var(--havn-yellow)", fontSize: "10px", fontWeight: 500 },
   resultsBody: { flex: 1, overflow: "auto", display: "flex", flexDirection: "column" },
+
+  emptyState: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "32px" },
+  emptyText: { fontSize: "13px", color: "var(--havn-text-dim)", fontFamily: "var(--havn-font-mono)" },
 };

@@ -278,17 +278,18 @@ const glossaryStyles = {
     color: "var(--havn-accent)",
     cursor: "help",
     display: "inline",
+    fontWeight: 500,
   },
   tooltip: {
     position: "absolute",
     left: "50%",
     transform: "translateX(-50%)",
-    width: "260px",
+    width: "240px",
     padding: "10px 12px",
     background: "var(--havn-bg)",
     border: "1px solid var(--havn-border-light)",
     borderRadius: "var(--havn-radius-lg, 8px)",
-    boxShadow: "0 8px 24px rgba(0, 0, 0, 0.4)",
+    boxShadow: "0 8px 24px rgba(0, 0, 0, 0.45)",
     color: "var(--havn-text-secondary)",
     fontSize: "12px",
     lineHeight: 1.55,
@@ -317,10 +318,10 @@ function Illustration({ id }) {
         alt=""
         onError={() => setImgError(true)}
         style={{
-          width: "180px",
-          height: "180px",
+          width: "120px",
+          height: "120px",
           objectFit: "contain",
-          opacity: 0.85,
+          opacity: 0.8,
           pointerEvents: "none",
           flexShrink: 0,
         }}
@@ -676,9 +677,17 @@ export default function Onboarding({ onComplete, isOpen, onNavigate, tables, onS
         opacity: cardVisible ? undefined : 0,
       }}>
         <div style={styles.card}>
-          {/* Top section: step counter */}
-          <div style={styles.stepCounter}>
-            {currentStep + 1} / {steps.length}
+          {/* Top section: step counter + progress bar */}
+          <div style={styles.stepCounterRow}>
+            <span style={styles.stepCounter}>
+              Step {currentStep + 1} of {steps.length}
+            </span>
+            <div style={styles.progressTrack}>
+              <div style={{
+                ...styles.progressBar,
+                width: `${((currentStep + 1) / steps.length) * 100}%`,
+              }} />
+            </div>
           </div>
 
           {/* Body: text on left, illustration on right */}
@@ -689,9 +698,11 @@ export default function Onboarding({ onComplete, isOpen, onNavigate, tables, onS
                 {parseDescription(step.description)}
               </p>
             </div>
-            <div style={styles.illustrationArea}>
-              <Illustration id={step.illustration} />
-            </div>
+            {step.illustration && (
+              <div style={styles.illustrationArea}>
+                <Illustration id={step.illustration} />
+              </div>
+            )}
           </div>
 
           {/* Navigation */}
@@ -704,8 +715,14 @@ export default function Onboarding({ onComplete, isOpen, onNavigate, tables, onS
                   aria-label={`Go to step ${i + 1}`}
                   style={{
                     ...styles.dot,
-                    background: i === currentStep ? "var(--havn-accent)" : "var(--havn-border-light)",
-                    width: i === currentStep ? "20px" : "8px",
+                    background: i === currentStep
+                      ? "var(--havn-accent)"
+                      : i < currentStep
+                        ? "var(--havn-text-dim)"
+                        : "var(--havn-border-light)",
+                    width: i === currentStep ? "18px" : "6px",
+                    height: "6px",
+                    opacity: i <= currentStep ? 1 : 0.6,
                   }}
                 />
               ))}
@@ -752,25 +769,46 @@ const styles = {
     maxWidth: "calc(100vw - 48px)",
     background: "var(--havn-bg-secondary)",
     border: "1px solid var(--havn-border-light)",
+    borderTop: "2px solid var(--havn-accent)",
     borderRadius: "var(--havn-radius-lg, 8px)",
-    boxShadow: "0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.1)",
+    boxShadow: "0 12px 40px rgba(0, 0, 0, 0.45)",
     padding: "20px 24px 18px",
     display: "flex",
     flexDirection: "column",
   },
+  stepCounterRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    marginBottom: "14px",
+  },
   stepCounter: {
     fontSize: "11px",
     color: "var(--havn-text-dim)",
-    fontWeight: 600,
-    letterSpacing: "0.5px",
-    marginBottom: "12px",
+    fontWeight: 500,
+    letterSpacing: "0.3px",
     fontFamily: "var(--havn-font-mono, monospace)",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  },
+  progressTrack: {
+    flex: 1,
+    height: "2px",
+    background: "var(--havn-border)",
+    borderRadius: "1px",
+    overflow: "hidden",
+  },
+  progressBar: {
+    height: "100%",
+    background: "var(--havn-accent)",
+    borderRadius: "1px",
+    transition: "width 0.3s ease",
   },
   body: {
     display: "flex",
-    gap: "16px",
+    gap: "20px",
     alignItems: "flex-start",
-    minHeight: "160px",
+    minHeight: "140px",
   },
   textArea: {
     flex: 1,
@@ -783,38 +821,38 @@ const styles = {
     justifyContent: "flex-end",
   },
   title: {
-    fontSize: "20px",
+    fontSize: "18px",
     fontWeight: 600,
     color: "var(--havn-text)",
     margin: "0 0 10px",
     lineHeight: 1.3,
+    letterSpacing: "-0.2px",
   },
   description: {
-    fontSize: "14px",
+    fontSize: "13.5px",
     color: "var(--havn-text-secondary)",
-    lineHeight: 1.7,
+    lineHeight: 1.65,
     margin: 0,
   },
   nav: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: "18px",
+    marginTop: "16px",
     paddingTop: "14px",
     borderTop: "1px solid var(--havn-border)",
   },
   dots: {
     display: "flex",
-    gap: "5px",
+    gap: "4px",
     alignItems: "center",
   },
   dot: {
-    height: "8px",
-    borderRadius: "4px",
+    borderRadius: "3px",
     border: "none",
     cursor: "pointer",
     padding: 0,
-    transition: "width 0.25s ease, background 0.25s ease",
+    transition: "width 0.25s ease, background 0.25s ease, opacity 0.25s ease",
   },
   buttonGroup: {
     display: "flex",
@@ -828,7 +866,7 @@ const styles = {
     alignItems: "center",
   },
   btnPrimary: {
-    padding: "7px 12px 7px 18px",
+    padding: "7px 14px 7px 16px",
     background: "var(--havn-accent)",
     border: "none",
     borderRadius: "var(--havn-radius, 4px)",
@@ -839,6 +877,7 @@ const styles = {
     display: "inline-flex",
     alignItems: "center",
     gap: "8px",
+    transition: "opacity 0.15s ease",
   },
   btnGhost: {
     padding: "7px 14px",
@@ -848,6 +887,7 @@ const styles = {
     color: "var(--havn-text-secondary)",
     cursor: "pointer",
     fontSize: "12px",
+    transition: "border-color 0.15s ease, color 0.15s ease",
   },
   btnSkip: {
     padding: "2px 0",
@@ -856,7 +896,8 @@ const styles = {
     color: "var(--havn-text-dim)",
     cursor: "pointer",
     fontSize: "11px",
-    opacity: 0.7,
+    opacity: 0.65,
+    transition: "opacity 0.15s ease",
   },
   keyHint: {
     display: "inline-flex",
@@ -865,7 +906,7 @@ const styles = {
     width: "18px",
     height: "18px",
     borderRadius: "3px",
-    background: "rgba(0, 0, 0, 0.2)",
+    background: "rgba(0, 0, 0, 0.18)",
     color: "inherit",
     fontSize: "12px",
     lineHeight: 1,

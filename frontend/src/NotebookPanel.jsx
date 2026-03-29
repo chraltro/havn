@@ -793,29 +793,12 @@ export default function NotebookPanel({ openPath }) {
   if (!notebook) {
     return (
       <div style={s.container}>
-        <div style={s.listHeader}>
-          <div style={s.newRow}>
-            <input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Notebook name..."
-              style={s.input}
-              onKeyDown={(e) => e.key === "Enter" && createNotebook()}
-            />
-            <button onClick={createNotebook} style={s.btn}>New</button>
-          </div>
-        </div>
-        {nbError && <div style={{ color: "var(--havn-red)", fontSize: "12px", padding: "6px 12px" }}>{nbError}</div>}
-        <div style={s.list}>
-          {notebooks.length === 0 && (
-            <div style={s.empty}>No notebooks yet. Create one above.</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--havn-text-secondary)", fontSize: 13 }}>
+          {nbError ? (
+            <span style={{ color: "var(--havn-red)" }}>{nbError}</span>
+          ) : (
+            <span>Select a .dpnb notebook from the file tree to open it.</span>
           )}
-          {notebooks.map((nb) => (
-            <div key={nb.path} data-havn-notebook="" onClick={() => openNotebook(nb.path)} style={s.nbItem}>
-              <span style={s.nbName}>{nb.title || nb.name}</span>
-              <span style={s.nbMeta}><span style={s.nbPath}>{nb.path}</span> · {nb.cells} cells</span>
-            </div>
-          ))}
         </div>
       </div>
     );
@@ -824,7 +807,6 @@ export default function NotebookPanel({ openPath }) {
   return (
     <div style={s.container}>
       <div style={s.nbHeader}>
-        <button onClick={() => { setNotebook(null); setActive(null); }} style={s.backBtn}>&larr; Back</button>
         <span style={s.nbTitle}>{notebook.title || active}</span>
         <div style={s.nbActions}>
           <button onClick={() => addCell("sql")} style={s.btn}>+ SQL</button>

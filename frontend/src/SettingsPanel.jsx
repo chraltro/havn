@@ -24,12 +24,27 @@ function ThemeSection() {
                 ...sec.themeCard,
                 border: active ? "2px solid var(--havn-accent)" : "1px solid var(--havn-border)",
                 background: theme.vars["--havn-bg"],
+                boxShadow: active ? `0 0 0 1px ${theme.vars["--havn-accent"]}40` : "none",
               }}
             >
-              <div style={{ display: "flex", gap: "4px", marginBottom: "8px" }}>
-                <span style={{ width: "14px", height: "14px", borderRadius: "50%", background: theme.vars["--havn-accent"], border: `1px solid ${theme.vars["--havn-border"]}` }} />
-                <span style={{ width: "14px", height: "14px", borderRadius: "50%", background: theme.vars["--havn-green"], border: `1px solid ${theme.vars["--havn-border"]}` }} />
-                <span style={{ width: "14px", height: "14px", borderRadius: "50%", background: theme.vars["--havn-red"], border: `1px solid ${theme.vars["--havn-border"]}` }} />
+              {/* Color bar preview — shows the palette at a glance */}
+              <div style={{ display: "flex", gap: "2px", marginBottom: "10px", borderRadius: "3px", overflow: "hidden", height: "6px" }}>
+                <span style={{ flex: 2, background: theme.vars["--havn-accent"] }} />
+                <span style={{ flex: 1, background: theme.vars["--havn-green"] }} />
+                <span style={{ flex: 1, background: theme.vars["--havn-purple"] }} />
+                <span style={{ flex: 1, background: theme.vars["--havn-red"] }} />
+              </div>
+              {/* Simulated UI chrome — sidebar + content area */}
+              <div style={{ display: "flex", gap: "3px", marginBottom: "10px", height: "28px", borderRadius: "3px", overflow: "hidden", border: `1px solid ${theme.vars["--havn-border"]}` }}>
+                <div style={{ width: "30%", background: theme.vars["--havn-bg-secondary"], display: "flex", flexDirection: "column", gap: "2px", padding: "4px 3px" }}>
+                  <span style={{ height: "2px", width: "70%", background: theme.vars["--havn-text-dim"], borderRadius: "1px" }} />
+                  <span style={{ height: "2px", width: "85%", background: theme.vars["--havn-accent"], borderRadius: "1px" }} />
+                  <span style={{ height: "2px", width: "55%", background: theme.vars["--havn-text-dim"], borderRadius: "1px" }} />
+                </div>
+                <div style={{ flex: 1, background: theme.vars["--havn-bg-tertiary"], display: "flex", flexDirection: "column", gap: "2px", padding: "4px 3px" }}>
+                  <span style={{ height: "2px", width: "60%", background: theme.vars["--havn-text-secondary"], borderRadius: "1px" }} />
+                  <span style={{ height: "2px", width: "40%", background: theme.vars["--havn-text-dim"], borderRadius: "1px" }} />
+                </div>
               </div>
               <div style={{ color: theme.vars["--havn-text"], fontSize: "12px", fontWeight: 600, marginBottom: "2px" }}>{theme.name}</div>
               <div style={{ color: theme.vars["--havn-text-secondary"], fontSize: "10px", lineHeight: "1.3" }}>{theme.description}</div>
@@ -39,7 +54,7 @@ function ThemeSection() {
         })}
       </div>
 
-      <h3 style={{ ...sec.heading, marginTop: "20px" }}>Fonts</h3>
+      <h3 style={{ ...sec.heading, marginTop: "24px" }}>Fonts</h3>
       <p style={sec.desc}>Choose a font pairing. Works with any color theme above.</p>
       <div style={sec.fontGrid}>
         {getFontThemeIds().map((id) => {
@@ -53,15 +68,18 @@ function ThemeSection() {
                 ...sec.fontCard,
                 border: active ? "2px solid var(--havn-accent)" : "1px solid var(--havn-border)",
                 background: active ? "var(--havn-bg-secondary)" : "var(--havn-bg-tertiary)",
+                boxShadow: active ? "0 0 0 1px color-mix(in srgb, var(--havn-accent) 25%, transparent)" : "none",
               }}
             >
-              <div style={{ fontSize: "14px", fontWeight: 600, fontFamily: font.vars["--havn-font"], marginBottom: "2px", color: "var(--havn-text)" }}>
-                Aa
+              <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "6px" }}>
+                <div style={{ fontSize: "18px", fontWeight: 600, fontFamily: font.vars["--havn-font"], color: "var(--havn-text)", lineHeight: 1 }}>
+                  Aa
+                </div>
+                <div style={{ fontSize: "12px", fontFamily: font.vars["--havn-font-mono"], color: "var(--havn-accent)", lineHeight: 1 }}>
+                  0x1F {"{}"}
+                </div>
               </div>
-              <div style={{ fontSize: "11px", fontFamily: font.vars["--havn-font-mono"], color: "var(--havn-accent)", marginBottom: "4px" }}>
-                0x1F {}
-              </div>
-              <div style={{ fontSize: "11px", fontWeight: 500, color: "var(--havn-text)" }}>{font.name}</div>
+              <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--havn-text)", marginBottom: "1px" }}>{font.name}</div>
               <div style={{ fontSize: "10px", color: "var(--havn-text-secondary)", lineHeight: "1.3" }}>{font.description}</div>
               {active && <div style={{ marginTop: "4px", fontSize: "9px", color: "var(--havn-accent)", fontWeight: 700, letterSpacing: "0.5px", textTransform: "uppercase" }}>Active</div>}
             </button>
@@ -154,8 +172,8 @@ function SchedulerSection() {
                   <td style={sec.td}>{last.time}</td>
                   <td style={sec.td}>
                     <span style={{
-                      padding: '2px 8px', borderRadius: 'var(--havn-radius)', fontSize: 11,
-                      background: last.status === 'success' ? 'var(--havn-green-bg)' : last.status === 'error' ? 'var(--havn-red-bg)' : 'var(--havn-btn-bg)',
+                      padding: '2px 8px', borderRadius: 'var(--havn-radius)', fontSize: 11, fontWeight: 500,
+                      background: last.status === 'success' ? 'color-mix(in srgb, var(--havn-green) 15%, transparent)' : last.status === 'error' ? 'color-mix(in srgb, var(--havn-red) 15%, transparent)' : 'var(--havn-btn-bg)',
                       color: last.status === 'success' ? 'var(--havn-green)' : last.status === 'error' ? 'var(--havn-red)' : 'var(--havn-text-secondary)'
                     }}>{last.status}</span>
                   </td>
@@ -163,7 +181,7 @@ function SchedulerSection() {
                     <button
                       onClick={() => handleRunNow(s.name)}
                       disabled={running === s.name}
-                      style={{ ...sec.addBtn, opacity: running === s.name ? 0.5 : 1 }}
+                      style={{ ...sec.addBtn, background: "var(--havn-green)", opacity: running === s.name ? 0.5 : 1 }}
                     >{running === s.name ? 'Running...' : 'Run Now'}</button>
                   </td>
                 </tr>
@@ -394,10 +412,10 @@ function AlertsSection() {
 
       {testResult && (
         <div style={{
-          padding: '8px 12px', borderRadius: 'var(--havn-radius-lg)', marginBottom: 12, fontSize: 13,
-          background: testResult.success ? 'var(--havn-green-bg)' : 'var(--havn-red-bg)',
+          padding: '8px 12px', borderRadius: 'var(--havn-radius)', marginBottom: 12, fontSize: 13, fontWeight: 500,
+          background: testResult.success ? 'color-mix(in srgb, var(--havn-green) 12%, var(--havn-bg-secondary))' : 'color-mix(in srgb, var(--havn-red) 12%, var(--havn-bg-secondary))',
           color: testResult.success ? 'var(--havn-green)' : 'var(--havn-red)',
-          border: `1px solid ${testResult.success ? 'var(--havn-green-border)' : 'var(--havn-red-border)'}`
+          border: `1px solid ${testResult.success ? 'var(--havn-green-border)' : 'var(--havn-border-light)'}`
         }}>{testResult.message}</div>
       )}
 
@@ -425,8 +443,8 @@ function AlertsSection() {
                 <td style={sec.td} title={a.message || ''}>{(a.message || '—').slice(0, 50)}</td>
                 <td style={sec.td}>
                   <span style={{
-                    padding: '2px 8px', borderRadius: 'var(--havn-radius)', fontSize: 11,
-                    background: a.status === 'sent' || a.status === 'success' ? 'var(--havn-green-bg)' : 'var(--havn-red-bg)',
+                    padding: '2px 8px', borderRadius: 'var(--havn-radius)', fontSize: 11, fontWeight: 500,
+                    background: a.status === 'sent' || a.status === 'success' ? 'color-mix(in srgb, var(--havn-green) 15%, transparent)' : 'color-mix(in srgb, var(--havn-red) 15%, transparent)',
                     color: a.status === 'sent' || a.status === 'success' ? 'var(--havn-green)' : 'var(--havn-red)'
                   }}>{a.status || '—'}</span>
                 </td>
@@ -627,19 +645,39 @@ function ResourcesSection() {
   );
 }
 
+function SectionGroup({ label, children }) {
+  return (
+    <div style={{ marginBottom: "8px" }}>
+      <div style={sec.groupLabel}>{label}</div>
+      <div style={sec.groupContent}>{children}</div>
+    </div>
+  );
+}
+
 export default function SettingsPanel({ onShowGuide, showConfirm }) {
   return (
     <div style={sec.container}>
       <div style={sec.content}>
-        {onShowGuide && <GuideSection onShowGuide={onShowGuide} />}
-        <HintsSection />
-        <ThemeSection />
-        <LintConfigSection showConfirm={showConfirm} />
-        <SchedulerSection />
-        <SecretsSection showConfirm={showConfirm} />
-        <UsersSection showConfirm={showConfirm} />
-        <AlertsSection />
-        <ResourcesSection />
+        <SectionGroup label="Appearance">
+          <ThemeSection />
+        </SectionGroup>
+
+        <SectionGroup label="Experience">
+          {onShowGuide && <GuideSection onShowGuide={onShowGuide} />}
+          <HintsSection />
+        </SectionGroup>
+
+        <SectionGroup label="Pipeline">
+          <LintConfigSection showConfirm={showConfirm} />
+          <SchedulerSection />
+          <ResourcesSection />
+        </SectionGroup>
+
+        <SectionGroup label="Security">
+          <SecretsSection showConfirm={showConfirm} />
+          <UsersSection showConfirm={showConfirm} />
+          <AlertsSection />
+        </SectionGroup>
       </div>
     </div>
   );
@@ -648,24 +686,26 @@ export default function SettingsPanel({ onShowGuide, showConfirm }) {
 const sec = {
   container: { display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" },
   header: { padding: "8px 12px", borderBottom: "1px solid var(--havn-border)", fontWeight: 600, fontSize: "13px" },
-  content: { flex: 1, overflow: "auto", padding: "16px 24px", maxWidth: "800px" },
-  section: { marginBottom: "32px" },
-  heading: { fontSize: "16px", fontWeight: 600, margin: "0 0 4px" },
+  content: { flex: 1, overflow: "auto", padding: "24px 28px 40px", maxWidth: "800px" },
+  groupLabel: { fontSize: "10px", fontWeight: 700, letterSpacing: "1.2px", textTransform: "uppercase", color: "var(--havn-accent)", marginBottom: "16px", paddingBottom: "8px", borderBottom: "1px solid var(--havn-border)" },
+  groupContent: { marginBottom: "24px" },
+  section: { marginBottom: "28px" },
+  heading: { fontSize: "15px", fontWeight: 600, margin: "0 0 4px", color: "var(--havn-text)" },
   desc: { fontSize: "12px", color: "var(--havn-text-secondary)", margin: "0 0 12px", lineHeight: 1.6 },
   code: { background: "var(--havn-btn-bg)", padding: "1px 5px", borderRadius: "3px", fontSize: "12px", fontFamily: "var(--havn-font-mono)" },
   table: { width: "100%", borderCollapse: "collapse", marginBottom: "12px", fontSize: "12px" },
-  th: { textAlign: "left", padding: "6px 10px", borderBottom: "2px solid var(--havn-border-light)", color: "var(--havn-text-secondary)", fontWeight: 600 },
-  td: { padding: "6px 10px", borderBottom: "1px solid var(--havn-border)" },
+  th: { textAlign: "left", padding: "6px 10px", borderBottom: "1px solid var(--havn-border-light)", color: "var(--havn-text-secondary)", fontWeight: 600, fontSize: "11px", letterSpacing: "0.3px" },
+  td: { padding: "7px 10px", borderBottom: "1px solid var(--havn-border)" },
   masked: { color: "var(--havn-text-secondary)", fontFamily: "var(--havn-font-mono)" },
-  addRow: { display: "flex", gap: "8px", alignItems: "center" },
-  input: { flex: 1, padding: "6px 10px", background: "var(--havn-bg-tertiary)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius-lg)", color: "var(--havn-text)", fontSize: "13px" },
-  roleSelect: { padding: "4px 8px", background: "var(--havn-bg-tertiary)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "12px" },
-  addBtn: { padding: "6px 14px", background: "var(--havn-green)", border: "1px solid var(--havn-green-border)", borderRadius: "var(--havn-radius-lg)", color: "#fff", cursor: "pointer", fontSize: "12px", fontWeight: 500, whiteSpace: "nowrap" },
-  delBtn: { padding: "3px 8px", background: "var(--havn-btn-bg)", border: "1px solid var(--havn-btn-border)", borderRadius: "var(--havn-radius)", color: "var(--havn-red)", cursor: "pointer", fontSize: "11px" },
-  label: { display: "block", fontSize: "12px", color: "var(--havn-text-secondary)", marginBottom: "4px" },
-  configTextarea: { width: "100%", padding: "10px 12px", background: "var(--havn-bg-tertiary)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius-lg)", color: "var(--havn-text)", fontFamily: "var(--havn-font-mono)", fontSize: "12px", lineHeight: 1.6, resize: "vertical", boxSizing: "border-box", outline: "none" },
+  addRow: { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" },
+  input: { flex: 1, minWidth: 0, padding: "7px 10px", background: "var(--havn-bg-tertiary)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "13px", outline: "none" },
+  roleSelect: { padding: "7px 10px", background: "var(--havn-bg-tertiary)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "13px" },
+  addBtn: { padding: "7px 16px", background: "var(--havn-accent)", border: "none", borderRadius: "var(--havn-radius)", color: "#fff", cursor: "pointer", fontSize: "12px", fontWeight: 600, whiteSpace: "nowrap" },
+  delBtn: { padding: "4px 10px", background: "transparent", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-red)", cursor: "pointer", fontSize: "11px" },
+  label: { display: "block", fontSize: "11px", fontWeight: 600, color: "var(--havn-text-secondary)", marginBottom: "5px", letterSpacing: "0.2px" },
+  configTextarea: { width: "100%", padding: "10px 12px", background: "var(--havn-bg-tertiary)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontFamily: "var(--havn-font-mono)", fontSize: "12px", lineHeight: 1.6, resize: "vertical", boxSizing: "border-box", outline: "none" },
   themeGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "10px" },
-  themeCard: { padding: "12px", borderRadius: "var(--havn-radius-lg)", cursor: "pointer", textAlign: "left", display: "block" },
-  fontGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "10px" },
-  fontCard: { padding: "12px", borderRadius: "var(--havn-radius-lg)", cursor: "pointer", textAlign: "left", display: "block" },
+  themeCard: { padding: "12px", borderRadius: "var(--havn-radius-lg)", cursor: "pointer", textAlign: "left", display: "block", transition: "border-color 0.15s, box-shadow 0.15s" },
+  fontGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "10px" },
+  fontCard: { padding: "10px 12px", borderRadius: "var(--havn-radius)", cursor: "pointer", textAlign: "left", display: "block", transition: "border-color 0.15s, box-shadow 0.15s" },
 };
