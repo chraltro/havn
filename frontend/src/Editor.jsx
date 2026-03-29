@@ -1,8 +1,109 @@
 import React, { useEffect, useRef } from "react";
 import MonacoEditor, { loader } from "@monaco-editor/react";
 import { useTheme } from "./ThemeProvider";
-import { getTheme } from "./themes";
+import { COLOR_THEMES } from "./themes";
 import { api } from "./api";
+
+// ---------------------------------------------------------------------------
+// Custom Monaco themes derived from havn COLOR_THEMES
+// ---------------------------------------------------------------------------
+
+/** Normalize a CSS hex color to 6-digit uppercase hex (strips shorthand). */
+function normHex(hex) {
+  let h = hex.replace("#", "");
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  return "#" + h.toUpperCase();
+}
+
+/** Append an alpha byte (0-255) to a 6-digit hex color → #RRGGBBAA. */
+function hexAlpha(hex, alpha) {
+  const a = Math.round(alpha * 255).toString(16).padStart(2, "0").toUpperCase();
+  return normHex(hex) + a;
+}
+
+/** Build a Monaco IStandaloneThemeData from a havn color theme entry. */
+function buildMonacoTheme(themeEntry) {
+  const v = themeEntry.vars;
+  const dark = themeEntry.dark;
+  return {
+    base: dark ? "vs-dark" : "vs",
+    inherit: true,
+    rules: [
+      // Keywords (SELECT, FROM, CREATE, etc.)
+      { token: "keyword", foreground: normHex(v["--havn-accent"]).slice(1), fontStyle: "bold" },
+      { token: "keyword.sql", foreground: normHex(v["--havn-accent"]).slice(1), fontStyle: "bold" },
+      // Operators
+      { token: "operator", foreground: normHex(v["--havn-text-secondary"]).slice(1) },
+      { token: "operator.sql", foreground: normHex(v["--havn-text-secondary"]).slice(1) },
+      // Strings
+      { token: "string", foreground: normHex(v["--havn-green"]).slice(1) },
+      { token: "string.sql", foreground: normHex(v["--havn-green"]).slice(1) },
+      // Numbers
+      { token: "number", foreground: normHex(v["--havn-purple"]).slice(1) },
+      { token: "number.sql", foreground: normHex(v["--havn-purple"]).slice(1) },
+      // Comments
+      { token: "comment", foreground: normHex(v["--havn-text-dim"]).slice(1), fontStyle: "italic" },
+      { token: "comment.sql", foreground: normHex(v["--havn-text-dim"]).slice(1), fontStyle: "italic" },
+      // Identifiers / default
+      { token: "identifier", foreground: normHex(v["--havn-text"]).slice(1) },
+      { token: "identifier.sql", foreground: normHex(v["--havn-text"]).slice(1) },
+      // Types
+      { token: "type", foreground: normHex(v["--havn-yellow"]).slice(1) },
+      { token: "predefined.sql", foreground: normHex(v["--havn-yellow"]).slice(1) },
+      // Functions
+      { token: "predefined", foreground: normHex(v["--havn-yellow"]).slice(1) },
+      // Delimiters (parentheses, commas, semicolons)
+      { token: "delimiter", foreground: normHex(v["--havn-text-secondary"]).slice(1) },
+      { token: "delimiter.parenthesis", foreground: normHex(v["--havn-text-secondary"]).slice(1) },
+      // Python-specific tokens
+      { token: "keyword.python", foreground: normHex(v["--havn-accent"]).slice(1), fontStyle: "bold" },
+      { token: "string.python", foreground: normHex(v["--havn-green"]).slice(1) },
+      { token: "comment.python", foreground: normHex(v["--havn-text-dim"]).slice(1), fontStyle: "italic" },
+      { token: "number.python", foreground: normHex(v["--havn-purple"]).slice(1) },
+      { token: "identifier.python", foreground: normHex(v["--havn-text"]).slice(1) },
+      { token: "delimiter.python", foreground: normHex(v["--havn-text-secondary"]).slice(1) },
+      { token: "type.identifier.python", foreground: normHex(v["--havn-yellow"]).slice(1) },
+      // YAML tokens
+      { token: "type.yaml", foreground: normHex(v["--havn-accent"]).slice(1) },
+      { token: "string.yaml", foreground: normHex(v["--havn-green"]).slice(1) },
+      { token: "number.yaml", foreground: normHex(v["--havn-purple"]).slice(1) },
+      { token: "comment.yaml", foreground: normHex(v["--havn-text-dim"]).slice(1), fontStyle: "italic" },
+    ],
+    colors: {
+      "editor.background": normHex(v["--havn-bg-tertiary"]),
+      "editor.foreground": normHex(v["--havn-text"]),
+      "editorLineNumber.foreground": normHex(v["--havn-text-dim"]),
+      "editorLineNumber.activeForeground": normHex(v["--havn-text-secondary"]),
+      "editorCursor.foreground": normHex(v["--havn-accent"]),
+      "editor.selectionBackground": hexAlpha(v["--havn-accent"], 0.2),
+      "editor.inactiveSelectionBackground": hexAlpha(v["--havn-accent"], 0.1),
+      "editor.lineHighlightBackground": normHex(v["--havn-bg-secondary"]),
+      "editor.lineHighlightBorder": "#00000000",
+      "editorIndentGuide.background": normHex(v["--havn-border"]),
+      "editorIndentGuide.activeBackground": normHex(v["--havn-border-light"]),
+      "editorBracketMatch.background": hexAlpha(v["--havn-accent"], 0.15),
+      "editorBracketMatch.border": hexAlpha(v["--havn-accent"], 0.4),
+      "editorWidget.background": normHex(v["--havn-bg-secondary"]),
+      "editorWidget.border": normHex(v["--havn-border"]),
+      "editorSuggestWidget.background": normHex(v["--havn-bg-secondary"]),
+      "editorSuggestWidget.border": normHex(v["--havn-border"]),
+      "editorSuggestWidget.selectedBackground": normHex(v["--havn-btn-bg"]),
+      "editorSuggestWidget.highlightForeground": normHex(v["--havn-accent"]),
+      "editorHoverWidget.background": normHex(v["--havn-bg-secondary"]),
+      "editorHoverWidget.border": normHex(v["--havn-border"]),
+      "scrollbarSlider.background": hexAlpha(v["--havn-text-dim"], 0.2),
+      "scrollbarSlider.hoverBackground": hexAlpha(v["--havn-text-dim"], 0.35),
+      "scrollbarSlider.activeBackground": hexAlpha(v["--havn-text-dim"], 0.5),
+    },
+  };
+}
+
+/** Register all havn themes with a Monaco instance. */
+function defineHavnThemes(monaco) {
+  for (const [id, entry] of Object.entries(COLOR_THEMES)) {
+    monaco.editor.defineTheme(`havn-${id}`, buildMonacoTheme(entry));
+  }
+}
 
 // Cache for table schema lookups to avoid repeated API calls
 const schemaCache = new Map();
@@ -282,13 +383,16 @@ loader.init().then((monaco) => {
 
 export default function Editor({ content, language, onChange, activeFile, onMount, goToLine, onFormat, onPreview }) {
   const { themeId } = useTheme();
-  const currentTheme = getTheme(themeId);
-  const monacoTheme = currentTheme.dark ? "vs-dark" : "vs";
+  const monacoTheme = `havn-${themeId}`;
   const editorRef = useRef(null);
   const onFormatRef = useRef(onFormat);
   onFormatRef.current = onFormat;
   const onPreviewRef = useRef(onPreview);
   onPreviewRef.current = onPreview;
+
+  function handleBeforeMount(monaco) {
+    defineHavnThemes(monaco);
+  }
 
   function handleEditorMount(editor, monaco) {
     editorRef.current = editor;
@@ -355,6 +459,7 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
       value={content}
       onChange={(val) => onChange(val || "")}
       theme={monacoTheme}
+      beforeMount={handleBeforeMount}
       onMount={(editor, monaco) => handleEditorMount(editor, monaco)}
       wrapperProps={{ "aria-label": "Code editor" }}
       options={{
@@ -365,7 +470,7 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
         renderLineHighlight: "all",
         scrollBeyondLastLine: false,
         wordWrap: "on",
-        padding: { top: 8 },
+        padding: { top: 12, bottom: 12 },
         tabSize: 4,
         insertSpaces: true,
         smoothScrolling: true,
@@ -381,9 +486,9 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
 }
 
 const styles = {
-  empty: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--havn-text-secondary)", gap: "8px" },
-  emptyIcon: { marginBottom: "4px", opacity: 0.6 },
-  emptyText: { fontSize: "16px", marginBottom: "4px", fontWeight: 500 },
-  emptyHint: { fontSize: "13px", textAlign: "center", lineHeight: "1.7", color: "var(--havn-text-dim)" },
-  code: { background: "var(--havn-btn-bg)", padding: "1px 5px", borderRadius: "3px", fontSize: "12px", fontFamily: "var(--havn-font-mono)" },
+  empty: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--havn-text-secondary)", gap: "6px" },
+  emptyIcon: { marginBottom: "8px", opacity: 0.5 },
+  emptyText: { margin: 0, fontSize: "15px", fontWeight: 500, letterSpacing: "-0.01em" },
+  emptyHint: { margin: 0, fontSize: "13px", textAlign: "center", lineHeight: "1.8", color: "var(--havn-text-dim)", maxWidth: "400px" },
+  code: { background: "var(--havn-btn-bg)", padding: "2px 6px", borderRadius: "3px", fontSize: "12px", fontFamily: "var(--havn-font-mono)" },
 };

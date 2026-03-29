@@ -54,9 +54,9 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
             }
           }}
         >
-          <span style={{ ...styles.icon, transform: expanded ? "rotate(0deg)" : "rotate(-90deg)" }}>
-            {"\u25BE"}
-          </span>
+          <svg width="10" height="10" viewBox="0 0 10 10" style={{ ...styles.icon, transform: expanded ? "rotate(0deg)" : "rotate(-90deg)" }}>
+            <path d="M2.5 3L5 6L7.5 3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
           <span style={styles.dirName}>{node.name}</span>
           <button
             onClick={(e) => {
@@ -112,7 +112,12 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
   }
 
   const ext = node.name.split(".").pop();
-  const iconColor = ext === "sql" ? "var(--havn-accent)" : ext === "py" ? "var(--havn-green)" : "var(--havn-text-secondary)";
+  const iconColor =
+    ext === "sql" ? "var(--havn-accent)" :
+    ext === "py" ? "var(--havn-green)" :
+    ext === "yml" || ext === "yaml" ? "var(--havn-yellow)" :
+    ext === "dpnb" ? "var(--havn-purple)" :
+    "var(--havn-text-secondary)";
 
   return (
     <div
@@ -128,7 +133,7 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
       style={{
         ...styles.item,
         paddingLeft: 8 + depth * 16,
-        background: isActive ? "var(--havn-bg-secondary)" : "transparent",
+        background: isActive ? "color-mix(in srgb, var(--havn-accent) 8%, var(--havn-bg-secondary))" : "transparent",
         borderLeft: isActive ? "2px solid var(--havn-accent)" : "2px solid transparent",
       }}
       onClick={() => onSelect(node.path)}
@@ -204,7 +209,9 @@ function FilteredFileNode({ node, depth, onSelect, activeFile, onNewFile, onDele
   return (
     <div>
       <div data-havn-file="" style={{ ...styles.item, paddingLeft: 8 + depth * 16 }}>
-        <span style={{ ...styles.icon, transform: "rotate(0deg)" }}>{"\u25BE"}</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" style={{ ...styles.icon, transform: "rotate(0deg)" }}>
+          <path d="M2.5 3L5 6L7.5 3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
         <span style={styles.dirName}>{node.name}</span>
       </div>
       {children.map((child) => (
@@ -289,15 +296,15 @@ const styles = {
   filterRow: { display: "flex", alignItems: "center", gap: "6px", padding: "4px 8px", margin: "4px 4px 2px" },
   filterInput: { flex: 1, padding: "3px 6px", background: "var(--havn-bg)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", outline: "none", minWidth: 0 },
   filterClear: { background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", padding: "0 2px", lineHeight: 1, flexShrink: 0 },
-  item: { display: "flex", alignItems: "center", gap: "6px", padding: "4px 8px", cursor: "pointer", fontSize: "13px", whiteSpace: "nowrap", margin: "0 4px", borderRadius: "3px" },
-  icon: { fontSize: "10px", color: "var(--havn-text-secondary)", width: "10px", display: "inline-block", transition: "transform 0.12s ease" },
-  dirName: { color: "var(--havn-text)", fontWeight: 500, fontFamily: "var(--havn-font-mono)" },
-  addBtn: { marginLeft: "auto", width: "18px", height: "18px", background: "none", border: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "14px", lineHeight: "18px", textAlign: "center", padding: 0, flexShrink: 0 },
+  item: { display: "flex", alignItems: "center", gap: "6px", padding: "5px 8px", cursor: "pointer", fontSize: "12px", whiteSpace: "nowrap", margin: "0 4px", borderRadius: "var(--havn-radius)" },
+  icon: { fontSize: "10px", color: "var(--havn-text-dim)", width: "12px", display: "inline-flex", alignItems: "center", justifyContent: "center", transition: "transform 0.12s ease", flexShrink: 0 },
+  dirName: { color: "var(--havn-text)", fontWeight: 600, fontFamily: "var(--havn-font-mono)", fontSize: "11px", letterSpacing: "0.01em", textTransform: "lowercase" },
+  addBtn: { marginLeft: "auto", width: "18px", height: "18px", background: "none", border: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "14px", lineHeight: "18px", textAlign: "center", padding: 0, flexShrink: 0, borderRadius: "var(--havn-radius)", transition: "color 0.1s ease" },
   newFileRow: { display: "flex", padding: "2px 8px 4px", margin: "0 4px" },
   newFileInput: { flex: 1, padding: "3px 6px", background: "var(--havn-bg)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", outline: "none" },
-  fileName: { color: "var(--havn-text)", fontFamily: "var(--havn-font-mono)", fontSize: "12px" },
-  activeFileName: { color: "var(--havn-accent)", fontWeight: 500, fontFamily: "var(--havn-font-mono)", fontSize: "12px" },
-  dot: { width: "6px", height: "6px", borderRadius: "50%", flexShrink: 0 },
-  deleteBtn: { marginLeft: "auto", width: "18px", height: "18px", background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", lineHeight: "18px", textAlign: "center", padding: 0, flexShrink: 0 },
-  empty: { padding: "12px", color: "var(--havn-text-dim)", fontSize: "12px", textAlign: "center" },
+  fileName: { color: "var(--havn-text-secondary)", fontFamily: "var(--havn-font-mono)", fontSize: "11.5px", letterSpacing: "0.005em" },
+  activeFileName: { color: "var(--havn-text)", fontWeight: 500, fontFamily: "var(--havn-font-mono)", fontSize: "11.5px", letterSpacing: "0.005em" },
+  dot: { width: "5px", height: "5px", borderRadius: "50%", flexShrink: 0 },
+  deleteBtn: { marginLeft: "auto", width: "18px", height: "18px", background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", lineHeight: "18px", textAlign: "center", padding: 0, flexShrink: 0, borderRadius: "var(--havn-radius)", transition: "color 0.1s ease" },
+  empty: { padding: "16px 12px", color: "var(--havn-text-dim)", fontSize: "11px", textAlign: "center", fontFamily: "var(--havn-font-mono)" },
 };

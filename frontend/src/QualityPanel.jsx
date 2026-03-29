@@ -77,6 +77,13 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
 
   useEffect(() => { loadAll(); }, []);
 
+  // Auto-refresh when pipeline completes
+  useEffect(() => {
+    const handler = () => loadAll();
+    window.addEventListener("havn-data-changed", handler);
+    return () => window.removeEventListener("havn-data-changed", handler);
+  }, []);
+
   // Listen for sub-tab navigation (e.g., "Quality:Contracts:daily_sales" from OverviewPanel)
   useEffect(() => {
     const handler = (e) => {
@@ -307,20 +314,26 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
       <div style={s.header}>
         <div style={s.cards}>
           <div style={s.card}>
-            <div style={s.cardLabel}>Total Models</div>
+            <div style={s.cardLabel}>Models</div>
             <div style={s.cardValue}>{totalModels}</div>
           </div>
-          <div style={s.card}>
-            <div style={s.cardLabel}>Stale Models</div>
-            <div style={{ ...s.cardValue, color: staleModels > 0 ? 'var(--havn-red)' : 'var(--havn-green)' }}>{staleModels}</div>
+          <div style={{ ...s.card, ...(staleModels > 0 ? s.cardAlert : {}) }}>
+            <div style={s.cardLabel}>Stale</div>
+            <div style={{ ...s.cardValue, color: staleModels > 0 ? 'var(--havn-red)' : 'var(--havn-text-dim)' }}>{staleModels}</div>
           </div>
           <div style={s.card}>
-            <div style={s.cardLabel}>Assertion Pass Rate</div>
-            <div style={{ ...s.cardValue, color: assertionRate == null ? 'var(--havn-text-dim)' : assertionRate === 100 ? 'var(--havn-green)' : assertionRate >= 80 ? 'var(--havn-yellow)' : 'var(--havn-red)' }}>{assertionRate != null ? `${assertionRate}%` : '\u2014'}</div>
+            <div style={s.cardLabel}>Assertions</div>
+            <div style={{ ...s.cardValue, color: assertionRate == null ? 'var(--havn-text-dim)' : assertionRate === 100 ? 'var(--havn-green)' : assertionRate >= 80 ? 'var(--havn-yellow)' : 'var(--havn-red)' }}>
+              {assertionRate != null ? `${assertionRate}%` : '\u2014'}
+            </div>
+            {assertions.length > 0 && <div style={s.cardDetail}>{passedAssertions}/{assertions.length} passed</div>}
           </div>
           <div style={s.card}>
-            <div style={s.cardLabel}>Contract Pass Rate</div>
-            <div style={{ ...s.cardValue, color: contractRate == null ? 'var(--havn-text-dim)' : contractRate === 100 ? 'var(--havn-green)' : contractRate >= 80 ? 'var(--havn-yellow)' : 'var(--havn-red)' }}>{contractRate != null ? `${contractRate}%` : '\u2014'}</div>
+            <div style={s.cardLabel}>Contracts</div>
+            <div style={{ ...s.cardValue, color: contractRate == null ? 'var(--havn-text-dim)' : contractRate === 100 ? 'var(--havn-green)' : contractRate >= 80 ? 'var(--havn-yellow)' : 'var(--havn-red)' }}>
+              {contractRate != null ? `${contractRate}%` : '\u2014'}
+            </div>
+            {contractHistory.length > 0 && <div style={s.cardDetail}>{passedContracts}/{contractHistory.length} passed</div>}
           </div>
           <div style={s.card}>
             <div style={s.cardLabel}>Anomalies</div>
@@ -357,7 +370,12 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                     <SortTh label="Status" sortKey="is_stale" current={freshSort.sortKey} dir={freshSort.sortDir} onToggle={freshSort.toggle} style={s.th} />
                   </tr></thead>
                   <tbody>
-                    {filteredFreshness.length === 0 ? <tr><td colSpan={5} style={s.emptyCell}><div style={s.emptyState}>No freshness data available. Run a transform to generate freshness info.</div></td></tr> :
+                    {filteredFreshness.length === 0 ? <tr><td colSpan={5} style={s.emptyCell}><div style={s.emptyState}>
+                      {freshness.length > 0 ? 'No models match the current filter.' : (<>
+                        <div style={s.emptyTitle}>No freshness data yet</div>
+                        <div style={s.emptyText}>Run <code style={s.emptyCode}>havn transform</code> to build models and track their freshness.</div>
+                      </>)}
+                    </div></td></tr> :
                     filteredFreshness.map((m, i) => (
                       <tr key={i}>
                         <td style={s.td}>{m.model}</td>
@@ -387,7 +405,12 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                     <th style={s.th}>Profiled At</th>
                   </tr></thead>
                   <tbody>
-                    {filteredProfiles.length === 0 ? <tr><td colSpan={4} style={s.emptyCell}><div style={s.emptyState}>No profiles available. Run profiling to see column statistics.</div></td></tr> :
+                    {filteredProfiles.length === 0 ? <tr><td colSpan={4} style={s.emptyCell}><div style={s.emptyState}>
+                      {profiles.length > 0 ? 'No profiles match the current filter.' : (<>
+                        <div style={s.emptyTitle}>No profiles yet</div>
+                        <div style={s.emptyText}>Profiles capture row counts, null percentages, and distinct counts for each model.</div>
+                      </>)}
+                    </div></td></tr> :
                     filteredProfiles.map((p, i) => {
                       const cols = profileColumns(p);
                       return (
@@ -452,7 +475,12 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                     <th style={s.th}>Last Checked</th>
                   </tr></thead>
                   <tbody>
-                    {groupedAssertions.length === 0 ? <tr><td colSpan={4} style={s.emptyCell}><div style={s.emptyState}>No assertion results. Add <code style={{ fontSize: 12 }}>-- assert:</code> comments to your SQL models and run a transform.</div></td></tr> :
+                    {groupedAssertions.length === 0 ? <tr><td colSpan={4} style={s.emptyCell}><div style={s.emptyState}>
+                      {assertions.length > 0 ? 'No assertions match the current filter.' : (<>
+                        <div style={s.emptyTitle}>No assertions defined</div>
+                        <div style={s.emptyText}>Add <code style={s.emptyCode}>-- assert: row_count &gt; 0</code> comments to your SQL models, then run a transform.</div>
+                      </>)}
+                    </div></td></tr> :
                     groupedAssertions.map((g) => {
                       const isExpanded = expandedAssertionModel === g.model;
                       const allPassed = g.failed === 0;
@@ -536,7 +564,11 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                     </tr></thead>
                     <tbody>
                       {filteredContracts.length === 0 ? (
-                        <tr><td colSpan={6} style={s.emptyCell}><div style={s.emptyState}>No contract history.<br /><button style={s.btnPrimary} onClick={handleRunContracts} disabled={runningContracts}>{runningContracts ? 'Running...' : 'Run Contracts Now'}</button></div></td></tr>
+                        <tr><td colSpan={6} style={s.emptyCell}><div style={s.emptyState}>
+                          <div style={s.emptyTitle}>No contract runs yet</div>
+                          <div style={s.emptyText}>Run contracts to validate data quality rules against your models.</div>
+                          <button style={{ ...s.btnPrimary, marginTop: 12 }} onClick={handleRunContracts} disabled={runningContracts}>{runningContracts ? 'Running...' : 'Run Contracts'}</button>
+                        </div></td></tr>
                       ) : filteredContracts.map((c, i) => {
                         const detail = (() => { try { return typeof c.detail === 'string' ? JSON.parse(c.detail) : (c.detail || []); } catch { return []; } })();
                         const hasDetail = detail.length > 0;
@@ -555,7 +587,7 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                               <td style={s.td}>{c.model}</td>
                               <td style={s.td}>
                                 {c.error && detail.length === 0 ? (
-                                  <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: 'color-mix(in srgb, var(--havn-yellow) 20%, transparent)', color: 'var(--havn-yellow)', fontWeight: 500 }}>SKIP</span>
+                                  <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, background: 'color-mix(in srgb, var(--havn-yellow) 15%, transparent)', color: 'var(--havn-yellow)' }}>SKIP</span>
                                 ) : (
                                   <span style={s.badge(c.passed)}>{c.passed ? 'PASS' : 'FAIL'}</span>
                                 )}
@@ -618,7 +650,10 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                     </tr></thead>
                     <tbody>
                       {filteredContracts.length === 0 ? (
-                        <tr><td colSpan={5} style={s.emptyCell}><div style={s.emptyState}>No contracts defined. Add YAML files in <code style={{ fontSize: 12 }}>contracts/</code> to get started.</div></td></tr>
+                        <tr><td colSpan={5} style={s.emptyCell}><div style={s.emptyState}>
+                          <div style={s.emptyTitle}>No contracts defined</div>
+                          <div style={s.emptyText}>Add YAML files in <code style={s.emptyCode}>contracts/</code> to define data quality rules for your models.</div>
+                        </div></td></tr>
                       ) : filteredContracts.map((c, i) => {
                         const rules = c.assertions || [];
                         const detail = (() => { try { return typeof c.detail === 'string' ? JSON.parse(c.detail) : (c.detail || []); } catch { return []; } })();
@@ -636,7 +671,7 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                               <td style={s.td}>{c.model}</td>
                               <td style={s.td}>
                                 {c.passed == null ? (
-                                  <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text-dim)' }}>NOT RUN</span>
+                                  <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text-dim)' }}>NOT RUN</span>
                                 ) : (
                                   <span style={s.badge(c.passed)}>{c.passed ? 'PASS' : 'FAIL'}</span>
                                 )}
@@ -678,7 +713,7 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                                         )) : rules.map((rule, ri) => (
                                           <tr key={ri}>
                                             <td style={{ ...s.td, paddingLeft: 32, width: 60 }}>
-                                              <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: 'var(--havn-bg)', color: 'var(--havn-text-dim)' }}>--</span>
+                                              <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, background: 'var(--havn-bg)', color: 'var(--havn-text-dim)', whiteSpace: 'nowrap' }}>{'\u2014'}</span>
                                             </td>
                                             <td style={{ ...s.td, fontFamily: 'var(--havn-font-mono)', fontSize: 12 }} colSpan={2}>{rule}</td>
                                           </tr>
@@ -706,7 +741,10 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                   <span style={s.count}>{filteredAnomalies.length} anomal{filteredAnomalies.length !== 1 ? 'ies' : 'y'}</span>
                 </div>
                 {filteredAnomalies.length === 0 ? (
-                  <div style={s.emptyState}>No anomalies detected. Anomalies appear when model metrics deviate significantly from their historical baselines after 3+ runs.</div>
+                  <div style={s.emptyState}>
+                    <div style={s.emptyTitle}>No anomalies detected</div>
+                    <div style={s.emptyText}>Anomalies surface when model metrics deviate significantly from their historical baselines. At least 3 profiling runs are needed to establish a baseline.</div>
+                  </div>
                 ) : (
                   <table style={s.table}>
                     <thead><tr>
@@ -730,7 +768,7 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                                 </span>
                               </td>
                               <td style={s.td}>
-                                <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text-secondary)' }}>
+                                <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text-secondary)' }}>
                                   {a.metric === 'row_count' ? 'Row Count' : a.metric === 'null_percentage' ? 'Null %' : a.metric === 'distinct_count' ? 'Distinct Count' : a.metric}
                                 </span>
                               </td>
@@ -877,11 +915,12 @@ function AnomalySparkline({ data, metric, currentValue, meanValue, stddevValue }
 const s = {
   container: { height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--havn-bg)' },
   header: { display: 'flex', flexDirection: 'column', padding: '8px 12px', borderBottom: '1px solid var(--havn-border)' },
-  title: { fontSize: 13, fontWeight: 600, color: 'var(--havn-text)' },
-  cards: { display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 16 },
-  card: { background: 'var(--havn-bg-secondary)', border: '1px solid var(--havn-border)', borderRadius: 8, padding: '12px 16px' },
-  cardLabel: { fontSize: 11, color: 'var(--havn-text-secondary)', textTransform: 'uppercase', marginBottom: 4 },
-  cardValue: { fontSize: 24, fontWeight: 700, color: 'var(--havn-text)' },
+  cards: { display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 16 },
+  card: { background: 'var(--havn-bg-secondary)', border: '1px solid var(--havn-border)', borderRadius: 8, padding: '10px 14px' },
+  cardAlert: { borderColor: 'color-mix(in srgb, var(--havn-red) 40%, var(--havn-border))' },
+  cardLabel: { fontSize: 10, color: 'var(--havn-text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, marginBottom: 2 },
+  cardValue: { fontSize: 22, fontWeight: 700, color: 'var(--havn-text)', lineHeight: 1.2 },
+  cardDetail: { fontSize: 11, color: 'var(--havn-text-dim)', marginTop: 2 },
   tabs: { display: 'flex', gap: 0 },
   tab: { padding: '8px 20px', cursor: 'pointer', fontSize: 13, color: 'var(--havn-text-secondary)', borderBottom: '2px solid transparent', background: 'none' },
   tabActive: { color: 'var(--havn-text)', borderBottom: '2px solid var(--havn-accent)' },
@@ -891,12 +930,15 @@ const s = {
   filterSelect: { padding: '5px 8px', background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text)', border: '1px solid var(--havn-border-light)', borderRadius: 6, fontSize: 12 },
   count: { fontSize: 12, color: 'var(--havn-text-dim)', marginLeft: 'auto' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 13 },
-  th: { textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--havn-border-light)', color: 'var(--havn-text-secondary)', fontSize: 11, textTransform: 'uppercase' },
+  th: { textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--havn-border-light)', color: 'var(--havn-text-secondary)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.3px' },
   td: { padding: '8px 12px', borderBottom: '1px solid var(--havn-border)', color: 'var(--havn-text)' },
-  badge: (ok) => ({ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: ok ? 'color-mix(in srgb, var(--havn-green) 15%, transparent)' : 'color-mix(in srgb, var(--havn-red) 15%, transparent)', color: ok ? 'var(--havn-green)' : 'var(--havn-red)' }),
-  severityBadge: (sev) => ({ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: sev === 'warn' ? 'color-mix(in srgb, var(--havn-yellow) 15%, transparent)' : 'color-mix(in srgb, var(--havn-bg-tertiary) 100%, transparent)', color: sev === 'warn' ? 'var(--havn-yellow)' : 'var(--havn-text-secondary)' }),
+  badge: (ok) => ({ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, background: ok ? 'color-mix(in srgb, var(--havn-green) 15%, transparent)' : 'color-mix(in srgb, var(--havn-red) 15%, transparent)', color: ok ? 'var(--havn-green)' : 'var(--havn-red)' }),
+  severityBadge: () => ({ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text-secondary)' }),
   btn: { padding: '4px 12px', background: 'var(--havn-btn-bg)', color: 'var(--havn-text)', border: '1px solid var(--havn-btn-border)', borderRadius: 'var(--havn-radius-lg)', cursor: 'pointer', fontSize: 11, fontWeight: 500 },
   btnPrimary: { padding: '4px 12px', background: 'var(--havn-green)', color: '#fff', border: '1px solid var(--havn-green-border)', borderRadius: 'var(--havn-radius-lg)', cursor: 'pointer', fontSize: 11, fontWeight: 500 },
   emptyCell: { padding: 0, borderBottom: '1px solid var(--havn-border)' },
-  emptyState: { padding: '32px 16px', color: 'var(--havn-text-dim)', textAlign: 'center', fontSize: 13, lineHeight: 1.8 },
+  emptyState: { padding: '40px 20px', color: 'var(--havn-text-dim)', textAlign: 'center', fontSize: 13, lineHeight: 1.6 },
+  emptyTitle: { fontSize: 14, fontWeight: 600, color: 'var(--havn-text-secondary)', marginBottom: 6 },
+  emptyText: { fontSize: 12, color: 'var(--havn-text-dim)', lineHeight: 1.6, maxWidth: 380, margin: '0 auto' },
+  emptyCode: { fontSize: 11, fontFamily: 'var(--havn-font-mono)', background: 'var(--havn-bg-tertiary)', padding: '1px 5px', borderRadius: 3 },
 };

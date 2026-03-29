@@ -3,7 +3,7 @@ import { api } from "./api";
 import SortableTable from "./SortableTable";
 import { useHintTriggerFn } from "./HintSystem";
 
-export default function TablesPanel({ selectedTable, onQueryTable }) {
+export default function TablesPanel({ selectedTable, onQueryTable, tables, onSelectTable }) {
   const [columns, setColumns] = useState([]);
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -121,7 +121,70 @@ export default function TablesPanel({ selectedTable, onQueryTable }) {
   }
 
   if (!selectedTable) {
-    return <div style={st.placeholder}>Select a table from the sidebar to view its schema and data.</div>;
+    // Group tables by schema for an overview
+    const bySchema = {};
+    if (tables) {
+      for (const t of tables) {
+        if (!bySchema[t.schema]) bySchema[t.schema] = [];
+        bySchema[t.schema].push(t);
+      }
+    }
+    const schemaNames = Object.keys(bySchema).sort();
+
+    if (schemaNames.length === 0) {
+      return (
+        <div style={st.emptyState}>
+          <div style={st.emptyIcon}>
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <line x1="3" y1="9" x2="21" y2="9" />
+              <line x1="3" y1="15" x2="21" y2="15" />
+              <line x1="9" y1="3" x2="9" y2="21" />
+            </svg>
+          </div>
+          <div style={st.emptyTitle}>No tables yet</div>
+          <div style={st.emptyHint}>Run a pipeline or import data to create tables in your warehouse.</div>
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ padding: "20px 24px", overflow: "auto", height: "100%" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--havn-text)", marginBottom: 4, letterSpacing: "-0.01em" }}>Warehouse</div>
+        <div style={{ fontSize: 12, color: "var(--havn-text-secondary)", marginBottom: 20 }}>
+          {tables.length} table{tables.length !== 1 ? "s" : ""} across {schemaNames.length} schema{schemaNames.length !== 1 ? "s" : ""}
+        </div>
+        {schemaNames.map(schema => (
+          <div key={schema} style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--havn-text-dim)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>{schema}</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {bySchema[schema].map(t => (
+                <button
+                  key={t.name}
+                  onClick={() => onSelectTable && onSelectTable(t.schema, t.name)}
+                  style={{
+                    padding: "5px 10px",
+                    background: "var(--havn-bg-secondary)",
+                    border: "1px solid var(--havn-border)",
+                    borderRadius: "var(--havn-radius)",
+                    color: "var(--havn-text)",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontFamily: "var(--havn-font-mono)",
+                    fontWeight: 500,
+                    transition: "border-color 0.12s ease",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = "var(--havn-accent)"}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = "var(--havn-border)"}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   }
 
   if (loading && !preview) {
@@ -140,12 +203,18 @@ export default function TablesPanel({ selectedTable, onQueryTable }) {
   return (
     <div style={st.container}>
       <div style={st.tableHeader}>
-        <strong style={st.selectedName}>{selectedTable}</strong>
-        <span style={st.colCount}>{columns.length} columns</span>
-        {rowCount != null && <span style={st.rowCount}>{formatCount(rowCount)}</span>}
+        <div style={st.nameGroup}>
+          <span style={st.schemaLabel}>{selectedTable.split(".")[0]}</span>
+          <span style={st.nameSep}>.</span>
+          <strong style={st.selectedName}>{selectedTable.split(".")[1]}</strong>
+        </div>
+        <div style={st.metaBadges}>
+          <span style={st.metaBadge}>{columns.length} col{columns.length !== 1 ? "s" : ""}</span>
+          {rowCount != null && <span style={st.metaBadge}>{formatCount(rowCount)}</span>}
+        </div>
         <div style={st.headerActions}>
           {onQueryTable && (
-            <button onClick={handleQueryTable} style={st.actionBtn}>Query this table</button>
+            <button onClick={handleQueryTable} style={st.actionBtnPrimary}>Query this table</button>
           )}
           <button onClick={loadStats} disabled={statsLoading} style={st.actionBtn}>
             {statsLoading ? "Loading..." : stats ? "Refresh Stats" : "Show Stats"}
@@ -155,37 +224,44 @@ export default function TablesPanel({ selectedTable, onQueryTable }) {
           )}
         </div>
       </div>
-      <div style={st.columnsBar} data-havn-hint="columns-bar">
-        {columns.map((c) => {
-          const maskKey = selectedTable ? `${selectedTable}.${c.name}` : '';
-          const maskMethod = maskingPolicies[maskKey];
-          return (
-            <button
-              key={c.name}
-              onClick={() => handleColumnClick(c.name)}
-              style={{
-                ...st.colChip,
-                ...(sortCol === c.name ? st.colChipActive : {}),
-              }}
-              title={maskMethod ? `Sort by ${c.name} (masked: ${maskMethod})` : `Sort by ${c.name}`}
-            >
-              {maskMethod && <span style={st.maskIcon} title={`Masked: ${maskMethod}`}>&#x1F6E1;</span>}
-              {c.name} <span style={st.colType}>{c.type}</span>
-              {sortCol === c.name && <span style={st.sortArrow}>{sortDir === "ASC" ? " \u2191" : " \u2193"}</span>}
-            </button>
-          );
-        })}
+      <div style={st.columnsSection}>
+        <div style={st.sectionLabel}>Columns</div>
+        <div style={st.columnsBar} data-havn-hint="columns-bar">
+          {columns.map((c) => {
+            const maskKey = selectedTable ? `${selectedTable}.${c.name}` : '';
+            const maskMethod = maskingPolicies[maskKey];
+            const isActive = sortCol === c.name;
+            return (
+              <button
+                key={c.name}
+                onClick={() => handleColumnClick(c.name)}
+                style={{
+                  ...st.colChip,
+                  ...(isActive ? st.colChipActive : {}),
+                }}
+                title={maskMethod ? `Sort by ${c.name} (masked: ${maskMethod})` : `Sort by ${c.name}`}
+              >
+                {maskMethod && <span style={st.maskIcon} title={`Masked: ${maskMethod}`}>&#x1F6E1;</span>}
+                <span style={st.colName}>{c.name}</span>
+                <span style={st.colType}>{c.type}</span>
+                {isActive && <span style={st.sortArrow}>{sortDir === "ASC" ? "\u2191" : "\u2193"}</span>}
+              </button>
+            );
+          })}
+        </div>
       </div>
       {stats && stats.length > 0 && (
         <div style={st.statsBar}>
-          <span style={st.statsLabel}>Stats (numeric columns)</span>
+          <div style={st.sectionLabel}>Stats — numeric columns</div>
           <div style={st.statsList}>
             {stats.map((s) => (
               <div key={s.name} style={st.statItem}>
                 <span style={st.statName}>{s.name}</span>
-                <span style={st.statVal}>min: {s.min ?? "NULL"}</span>
-                <span style={st.statVal}>max: {s.max ?? "NULL"}</span>
-                <span style={st.statVal}>nulls: {s.nulls}</span>
+                <div style={st.statValues}>
+                  <span style={st.statVal}><span style={st.statKey}>min</span> {s.min ?? "NULL"}</span>
+                  <span style={st.statVal}><span style={st.statKey}>max</span> {s.max ?? "NULL"}</span>
+                  <span style={st.statVal}><span style={st.statKey}>nulls</span> {s.nulls}</span>
+                </div>
               </div>
             ))}
           </div>
@@ -193,7 +269,12 @@ export default function TablesPanel({ selectedTable, onQueryTable }) {
       )}
       {stats && stats.length === 0 && (
         <div style={st.statsBar}>
-          <span style={st.statsLabel}>No numeric columns for stats</span>
+          <div style={st.statsEmpty}>No numeric columns found for stats.</div>
+        </div>
+      )}
+      {preview && (
+        <div style={st.previewSection}>
+          <div style={st.sectionLabel}>Preview — first 100 rows</div>
         </div>
       )}
       {preview && (
@@ -215,25 +296,143 @@ export default function TablesPanel({ selectedTable, onQueryTable }) {
 }
 
 const st = {
-  container: { display: "flex", flexDirection: "column", height: "100%", overflow: "auto", padding: "12px" },
-  placeholder: { color: "var(--havn-text-dim)", padding: "24px", textAlign: "center" },
-  tableHeader: { display: "flex", alignItems: "center", gap: "12px", padding: "8px 12px", fontSize: "13px", flexWrap: "wrap", borderBottom: "1px solid var(--havn-border)" },
-  selectedName: { fontFamily: "var(--havn-font-mono)" },
-  colCount: { color: "var(--havn-text-secondary)", fontSize: "12px" },
-  rowCount: { color: "var(--havn-text-dim)", fontSize: "12px", fontFamily: "var(--havn-font-mono)" },
-  headerActions: { marginLeft: "auto", display: "flex", gap: "6px" },
-  actionBtn: { padding: "4px 12px", background: "var(--havn-btn-bg)", border: "1px solid var(--havn-btn-border)", borderRadius: "var(--havn-radius-lg)", color: "var(--havn-text)", cursor: "pointer", fontSize: "11px", fontWeight: 500 },
-  columnsBar: { display: "flex", flexWrap: "wrap", gap: "4px", padding: "4px 8px 12px" },
-  colChip: { background: "var(--havn-btn-bg)", border: "1px solid var(--havn-border)", padding: "3px 8px", borderRadius: "var(--havn-radius)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", cursor: "pointer", color: "var(--havn-text)" },
-  colChipActive: { borderColor: "var(--havn-accent)", color: "var(--havn-accent)", fontWeight: 600 },
-  colType: { color: "var(--havn-text-secondary)", marginLeft: "2px" },
-  maskIcon: { marginRight: "3px", fontSize: "10px", opacity: 0.7 },
-  sortArrow: { color: "var(--havn-accent)", fontWeight: 700 },
-  statsBar: { padding: "8px 8px 12px", borderTop: "1px solid var(--havn-border)", marginBottom: "4px" },
-  statsLabel: { fontSize: "11px", color: "var(--havn-text-secondary)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.3px" },
-  statsList: { display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "6px" },
-  statItem: { display: "flex", gap: "8px", padding: "4px 10px", background: "var(--havn-bg-tertiary)", borderRadius: "var(--havn-radius)", fontSize: "11px", fontFamily: "var(--havn-font-mono)" },
-  statName: { fontWeight: 600, color: "var(--havn-text)" },
-  statVal: { color: "var(--havn-text-secondary)" },
-  previewWrap: { overflow: "auto", flex: 1 },
+  container: {
+    display: "flex", flexDirection: "column", height: "100%", overflow: "auto", padding: "16px",
+  },
+
+  /* ── Empty state ─────────────────────────────────────────────── */
+  emptyState: {
+    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+    padding: "48px 24px", height: "100%", textAlign: "center",
+  },
+  emptyIcon: {
+    color: "var(--havn-text-dim)", marginBottom: "16px", opacity: 0.5,
+  },
+  emptyTitle: {
+    fontSize: "14px", fontWeight: 600, color: "var(--havn-text-secondary)", marginBottom: "6px",
+  },
+  emptyHint: {
+    fontSize: "12px", color: "var(--havn-text-dim)", maxWidth: "280px", lineHeight: "1.5",
+  },
+  placeholder: {
+    color: "var(--havn-text-dim)", padding: "24px", textAlign: "center",
+  },
+
+  /* ── Table header ────────────────────────────────────────────── */
+  tableHeader: {
+    display: "flex", alignItems: "center", gap: "12px", padding: "10px 4px 12px",
+    fontSize: "13px", flexWrap: "wrap", borderBottom: "1px solid var(--havn-border)",
+    marginBottom: "2px",
+  },
+  nameGroup: {
+    display: "flex", alignItems: "baseline", gap: "1px",
+    fontFamily: "var(--havn-font-mono)", fontSize: "14px",
+  },
+  schemaLabel: {
+    color: "var(--havn-text-secondary)", fontWeight: 400,
+  },
+  nameSep: {
+    color: "var(--havn-text-dim)",
+  },
+  selectedName: {
+    color: "var(--havn-text)", fontWeight: 600,
+  },
+  metaBadges: {
+    display: "flex", gap: "8px", alignItems: "center",
+  },
+  metaBadge: {
+    fontSize: "11px", color: "var(--havn-text-secondary)",
+    fontFamily: "var(--havn-font-mono)", background: "var(--havn-bg-tertiary)",
+    padding: "2px 8px", borderRadius: "var(--havn-radius)",
+    border: "1px solid var(--havn-border)",
+  },
+  headerActions: {
+    marginLeft: "auto", display: "flex", gap: "8px",
+  },
+  actionBtn: {
+    padding: "5px 12px", background: "var(--havn-btn-bg)",
+    border: "1px solid var(--havn-btn-border)", borderRadius: "var(--havn-radius)",
+    color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "11px", fontWeight: 500,
+  },
+  actionBtnPrimary: {
+    padding: "5px 14px", background: "transparent",
+    border: "1px solid var(--havn-accent)", borderRadius: "var(--havn-radius)",
+    color: "var(--havn-accent)", cursor: "pointer", fontSize: "11px", fontWeight: 600,
+  },
+
+  /* ── Section label (shared) ──────────────────────────────────── */
+  sectionLabel: {
+    fontSize: "10px", color: "var(--havn-text-dim)", fontWeight: 600,
+    textTransform: "uppercase", letterSpacing: "0.5px",
+    padding: "0 2px", marginBottom: "6px",
+  },
+
+  /* ── Columns bar ─────────────────────────────────────────────── */
+  columnsSection: {
+    padding: "12px 4px 4px",
+  },
+  columnsBar: {
+    display: "flex", flexWrap: "wrap", gap: "5px",
+  },
+  colChip: {
+    display: "inline-flex", alignItems: "center", gap: "6px",
+    background: "var(--havn-btn-bg)", border: "1px solid var(--havn-border)",
+    padding: "4px 10px", borderRadius: "var(--havn-radius)",
+    fontSize: "11px", fontFamily: "var(--havn-font-mono)",
+    cursor: "pointer", color: "var(--havn-text)", lineHeight: "1.3",
+    transition: "border-color 0.12s ease",
+  },
+  colChipActive: {
+    borderColor: "var(--havn-accent)", background: "color-mix(in srgb, var(--havn-accent) 8%, var(--havn-btn-bg))",
+  },
+  colName: {
+    fontWeight: 500,
+  },
+  colType: {
+    color: "var(--havn-text-dim)", fontSize: "10px",
+  },
+  maskIcon: {
+    marginRight: "1px", fontSize: "10px", opacity: 0.6,
+  },
+  sortArrow: {
+    color: "var(--havn-accent)", fontWeight: 700, fontSize: "12px",
+  },
+
+  /* ── Stats bar ───────────────────────────────────────────────── */
+  statsBar: {
+    padding: "12px 4px", borderTop: "1px solid var(--havn-border)", marginTop: "4px",
+  },
+  statsEmpty: {
+    fontSize: "12px", color: "var(--havn-text-dim)", fontStyle: "italic",
+  },
+  statsList: {
+    display: "flex", flexWrap: "wrap", gap: "6px",
+  },
+  statItem: {
+    display: "flex", flexDirection: "column", gap: "4px",
+    padding: "8px 12px", background: "var(--havn-bg-tertiary)",
+    borderRadius: "var(--havn-radius)", border: "1px solid var(--havn-border)",
+    fontSize: "11px", fontFamily: "var(--havn-font-mono)", minWidth: "120px",
+  },
+  statName: {
+    fontWeight: 600, color: "var(--havn-text)", fontSize: "12px",
+    borderBottom: "1px solid var(--havn-border)", paddingBottom: "4px", marginBottom: "1px",
+  },
+  statValues: {
+    display: "flex", flexDirection: "column", gap: "2px",
+  },
+  statVal: {
+    color: "var(--havn-text-secondary)", fontSize: "11px",
+  },
+  statKey: {
+    color: "var(--havn-text-dim)", display: "inline-block", width: "36px",
+  },
+
+  /* ── Preview ─────────────────────────────────────────────────── */
+  previewSection: {
+    padding: "12px 4px 0",
+  },
+  previewWrap: {
+    overflow: "auto", flex: 1,
+  },
 };

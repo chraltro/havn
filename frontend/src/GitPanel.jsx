@@ -302,6 +302,13 @@ export default function GitPanel() {
         )}
 
         {/* Changes section */}
+        {stagedFiles.length === 0 && unstagedFiles.length === 0 ? (
+          <div style={st.cleanState}>
+            <div style={st.cleanIcon}>{"\u2713"}</div>
+            <div style={st.cleanText}>Working tree clean</div>
+            <div style={st.cleanHint}>No uncommitted changes</div>
+          </div>
+        ) : (
         <div style={st.section}>
           {/* Staged files */}
           <div style={st.sectionHeader}>
@@ -318,7 +325,12 @@ export default function GitPanel() {
           ) : (
             <div style={st.fileList}>
               {stagedFiles.map((f) => (
-                <div key={"s:" + f.path} style={st.fileRow}>
+                <div
+                  key={"s:" + f.path}
+                  style={st.fileRow}
+                  onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-btn-bg)"}
+                  onMouseLeave={(e) => e.currentTarget.style.background = "none"}
+                >
                   <button onClick={() => handleUnstage([f.path])} style={st.stageBtn} title="Unstage" aria-label={`Unstage ${f.path}`}>
                     {"\u2212"}
                   </button>
@@ -327,7 +339,10 @@ export default function GitPanel() {
                     onClick={() => handleViewDiff(f.path)}
                     title="View diff"
                   >{f.path}</span>
-                  <span style={{ ...st.statusBadge, color: STATUS_COLORS[f.status] || "var(--havn-text-dim)" }}>
+                  <span
+                    style={{ ...st.statusBadge, color: STATUS_COLORS[f.status] || "var(--havn-text-dim)" }}
+                    title={STATUS_LABELS[f.status] || f.status}
+                  >
                     {f.status}
                   </span>
                 </div>
@@ -346,11 +361,16 @@ export default function GitPanel() {
             )}
           </div>
           {unstagedFiles.length === 0 ? (
-            <div style={st.emptyHint}>Working tree clean</div>
+            <div style={st.emptyHint}>No unstaged changes</div>
           ) : (
             <div style={st.fileList}>
               {unstagedFiles.map((f) => (
-                <div key={"u:" + f.path} style={st.fileRow}>
+                <div
+                  key={"u:" + f.path}
+                  style={st.fileRow}
+                  onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-btn-bg)"}
+                  onMouseLeave={(e) => e.currentTarget.style.background = "none"}
+                >
                   <button onClick={() => handleStage([f.path])} style={{ ...st.stageBtn, color: "var(--havn-green)" }} title="Stage" aria-label={`Stage ${f.path}`}>
                     +
                   </button>
@@ -359,11 +379,21 @@ export default function GitPanel() {
                     onClick={() => handleViewDiff(f.path)}
                     title="View diff"
                   >{f.path}</span>
-                  <span style={{ ...st.statusBadge, color: STATUS_COLORS[f.status] || "var(--havn-text-dim)" }}>
+                  <span
+                    style={{ ...st.statusBadge, color: STATUS_COLORS[f.status] || "var(--havn-text-dim)" }}
+                    title={STATUS_LABELS[f.status] || f.status}
+                  >
                     {f.status}
                   </span>
                   {f.status !== "U" && (
-                    <button onClick={() => handleDiscard([f.path])} style={st.discardBtn} title="Discard changes" aria-label={`Discard changes to ${f.path}`}>
+                    <button
+                      onClick={() => handleDiscard([f.path])}
+                      style={st.discardBtn}
+                      title="Discard changes"
+                      aria-label={`Discard changes to ${f.path}`}
+                      onMouseEnter={(e) => e.currentTarget.style.color = "var(--havn-red)"}
+                      onMouseLeave={(e) => e.currentTarget.style.color = "var(--havn-text-dim)"}
+                    >
                       {"\u21A9"}
                     </button>
                   )}
@@ -372,6 +402,7 @@ export default function GitPanel() {
             </div>
           )}
         </div>
+        )}
 
         {/* Diff viewer */}
         {diffFile && (
@@ -403,6 +434,8 @@ export default function GitPanel() {
             style={st.commitTextarea}
             rows={3}
             aria-label="Commit message"
+            onFocus={(e) => e.target.style.borderColor = "var(--havn-accent)"}
+            onBlur={(e) => e.target.style.borderColor = "var(--havn-border)"}
             onKeyDown={(e) => {
               if ((e.ctrlKey || e.metaKey) && e.key === "Enter") handleCommit();
             }}
@@ -410,7 +443,7 @@ export default function GitPanel() {
           <div style={st.commitFooter}>
             <span style={st.commitHint}>
               {stagedFiles.length} file{stagedFiles.length !== 1 ? "s" : ""} staged
-              {commitMsg.trim() ? "" : " -- enter a message to commit"}
+              {commitMsg.trim() ? <span style={st.kbdHint}>{"\u2318"}/{"\u2303"}+Enter to commit</span> : " \u2014 enter a message to commit"}
             </span>
             <button
               onClick={handleCommit}
@@ -590,6 +623,7 @@ const st = {
   fileRow: {
     display: "flex", alignItems: "center", gap: "6px", padding: "3px 4px",
     borderRadius: "var(--havn-radius)", fontSize: "12px",
+    transition: "background 0.1s ease",
   },
   stageBtn: {
     width: "18px", height: "18px", display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -609,7 +643,19 @@ const st = {
     background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer",
     fontSize: "12px", padding: "0 2px", flexShrink: 0,
   },
-  emptyHint: { padding: "8px 4px", color: "var(--havn-text-dim)", fontSize: "12px" },
+  emptyHint: { padding: "8px 4px", color: "var(--havn-text-dim)", fontSize: "12px", fontStyle: "italic" },
+  cleanState: {
+    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+    padding: "32px 16px", gap: "4px",
+  },
+  cleanIcon: {
+    width: "32px", height: "32px", borderRadius: "50%",
+    background: "color-mix(in srgb, var(--havn-accent) 12%, transparent)",
+    color: "var(--havn-accent)", display: "flex", alignItems: "center", justifyContent: "center",
+    fontSize: "16px", fontWeight: 700, marginBottom: "4px",
+  },
+  cleanText: { fontSize: "13px", fontWeight: 600, color: "var(--havn-text)" },
+  cleanHint: { fontSize: "12px", color: "var(--havn-text-dim)" },
 
   // Diff viewer
   diffSection: {
@@ -638,15 +684,17 @@ const st = {
     border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius)",
     color: "var(--havn-text)", fontFamily: "var(--havn-font)", fontSize: "12px",
     resize: "vertical", outline: "none", boxSizing: "border-box",
+    transition: "border-color 0.15s ease",
   },
   commitFooter: {
     display: "flex", alignItems: "center", justifyContent: "space-between",
     marginTop: "6px",
   },
   commitHint: { fontSize: "11px", color: "var(--havn-text-dim)" },
+  kbdHint: { marginLeft: "8px", fontSize: "10px", color: "var(--havn-text-dim)", opacity: 0.7 },
   commitBtn: {
-    padding: "5px 16px", background: "var(--havn-green)", border: "1px solid var(--havn-green-border)",
-    borderRadius: "var(--havn-radius-lg)", color: "#fff", cursor: "pointer",
+    padding: "5px 16px", background: "var(--havn-accent)", border: "1px solid var(--havn-accent)",
+    borderRadius: "var(--havn-radius-lg)", color: "#0B0E14", cursor: "pointer",
     fontSize: "12px", fontWeight: 600,
   },
 
