@@ -30,3 +30,6 @@ dashboard-*.png
 qa-*.md
 temp_*
 internal_*
+.agents/
+.impeccable.md
+skills-lock.json
