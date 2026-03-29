@@ -114,7 +114,7 @@ Custom expressions are evaluated as `SELECT (<expression>) FROM <table>` and mus
 - If an assertion **fails**, the model status is set to `assertion_failed`
 - The model data is **not rolled back** -- the table exists but is flagged
 - All assertions for a model are evaluated (not short-circuited)
-- Results are stored in `_dp_internal.assertion_results`
+- Results are stored in `_havn.assertion_results`
 
 ### Viewing Assertion Results
 

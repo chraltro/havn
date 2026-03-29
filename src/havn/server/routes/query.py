@@ -56,14 +56,14 @@ _DANGEROUS_FUNCTIONS_RE = re.compile(
 )
 
 # Block access to the internal metadata schema
-_INTERNAL_SCHEMA_RE = re.compile(r'\b_dp_internal\b', re.IGNORECASE)
+_INTERNAL_SCHEMA_RE = re.compile(r'\b_havn\b', re.IGNORECASE)
 
 
 def _validate_query_sql(sql: str) -> None:
     """Reject SQL that is not a safe read-only query.
 
     Raises HTTPException(403) if the SQL contains forbidden statements,
-    dangerous file-access functions, or references to _dp_internal.
+    dangerous file-access functions, or references to _havn.
     """
     stripped = sql.strip().rstrip(";").strip()
 
@@ -82,7 +82,7 @@ def _validate_query_sql(sql: str) -> None:
     if _INTERNAL_SCHEMA_RE.search(stripped):
         raise HTTPException(
             403,
-            "Access to _dp_internal schema is not allowed through the query interface.",
+            "Access to _havn schema is not allowed through the query interface.",
         )
 
 
@@ -155,14 +155,14 @@ def profile_query(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -
 
 @router.get("/api/metrics/slow-queries")
 def get_slow_queries(request: Request, conn: DbConnReadOnly, limit: int = 50) -> list[dict]:
-    """Return recent slow queries from _dp_internal.slow_queries."""
+    """Return recent slow queries from _havn.slow_queries."""
     _require_permission(request, "read")
     try:
         from havn.engine.database import ensure_meta_table
         ensure_meta_table(conn)
         rows = conn.execute(
             "SELECT query_text, duration_ms, row_count, executed_at "
-            "FROM _dp_internal.slow_queries ORDER BY executed_at DESC LIMIT ?",
+            "FROM _havn.slow_queries ORDER BY executed_at DESC LIMIT ?",
             [min(limit, 500)],
         ).fetchall()
         return [
@@ -344,7 +344,7 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
                 try:
                     ensure_meta_table(conn_rw)
                     conn_rw.execute(
-                        "INSERT INTO _dp_internal.slow_queries (query_text, duration_ms, row_count) VALUES (?, ?, ?)",
+                        "INSERT INTO _havn.slow_queries (query_text, duration_ms, row_count) VALUES (?, ?, ?)",
                         [req.sql[:10_000], duration_ms, len(data["rows"])],
                     )
                 finally:
@@ -375,7 +375,7 @@ def list_tables(
             """
             SELECT table_schema, table_name, table_type
             FROM information_schema.tables
-            WHERE table_schema NOT IN ('information_schema', '_dp_internal')
+            WHERE table_schema NOT IN ('information_schema', '_havn')
               AND table_schema = ?
             ORDER BY table_schema, table_name
             """,
@@ -386,7 +386,7 @@ def list_tables(
             """
             SELECT table_schema, table_name, table_type
             FROM information_schema.tables
-            WHERE table_schema NOT IN ('information_schema', '_dp_internal')
+            WHERE table_schema NOT IN ('information_schema', '_havn')
             ORDER BY table_schema, table_name
             """
         ).fetchall()
@@ -555,7 +555,7 @@ def get_autocomplete(request: Request, conn: DbConnReadOnly) -> dict:
         """
         SELECT table_schema, table_name
         FROM information_schema.tables
-        WHERE table_schema NOT IN ('information_schema', '_dp_internal')
+        WHERE table_schema NOT IN ('information_schema', '_havn')
         ORDER BY table_schema, table_name
         """
     ).fetchall()
@@ -564,7 +564,7 @@ def get_autocomplete(request: Request, conn: DbConnReadOnly) -> dict:
         """
         SELECT table_schema, table_name, column_name, data_type
         FROM information_schema.columns
-        WHERE table_schema NOT IN ('information_schema', '_dp_internal')
+        WHERE table_schema NOT IN ('information_schema', '_havn')
         ORDER BY table_schema, table_name, ordinal_position
         """
     ).fetchall()

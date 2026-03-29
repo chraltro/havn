@@ -244,7 +244,7 @@ Remove old versions to save disk space:
 
 The cleanup function:
 - Deletes Parquet files from `_snapshots/`
-- Removes metadata from `_dp_internal.version_history`
+- Removes metadata from `_havn.version_history`
 - Validates paths before deletion (safety)
 
 ## Model-Level Diff

@@ -86,14 +86,14 @@ class TestIntegration:
 
         # Verify profiles were saved
         profile = db.execute(
-            "SELECT row_count FROM _dp_internal.model_profiles WHERE model_path = 'bronze.customers'"
+            "SELECT row_count FROM _havn.model_profiles WHERE model_path = 'bronze.customers'"
         ).fetchone()
         assert profile is not None
         assert profile[0] == 2
 
         # Verify assertions were logged
         assertion_count = db.execute(
-            "SELECT COUNT(*) FROM _dp_internal.assertion_results WHERE model_path = 'bronze.customers'"
+            "SELECT COUNT(*) FROM _havn.assertion_results WHERE model_path = 'bronze.customers'"
         ).fetchone()[0]
         assert assertion_count == 3  # row_count > 0, no_nulls(email), unique(id)
 

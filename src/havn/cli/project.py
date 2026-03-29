@@ -238,7 +238,7 @@ def status(
         try:
             rows = conn.execute(
                 "SELECT table_schema, table_name FROM information_schema.tables "
-                "WHERE table_schema NOT IN ('information_schema', '_dp_internal')"
+                "WHERE table_schema NOT IN ('information_schema', '_havn')"
             ).fetchall()
             total_tables = len(rows)
             total_rows = 0
@@ -254,7 +254,7 @@ def status(
             try:
                 last = conn.execute(
                     "SELECT run_type, target, status, started_at, duration_ms "
-                    "FROM _dp_internal.run_log ORDER BY started_at DESC LIMIT 1"
+                    "FROM _havn.run_log ORDER BY started_at DESC LIMIT 1"
                 ).fetchone()
             except Exception:
                 last = None
@@ -456,7 +456,7 @@ def context(
                 """
                 SELECT table_schema, table_name, table_type
                 FROM information_schema.tables
-                WHERE table_schema NOT IN ('information_schema', '_dp_internal')
+                WHERE table_schema NOT IN ('information_schema', '_havn')
                 ORDER BY table_schema, table_name
                 """
             ).fetchall()
@@ -471,7 +471,7 @@ def context(
                 history_rows = conn.execute(
                     """
                     SELECT run_type, target, status, started_at, error
-                    FROM _dp_internal.run_log
+                    FROM _havn.run_log
                     ORDER BY started_at DESC
                     LIMIT 10
                     """
@@ -614,7 +614,7 @@ def clear(
         wal_path.unlink()
 
     # Delete snapshot/rewind data
-    for meta_dir in [".dp", "_snapshots", "output"]:
+    for meta_dir in [".havn", "_snapshots", "output"]:
         meta_path = project_dir / meta_dir
         if meta_path.exists():
             shutil.rmtree(meta_path)

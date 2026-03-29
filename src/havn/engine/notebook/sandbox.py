@@ -5,9 +5,9 @@ cells. Uses a **blocklist** approach — users can import any package and use
 the full Python language, with targeted restrictions on:
 
 1. AST validation — block access to havn server internals, dunder-based
-   sandbox escapes, and _dp_internal access via db
+   sandbox escapes, and _havn access via db
 2. Guarded open() — intercepts file reads to block .env and dotfiles
-3. SafeDbProxy — wraps the DuckDB connection to block _dp_internal,
+3. SafeDbProxy — wraps the DuckDB connection to block _havn,
    ATTACH, INSTALL, LOAD, COPY TO
 4. Execution timeout — prevents infinite loops from hanging the server
 
@@ -103,7 +103,7 @@ def _check_dunder_access(node: ast.AST) -> None:
 
 
 def _check_db_internal_access(node: ast.AST) -> None:
-    """Reject db.execute() calls with _dp_internal in string arguments."""
+    """Reject db.execute() calls with _havn in string arguments."""
     if not isinstance(node, ast.Call):
         return
     func = node.func
@@ -117,17 +117,17 @@ def _check_db_internal_access(node: ast.AST) -> None:
         return
     for arg in node.args:
         if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-            if "_dp_internal" in arg.value.lower():
+            if "_havn" in arg.value.lower():
                 raise SandboxViolation(
-                    f"Line {node.lineno}: access to _dp_internal schema "
+                    f"Line {node.lineno}: access to _havn schema "
                     f"is not allowed in notebooks"
                 )
         elif isinstance(arg, ast.JoinedStr):
             for val in arg.values:
                 if isinstance(val, ast.Constant) and isinstance(val.value, str):
-                    if "_dp_internal" in val.value.lower():
+                    if "_havn" in val.value.lower():
                         raise SandboxViolation(
-                            f"Line {node.lineno}: access to _dp_internal schema "
+                            f"Line {node.lineno}: access to _havn schema "
                             f"is not allowed in notebooks"
                         )
 
@@ -205,7 +205,7 @@ def execute_with_timeout(
 
 _BLOCKED_SQL_RE = re.compile(
     r'\b('
-    r'_dp_internal'
+    r'_havn'
     r'|ATTACH\b|INSTALL\b|LOAD\b'
     r'|COPY\s+.*\bTO\b'
     r')',
@@ -216,13 +216,13 @@ _BLOCKED_SQL_RE = re.compile(
 def check_sql(query: str) -> None:
     """Validate that a SQL string doesn't access blocked resources.
 
-    Raises PermissionError if the query references _dp_internal,
+    Raises PermissionError if the query references _havn,
     ATTACH, INSTALL, LOAD, or COPY TO.
     """
     if _BLOCKED_SQL_RE.search(query):
         raise PermissionError(
             "This SQL operation is not allowed in notebooks. "
-            "Access to _dp_internal, ATTACH, INSTALL, LOAD, "
+            "Access to _havn, ATTACH, INSTALL, LOAD, "
             "and COPY TO are blocked."
         )
 

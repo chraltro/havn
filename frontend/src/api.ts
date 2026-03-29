@@ -220,7 +220,7 @@ const REQUEST_TIMEOUT_MS = 30000;
 const MAX_RETRIES = 3;
 const RETRY_BACKOFF = [1000, 2000, 4000];
 
-let authToken: string | null = localStorage.getItem("dp_token") || null;
+let authToken: string | null = localStorage.getItem("havn_token") || null;
 
 /** Parse an error response into a human-readable message */
 async function parseErrorResponse(res: Response, path: string): Promise<string> {
@@ -334,8 +334,8 @@ async function request<T = unknown>(path: string, options: RequestOptions = {}):
       // 401 — auth required, don't retry
       if (res.status === 401) {
         authToken = null;
-        localStorage.removeItem("dp_token");
-        window.dispatchEvent(new Event("dp_auth_required"));
+        localStorage.removeItem("havn_token");
+        window.dispatchEvent(new Event("havn_auth_required"));
         throw new Error("Authentication required");
       }
 
@@ -394,8 +394,8 @@ export const api = {
   // Auth
   setToken: (token: string | null) => {
     authToken = token;
-    if (token) localStorage.setItem("dp_token", token);
-    else localStorage.removeItem("dp_token");
+    if (token) localStorage.setItem("havn_token", token);
+    else localStorage.removeItem("havn_token");
   },
   getToken: () => authToken,
   getAuthStatus: () => request<AuthStatus>("/auth/status"),
@@ -726,8 +726,8 @@ export const api = {
       clearTimeout(timeoutId);
       if (res.status === 401) {
         authToken = null;
-        localStorage.removeItem("dp_token");
-        window.dispatchEvent(new Event("dp_auth_required"));
+        localStorage.removeItem("havn_token");
+        window.dispatchEvent(new Event("havn_auth_required"));
         throw new Error("Authentication required");
       }
       if (!res.ok) {

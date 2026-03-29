@@ -417,7 +417,7 @@ function AppContent() {
   const [preview, setPreview] = useState(null);
   const [previewError, setPreviewError] = useState(null);
   const [previewRunning, setPreviewRunning] = useState(false);
-  const [previewHeight, onPreviewResize, onPreviewResizeStart] = useResizable("dp_editor_preview_height", 200, 80, 600);
+  const [previewHeight, onPreviewResize, onPreviewResizeStart] = useResizable("havn_editor_preview_height", 200, 80, 600);
 
   // Tab/UI state
   const [activeTab, setActiveTab] = useState("Overview");
@@ -429,17 +429,17 @@ function AppContent() {
   const subTabs = currentSectionDef?.tabs || [];
 
   // Resizable panels
-  const [sidebarWidth, onSidebarResize, onSidebarResizeStart] = useResizable("dp_sidebar_width", 240, 150, 500);
-  const [outputHeight, onOutputResize, onOutputResizeStart] = useResizable("dp_output_height", 80, 40, 500);
-  const [outputCollapsed, setOutputCollapsed] = useState(() => localStorage.getItem("dp_output_collapsed") === "true");
+  const [sidebarWidth, onSidebarResize, onSidebarResizeStart] = useResizable("havn_sidebar_width", 240, 150, 500);
+  const [outputHeight, onOutputResize, onOutputResizeStart] = useResizable("havn_output_height", 80, 40, 500);
+  const [outputCollapsed, setOutputCollapsed] = useState(() => localStorage.getItem("havn_output_collapsed") === "true");
   const toggleOutputCollapsed = useCallback(() => {
     setOutputCollapsed(prev => {
       const next = !prev;
-      localStorage.setItem("dp_output_collapsed", String(next));
+      localStorage.setItem("havn_output_collapsed", String(next));
       return next;
     });
   }, []);
-  const [agentWidth, onAgentResize, onAgentResizeStart] = useResizable("dp_agent_width", 340, 240, 600);
+  const [agentWidth, onAgentResize, onAgentResizeStart] = useResizable("havn_agent_width", 340, 240, 600);
 
   // Editor navigation
   const editorRef = useRef(null);
@@ -454,7 +454,7 @@ function AppContent() {
       const name = overview.project_name || "__default__";
       onboardingProjectRef.current = name;
       setIsSampleProject(!!overview.is_sample);
-      if (!localStorage.getItem(`dp_onboarding_completed:${name}`)) {
+      if (!localStorage.getItem(`havn_onboarding_completed:${name}`)) {
         setOnboardingOpen(true);
       }
     }).catch(() => {});
@@ -524,7 +524,7 @@ function AppContent() {
   function handleOnboardingComplete() {
     setOnboardingOpen(false);
     const name = onboardingProjectRef.current || "__default__";
-    localStorage.setItem(`dp_onboarding_completed:${name}`, "true");
+    localStorage.setItem(`havn_onboarding_completed:${name}`, "true");
   }
 
   async function handleClearSample() {
@@ -884,7 +884,7 @@ function AppContent() {
 
   function queryTable(schema, table) {
     navigateToTab("Query");
-    window.__dp_prefill_query = { sql: `SELECT * FROM ${schema}.${table}`, run: true };
+    window.__havn_prefill_query = { sql: `SELECT * FROM ${schema}.${table}`, run: true };
   }
 
   async function handleRunLintWithReload(fix = false) {

@@ -230,7 +230,7 @@ class TestFullPipeline:
 
         # Check run_log has entries for all steps
         run_types = db.execute(
-            "SELECT DISTINCT run_type FROM _dp_internal.run_log"
+            "SELECT DISTINCT run_type FROM _havn.run_log"
         ).fetchall()
         run_types = {r[0] for r in run_types}
         assert "seed" in run_types
@@ -239,13 +239,13 @@ class TestFullPipeline:
 
         # Check assertion results were recorded
         assertion_count = db.execute(
-            "SELECT COUNT(*) FROM _dp_internal.assertion_results"
+            "SELECT COUNT(*) FROM _havn.assertion_results"
         ).fetchone()[0]
         assert assertion_count > 0
 
         # All assertions should have passed
         failed = db.execute(
-            "SELECT COUNT(*) FROM _dp_internal.assertion_results WHERE passed = false"
+            "SELECT COUNT(*) FROM _havn.assertion_results WHERE passed = false"
         ).fetchone()[0]
         assert failed == 0
 
@@ -316,7 +316,7 @@ class TestIngestErrors:
         run_scripts_in_dir(db, project / "ingest", "ingest")
 
         errors = db.execute(
-            "SELECT COUNT(*) FROM _dp_internal.run_log "
+            "SELECT COUNT(*) FROM _havn.run_log "
             "WHERE run_type = 'ingest' AND status = 'error'"
         ).fetchone()[0]
         assert errors >= 1

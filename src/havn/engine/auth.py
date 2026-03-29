@@ -1,7 +1,7 @@
 """Authentication and user management.
 
 Simple token-based auth with role-based permissions.
-Users stored in DuckDB _dp_internal schema.
+Users stored in DuckDB _havn schema.
 Roles: admin (full), editor (run + query), viewer (read-only).
 """
 
@@ -48,9 +48,9 @@ def _verify_password(password: str, stored_hash: str, stored_salt: str) -> bool:
 
 def ensure_auth_tables(conn: duckdb.DuckDBPyConnection) -> None:
     """Create auth tables if they don't exist."""
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _dp_internal")
+    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.users (
+        CREATE TABLE IF NOT EXISTS _havn.users (
             username     VARCHAR PRIMARY KEY,
             password_hash VARCHAR NOT NULL,
             password_salt VARCHAR NOT NULL,
@@ -61,7 +61,7 @@ def ensure_auth_tables(conn: duckdb.DuckDBPyConnection) -> None:
         )
     """)
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.tokens (
+        CREATE TABLE IF NOT EXISTS _havn.tokens (
             token        VARCHAR PRIMARY KEY,
             username     VARCHAR NOT NULL,
             created_at   TIMESTAMP DEFAULT current_timestamp,
@@ -84,7 +84,7 @@ def create_user(
 
     # Check if user exists
     existing = conn.execute(
-        "SELECT username FROM _dp_internal.users WHERE username = ?", [username]
+        "SELECT username FROM _havn.users WHERE username = ?", [username]
     ).fetchone()
     if existing:
         raise ValueError(f"User '{username}' already exists")
@@ -92,7 +92,7 @@ def create_user(
     pw_hash, pw_salt = _hash_password(password)
     conn.execute(
         """
-        INSERT INTO _dp_internal.users (username, password_hash, password_salt, role, display_name)
+        INSERT INTO _havn.users (username, password_hash, password_salt, role, display_name)
         VALUES (?, ?, ?, ?, ?)
         """,
         [username, pw_hash, pw_salt, role, display_name or username],
@@ -104,7 +104,7 @@ def authenticate(conn: duckdb.DuckDBPyConnection, username: str, password: str) 
     """Authenticate user, return token or None."""
     ensure_auth_tables(conn)
     row = conn.execute(
-        "SELECT password_hash, password_salt FROM _dp_internal.users WHERE username = ?",
+        "SELECT password_hash, password_salt FROM _havn.users WHERE username = ?",
         [username],
     ).fetchone()
     if not row:
@@ -118,11 +118,11 @@ def authenticate(conn: duckdb.DuckDBPyConnection, username: str, password: str) 
     token = secrets.token_urlsafe(32)
     token_hash = _hash_token(token)
     conn.execute(
-        "INSERT INTO _dp_internal.tokens (token, username, expires_at) VALUES (?, ?, current_timestamp + ?)",
+        "INSERT INTO _havn.tokens (token, username, expires_at) VALUES (?, ?, current_timestamp + ?)",
         [token_hash, username, TOKEN_LIFETIME],
     )
     conn.execute(
-        "UPDATE _dp_internal.users SET last_login = current_timestamp WHERE username = ?",
+        "UPDATE _havn.users SET last_login = current_timestamp WHERE username = ?",
         [username],
     )
     logger.info("User '%s' authenticated successfully", username)
@@ -139,8 +139,8 @@ def validate_token(conn: duckdb.DuckDBPyConnection, token: str) -> dict | None:
     row = conn.execute(
         """
         SELECT t.username, u.role, u.display_name
-        FROM _dp_internal.tokens t
-        JOIN _dp_internal.users u ON t.username = u.username
+        FROM _havn.tokens t
+        JOIN _havn.users u ON t.username = u.username
         WHERE t.token = ?
           AND (t.expires_at IS NULL OR t.expires_at > current_timestamp)
         """,
@@ -149,7 +149,7 @@ def validate_token(conn: duckdb.DuckDBPyConnection, token: str) -> dict | None:
     if not row:
         # Clean up expired tokens opportunistically
         conn.execute(
-            "DELETE FROM _dp_internal.tokens WHERE expires_at IS NOT NULL AND expires_at <= current_timestamp"
+            "DELETE FROM _havn.tokens WHERE expires_at IS NOT NULL AND expires_at <= current_timestamp"
         )
         return None
     return {"username": row[0], "role": row[1], "display_name": row[2]}
@@ -161,7 +161,7 @@ def list_users(conn: duckdb.DuckDBPyConnection) -> list[dict]:
     rows = conn.execute(
         """
         SELECT username, role, display_name, created_at, last_login
-        FROM _dp_internal.users
+        FROM _havn.users
         ORDER BY created_at
         """
     ).fetchall()
@@ -187,7 +187,7 @@ def update_user(
     """Update user fields. Returns True if found."""
     ensure_auth_tables(conn)
     existing = conn.execute(
-        "SELECT username FROM _dp_internal.users WHERE username = ?", [username]
+        "SELECT username FROM _havn.users WHERE username = ?", [username]
     ).fetchone()
     if not existing:
         return False
@@ -196,18 +196,18 @@ def update_user(
         if role not in ("admin", "editor", "viewer"):
             raise ValueError(f"Invalid role: {role}")
         conn.execute(
-            "UPDATE _dp_internal.users SET role = ? WHERE username = ?",
+            "UPDATE _havn.users SET role = ? WHERE username = ?",
             [role, username],
         )
     if password:
         pw_hash, pw_salt = _hash_password(password)
         conn.execute(
-            "UPDATE _dp_internal.users SET password_hash = ?, password_salt = ? WHERE username = ?",
+            "UPDATE _havn.users SET password_hash = ?, password_salt = ? WHERE username = ?",
             [pw_hash, pw_salt, username],
         )
     if display_name:
         conn.execute(
-            "UPDATE _dp_internal.users SET display_name = ? WHERE username = ?",
+            "UPDATE _havn.users SET display_name = ? WHERE username = ?",
             [display_name, username],
         )
     return True
@@ -217,12 +217,12 @@ def delete_user(conn: duckdb.DuckDBPyConnection, username: str) -> bool:
     """Delete a user and their tokens."""
     ensure_auth_tables(conn)
     existing = conn.execute(
-        "SELECT username FROM _dp_internal.users WHERE username = ?", [username]
+        "SELECT username FROM _havn.users WHERE username = ?", [username]
     ).fetchone()
     if not existing:
         return False
-    conn.execute("DELETE FROM _dp_internal.tokens WHERE username = ?", [username])
-    conn.execute("DELETE FROM _dp_internal.users WHERE username = ?", [username])
+    conn.execute("DELETE FROM _havn.tokens WHERE username = ?", [username])
+    conn.execute("DELETE FROM _havn.users WHERE username = ?", [username])
     return True
 
 
@@ -230,16 +230,16 @@ def revoke_tokens(conn: duckdb.DuckDBPyConnection, username: str) -> int:
     """Revoke all tokens for a user."""
     ensure_auth_tables(conn)
     before = conn.execute(
-        "SELECT COUNT(*) FROM _dp_internal.tokens WHERE username = ?", [username]
+        "SELECT COUNT(*) FROM _havn.tokens WHERE username = ?", [username]
     ).fetchone()[0]
-    conn.execute("DELETE FROM _dp_internal.tokens WHERE username = ?", [username])
+    conn.execute("DELETE FROM _havn.tokens WHERE username = ?", [username])
     return before
 
 
 def has_any_users(conn: duckdb.DuckDBPyConnection) -> bool:
     """Check if any users exist (for initial setup)."""
     ensure_auth_tables(conn)
-    row = conn.execute("SELECT COUNT(*) FROM _dp_internal.users").fetchone()
+    row = conn.execute("SELECT COUNT(*) FROM _havn.users").fetchone()
     return row[0] > 0
 
 

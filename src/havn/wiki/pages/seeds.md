@@ -108,7 +108,7 @@ streams:
 havn tracks seed changes using SHA256 content hashing:
 
 1. When a seed is loaded, a hash of the CSV file content is computed
-2. The hash is stored in `_dp_internal.model_state`
+2. The hash is stored in `_havn.model_state`
 3. On subsequent runs, the current hash is compared against the stored hash
 4. If the hash matches, the seed is **skipped**
 5. If the hash differs, the seed is **reloaded**

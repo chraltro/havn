@@ -25,7 +25,7 @@ Ingest Scripts (.py / .dpnb)
 - **silver** -- Business logic: joins, aggregations, calculations
 - **gold** -- Consumption-ready tables for dashboards, APIs, and reports
 
-All metadata (model state, run logs, users, tokens) is stored in a hidden `_dp_internal` schema within the same DuckDB file.
+All metadata (model state, run logs, users, tokens) is stored in a hidden `_havn` schema within the same DuckDB file.
 
 ## Web UI
 

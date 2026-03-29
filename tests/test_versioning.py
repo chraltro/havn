@@ -264,7 +264,7 @@ class TestVersioningSecurity:
         # Tamper with the stored parquet_file path to attempt traversal
         import json
         version = conn.execute(
-            "SELECT tables_snapshot FROM _dp_internal.version_history WHERE version_id = ?",
+            "SELECT tables_snapshot FROM _havn.version_history WHERE version_id = ?",
             [v1["version_id"]],
         ).fetchone()
         tables_info = json.loads(version[0])
@@ -272,7 +272,7 @@ class TestVersioningSecurity:
         for key in tables_info:
             tables_info[key]["parquet_file"] = "../../../etc/passwd"
         conn.execute(
-            "UPDATE _dp_internal.version_history SET tables_snapshot = ?::JSON WHERE version_id = ?",
+            "UPDATE _havn.version_history SET tables_snapshot = ?::JSON WHERE version_id = ?",
             [json.dumps(tables_info), v1["version_id"]],
         )
 

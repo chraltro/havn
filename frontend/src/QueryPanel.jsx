@@ -16,12 +16,12 @@ function fmt(sql) { try { return formatSQL(sql, FMT_OPTS); } catch { return sql;
 
 function getHistory() {
   try {
-    return JSON.parse(localStorage.getItem("dp_query_history") || "[]");
+    return JSON.parse(localStorage.getItem("havn_query_history") || "[]");
   } catch { return []; }
 }
 
 function saveHistory(h) {
-  localStorage.setItem("dp_query_history", JSON.stringify(h.slice(0, MAX_HISTORY)));
+  localStorage.setItem("havn_query_history", JSON.stringify(h.slice(0, MAX_HISTORY)));
 }
 
 /**
@@ -191,8 +191,8 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
   const historyRef = useRef(null);
   const [maskingPolicies, setMaskingPolicies] = useState({});
   const setHintTrigger = useHintTriggerFn();
-  const [sidebarWidth, onSidebarResize, onSidebarResizeStart] = useResizable("dp_query_sidebar_width", 200, 120, 400);
-  const [editorHeight, onEditorResize, onEditorResizeStart] = useResizable("dp_query_editor_height", 120, 60, 500);
+  const [sidebarWidth, onSidebarResize, onSidebarResizeStart] = useResizable("havn_query_sidebar_width", 200, 120, 400);
+  const [editorHeight, onEditorResize, onEditorResizeStart] = useResizable("havn_query_editor_height", 120, 60, 500);
 
   // Autocomplete state
   const [acItems, setAcItems] = useState([]);
@@ -214,9 +214,9 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
   useEffect(() => {
     let attempts = 0;
     function check() {
-      const pf = window.__dp_prefill_query;
+      const pf = window.__havn_prefill_query;
       if (!pf) return false;
-      delete window.__dp_prefill_query;
+      delete window.__havn_prefill_query;
       const query = typeof pf === "string" ? pf : pf.sql;
       const autoRun = typeof pf === "object" && pf.run;
       setSql(fmt(query));
@@ -528,7 +528,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
     }
     if (suggestions.length < 4) {
       suggestions.push({
-        sql: fmt("SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema NOT IN ('information_schema', '_dp_internal') ORDER BY table_schema, table_name"),
+        sql: fmt("SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema NOT IN ('information_schema', '_havn') ORDER BY table_schema, table_name"),
         label: "List all tables",
       });
     }

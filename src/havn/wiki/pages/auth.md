@@ -269,16 +269,16 @@ curl -X DELETE http://localhost:3000/api/secrets/DB_PASSWORD \
 
 ## Data Storage
 
-Auth data is stored in the DuckDB database under `_dp_internal`:
+Auth data is stored in the DuckDB database under `_havn`:
 
 | Table | Contents |
 |-------|----------|
-| `_dp_internal.users` | User accounts (username, password hash, salt, role, display name, timestamps) |
-| `_dp_internal.tokens` | Active authentication tokens with expiration |
+| `_havn.users` | User accounts (username, password hash, salt, role, display name, timestamps) |
+| `_havn.tokens` | Active authentication tokens with expiration |
 
 ## Audit Logging
 
-When auth is enabled, user actions are logged to `_dp_internal.audit_log`:
+When auth is enabled, user actions are logged to `_havn.audit_log`:
 
 - Login events
 - Query execution

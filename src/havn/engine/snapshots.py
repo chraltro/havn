@@ -76,8 +76,8 @@ class RunInfo:
 # Metadata database management
 # ---------------------------------------------------------------------------
 
-_SNAPSHOTS_DIR = ".dp/snapshots"
-_METADATA_DIR = ".dp/metadata"
+_SNAPSHOTS_DIR = ".havn/snapshots"
+_METADATA_DIR = ".havn/metadata"
 
 
 def _meta_db_path(project_dir: Path) -> Path:

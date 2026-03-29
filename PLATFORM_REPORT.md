@@ -33,7 +33,7 @@ Data flows through four schemas:
   (raw)        (cleaned)   (modeled)   (consumption)
 ```
 
-All metadata (model state, run logs, profiles, users, tokens, alerts, CDC state, versions, contracts) lives in a `_dp_internal` schema inside the same warehouse file.
+All metadata (model state, run logs, profiles, users, tokens, alerts, CDC state, versions, contracts) lives in a `_havn` schema inside the same warehouse file.
 
 ---
 
@@ -107,7 +107,7 @@ Incremental data extraction from external sources using watermarking and file tr
 | **High watermark** | Tracks last-seen value of a column (e.g., `updated_at`) for incremental pulls |
 | **File tracking** | Monitors file modification timestamps; only re-ingests changed files |
 | **Full refresh** | Fallback mode that replaces the entire table |
-| **State management** | CDC state persisted in `_dp_internal.cdc_state` |
+| **State management** | CDC state persisted in `_havn.cdc_state` |
 | **Status & reset** | Query sync status and reset watermarks per source |
 
 ### 6. Data Quality & Contracts
@@ -120,7 +120,7 @@ Two complementary systems for ensuring data correctness.
 | **YAML contracts** | Standalone contract files in `contracts/` for reusable quality rules |
 | **Assertion types** | `row_count`, `no_nulls`, `unique`, `accepted_values`, custom SQL expressions |
 | **Severity levels** | `error` (fails pipeline) or `warn` (logs warning, continues) |
-| **History tracking** | Results stored in `_dp_internal.assertion_results` and `contract_results` |
+| **History tracking** | Results stored in `_havn.assertion_results` and `contract_results` |
 | **Batch execution** | `havn contracts` evaluates all contracts; supports filtering |
 
 ### 7. Authentication & RBAC
@@ -169,7 +169,7 @@ Multi-channel alerting for pipeline and data quality events.
 | **Generic webhooks** | POST to any HTTP endpoint |
 | **Logging** | Python logger integration |
 | **Alert types** | Pipeline success/failure, assertion failures, stale models |
-| **History** | All alerts tracked in `_dp_internal.alert_log` |
+| **History** | All alerts tracked in `_havn.alert_log` |
 
 ### 11. Versioning & Time Travel
 

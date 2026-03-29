@@ -58,19 +58,19 @@ class TestASTValidation:
         with pytest.raises(SandboxViolation, match="__code__"):
             validate_ast("func.__code__")
 
-    # --- Blocked: _dp_internal via db ---
+    # --- Blocked: _havn via db ---
 
-    def test_db_execute_dp_internal_blocked(self):
-        with pytest.raises(SandboxViolation, match="_dp_internal"):
-            validate_ast('db.execute("SELECT * FROM _dp_internal.users")')
+    def test_db_execute_havn_blocked(self):
+        with pytest.raises(SandboxViolation, match="_havn"):
+            validate_ast('db.execute("SELECT * FROM _havn.users")')
 
-    def test_db_sql_dp_internal_blocked(self):
-        with pytest.raises(SandboxViolation, match="_dp_internal"):
-            validate_ast('db.sql("SELECT * FROM _dp_internal.tokens")')
+    def test_db_sql_havn_blocked(self):
+        with pytest.raises(SandboxViolation, match="_havn"):
+            validate_ast('db.sql("SELECT * FROM _havn.tokens")')
 
-    def test_db_execute_fstring_dp_internal_blocked(self):
-        with pytest.raises(SandboxViolation, match="_dp_internal"):
-            validate_ast('db.execute(f"SELECT * FROM _dp_internal.{table}")')
+    def test_db_execute_fstring_havn_blocked(self):
+        with pytest.raises(SandboxViolation, match="_havn"):
+            validate_ast('db.execute(f"SELECT * FROM _havn.{table}")')
 
     # --- Allowed: normal imports (blocklist, not allowlist) ---
 
@@ -157,13 +157,13 @@ class TestSafeDbProxy:
         result = self.proxy.execute("SELECT * FROM t")
         assert result.fetchone() == (1,)
 
-    def test_dp_internal_blocked(self):
-        with pytest.raises(PermissionError, match="_dp_internal"):
-            self.proxy.execute("SELECT * FROM _dp_internal.users")
+    def test_havn_blocked(self):
+        with pytest.raises(PermissionError, match="_havn"):
+            self.proxy.execute("SELECT * FROM _havn.users")
 
-    def test_dp_internal_case_insensitive(self):
+    def test_havn_case_insensitive(self):
         with pytest.raises(PermissionError):
-            self.proxy.execute("SELECT * FROM _DP_INTERNAL.tokens")
+            self.proxy.execute("SELECT * FROM _HAVN.tokens")
 
     def test_attach_blocked(self):
         with pytest.raises(PermissionError, match="ATTACH"):
@@ -262,17 +262,17 @@ class TestSandboxedExecution:
         result = execute_cell(self.conn, "().__class__.__subclasses__()")
         assert any(o["type"] == "error" for o in result["outputs"])
 
-    # --- Blocked: _dp_internal via db ---
+    # --- Blocked: _havn via db ---
 
-    def test_dp_internal_via_ast_blocked(self):
+    def test_havn_via_ast_blocked(self):
         result = execute_cell(
             self.conn,
-            'db.execute("SELECT * FROM _dp_internal.tokens")',
+            'db.execute("SELECT * FROM _havn.tokens")',
         )
         assert any(o["type"] == "error" for o in result["outputs"])
         assert any("Sandbox" in o.get("text", "") for o in result["outputs"])
 
-    def test_dp_internal_dynamic_not_caught_by_ast(self):
+    def test_havn_dynamic_not_caught_by_ast(self):
         """Dynamic SQL construction bypasses AST check — known limitation."""
         # This is a known limitation: AST validation only catches string
         # literals. Dynamic construction reaches the real db connection.
@@ -280,7 +280,7 @@ class TestSandboxedExecution:
         # in :memory:) but NOT a sandbox error.
         result = execute_cell(
             self.conn,
-            'sql = "_dp_" + "internal.users"\ndb.execute(f"SELECT * FROM {sql}")',
+            'sql = "_ha" + "vn.users"\ndb.execute(f"SELECT * FROM {sql}")',
         )
         assert any(o["type"] == "error" for o in result["outputs"])
 
@@ -382,7 +382,7 @@ class TestSandboxedExecution:
         """sandboxed=False skips all protections."""
         result = execute_cell(
             self.conn,
-            'db.execute("CREATE SCHEMA IF NOT EXISTS _dp_internal")',
+            'db.execute("CREATE SCHEMA IF NOT EXISTS _havn")',
             sandboxed=False,
         )
         # Should not have sandbox errors

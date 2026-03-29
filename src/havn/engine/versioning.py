@@ -13,7 +13,7 @@ Snapshot storage layout::
       run-43/
         ...
 
-State is tracked in ``_dp_internal.version_history``.
+State is tracked in ``_havn.version_history``.
 """
 
 from __future__ import annotations
@@ -37,9 +37,9 @@ logger = logging.getLogger("havn.versioning")
 def _ensure_version_tables(conn: duckdb.DuckDBPyConnection) -> None:
     """Create the version history metadata table (no-op on read-only connections)."""
     try:
-        conn.execute("CREATE SCHEMA IF NOT EXISTS _dp_internal")
+        conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS _dp_internal.version_history (
+            CREATE TABLE IF NOT EXISTS _havn.version_history (
                 version_id      VARCHAR PRIMARY KEY,
                 created_at      TIMESTAMP DEFAULT current_timestamp,
                 description     VARCHAR DEFAULT '',
@@ -75,7 +75,7 @@ def create_version(
     # Generate version ID from existing version count + timestamp
     try:
         ver_count = conn.execute(
-            "SELECT COUNT(*) FROM _dp_internal.version_history"
+            "SELECT COUNT(*) FROM _havn.version_history"
         ).fetchone()[0]
     except Exception:
         ver_count = 0
@@ -146,7 +146,7 @@ def create_version(
     # Record in metadata
     conn.execute(
         """
-        INSERT OR REPLACE INTO _dp_internal.version_history
+        INSERT OR REPLACE INTO _havn.version_history
             (version_id, description, tables_snapshot, trigger)
         VALUES (?, ?, ?::JSON, ?)
         """,
@@ -170,7 +170,7 @@ def list_versions(
     rows = conn.execute(
         """
         SELECT version_id, created_at, description, tables_snapshot, trigger
-        FROM _dp_internal.version_history
+        FROM _havn.version_history
         ORDER BY created_at DESC
         LIMIT ?
         """,
@@ -203,7 +203,7 @@ def get_version(
     _ensure_version_tables(conn)
     row = conn.execute(
         "SELECT version_id, created_at, description, tables_snapshot, trigger "
-        "FROM _dp_internal.version_history WHERE version_id = ?",
+        "FROM _havn.version_history WHERE version_id = ?",
         [version_id],
     ).fetchone()
     if not row:
@@ -444,7 +444,7 @@ def table_timeline(
     rows = conn.execute(
         """
         SELECT version_id, created_at, description, tables_snapshot, trigger
-        FROM _dp_internal.version_history
+        FROM _havn.version_history
         ORDER BY created_at DESC
         LIMIT ?
         """,
@@ -488,7 +488,7 @@ def cleanup_old_versions(
 
     # Get versions ordered oldest first
     rows = conn.execute(
-        "SELECT version_id FROM _dp_internal.version_history ORDER BY created_at ASC"
+        "SELECT version_id FROM _havn.version_history ORDER BY created_at ASC"
     ).fetchall()
 
     all_versions = [r[0] for r in rows]
@@ -505,7 +505,7 @@ def cleanup_old_versions(
         if snap_dir.exists() and str(snap_dir).startswith(str(snapshots_root)):
             shutil.rmtree(snap_dir)
         conn.execute(
-            "DELETE FROM _dp_internal.version_history WHERE version_id = ?",
+            "DELETE FROM _havn.version_history WHERE version_id = ?",
             [vid],
         )
         removed += 1
@@ -520,7 +520,7 @@ def _get_user_tables(
     try:
         rows = conn.execute(
             "SELECT table_schema, table_name FROM information_schema.tables "
-            "WHERE table_schema NOT IN ('information_schema', '_dp_internal', 'pg_catalog') "
+            "WHERE table_schema NOT IN ('information_schema', '_havn', 'pg_catalog') "
             "AND table_type = 'BASE TABLE' "
             "ORDER BY table_schema, table_name"
         ).fetchall()

@@ -26,7 +26,7 @@ def _get_huey(project_dir: Path) -> SqliteHuey:
     """Get or create the Huey instance backed by SQLite in the project dir."""
     global _huey
     if _huey is None:
-        db_path = project_dir / ".dp_scheduler.db"
+        db_path = project_dir / ".havn_scheduler.db"
         _huey = SqliteHuey(filename=str(db_path), immediate=False)
     return _huey
 

@@ -970,7 +970,7 @@ class TestAssertionEdgeCases:
 
         # Check the profile was saved
         row = db.execute(
-            "SELECT null_percentages FROM _dp_internal.model_profiles "
+            "SELECT null_percentages FROM _havn.model_profiles "
             "WHERE model_path = 'bronze.sparse'"
         ).fetchone()
         assert row is not None

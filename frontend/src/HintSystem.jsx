@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
 import { HINTS } from "./hints";
 
-const STORAGE_KEY = "dp_dismissed_hints";
-const STALE_STORAGE_KEY = "dp_hint_stale_timestamps";
+const STORAGE_KEY = "havn_dismissed_hints";
+const STALE_STORAGE_KEY = "havn_hint_stale_timestamps";
 
 function loadDismissed() {
   try {

@@ -38,7 +38,7 @@ class TestAlerts:
         # Check it was logged
         row = db.execute(
             "SELECT alert_type, channel, target, message, status "
-            "FROM _dp_internal.alert_log ORDER BY sent_at DESC LIMIT 1"
+            "FROM _havn.alert_log ORDER BY sent_at DESC LIMIT 1"
         ).fetchone()
         assert row[0] == "test"
         assert row[1] == "log"

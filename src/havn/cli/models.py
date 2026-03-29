@@ -245,7 +245,7 @@ def debug(
         error_message = None
         try:
             row = conn.execute(
-                "SELECT error FROM _dp_internal.run_log "
+                "SELECT error FROM _havn.run_log "
                 "WHERE target = ? AND status IN ('error', 'assertion_failed') "
                 "ORDER BY started_at DESC LIMIT 1",
                 [model_name],
@@ -259,7 +259,7 @@ def debug(
         assertion_failures = None
         try:
             assertion_rows = conn.execute(
-                "SELECT expression, detail FROM _dp_internal.assertion_results "
+                "SELECT expression, detail FROM _havn.assertion_results "
                 "WHERE model_path = ? AND passed = false "
                 "ORDER BY checked_at DESC LIMIT 10",
                 [model_name],

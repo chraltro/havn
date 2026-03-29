@@ -27,7 +27,7 @@ function applyTheme(colorId, fontId) {
 export default function ThemeProvider({ children }) {
   const [colorThemeId, setColorThemeId] = useState(() => {
     // Migrate from old single-theme storage
-    const legacy = localStorage.getItem("dp_theme");
+    const legacy = localStorage.getItem("havn_theme");
     const saved = localStorage.getItem("havn_color_theme");
     return saved || legacy || DEFAULT_COLOR_THEME;
   });

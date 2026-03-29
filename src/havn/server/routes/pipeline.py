@@ -1531,7 +1531,7 @@ def get_history(request: Request, conn: DbConn, limit: int = 50) -> list[dict]:
     rows = conn.execute(
         """
         SELECT run_id, run_type, target, status, started_at, duration_ms, rows_affected, error
-        FROM _dp_internal.run_log
+        FROM _havn.run_log
         ORDER BY started_at DESC
         LIMIT ?
         """,
@@ -1574,7 +1574,7 @@ def get_pipeline_runs(request: Request, conn: DbConn, limit: int = 50) -> list[d
             SUM(CASE WHEN status IN ('error', 'failed') THEN 1 ELSE 0 END) AS error_count,
             SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skipped_count,
             SUM(rows_affected) AS total_rows
-        FROM _dp_internal.run_log
+        FROM _havn.run_log
         WHERE pipeline_run_id IS NOT NULL
         GROUP BY pipeline_run_id
         ORDER BY MIN(started_at) DESC
@@ -1609,7 +1609,7 @@ def get_pipeline_run_detail(request: Request, pipeline_run_id: str, conn: DbConn
     rows = conn.execute(
         """
         SELECT run_id, run_type, target, status, started_at, duration_ms, rows_affected, error
-        FROM _dp_internal.run_log
+        FROM _havn.run_log
         WHERE pipeline_run_id = ?
         ORDER BY started_at ASC
         """,
@@ -1641,7 +1641,7 @@ def get_run_comparison(request: Request, pipeline_run_id: str, conn: DbConn) -> 
     current = conn.execute(
         """
         SELECT run_type, target, MIN(started_at) AS started_at
-        FROM _dp_internal.run_log
+        FROM _havn.run_log
         WHERE pipeline_run_id = ?
         GROUP BY run_type, target
         """,
@@ -1655,7 +1655,7 @@ def get_run_comparison(request: Request, pipeline_run_id: str, conn: DbConn) -> 
     prev = conn.execute(
         """
         SELECT pipeline_run_id
-        FROM _dp_internal.run_log
+        FROM _havn.run_log
         WHERE pipeline_run_id IS NOT NULL
           AND pipeline_run_id != ?
           AND run_type = ?
@@ -1676,7 +1676,7 @@ def get_run_comparison(request: Request, pipeline_run_id: str, conn: DbConn) -> 
     current_models = conn.execute(
         """
         SELECT target, duration_ms, rows_affected, status
-        FROM _dp_internal.run_log
+        FROM _havn.run_log
         WHERE pipeline_run_id = ?
         """,
         [pipeline_run_id],
@@ -1686,7 +1686,7 @@ def get_run_comparison(request: Request, pipeline_run_id: str, conn: DbConn) -> 
     prev_models = conn.execute(
         """
         SELECT target, duration_ms, rows_affected, status
-        FROM _dp_internal.run_log
+        FROM _havn.run_log
         WHERE pipeline_run_id = ?
         """,
         [prev_run_id],

@@ -132,7 +132,7 @@ Table options:
 
 ## CDC State
 
-CDC state is stored in `_dp_internal.cdc_state`:
+CDC state is stored in `_havn.cdc_state`:
 
 | Column | Type | Description |
 |--------|------|-------------|

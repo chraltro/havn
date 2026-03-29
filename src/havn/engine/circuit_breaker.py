@@ -202,7 +202,7 @@ class CircuitBreaker:
     # ------------------------------------------------------------------
 
     def save_state(self, conn: Any) -> None:
-        """Persist all circuit states to ``_dp_internal.circuit_state``."""
+        """Persist all circuit states to ``_havn.circuit_state``."""
         from havn.engine.database import ensure_circuit_state_table
 
         ensure_circuit_state_table(conn)
@@ -211,7 +211,7 @@ class CircuitBreaker:
                 state = self._effective_state(entry)
                 conn.execute(
                     """
-                    INSERT OR REPLACE INTO _dp_internal.circuit_state
+                    INSERT OR REPLACE INTO _havn.circuit_state
                         (name, state, failure_count, last_failure_at, opens_at)
                     VALUES (?, ?, ?, ?, ?)
                     """,
@@ -225,14 +225,14 @@ class CircuitBreaker:
                 )
 
     def load_state(self, conn: Any) -> None:
-        """Restore circuit states from ``_dp_internal.circuit_state``."""
+        """Restore circuit states from ``_havn.circuit_state``."""
         from havn.engine.database import ensure_circuit_state_table
 
         ensure_circuit_state_table(conn)
         try:
             rows = conn.execute(
                 "SELECT name, state, failure_count, last_failure_at, opens_at "
-                "FROM _dp_internal.circuit_state"
+                "FROM _havn.circuit_state"
             ).fetchall()
         except Exception:
             return
