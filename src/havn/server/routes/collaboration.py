@@ -11,6 +11,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from havn.server.deps import (
     DbConnReadOnly,
+    _authenticate_websocket,
     _require_permission,
     _serialize,
 )
@@ -94,12 +95,17 @@ def session_query(
     conn: DbConnReadOnly,
 ) -> dict:
     """Execute a query within a collaboration session and record in history."""
-    _require_permission(request, "read")
+    user = _require_permission(request, "read")
     from havn.engine.collaboration import session_manager
+    from havn.engine.masking import apply_masking
+    from havn.server.routes.query import _validate_query_sql
 
     session = session_manager.get_session(session_id)
     if not session:
         raise HTTPException(404, "Session not found")
+
+    # Validate SQL is safe read-only query
+    _validate_query_sql(req.sql)
 
     start = time.time()
     try:
@@ -108,11 +114,13 @@ def session_query(
             [desc[0] for desc in result.description] if result.description else []
         )
         rows = [[_serialize(v) for v in row] for row in result.fetchall()]
+        # Apply masking policies
+        rows = apply_masking(columns, rows, user["role"], conn)
         duration_ms = int((time.time() - start) * 1000)
 
         entry = session_manager.add_query_result(
             session_id,
-            req.user_id,
+            user.get("username", "anonymous"),
             req.sql,
             columns,
             rows,
@@ -124,11 +132,13 @@ def session_query(
             "duration_ms": duration_ms,
             "history_id": entry["id"] if entry else None,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
         session_manager.add_query_result(
             session_id,
-            req.user_id,
+            user.get("username", "anonymous"),
             req.sql,
             [],
             [],
@@ -158,10 +168,17 @@ def register_websocket(app) -> None:
                 session_manager,
             )
 
+            # Authenticate before accepting the connection
+            ws_user = _authenticate_websocket(websocket)
+            if ws_user is None:
+                await websocket.close(code=4001, reason="Authentication required")
+                return
+
             await websocket.accept()
 
-            user_id = websocket.query_params.get("user_id", "anonymous")
-            display_name = websocket.query_params.get("display_name", user_id)
+            # Use authenticated identity — don't trust client-supplied user_id
+            user_id = ws_user.get("username", "anonymous")
+            display_name = ws_user.get("display_name", user_id)
 
             session = session_manager.join_session(
                 session_id, user_id, display_name, websocket

@@ -46,8 +46,9 @@ class PolicyUpdate(BaseModel):
 
 
 @router.get("/api/masking/methods")
-def list_methods() -> list[dict]:
+def list_methods(request: Request) -> list[dict]:
     """Return available masking methods with descriptions and config schemas."""
+    _require_permission(request, "read")
     from havn.engine.masking import list_masking_methods
 
     return list_masking_methods()

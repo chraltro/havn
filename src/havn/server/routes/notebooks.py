@@ -88,6 +88,25 @@ class PromoteToModelRequest(BaseModel):
     overwrite: bool = Field(default=False)
 
 
+def _mask_notebook_outputs(outputs: list[dict]) -> list[dict]:
+    """Mask secret values in notebook cell outputs."""
+    from havn.engine.secrets import mask_output
+
+    project_dir = _get_project_dir()
+    for output in outputs:
+        if isinstance(output, dict):
+            for key in ("text", "data", "traceback"):
+                val = output.get(key)
+                if isinstance(val, str):
+                    output[key] = mask_output(val, project_dir)
+                elif isinstance(val, list):
+                    output[key] = [
+                        mask_output(item, project_dir) if isinstance(item, str) else item
+                        for item in val
+                    ]
+    return outputs
+
+
 # --- Notebook endpoints ---
 
 
@@ -187,6 +206,7 @@ def run_cell_endpoint(
         from havn.engine.notebook import execute_sql_cell
 
         result = execute_sql_cell(conn, req.source)
+        result["outputs"] = _mask_notebook_outputs(result["outputs"])
         return {
             "outputs": result["outputs"],
             "duration_ms": result["duration_ms"],
@@ -196,6 +216,7 @@ def run_cell_endpoint(
         from havn.engine.notebook import execute_ingest_cell
 
         result = execute_ingest_cell(conn, req.source, _get_project_dir())
+        result["outputs"] = _mask_notebook_outputs(result["outputs"])
         return {"outputs": result["outputs"], "duration_ms": result["duration_ms"]}
     else:
         from havn.engine.notebook import execute_cell
@@ -203,6 +224,7 @@ def run_cell_endpoint(
         namespace = _notebook_namespaces.get(name)
         result = execute_cell(conn, req.source, namespace)
         _notebook_ns_set(name, result["namespace"])
+        result["outputs"] = _mask_notebook_outputs(result["outputs"])
         return {"outputs": result["outputs"], "duration_ms": result["duration_ms"]}
 
 

@@ -28,6 +28,64 @@ router = APIRouter()
 _SLOW_QUERY_THRESHOLD_MS = 5000
 
 
+# --- SQL safety validation ---
+
+# Statements that modify data or schema — only SELECT is allowed through
+# the query endpoint.
+_FORBIDDEN_STATEMENT_RE = re.compile(
+    r'^\s*('
+    r'INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|MERGE'
+    r'|COPY|ATTACH|DETACH|INSTALL|LOAD|EXPORT|IMPORT'
+    r'|GRANT|REVOKE|SET|RESET|VACUUM|CHECKPOINT|PRAGMA'
+    r'|CALL|EXECUTE'
+    r')\b',
+    re.IGNORECASE,
+)
+
+# DuckDB functions that can read/write files on the filesystem
+_DANGEROUS_FUNCTIONS_RE = re.compile(
+    r'\b('
+    r'read_csv_auto|read_csv|read_parquet|read_json_auto|read_json'
+    r'|read_json_objects|read_ndjson|read_ndjson_auto'
+    r'|read_blob|read_text'
+    r'|write_csv|write_parquet'
+    r'|iceberg_scan|delta_scan|parquet_scan|csv_scan'
+    r'|httpfs_.*|http_get|http_post'
+    r')\s*\(',
+    re.IGNORECASE,
+)
+
+# Block access to the internal metadata schema
+_INTERNAL_SCHEMA_RE = re.compile(r'\b_dp_internal\b', re.IGNORECASE)
+
+
+def _validate_query_sql(sql: str) -> None:
+    """Reject SQL that is not a safe read-only query.
+
+    Raises HTTPException(403) if the SQL contains forbidden statements,
+    dangerous file-access functions, or references to _dp_internal.
+    """
+    stripped = sql.strip().rstrip(";").strip()
+
+    if _FORBIDDEN_STATEMENT_RE.match(stripped):
+        raise HTTPException(
+            403,
+            "Only SELECT queries are allowed through the query interface.",
+        )
+
+    if _DANGEROUS_FUNCTIONS_RE.search(stripped):
+        raise HTTPException(
+            403,
+            "File-access functions (read_csv, read_parquet, etc.) are not allowed through the query interface.",
+        )
+
+    if _INTERNAL_SCHEMA_RE.search(stripped):
+        raise HTTPException(
+            403,
+            "Access to _dp_internal schema is not allowed through the query interface.",
+        )
+
+
 # --- Pydantic models ---
 
 
@@ -51,6 +109,7 @@ _QUERY_TIMEOUT_SECONDS = 30
 def explain_endpoint(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
     """Run EXPLAIN on a SQL query and return structured plan + raw text."""
     _require_permission(request, "read")
+    _validate_query_sql(req.sql)
     try:
         from havn.engine.explain import explain_query as _explain_query, plan_to_dict
 
@@ -65,6 +124,7 @@ def explain_endpoint(request: Request, req: ExplainRequest, conn: DbConnReadOnly
 def explain_analyze_endpoint(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
     """Run EXPLAIN ANALYZE on a SQL query and return structured plan + raw text."""
     _require_permission(request, "read")
+    _validate_query_sql(req.sql)
     try:
         from havn.engine.explain import explain_analyze_query as _explain_analyze, plan_to_dict
 
@@ -79,6 +139,7 @@ def explain_analyze_endpoint(request: Request, req: ExplainRequest, conn: DbConn
 def profile_query(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
     """Run EXPLAIN ANALYZE on a SQL query and return the profiled plan."""
     _require_permission(request, "read")
+    _validate_query_sql(req.sql)
     try:
         from havn.engine.explain import explain_analyze_query as _explain_analyze, plan_to_dict
 
@@ -148,7 +209,7 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
     sql_stripped = sql.strip()
 
     # SHOW MASKING POLICIES
-    if re.match(r'^\s*SHOW\s+MASKING\s+POLIC', sql_stripped, re.IGNORECASE):
+    if re.match(r'^\s*SHOW\s+MASKING\s+POLIC', sql_stripped, re.IGNORECASE | re.DOTALL):
         from havn.server.deps import _get_db_path
         from havn.engine.database import connect
         from havn.engine.masking import ensure_masking_table
@@ -167,7 +228,7 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
     # CREATE MASKING POLICY ON schema.table.column METHOD method [EXEMPT role1,role2]
     create_match = re.match(
         r'^\s*CREATE\s+MASKING\s+POLICY\s+ON\s+(\w+)\.(\w+)\.(\w+)\s+METHOD\s+(\w+)(?:\s+EXEMPT\s+([\w,\s]+))?\s*$',
-        sql_stripped, re.IGNORECASE
+        sql_stripped, re.IGNORECASE | re.DOTALL
     )
     if create_match:
         schema, table, column, method, exempt_str = create_match.groups()
@@ -187,7 +248,7 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
             conn_rw.close()
 
     # DROP MASKING POLICY <id>
-    drop_match = re.match(r'^\s*DROP\s+MASKING\s+POLICY\s+(\d+)\s*$', sql_stripped, re.IGNORECASE)
+    drop_match = re.match(r'^\s*DROP\s+MASKING\s+POLICY\s+(\d+)\s*$', sql_stripped, re.IGNORECASE | re.DOTALL)
     if drop_match:
         policy_id = int(drop_match.group(1))
         from havn.server.deps import _get_db_path
@@ -204,6 +265,9 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
         finally:
             conn_rw.close()
     # --- End masking SQL command interception ---
+
+    # Validate the SQL is a safe read-only query
+    _validate_query_sql(sql)
 
     try:
         import threading
@@ -533,9 +597,12 @@ class ExportRequest(BaseModel):
 @router.post("/api/query/export-csv")
 def export_csv(request: Request, req: ExportRequest, conn: DbConnReadOnly):
     """Stream query results as CSV download. No row limit."""
-    _require_permission(request, "read")
+    user = _require_permission(request, "read")
     import csv
     import io
+
+    # Validate the SQL is a safe read-only query
+    _validate_query_sql(req.sql)
 
     try:
         result = conn.execute(req.sql)
@@ -551,13 +618,15 @@ def export_csv(request: Request, req: ExportRequest, conn: DbConnReadOnly):
         yield buf.getvalue()
         buf.seek(0)
         buf.truncate(0)
-        # Stream rows in batches
+        # Stream rows in batches, applying masking to each batch
         while True:
             batch = result.fetchmany(5000)
             if not batch:
                 break
-            for row in batch:
-                writer.writerow([_serialize(v) for v in row])
+            serialized = [[_serialize(v) for v in row] for row in batch]
+            serialized = apply_masking(columns, serialized, user["role"], conn)
+            for row in serialized:
+                writer.writerow(row)
             yield buf.getvalue()
             buf.seek(0)
             buf.truncate(0)

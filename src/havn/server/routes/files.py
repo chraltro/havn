@@ -114,7 +114,15 @@ def list_files(request: Request) -> list[FileInfo]:
 def read_file(request: Request, file_path: str) -> dict:
     """Read a file's content."""
     _require_permission(request, "read")
-    full_path = _get_project_dir() / file_path
+    project_dir = _get_project_dir()
+    full_path = (project_dir / file_path).resolve()
+    # Path traversal protection
+    if not str(full_path).startswith(str(project_dir.resolve())):
+        raise HTTPException(400, "Invalid file path")
+    # Block reading dotfiles (e.g. .env containing secrets)
+    parts = Path(file_path).parts
+    if any(part.startswith(".") for part in parts):
+        raise HTTPException(403, "Access to dotfiles is not allowed")
     if not full_path.exists():
         raise HTTPException(404, f"File not found: {file_path}")
     if not full_path.is_file():

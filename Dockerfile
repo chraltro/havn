@@ -16,6 +16,9 @@ COPY --from=frontend /build/frontend/dist /app/frontend/dist
 
 RUN pip install --no-cache-dir .
 
+RUN useradd -m -s /bin/bash havn && chown havn:havn /app
+USER havn
+
 WORKDIR /project
 EXPOSE 3000
 

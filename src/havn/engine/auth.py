@@ -24,6 +24,12 @@ logger = logging.getLogger("havn.auth")
 TOKEN_LIFETIME = timedelta(days=30)
 
 
+def _hash_token(token: str) -> str:
+    """Hash a bearer token with SHA-256 for storage. Tokens are already
+    high-entropy so a fast hash without salt is sufficient."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 def _hash_password(password: str, salt: bytes | None = None) -> tuple[str, str]:
     """Hash a password with PBKDF2. Returns (hash_hex, salt_hex)."""
     if salt is None:
@@ -102,15 +108,18 @@ def authenticate(conn: duckdb.DuckDBPyConnection, username: str, password: str) 
         [username],
     ).fetchone()
     if not row:
+        # Perform a dummy hash to prevent timing-based username enumeration
+        _hash_password(password, os.urandom(32))
         return None
     if not _verify_password(password, row[0], row[1]):
         return None
 
-    # Generate token with expiration
+    # Generate token with expiration — store hash, return plaintext
     token = secrets.token_urlsafe(32)
+    token_hash = _hash_token(token)
     conn.execute(
         "INSERT INTO _dp_internal.tokens (token, username, expires_at) VALUES (?, ?, current_timestamp + ?)",
-        [token, username, TOKEN_LIFETIME],
+        [token_hash, username, TOKEN_LIFETIME],
     )
     conn.execute(
         "UPDATE _dp_internal.users SET last_login = current_timestamp WHERE username = ?",
@@ -126,6 +135,7 @@ def validate_token(conn: duckdb.DuckDBPyConnection, token: str) -> dict | None:
     Rejects expired tokens (where expires_at is set and in the past).
     """
     ensure_auth_tables(conn)
+    token_hash = _hash_token(token)
     row = conn.execute(
         """
         SELECT t.username, u.role, u.display_name
@@ -134,7 +144,7 @@ def validate_token(conn: duckdb.DuckDBPyConnection, token: str) -> dict | None:
         WHERE t.token = ?
           AND (t.expires_at IS NULL OR t.expires_at > current_timestamp)
         """,
-        [token],
+        [token_hash],
     ).fetchone()
     if not row:
         # Clean up expired tokens opportunistically
