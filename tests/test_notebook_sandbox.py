@@ -329,6 +329,7 @@ class TestSandboxedExecution:
 
     def test_dataframe_replacement_scan(self):
         """DuckDB replacement scan works — can reference a DataFrame as a table in SQL."""
+        pytest.importorskip("pandas")
         code = (
             "import pandas as pd\n"
             "df = pd.DataFrame({'id': [1, 2, 3], 'name': ['a', 'b', 'c']})\n"
@@ -343,6 +344,7 @@ class TestSandboxedExecution:
 
     def test_multi_cell_dataframe_pipeline(self):
         """Simulate a real ingest notebook: cell 1 creates df, cell 2 loads it via SQL."""
+        pytest.importorskip("pandas")
         ns = {}
         # Cell 1: create DataFrame
         r1 = execute_cell(self.conn, (
