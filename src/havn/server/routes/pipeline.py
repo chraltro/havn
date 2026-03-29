@@ -76,7 +76,11 @@ def run_script_endpoint(
     from havn.engine.runner import run_script
 
     logger.info("Script run requested: %s", req.script_path)
-    script_path = _get_project_dir() / req.script_path
+    project_dir = _get_project_dir()
+    script_path = (project_dir / req.script_path).resolve()
+    # Path traversal protection
+    if not script_path.is_relative_to(project_dir.resolve()):
+        raise HTTPException(400, "Invalid script path")
     if not script_path.exists():
         raise HTTPException(404, f"Script not found: {req.script_path}")
     script_type = "ingest" if "ingest" in req.script_path else "export"
@@ -1135,7 +1139,10 @@ def start_script(request: Request, req: RunScriptRequest) -> dict:
     """Start a script in background thread. Returns immediately."""
     _require_permission(request, "execute")
     project_dir = _get_project_dir()
-    script_path = project_dir / req.script_path
+    script_path = (project_dir / req.script_path).resolve()
+    # Path traversal protection
+    if not script_path.is_relative_to(project_dir.resolve()):
+        raise HTTPException(400, "Invalid script path")
     if not script_path.exists():
         raise HTTPException(404, f"Script not found: {req.script_path}")
     return _start_operation("script", req.script_path, _run_script_thread, (req.script_path, project_dir))

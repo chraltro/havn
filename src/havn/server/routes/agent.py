@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from havn.server.deps import _require_permission
+from havn.server.deps import _authenticate_websocket, _require_permission
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -212,6 +212,12 @@ def register_agent_websocket(app) -> None:
                 { "type": "error", "message": "..." }
             """
             import havn.server.app as server_app
+
+            # Authenticate before accepting the connection
+            ws_user = _authenticate_websocket(websocket)
+            if ws_user is None:
+                await websocket.close(code=4001, reason="Authentication required")
+                return
 
             await websocket.accept()
             ws_id = id(websocket)

@@ -373,7 +373,11 @@ def apply_masking(
         if schema is not None and table is not None:
             if p["schema_name"].lower() != schema.lower() or p["table_name"].lower() != table.lower():
                 continue
-        # If no schema/table (ad-hoc query), match on column name alone
+        # If no schema/table (ad-hoc query), match on column name alone.
+        # LIMITATION: column aliases (SELECT col AS other_name) will bypass
+        # masking because we can only match on the result column name, not
+        # the source column. Proper mitigation would require SQL lineage
+        # analysis which is beyond the scope of post-query masking.
 
         matched.append((p, col_idx[col_lower]))
 
