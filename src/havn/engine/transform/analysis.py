@@ -291,7 +291,7 @@ def check_freshness(
             """
             SELECT model_path, last_run_at, run_duration_ms, row_count,
                    EXTRACT(EPOCH FROM (current_timestamp - last_run_at)) / 3600 AS hours_since
-            FROM _dp_internal.model_state
+            FROM _havn.model_state
             ORDER BY last_run_at ASC
             """
         ).fetchall()

@@ -163,7 +163,7 @@ Compiled 2026-03-20. Six-agent deep analysis of the full codebase: backend engin
 | # | Idea | Priority | Effort | Notes |
 |---|------|----------|--------|-------|
 | 3.14 | Expand audit actions (auth_failed, permission_denied, connector_sync, masking_policy changes, agent file edits) | HIGH | S | |
-| 3.15 | Persistent pipeline event log (store SSE events to `_dp_internal.pipeline_events`) | MEDIUM | M | Lost on server restart today |
+| 3.15 | Persistent pipeline event log (store SSE events to `_havn.pipeline_events`) | MEDIUM | M | Lost on server restart today |
 | 3.16 | Circuit breaker state change logging | MEDIUM | S | |
 | 3.17 | Webhook retry with exponential backoff (currently fire-and-forget) | MEDIUM | S | |
 
@@ -180,7 +180,7 @@ Compiled 2026-03-20. Six-agent deep analysis of the full codebase: backend engin
 | # | Idea | Priority | Effort | Notes |
 |---|------|----------|--------|-------|
 | 3.21 | WebSocket heartbeat/ping mechanism | HIGH | M | No reconnection on network blips |
-| 3.22 | Session persistence to `_dp_internal` (survive server restarts) | MEDIUM | L | |
+| 3.22 | Session persistence to `_havn` (survive server restarts) | MEDIUM | L | |
 
 ### Alerting
 

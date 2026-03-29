@@ -63,7 +63,7 @@ def _scan_import_sources(project_dir: Path) -> dict[str, str]:
         result = conn.execute(
             """
             SELECT DISTINCT ON (target) target, log_output
-            FROM _dp_internal.run_log
+            FROM _havn.run_log
             WHERE run_type = 'import' AND status = 'success'
             ORDER BY target, started_at DESC
         """

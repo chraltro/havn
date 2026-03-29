@@ -63,7 +63,7 @@ class MoveFileRequest(BaseModel):
 
 _SKIP_DIRS = {
     "__pycache__", "node_modules", ".venv", ".pytest_cache",
-    ".dp", "dist", "build",
+    ".havn", "dist", "build",
 }
 
 
@@ -310,7 +310,7 @@ def _drop_db_object(full_path: Path, file_path: str) -> str | None:
         # Clean up model_state metadata
         try:
             conn.execute(
-                "DELETE FROM _dp_internal.model_state WHERE model_name = ?",
+                "DELETE FROM _havn.model_state WHERE model_name = ?",
                 [f"{schema}.{name}"],
             )
         except Exception:

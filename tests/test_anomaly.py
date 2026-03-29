@@ -34,7 +34,7 @@ def _insert_profile_history(conn, model, row_count, null_pcts=None, distinct_cts
     """Helper to insert a profile history row."""
     conn.execute(
         """
-        INSERT INTO _dp_internal.profile_history
+        INSERT INTO _havn.profile_history
             (model_path, row_count, column_count, null_percentages, distinct_counts, profiled_at)
         VALUES (?, ?, ?, ?::JSON, ?::JSON, current_timestamp)
         """,
@@ -211,7 +211,7 @@ class TestAnomalyLogging:
         ]
         log_anomalies(conn, anomalies)
         rows = conn.execute(
-            "SELECT model_name, metric, z_score, direction FROM _dp_internal.anomaly_log"
+            "SELECT model_name, metric, z_score, direction FROM _havn.anomaly_log"
         ).fetchall()
         assert len(rows) == 1
         assert rows[0][0] == "bronze.events"
@@ -246,7 +246,7 @@ class TestAnomalyLogging:
         ]
         log_anomalies(conn, anomalies)
         rows = conn.execute(
-            "SELECT COUNT(*) FROM _dp_internal.anomaly_log"
+            "SELECT COUNT(*) FROM _havn.anomaly_log"
         ).fetchone()
         assert rows[0] == 2
 

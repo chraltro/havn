@@ -238,7 +238,7 @@ def profile(
             # Show detailed profile for a specific model
             row = conn.execute(
                 "SELECT model_path, row_count, column_count, null_percentages, distinct_counts, profiled_at "
-                "FROM _dp_internal.model_profiles WHERE model_path = ?",
+                "FROM _havn.model_profiles WHERE model_path = ?",
                 [model],
             ).fetchone()
             if not row:
@@ -273,7 +273,7 @@ def profile(
             # Show summary for all profiled models
             rows = conn.execute(
                 "SELECT model_path, row_count, column_count, profiled_at "
-                "FROM _dp_internal.model_profiles ORDER BY model_path"
+                "FROM _havn.model_profiles ORDER BY model_path"
             ).fetchall()
             if not rows:
                 console.print("[yellow]No profile data. Run havn transform first.[/yellow]")
@@ -313,7 +313,7 @@ def assertions(
         rows = conn.execute(
             """
             SELECT model_path, expression, passed, detail, checked_at
-            FROM _dp_internal.assertion_results
+            FROM _havn.assertion_results
             ORDER BY checked_at DESC
             LIMIT 50
             """

@@ -40,7 +40,7 @@ def generate_docs(
     schemas = conn.execute("""
         SELECT DISTINCT table_schema
         FROM information_schema.tables
-        WHERE table_schema NOT IN ('information_schema', '_dp_internal')
+        WHERE table_schema NOT IN ('information_schema', '_havn')
         ORDER BY
             CASE table_schema
                 WHEN 'landing' THEN 1
@@ -102,7 +102,7 @@ def generate_docs(
             if kind == "TABLE":
                 try:
                     cached = conn.execute(
-                        "SELECT row_count FROM _dp_internal.model_state WHERE model_path = ? AND row_count IS NOT NULL",
+                        "SELECT row_count FROM _havn.model_state WHERE model_path = ? AND row_count IS NOT NULL",
                         [f"{schema_name}.{table_name}"],
                     ).fetchone()
                     if cached:
@@ -220,7 +220,7 @@ def generate_structured_docs(
     schemas_raw = conn.execute("""
         SELECT DISTINCT table_schema
         FROM information_schema.tables
-        WHERE table_schema NOT IN ('information_schema', '_dp_internal')
+        WHERE table_schema NOT IN ('information_schema', '_havn')
         ORDER BY
             CASE table_schema
                 WHEN 'landing' THEN 1
@@ -254,7 +254,7 @@ def generate_structured_docs(
             if kind == "table":
                 try:
                     cached = conn.execute(
-                        "SELECT row_count FROM _dp_internal.model_state WHERE model_path = ? AND row_count IS NOT NULL",
+                        "SELECT row_count FROM _havn.model_state WHERE model_path = ? AND row_count IS NOT NULL",
                         [f"{schema_name}.{table_name}"],
                     ).fetchone()
                     if cached:

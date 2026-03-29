@@ -108,10 +108,10 @@ def ensure_schemas(conn: duckdb.DuckDBPyConnection, schemas: list[str]) -> None:
 def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     """Create the internal metadata tables for change tracking, profiling, and assertions."""
     conn.execute("""
-        CREATE SCHEMA IF NOT EXISTS _dp_internal
+        CREATE SCHEMA IF NOT EXISTS _havn
     """)
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.model_state (
+        CREATE TABLE IF NOT EXISTS _havn.model_state (
             model_path   VARCHAR PRIMARY KEY,
             content_hash VARCHAR NOT NULL,
             upstream_hash VARCHAR NOT NULL,
@@ -122,7 +122,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
         )
     """)
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.run_log (
+        CREATE TABLE IF NOT EXISTS _havn.run_log (
             run_id       VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
             pipeline_run_id VARCHAR,
             run_type     VARCHAR NOT NULL,
@@ -139,13 +139,13 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     # Migration for existing databases
     try:
         conn.execute("""
-            ALTER TABLE _dp_internal.run_log ADD COLUMN IF NOT EXISTS pipeline_run_id VARCHAR
+            ALTER TABLE _havn.run_log ADD COLUMN IF NOT EXISTS pipeline_run_id VARCHAR
         """)
     except Exception:
         pass  # column already exists or ALTER not supported
     # Model profiling stats (auto-computed after each build)
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.model_profiles (
+        CREATE TABLE IF NOT EXISTS _havn.model_profiles (
             model_path       VARCHAR PRIMARY KEY,
             row_count        BIGINT DEFAULT 0,
             column_count     INTEGER DEFAULT 0,
@@ -156,7 +156,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     """)
     # Data quality assertion results
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.assertion_results (
+        CREATE TABLE IF NOT EXISTS _havn.assertion_results (
             id          VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
             model_path  VARCHAR NOT NULL,
             expression  VARCHAR NOT NULL,
@@ -167,7 +167,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     """)
     # Masking policies
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.masking_policies (
+        CREATE TABLE IF NOT EXISTS _havn.masking_policies (
             id               VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
             schema_name      VARCHAR NOT NULL,
             table_name       VARCHAR NOT NULL,
@@ -182,12 +182,12 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     """)
     # Audit log
     try:
-        conn.execute("CREATE SEQUENCE IF NOT EXISTS _dp_internal.audit_log_seq START 1")
+        conn.execute("CREATE SEQUENCE IF NOT EXISTS _havn.audit_log_seq START 1")
     except Exception:
         pass  # sequence already exists
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.audit_log (
-            id INTEGER PRIMARY KEY DEFAULT nextval('_dp_internal.audit_log_seq'),
+        CREATE TABLE IF NOT EXISTS _havn.audit_log (
+            id INTEGER PRIMARY KEY DEFAULT nextval('_havn.audit_log_seq'),
             "user" VARCHAR NOT NULL,
             action VARCHAR NOT NULL,
             resource VARCHAR,
@@ -198,7 +198,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     """)
     # Slow query tracking
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.slow_queries (
+        CREATE TABLE IF NOT EXISTS _havn.slow_queries (
             id           VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
             query_text   VARCHAR NOT NULL,
             duration_ms  BIGINT NOT NULL,
@@ -208,7 +208,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     """)
     # Alert/notification log
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.alert_log (
+        CREATE TABLE IF NOT EXISTS _havn.alert_log (
             id          VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
             alert_type  VARCHAR NOT NULL,
             channel     VARCHAR NOT NULL,
@@ -221,7 +221,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     """)
     # Profile history (append-only for anomaly detection baselines)
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.profile_history (
+        CREATE TABLE IF NOT EXISTS _havn.profile_history (
             id              VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
             model_path      VARCHAR NOT NULL,
             row_count       BIGINT DEFAULT 0,
@@ -233,7 +233,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     """)
     # Anomaly detection log
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.anomaly_log (
+        CREATE TABLE IF NOT EXISTS _havn.anomaly_log (
             id            VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
             model_name    VARCHAR NOT NULL,
             metric        VARCHAR NOT NULL,
@@ -248,7 +248,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     """)
     # Dashboard definitions
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.dashboards (
+        CREATE TABLE IF NOT EXISTS _havn.dashboards (
             id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
             name         VARCHAR NOT NULL,
             description  VARCHAR DEFAULT '',
@@ -264,7 +264,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     """)
     # Dashboard widget instances
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.dashboard_widgets (
+        CREATE TABLE IF NOT EXISTS _havn.dashboard_widgets (
             id            VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
             dashboard_id  VARCHAR NOT NULL,
             widget_type   VARCHAR NOT NULL,
@@ -281,7 +281,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     """)
     # Dashboard query result cache
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.dashboard_cache (
+        CREATE TABLE IF NOT EXISTS _havn.dashboard_cache (
             cache_key   VARCHAR PRIMARY KEY,
             result_json JSON NOT NULL,
             row_count   INTEGER DEFAULT 0,
@@ -293,9 +293,9 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
 
 def ensure_circuit_state_table(conn: duckdb.DuckDBPyConnection) -> None:
     """Create the circuit breaker state table if it doesn't exist."""
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _dp_internal")
+    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.circuit_state (
+        CREATE TABLE IF NOT EXISTS _havn.circuit_state (
             name            VARCHAR PRIMARY KEY,
             state           VARCHAR NOT NULL,
             failure_count   INTEGER NOT NULL DEFAULT 0,
@@ -319,7 +319,7 @@ def log_run(
     """Insert a run log entry."""
     conn.execute(
         """
-        INSERT INTO _dp_internal.run_log
+        INSERT INTO _havn.run_log
             (run_type, target, status, duration_ms, rows_affected, error, log_output, pipeline_run_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,

@@ -173,7 +173,7 @@ def _save_profile(
     distinct_json = json.dumps(profile.distinct_counts)
     conn.execute(
         """
-        INSERT OR REPLACE INTO _dp_internal.model_profiles
+        INSERT OR REPLACE INTO _havn.model_profiles
             (model_path, row_count, column_count, null_percentages, distinct_counts, profiled_at)
         VALUES (?, ?, ?, ?::JSON, ?::JSON, current_timestamp)
         """,
@@ -189,7 +189,7 @@ def _save_profile(
     try:
         conn.execute(
             """
-            INSERT INTO _dp_internal.profile_history
+            INSERT INTO _havn.profile_history
                 (model_path, row_count, column_count, null_percentages, distinct_counts, profiled_at)
             VALUES (?, ?, ?, ?::JSON, ?::JSON, current_timestamp)
             """,
@@ -214,7 +214,7 @@ def _save_assertions(
     for ar in results:
         conn.execute(
             """
-            INSERT INTO _dp_internal.assertion_results
+            INSERT INTO _havn.assertion_results
                 (model_path, expression, passed, detail, checked_at)
             VALUES (?, ?, ?, ?, current_timestamp)
             """,

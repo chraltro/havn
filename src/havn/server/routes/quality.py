@@ -60,7 +60,7 @@ def get_profiles(request: Request, conn: DbConnReadOnly) -> list[dict]:
     ensure_meta_table(conn)
     rows = conn.execute(
         "SELECT model_path, row_count, column_count, null_percentages, distinct_counts, profiled_at "
-        "FROM _dp_internal.model_profiles ORDER BY model_path"
+        "FROM _havn.model_profiles ORDER BY model_path"
     ).fetchall()
     return [
         {
@@ -84,7 +84,7 @@ def get_profile(
     ensure_meta_table(conn)
     row = conn.execute(
         "SELECT model_path, row_count, column_count, null_percentages, distinct_counts, profiled_at "
-        "FROM _dp_internal.model_profiles WHERE model_path = ?",
+        "FROM _havn.model_profiles WHERE model_path = ?",
         [model_name],
     ).fetchone()
     if not row:
@@ -114,7 +114,7 @@ def get_assertions(
     rows = conn.execute(
         """
         SELECT model_path, expression, passed, detail, checked_at
-        FROM _dp_internal.assertion_results
+        FROM _havn.assertion_results
         ORDER BY checked_at DESC
         LIMIT ?
         """,
@@ -142,7 +142,7 @@ def get_model_assertions(
     rows = conn.execute(
         """
         SELECT model_path, expression, passed, detail, checked_at
-        FROM _dp_internal.assertion_results
+        FROM _havn.assertion_results
         WHERE model_path = ?
         ORDER BY checked_at DESC
         LIMIT 50
@@ -174,7 +174,7 @@ def get_alert_history(
     rows = conn.execute(
         """
         SELECT alert_type, channel, target, message, status, sent_at, error
-        FROM _dp_internal.alert_log
+        FROM _havn.alert_log
         ORDER BY sent_at DESC
         LIMIT ?
         """,
@@ -207,7 +207,7 @@ def test_alert(request: Request, req: TestAlertRequest) -> dict:
     )
     alert = Alert(
         alert_type="test",
-        target="dp_test",
+        target="havn_test",
         message="This is a test alert from havn. If you see this, alerts are working!",
         details={"source": "havn alerts test"},
     )
@@ -316,7 +316,7 @@ def get_anomalies(
             """
             SELECT model_name, metric, current_value, mean_value, stddev_value,
                    z_score, direction, message, detected_at
-            FROM _dp_internal.anomaly_log
+            FROM _havn.anomaly_log
             WHERE model_name = ?
             ORDER BY detected_at DESC
             LIMIT ?
@@ -328,7 +328,7 @@ def get_anomalies(
             """
             SELECT model_name, metric, current_value, mean_value, stddev_value,
                    z_score, direction, message, detected_at
-            FROM _dp_internal.anomaly_log
+            FROM _havn.anomaly_log
             ORDER BY detected_at DESC
             LIMIT ?
             """,
@@ -407,7 +407,7 @@ def get_model_anomalies(
         """
         SELECT model_name, metric, current_value, mean_value, stddev_value,
                z_score, direction, message, detected_at
-        FROM _dp_internal.anomaly_log
+        FROM _havn.anomaly_log
         WHERE model_name = ?
         ORDER BY detected_at DESC
         LIMIT ?
@@ -440,7 +440,7 @@ def get_model_profile_history(
     rows = conn.execute(
         """
         SELECT row_count, null_percentages, distinct_counts, profiled_at
-        FROM _dp_internal.profile_history
+        FROM _havn.profile_history
         WHERE model_path = ?
         ORDER BY profiled_at ASC
         LIMIT ?

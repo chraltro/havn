@@ -201,7 +201,7 @@ DROP MASKING POLICY <policy_id>
 
 ## Policy Storage
 
-Policies are stored in `_dp_internal.masking_policies` in DuckDB:
+Policies are stored in `_havn.masking_policies` in DuckDB:
 
 | Column | Type | Description |
 |--------|------|-------------|

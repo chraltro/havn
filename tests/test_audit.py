@@ -90,7 +90,7 @@ class TestLogAudit:
         log_audit(conn, user="alice", action="query", resource="SELECT 1")
 
         rows = conn.execute(
-            'SELECT "user", action, resource FROM _dp_internal.audit_log'
+            'SELECT "user", action, resource FROM _havn.audit_log'
         ).fetchall()
         assert len(rows) == 1
         assert rows[0][0] == "alice"
@@ -111,7 +111,7 @@ class TestLogAudit:
 
         rows = conn.execute(
             'SELECT "user", action, resource, detail, ip_address '
-            "FROM _dp_internal.audit_log"
+            "FROM _havn.audit_log"
         ).fetchall()
         assert len(rows) == 1
         assert rows[0][0] == "bob"
@@ -128,7 +128,7 @@ class TestLogAudit:
         log_audit(conn, user="alice", action="file_edit", resource="test.sql")
 
         count = conn.execute(
-            "SELECT COUNT(*) FROM _dp_internal.audit_log"
+            "SELECT COUNT(*) FROM _havn.audit_log"
         ).fetchone()[0]
         assert count == 3
 
@@ -138,7 +138,7 @@ class TestLogAudit:
         log_audit(conn, user="alice", action="query", resource="SELECT 1")
 
         ts = conn.execute(
-            'SELECT "timestamp" FROM _dp_internal.audit_log'
+            'SELECT "timestamp" FROM _havn.audit_log'
         ).fetchone()[0]
         assert ts is not None
 
@@ -148,7 +148,7 @@ class TestLogAudit:
         log_audit(conn, user="alice", action="query", resource="SELECT 1")
 
         row = conn.execute(
-            "SELECT detail, ip_address FROM _dp_internal.audit_log"
+            "SELECT detail, ip_address FROM _havn.audit_log"
         ).fetchone()
         assert row[0] is None
         assert row[1] is None

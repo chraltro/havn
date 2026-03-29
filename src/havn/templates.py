@@ -664,7 +664,7 @@ You are working on a havn data platform project. havn uses DuckDB + plain SQL tr
 # Don't:
 # - Add Jinja/templating to SQL — use Python macros for reusable logic
 # - Mock DuckDB in tests
-# - Modify _dp_internal schema from user-facing code
+# - Modify _havn schema from user-facing code
 """
 
 COPILOT_INSTRUCTIONS_TEMPLATE = """\
@@ -714,7 +714,7 @@ db.execute("CREATE OR REPLACE TABLE landing.x AS SELECT * FROM ...")
 ### Don't:
 - Add Jinja/templating to SQL — use Python macros instead
 - Mock DuckDB in tests
-- Modify `_dp_internal` schema from user-facing code
+- Modify `_havn` schema from user-facing code
 """
 
 CLAUDE_MD_TEMPLATE = """\
@@ -866,7 +866,7 @@ contracts:
 - `silver` — business logic, joins
 - `gold` — consumption-ready
 - `seeds` — reference data from CSV files
-- `_dp_internal` — metadata (do not modify directly)
+- `_havn` — metadata (do not modify directly)
 
 ## Things You Can Ask Your AI Assistant
 

@@ -111,7 +111,7 @@ Internal DuckDB schemas:
   bronze/         Cleaned data
   silver/         Business logic
   gold/           Consumption-ready
-  _dp_internal/   Metadata (model_state, run_log, users, tokens)
+  _havn/   Metadata (model_state, run_log, users, tokens)
 ```
 
 ## Key Conventions

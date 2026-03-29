@@ -100,7 +100,7 @@ Returns:
 havn checks freshness in two ways:
 
 1. **loaded_at_column** -- If specified, havn queries `MAX(loaded_at_column)` from the table to find the most recent data timestamp.
-2. **Run log fallback** -- If no `loaded_at_column` is set, havn checks the most recent successful run in `_dp_internal.run_log` for that table.
+2. **Run log fallback** -- If no `loaded_at_column` is set, havn checks the most recent successful run in `_havn.run_log` for that table.
 
 A source is marked **stale** if the hours since the last load exceed `freshness_hours`.
 

@@ -66,7 +66,7 @@ def _execute_incremental(
     else:
         # Strategies that need staging: delete+insert, merge
         keys = [k.strip() for k in model.unique_key.split(",")]
-        staging_name = f"_dp_staging_{model.name}"
+        staging_name = f"_havn_staging_{model.name}"
 
         # Create staging table with new data
         conn.execute(f"CREATE OR REPLACE TEMP TABLE {staging_name} AS\n{query}")

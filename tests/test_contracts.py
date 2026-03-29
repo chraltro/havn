@@ -169,7 +169,7 @@ class TestPreviousBaseline:
         # Insert a previous profile with row_count=1000
         conn.execute(
             """
-            INSERT OR REPLACE INTO _dp_internal.model_profiles
+            INSERT OR REPLACE INTO _havn.model_profiles
                 (model_path, row_count, column_count, null_percentages, distinct_counts, profiled_at)
             VALUES ('gold.orders', 1000, 3, '{}'::JSON, '{}'::JSON, current_timestamp)
             """
@@ -302,7 +302,7 @@ class TestFreshnessAssertions:
         # Set last_run_at to N hours ago
         conn.execute(
             f"""
-            INSERT OR REPLACE INTO _dp_internal.model_state
+            INSERT OR REPLACE INTO _havn.model_state
                 (model_path, content_hash, upstream_hash, materialized_as, last_run_at, row_count)
             VALUES ('gold.orders', 'abc', 'def', 'table',
                     current_timestamp - INTERVAL '{int(hours_ago)} hours', 1)

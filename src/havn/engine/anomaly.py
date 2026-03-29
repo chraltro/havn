@@ -129,7 +129,7 @@ def _get_profile_history(
         rows = conn.execute(
             """
             SELECT row_count, null_percentages, distinct_counts
-            FROM _dp_internal.profile_history
+            FROM _havn.profile_history
             WHERE model_path = ?
             ORDER BY profiled_at DESC
             LIMIT ?
@@ -252,7 +252,7 @@ def log_anomalies(
         try:
             conn.execute(
                 """
-                INSERT INTO _dp_internal.anomaly_log
+                INSERT INTO _havn.anomaly_log
                     (model_name, metric, current_value, mean_value, stddev_value,
                      z_score, direction, message)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)

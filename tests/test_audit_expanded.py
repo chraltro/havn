@@ -144,7 +144,7 @@ class TestNewActionTypes:
         )
 
         rows = conn.execute(
-            "SELECT action, detail FROM _dp_internal.audit_log WHERE action = ?",
+            "SELECT action, detail FROM _havn.audit_log WHERE action = ?",
             [action],
         ).fetchall()
         assert len(rows) == 1

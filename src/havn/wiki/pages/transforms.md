@@ -166,7 +166,7 @@ havn uses SHA256 hashing to detect when a model's SQL has changed. On each `havn
 
 1. The SQL content is normalized (whitespace-insensitive)
 2. A SHA256 hash is computed from the normalized SQL
-3. The hash is compared against the stored hash in `_dp_internal.model_state`
+3. The hash is compared against the stored hash in `_havn.model_state`
 4. If the hash matches and upstream models haven't changed, the model is **skipped**
 5. If the hash differs or any upstream dependency was rebuilt, the model is **rebuilt**
 
@@ -249,7 +249,7 @@ After each model builds, havn automatically computes column-level statistics:
 - **Null percentages** -- Percentage of NULL values per column
 - **Distinct counts** -- Number of distinct values per column
 
-These profiles are stored in `_dp_internal.model_profiles` and are visible in the Quality panel and Tables browser.
+These profiles are stored in `_havn.model_profiles` and are visible in the Quality panel and Tables browser.
 
 ## Plain SQL -- No Templating
 

@@ -83,7 +83,7 @@ def send_alert(
             for r in results:
                 conn.execute(
                     """
-                    INSERT INTO _dp_internal.alert_log
+                    INSERT INTO _havn.alert_log
                         (alert_type, channel, target, message, status, error)
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,

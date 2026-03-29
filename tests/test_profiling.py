@@ -71,7 +71,7 @@ class TestAutoProfiling:
 
         # Check profile was saved
         row = db.execute(
-            "SELECT row_count, column_count FROM _dp_internal.model_profiles WHERE model_path = 'bronze.data'"
+            "SELECT row_count, column_count FROM _havn.model_profiles WHERE model_path = 'bronze.data'"
         ).fetchone()
         assert row is not None
         assert row[0] == 1  # row_count
@@ -94,7 +94,7 @@ class TestFreshness:
     def test_freshness_check(self, db):
         # Insert a model state entry
         db.execute(
-            "INSERT INTO _dp_internal.model_state "
+            "INSERT INTO _havn.model_state "
             "(model_path, content_hash, upstream_hash, materialized_as, last_run_at, row_count) "
             "VALUES ('gold.test', 'abc', '', 'table', current_timestamp - INTERVAL 2 HOUR, 100)"
         )
@@ -105,7 +105,7 @@ class TestFreshness:
 
     def test_freshness_stale(self, db):
         db.execute(
-            "INSERT INTO _dp_internal.model_state "
+            "INSERT INTO _havn.model_state "
             "(model_path, content_hash, upstream_hash, materialized_as, last_run_at, row_count) "
             "VALUES ('gold.old', 'abc', '', 'table', current_timestamp - INTERVAL 48 HOUR, 50)"
         )
@@ -116,12 +116,12 @@ class TestFreshness:
 
     def test_freshness_mixed(self, db):
         db.execute(
-            "INSERT INTO _dp_internal.model_state "
+            "INSERT INTO _havn.model_state "
             "(model_path, content_hash, upstream_hash, materialized_as, last_run_at, row_count) "
             "VALUES ('gold.fresh', 'abc', '', 'table', current_timestamp - INTERVAL 1 HOUR, 100)"
         )
         db.execute(
-            "INSERT INTO _dp_internal.model_state "
+            "INSERT INTO _havn.model_state "
             "(model_path, content_hash, upstream_hash, materialized_as, last_run_at, row_count) "
             "VALUES ('gold.stale', 'def', '', 'table', current_timestamp - INTERVAL 72 HOUR, 50)"
         )

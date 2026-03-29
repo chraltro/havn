@@ -132,7 +132,7 @@ def check_sources_freshness(
             if not last_loaded:
                 try:
                     row = conn.execute(
-                        "SELECT MAX(started_at) FROM _dp_internal.run_log "
+                        "SELECT MAX(started_at) FROM _havn.run_log "
                         "WHERE target = ? AND status = 'success'",
                         [full_name],
                     ).fetchone()
@@ -319,10 +319,10 @@ def get_overview(request: Request, conn: DbConnReadOnlyOptional) -> dict:
                 """
                 SELECT r.run_id, r.run_type, r.target, r.status,
                        r.started_at, r.duration_ms, r.rows_affected, r.error
-                FROM _dp_internal.run_log r
+                FROM _havn.run_log r
                 INNER JOIN (
                     SELECT target, MAX(started_at) AS max_started
-                    FROM _dp_internal.run_log
+                    FROM _havn.run_log
                     GROUP BY target
                 ) latest ON r.target = latest.target
                         AND r.started_at = latest.max_started
@@ -351,7 +351,7 @@ def get_overview(request: Request, conn: DbConnReadOnlyOptional) -> dict:
                 """
                 SELECT table_schema, table_name, table_type
                 FROM information_schema.tables
-                WHERE table_schema NOT IN ('information_schema', '_dp_internal')
+                WHERE table_schema NOT IN ('information_schema', '_havn')
                 ORDER BY table_schema, table_name
                 """
             ).fetchall()
@@ -373,7 +373,7 @@ def get_overview(request: Request, conn: DbConnReadOnlyOptional) -> dict:
             # Use cached row counts from model_state — never live COUNT(*)
             try:
                 cached_rows = conn.execute(
-                    "SELECT model_path, row_count FROM _dp_internal.model_state WHERE row_count IS NOT NULL"
+                    "SELECT model_path, row_count FROM _havn.model_state WHERE row_count IS NOT NULL"
                 ).fetchall()
                 for model_path, rc in cached_rows:
                     parts = model_path.split(".", 1)
@@ -431,7 +431,7 @@ def clear_sample_project(request: Request) -> dict:
         wal_path.unlink()
 
     # Delete snapshot/rewind data
-    for meta_dir in [".dp", "_snapshots", "output"]:
+    for meta_dir in [".havn", "_snapshots", "output"]:
         meta_path = project_dir / meta_dir
         if meta_path.exists():
             shutil.rmtree(meta_path)

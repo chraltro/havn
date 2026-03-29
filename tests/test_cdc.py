@@ -21,7 +21,7 @@ class TestCDC:
         # Table should exist
         result = conn.execute(
             "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = '_dp_internal' AND table_name = 'cdc_state'"
+            "WHERE table_schema = '_havn' AND table_name = 'cdc_state'"
         ).fetchone()
         assert result[0] == 1
         conn.close()

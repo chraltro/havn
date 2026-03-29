@@ -74,7 +74,7 @@ def test_apply_mask():
 def conn(tmp_path):
     """Create an in-memory DuckDB with test data and masking table."""
     db = duckdb.connect(str(tmp_path / "test.duckdb"))
-    db.execute("CREATE SCHEMA IF NOT EXISTS _dp_internal")
+    db.execute("CREATE SCHEMA IF NOT EXISTS _havn")
     db.execute("CREATE SCHEMA IF NOT EXISTS gold")
     db.execute("""
         CREATE TABLE gold.customers (

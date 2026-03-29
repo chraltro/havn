@@ -1,7 +1,7 @@
 """Column-level data masking engine.
 
 Provides post-query masking of sensitive columns based on policies stored
-in ``_dp_internal.masking_policies``.  Masking is applied to result rows
+in ``_havn.masking_policies``.  Masking is applied to result rows
 *after* query execution, before returning to the client.
 """
 
@@ -24,9 +24,9 @@ import duckdb
 
 def ensure_masking_table(conn: duckdb.DuckDBPyConnection) -> None:
     """Create the masking_policies table if it doesn't exist."""
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _dp_internal")
+    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS _dp_internal.masking_policies (
+        CREATE TABLE IF NOT EXISTS _havn.masking_policies (
             id               VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
             schema_name      VARCHAR NOT NULL,
             table_name       VARCHAR NOT NULL,
@@ -310,7 +310,7 @@ def _load_policies(conn: duckdb.DuckDBPyConnection) -> list[dict]:
     rows = conn.execute(
         "SELECT id, schema_name, table_name, column_name, method, method_config, "
         "condition_column, condition_value, exempted_roles "
-        "FROM _dp_internal.masking_policies"
+        "FROM _havn.masking_policies"
     ).fetchall()
     policies = []
     for r in rows:
@@ -431,7 +431,7 @@ def create_policy(
 
     row = conn.execute(
         """
-        INSERT INTO _dp_internal.masking_policies
+        INSERT INTO _havn.masking_policies
             (schema_name, table_name, column_name, method, method_config,
              condition_column, condition_value, exempted_roles)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -466,7 +466,7 @@ def get_policy(conn: duckdb.DuckDBPyConnection, policy_id: str) -> dict | None:
     row = conn.execute(
         "SELECT id, schema_name, table_name, column_name, method, method_config, "
         "condition_column, condition_value, exempted_roles, created_at "
-        "FROM _dp_internal.masking_policies WHERE id = ?",
+        "FROM _havn.masking_policies WHERE id = ?",
         [policy_id],
     ).fetchone()
     if not row:
@@ -510,7 +510,7 @@ def update_policy(conn: duckdb.DuckDBPyConnection, policy_id: str, **updates) ->
 
     params.append(policy_id)
     conn.execute(
-        f"UPDATE _dp_internal.masking_policies SET {', '.join(sets)} WHERE id = ?",
+        f"UPDATE _havn.masking_policies SET {', '.join(sets)} WHERE id = ?",
         params,
     )
     return get_policy(conn, policy_id)
@@ -519,10 +519,10 @@ def update_policy(conn: duckdb.DuckDBPyConnection, policy_id: str, **updates) ->
 def delete_policy(conn: duckdb.DuckDBPyConnection, policy_id: str) -> bool:
     """Delete a policy by ID. Returns True if deleted."""
     ensure_masking_table(conn)
-    before = conn.execute("SELECT COUNT(*) FROM _dp_internal.masking_policies WHERE id = ?", [policy_id]).fetchone()[0]
+    before = conn.execute("SELECT COUNT(*) FROM _havn.masking_policies WHERE id = ?", [policy_id]).fetchone()[0]
     if not before:
         return False
-    conn.execute("DELETE FROM _dp_internal.masking_policies WHERE id = ?", [policy_id])
+    conn.execute("DELETE FROM _havn.masking_policies WHERE id = ?", [policy_id])
     return True
 
 
