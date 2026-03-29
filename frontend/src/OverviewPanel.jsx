@@ -173,33 +173,39 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
           </div>
         )}
 
-        {/* Stats row */}
-        <div style={st.statsRow}>
-          <div style={st.statCard}>
-            <div style={st.statValue}>{data.total_tables}</div>
-            <div style={st.statLabel}>Tables</div>
+        {/* Stats bar */}
+        <div style={st.statsBar}>
+          <div style={st.statItem}>
+            <span style={st.statLabel}>Tables</span>
+            <span style={st.statValue}>{data.total_tables}</span>
           </div>
-          <div style={st.statCard}>
-            <div style={st.statValue}>{formatRows(data.total_rows)}</div>
-            <div style={st.statLabel}>Total Rows</div>
+          <span style={st.statDivider} />
+          <div style={st.statItem}>
+            <span style={st.statLabel}>Rows</span>
+            <span style={st.statValue}>{formatRows(data.total_rows)}</span>
           </div>
-          <div style={st.statCard}>
-            <div style={st.statValue}>{data.connectors}</div>
-            <div style={st.statLabel}>Connectors</div>
+          <span style={st.statDivider} />
+          <div style={st.statItem}>
+            <span style={st.statLabel}>Connectors</span>
+            <span style={st.statValue}>{data.connectors}</span>
           </div>
+          <span style={st.statDivider} />
           <div
-            style={{ ...st.statCard, cursor: errorCount > 0 ? "pointer" : "default", outline: showFailed ? "2px solid var(--havn-red)" : "none" }}
+            style={{ ...st.statItem, cursor: errorCount > 0 ? "pointer" : "default" }}
             onClick={() => { if (errorCount > 0) setShowFailed(!showFailed); }}
             title={errorCount > 0 ? "Click to show failures" : ""}
           >
-            <div style={{ ...st.statValue, color: errorCount > 0 ? "var(--havn-red)" : "var(--havn-green)" }}>
+            <span style={st.statLabel}>Runs</span>
+            <span style={{
+              ...st.statValue,
+              color: errorCount > 0 ? "var(--havn-red)" : recentRuns.length > 0 ? "var(--havn-green)" : "var(--havn-text)",
+            }}>
               {recentRuns.length > 0 ? `${successCount}/${recentRuns.length}` : "-"}
-            </div>
-            <div style={st.statLabel}>Runs OK (latest)</div>
+            </span>
             {errorCount > 0 && (
-              <div style={{ fontSize: "10px", color: "var(--havn-red)", marginTop: "2px" }}>
-                {errorCount} failed {"\u25BE"}
-              </div>
+              <span style={{ fontSize: "11px", color: "var(--havn-red)", marginLeft: "2px", cursor: "pointer" }}>
+                {"\u25BE"}
+              </span>
             )}
           </div>
         </div>
@@ -260,7 +266,7 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
           {/* Left column */}
           <div style={st.column}>
             {/* Pipeline health */}
-            <div style={st.card} data-havn-hint="pipeline-health">
+            <div style={st.cardPrimary} data-havn-hint="pipeline-health">
               <div style={st.cardHeader}>
                 <span style={st.cardTitle}>Pipeline Health</span>
                 {lastRun && (
@@ -363,25 +369,22 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
             </div>
 
             {/* Quick actions */}
-            <div style={st.card}>
-              <div style={st.cardHeader}>
-                <span style={st.cardTitle}>Quick Actions</span>
-              </div>
+            <div style={st.quickActionsCard}>
               <div style={st.quickActions}>
                 <button onClick={() => onNavigate("Data Sources")} style={st.quickAction}>
-                  <span style={st.qaIcon}>+</span>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><line x1="8" y1="3" x2="8" y2="13" /><line x1="3" y1="8" x2="13" y2="8" /></svg>
                   <span>Add Data Source</span>
                 </button>
                 <button onClick={() => onNavigate("Query")} style={st.quickAction}>
-                  <span style={st.qaIcon}>&gt;</span>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="5,3 11,8 5,13" /></svg>
                   <span>Run a Query</span>
                 </button>
                 <button onClick={() => onNavigate("Editor")} style={st.quickAction}>
-                  <span style={st.qaIcon}>#</span>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M11.5,2.5 L13.5,4.5 L5.5,12.5 L2.5,13.5 L3.5,10.5 Z" /><line x1="9.5" y1="4.5" x2="11.5" y2="6.5" /></svg>
                   <span>Edit Transforms</span>
                 </button>
                 <button onClick={() => onNavigate("DAG")} style={st.quickAction}>
-                  <span style={st.qaIcon}>&bull;</span>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="4" cy="4" r="2" /><circle cx="12" cy="8" r="2" /><circle cx="4" cy="12" r="2" /><line x1="6" y1="4.5" x2="10" y2="7.5" /><line x1="6" y1="11.5" x2="10" y2="8.5" /></svg>
                   <span>View DAG</span>
                 </button>
               </div>
@@ -457,22 +460,31 @@ const st = {
     marginLeft: "12px",
   },
 
-  // Stats
-  statsRow: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-    gap: "12px",
-    marginBottom: "20px",
-  },
-  statCard: {
+  // Stats — compact horizontal bar instead of hero metric cards
+  statsBar: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0",
     background: "var(--havn-bg-secondary)",
     border: "1px solid var(--havn-border)",
     borderRadius: "var(--havn-radius-lg)",
-    padding: "16px",
-    textAlign: "center",
+    padding: "10px 20px",
+    marginBottom: "20px",
   },
-  statValue: { fontSize: "24px", fontWeight: 700, color: "var(--havn-text)", fontFamily: "var(--havn-font-mono)" },
-  statLabel: { fontSize: "11px", color: "var(--havn-text-secondary)", marginTop: "4px", textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 500 },
+  statItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    padding: "0 16px",
+  },
+  statValue: { fontSize: "14px", fontWeight: 600, color: "var(--havn-text)", fontFamily: "var(--havn-font-mono)" },
+  statLabel: { fontSize: "12px", color: "var(--havn-text-secondary)", fontWeight: 500 },
+  statDivider: {
+    width: "1px",
+    height: "18px",
+    background: "var(--havn-border)",
+    flexShrink: 0,
+  },
 
   // Failed runs
   failedCard: {
@@ -528,16 +540,24 @@ const st = {
     whiteSpace: "nowrap",
   },
 
-  // Layout
-  columns: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" },
+  // Layout — asymmetric: Pipeline Health gets more space
+  columns: { display: "grid", gridTemplateColumns: "3fr 2fr", gap: "16px" },
   column: { display: "flex", flexDirection: "column", gap: "16px" },
 
-  // Cards
+  // Cards — base style
   card: {
     background: "var(--havn-bg-secondary)",
     border: "1px solid var(--havn-border)",
     borderRadius: "var(--havn-radius-lg)",
     overflow: "hidden",
+  },
+  // Primary card — subtle accent treatment for Pipeline Health
+  cardPrimary: {
+    background: "var(--havn-bg-secondary)",
+    border: "1px solid var(--havn-border)",
+    borderRadius: "var(--havn-radius-lg)",
+    overflow: "hidden",
+    borderTop: "2px solid var(--havn-accent)",
   },
   cardHeader: {
     display: "flex",
@@ -633,33 +653,27 @@ const st = {
     fontSize: "12px",
   },
 
-  // Quick actions
-  quickActions: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1px", background: "var(--havn-border)" },
+  // Quick actions — minimal, no card chrome
+  quickActionsCard: {
+    overflow: "hidden",
+  },
+  quickActions: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0",
+  },
   quickAction: {
     display: "flex",
     alignItems: "center",
-    gap: "8px",
-    padding: "10px 16px",
-    background: "var(--havn-bg-secondary)",
+    gap: "10px",
+    padding: "9px 12px",
+    background: "none",
     border: "none",
-    color: "var(--havn-text)",
+    borderBottom: "1px solid var(--havn-border)",
+    color: "var(--havn-text-secondary)",
     cursor: "pointer",
     fontSize: "12.5px",
     fontWeight: 500,
     textAlign: "left",
-  },
-  qaIcon: {
-    width: "24px",
-    height: "24px",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "var(--havn-bg-tertiary)",
-    borderRadius: "var(--havn-radius)",
-    fontFamily: "var(--havn-font-mono)",
-    fontSize: "14px",
-    fontWeight: 700,
-    color: "var(--havn-accent)",
-    flexShrink: 0,
   },
 };

@@ -415,7 +415,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
             <div style={st.steps}>
               {["Configure", "Test", "Select Resources", "Confirm"].map((label, i) => (
                 <div key={i} style={{ ...st.step, ...(step >= i + 1 ? st.stepActive : {}) }}>
-                  <span style={st.stepNum}>{i + 1}</span>
+                  <span style={{ ...st.stepNum, ...(step >= i + 1 ? st.stepNumActive : {}) }}>{i + 1}</span>
                   <span style={st.stepLabel}>{label}</span>
                 </div>
               ))}
@@ -431,7 +431,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
                 {selectedType.params.map((p) => (
                   <div key={p.name} style={st.formGroup}>
                     <label style={st.label}>
-                      {p.name.replace(/_/g, " ")}
+                      {p.name.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
                       {p.required && <span style={st.required}>*</span>}
                       {p.secret && <span style={st.secretBadge}>secret</span>}
                     </label>
@@ -467,7 +467,11 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
             {step >= 2 && testResult && (
               <div style={st.section}>
                 <h3 style={st.sectionTitle}>Connection Test</h3>
-                <div style={{ ...st.testResult, borderColor: testResult.success ? "var(--havn-green)" : "var(--havn-red)" }}>
+                <div style={{
+                  ...st.testResult,
+                  borderColor: testResult.success ? "var(--havn-green)" : "var(--havn-red)",
+                  background: testResult.success ? "rgba(46, 160, 67, 0.08)" : "rgba(248, 81, 73, 0.08)",
+                }}>
                   <span style={{ color: testResult.success ? "var(--havn-green)" : "var(--havn-red)", fontWeight: 600 }}>
                     {testResult.success ? "Connected successfully" : "Connection failed"}
                   </span>
@@ -548,7 +552,9 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
         <div style={st.content}>
           <div style={st.catalog}>
             {available.map((c) => (
-              <div key={c.name} style={st.card} onClick={() => startSetup(c)}>
+              <div key={c.name} style={st.card} onClick={() => startSetup(c)}
+                onMouseEnter={(e) => e.currentTarget.style.borderColor = "var(--havn-accent)"}
+                onMouseLeave={(e) => e.currentTarget.style.borderColor = ""}>
                 <div style={st.cardName}>{c.display_name}</div>
                 <div style={st.cardDesc}>{c.description}</div>
                 <div style={st.cardMeta}>
@@ -741,7 +747,18 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
         </div>
         <div style={st.content}>
           {configured.length === 0 ? (
-            <div style={st.emptyState}>No connectors configured yet.</div>
+            <div style={st.emptyState}>
+              <div style={st.emptyIcon}>
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                  <path d="M2 17l10 5 10-5" />
+                  <path d="M2 12l10 5 10-5" />
+                </svg>
+              </div>
+              <div style={st.emptyTitle}>No connectors configured</div>
+              <div style={st.emptyHint}>Set up a recurring connector to sync data from databases, APIs, or other sources on a schedule.</div>
+              <button style={{ ...st.btnPrimary, marginTop: 12, padding: '6px 16px', fontSize: '12px' }} onClick={goHome}>Add a Connector</button>
+            </div>
           ) : (
             <div style={st.connectorList}>
               {configured.map((c) => {
@@ -754,9 +771,13 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
                       <span style={st.connectorName}>{c.name}</span>
                       <span style={st.connectorType}>{c.type}</span>
                       <span style={{ ...st.statusDot, background: h ? (h.status === "success" ? "var(--havn-green)" : "var(--havn-red)") : (c.has_script ? "var(--havn-yellow)" : "var(--havn-text-dim)") }} />
-                      {h && <span style={{ ...st.healthInfo, color: h.status === "success" ? "var(--havn-text-dim)" : "var(--havn-red)" }}>
-                        {h.status === "success" ? `Last synced ${_timeAgo(h.started_at)}` : `Last sync failed ${_timeAgo(h.started_at)}`}
-                      </span>}
+                      {h ? (
+                        <span style={{ ...st.healthInfo, color: h.status === "success" ? "var(--havn-text-secondary)" : "var(--havn-red)" }}>
+                          {h.status === "success" ? `Synced ${_timeAgo(h.started_at)}` : `Failed ${_timeAgo(h.started_at)}`}
+                        </span>
+                      ) : (
+                        <span style={st.healthInfo}>{c.has_script ? "Not yet synced" : "No script"}</span>
+                      )}
                     </div>
                     <div style={st.connectorParams}>
                       {Object.entries(c.params || {}).filter(([k]) => k !== "type").map(([k, v]) => (
@@ -768,7 +789,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
                     <button onClick={() => doSync(c.name)} disabled={syncing === c.name || !c.has_script} style={st.btn}>
                       {syncing === c.name ? "Syncing..." : "Sync"}
                     </button>
-                    <button onClick={() => doRegenerate(c.name)} style={st.btn}>Regen</button>
+                    <button onClick={() => doRegenerate(c.name)} style={st.btn}>Regenerate</button>
                     <button onClick={() => doRemove(c.name)} style={st.btnDanger}>Remove</button>
                   </div>
                 </div>
@@ -786,7 +807,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
   return (
     <div style={st.container}>
       <div style={st.header}>
-        <span />
+        <span style={st.title}>Data Sources</span>
         {configured.length > 0 && (
           <button onClick={() => setView("manage")} style={st.btn}>
             Manage ({configured.length})
@@ -801,25 +822,48 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
           </div>
         )}
         <div style={st.homeDesc}>
-          How would you like to get data into your warehouse?
+          Bring data into your warehouse from files, databases, or recurring connectors.
         </div>
         <div style={st.methodGrid}>
-          <div style={st.methodCard} onClick={() => setView("file")}>
-            <div style={st.methodIcon}>^</div>
+          <div style={st.methodCard} onClick={() => setView("file")}
+            onMouseEnter={(e) => e.currentTarget.style.borderColor = "var(--havn-accent)"}
+            onMouseLeave={(e) => e.currentTarget.style.borderColor = ""}>
+            <div style={st.methodIcon}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+            </div>
             <div style={st.methodName}>Upload File</div>
             <div style={st.methodDesc}>
               Import a CSV, Parquet, or JSON file as a one-time load.
             </div>
           </div>
-          <div style={st.methodCard} onClick={() => setView("database")}>
-            <div style={st.methodIcon}>=</div>
+          <div style={st.methodCard} onClick={() => setView("database")}
+            onMouseEnter={(e) => e.currentTarget.style.borderColor = "var(--havn-accent)"}
+            onMouseLeave={(e) => e.currentTarget.style.borderColor = ""}>
+            <div style={st.methodIcon}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <ellipse cx="12" cy="5" rx="9" ry="3" />
+                <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+                <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+              </svg>
+            </div>
             <div style={st.methodName}>Database Import</div>
             <div style={st.methodDesc}>
               Connect to PostgreSQL, MySQL, or SQLite and import a table.
             </div>
           </div>
-          <div style={st.methodCard} onClick={() => setView("connector-catalog")}>
-            <div style={st.methodIcon}>~</div>
+          <div style={st.methodCard} onClick={() => setView("connector-catalog")}
+            onMouseEnter={(e) => e.currentTarget.style.borderColor = "var(--havn-accent)"}
+            onMouseLeave={(e) => e.currentTarget.style.borderColor = ""}>
+            <div style={st.methodIcon}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 4 23 10 17 10" />
+                <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+              </svg>
+            </div>
             <div style={st.methodName}>Recurring Connector</div>
             <div style={st.methodDesc}>
               Set up a scheduled sync from databases, APIs, or other sources.
@@ -837,9 +881,13 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
                   <span style={{ ...st.statusDot, background: h ? (h.status === "success" ? "var(--havn-green)" : "var(--havn-red)") : (c.has_script ? "var(--havn-yellow)" : "var(--havn-text-dim)") }} />
                   <span style={st.connectorName}>{c.name}</span>
                   <span style={st.connectorType}>{c.type}</span>
-                  {h && <span style={{ ...st.healthInfo, color: h.status === "success" ? "var(--havn-text-dim)" : "var(--havn-red)" }}>
-                    {h.status === "success" ? `synced ${_timeAgo(h.started_at)}` : `failed ${_timeAgo(h.started_at)}`}
-                  </span>}
+                  {h ? (
+                    <span style={{ ...st.healthInfo, color: h.status === "success" ? "var(--havn-text-secondary)" : "var(--havn-red)" }}>
+                      {h.status === "success" ? `synced ${_timeAgo(h.started_at)}` : `failed ${_timeAgo(h.started_at)}`}
+                    </span>
+                  ) : (
+                    <span style={st.healthInfo}>{c.has_script ? "not yet synced" : "no script"}</span>
+                  )}
                   <button onClick={() => doSync(c.name)} disabled={syncing === c.name || !c.has_script} style={st.btnSmall}>
                     {syncing === c.name ? "..." : "Sync"}
                   </button>
@@ -884,10 +932,7 @@ const st = {
     justifyContent: "center",
     background: "var(--havn-bg-tertiary)",
     borderRadius: "var(--havn-radius-lg)",
-    fontSize: "18px",
-    fontWeight: 700,
     color: "var(--havn-accent)",
-    fontFamily: "var(--havn-font-mono)",
   },
   methodName: { fontSize: "14px", fontWeight: 600, color: "var(--havn-text)", marginBottom: "6px" },
   methodDesc: { fontSize: "12px", color: "var(--havn-text-secondary)", lineHeight: 1.5 },
@@ -950,6 +995,7 @@ const st = {
   step: { display: "flex", alignItems: "center", gap: "6px", padding: "6px 12px", borderRadius: "var(--havn-radius-lg)", fontSize: "12px", color: "var(--havn-text-dim)", background: "var(--havn-bg-tertiary)" },
   stepActive: { color: "var(--havn-text)", background: "var(--havn-btn-bg)", fontWeight: 500 },
   stepNum: { width: "18px", height: "18px", borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "10px", fontWeight: 700, background: "var(--havn-bg-tertiary)", color: "var(--havn-text-secondary)" },
+  stepNumActive: { background: "var(--havn-accent)", color: "#fff" },
   stepLabel: {},
 
   // Test
@@ -989,12 +1035,15 @@ const st = {
   connectorNameRow: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" },
   connectorName: { fontWeight: 600, fontSize: "14px", fontFamily: "var(--havn-font-mono)" },
   connectorType: { fontSize: "11px", color: "var(--havn-text-secondary)", background: "var(--havn-bg-tertiary)", padding: "1px 6px", borderRadius: "var(--havn-radius)", fontWeight: 500 },
-  statusDot: { width: "6px", height: "6px", borderRadius: "50%", flexShrink: 0 },
+  statusDot: { width: "8px", height: "8px", borderRadius: "50%", flexShrink: 0 },
   connectorParams: { display: "flex", flexWrap: "wrap", gap: "4px" },
   paramChip: { fontSize: "11px", color: "var(--havn-text-dim)", fontFamily: "var(--havn-font-mono)" },
   connectorActions: { display: "flex", gap: "6px", flexShrink: 0 },
 
-  emptyState: { textAlign: "center", padding: "32px", color: "var(--havn-text-dim)", fontSize: "13px" },
+  emptyState: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "48px 24px", textAlign: "center" },
+  emptyIcon: { color: "var(--havn-text-dim)", marginBottom: "16px", opacity: 0.5 },
+  emptyTitle: { fontSize: "14px", fontWeight: 600, color: "var(--havn-text-secondary)", marginBottom: "6px" },
+  emptyHint: { fontSize: "12px", color: "var(--havn-text-dim)", maxWidth: "320px", lineHeight: "1.5" },
 
   // Success banner
   successBanner: {

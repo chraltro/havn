@@ -113,6 +113,13 @@ export default function SentinelPanel() {
     if (view === "history") loadSources();
   }, [view]);
 
+  // Auto-refresh when pipeline completes
+  useEffect(() => {
+    const handler = () => { if (view === "diffs") loadDiffs(); if (view === "history") loadSources(); };
+    window.addEventListener("havn-data-changed", handler);
+    return () => window.removeEventListener("havn-data-changed", handler);
+  }, [view]);
+
   async function handleResolve(diffId, modelName) {
     try {
       await api.resolveSentinelImpact(diffId, modelName);

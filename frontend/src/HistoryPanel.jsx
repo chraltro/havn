@@ -10,6 +10,7 @@ function timeAgo(dateStr) {
   const diffMs = now - then;
   if (diffMs < 0) return "just now";
   const seconds = Math.floor(diffMs / 1000);
+  if (seconds < 10) return "just now";
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
@@ -28,6 +29,27 @@ function formatDuration(ms) {
 function formatRows(n) {
   if (n == null || n === 0) return "";
   return n.toLocaleString();
+}
+
+function statusStyle(status) {
+  if (status === "success") {
+    return { background: "color-mix(in srgb, var(--havn-green) 12%, transparent)", color: "var(--havn-green)" };
+  }
+  if (status === "error" || status === "failed") {
+    return { background: "color-mix(in srgb, var(--havn-red) 12%, transparent)", color: "var(--havn-red)" };
+  }
+  if (status === "running") {
+    return { background: "color-mix(in srgb, var(--havn-accent) 12%, transparent)", color: "var(--havn-accent)" };
+  }
+  // skipped, cancelled, or unknown
+  return { background: "color-mix(in srgb, var(--havn-text-dim) 12%, transparent)", color: "var(--havn-text-secondary)" };
+}
+
+function statusIcon(status) {
+  if (status === "success") return "\u2713";
+  if (status === "error" || status === "failed") return "\u2717";
+  if (status === "running") return "\u25CB";
+  return "\u2013";
 }
 
 export default function HistoryPanel({ onOpenFile }) {
@@ -77,6 +99,13 @@ export default function HistoryPanel({ onOpenFile }) {
   useEffect(() => {
     loadRuns();
     loadFlatHistory();
+  }, []);
+
+  // Auto-refresh when pipeline completes
+  useEffect(() => {
+    const handler = () => { loadRuns(); loadFlatHistory(); };
+    window.addEventListener("havn-data-changed", handler);
+    return () => window.removeEventListener("havn-data-changed", handler);
   }, []);
 
   async function loadRuns() {
@@ -244,12 +273,26 @@ export default function HistoryPanel({ onOpenFile }) {
       {!isLoading && error && <div style={styles.errorMsg}>{error}</div>}
 
       {/* Empty */}
-      {!isLoading && !error && viewMode === "grouped" && runs.length === 0 && flatHistory.length === 0 && (
-        <div style={styles.emptyMsg}>No runs yet. Execute a pipeline to see history here.</div>
+      {!isLoading && !error && viewMode === "grouped" && filteredRuns.length === 0 && (
+        <div style={styles.emptyState}>
+          {runs.length === 0 ? (
+            <>
+              <div style={styles.emptyTitle}>No pipeline runs yet</div>
+              <div style={styles.emptyHint}>
+                Run <code style={styles.code}>havn transform</code> or <code style={styles.code}>havn stream</code> to build models and see run history here.
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={styles.emptyTitle}>No matching runs</div>
+              <div style={styles.emptyHint}>Try adjusting your filters.</div>
+            </>
+          )}
+        </div>
       )}
 
       {/* Grouped runs view */}
-      {!isLoading && viewMode === "grouped" && runs.length > 0 && (
+      {!isLoading && viewMode === "grouped" && filteredRuns.length > 0 && (
         <div style={styles.listWrap}>
           {/* Sort header */}
           <div style={styles.sortHeader}>
@@ -275,7 +318,6 @@ export default function HistoryPanel({ onOpenFile }) {
           </div>
           {sortItems(filteredRuns, sortKey, sortDir).map((run) => {
             const isExpanded = expandedRun === run.pipeline_run_id;
-            const isSuccess = run.status === "success";
             const hasErrors = run.error_count > 0;
 
             return (
@@ -294,17 +336,17 @@ export default function HistoryPanel({ onOpenFile }) {
                   <span style={styles.runDuration}>{formatDuration(run.total_duration_ms)}</span>
                   <span style={{
                     ...styles.statusBadge,
-                    background: isSuccess
-                      ? "color-mix(in srgb, var(--havn-green) 12%, transparent)"
-                      : "color-mix(in srgb, var(--havn-red) 12%, transparent)",
-                    color: isSuccess ? "var(--havn-green)" : "var(--havn-red)",
+                    ...statusStyle(run.status),
                   }}>
-                    {isSuccess ? "\u2713" : "\u2717"} {run.status}
+                    {statusIcon(run.status)} {run.status}
                   </span>
                   {hasErrors && (
                     <span style={styles.errorCount}>{run.error_count} err</span>
                   )}
-                  <span style={styles.timeAgo}>{timeAgo(run.started_at)}</span>
+                  <span
+                    style={styles.timeAgo}
+                    title={run.started_at ? run.started_at.slice(0, 19).replace("T", " ") : ""}
+                  >{timeAgo(run.started_at)}</span>
                 </div>
 
                 {/* Expanded detail */}
@@ -404,10 +446,24 @@ export default function HistoryPanel({ onOpenFile }) {
       {/* Flat history view (fallback) */}
       {!isLoading && viewMode === "all" && (
         <div style={styles.tableWrap}>
-          {flatHistory.length === 0 && !error && (
-            <div style={styles.emptyMsg}>No runs yet. Execute a pipeline to see history here.</div>
+          {filteredFlat.length === 0 && !error && (
+            <div style={styles.emptyState}>
+              {flatHistory.length === 0 ? (
+                <>
+                  <div style={styles.emptyTitle}>No pipeline runs yet</div>
+                  <div style={styles.emptyHint}>
+                    Run <code style={styles.code}>havn transform</code> or <code style={styles.code}>havn stream</code> to build models and see run history here.
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={styles.emptyTitle}>No matching entries</div>
+                  <div style={styles.emptyHint}>Try adjusting your filters.</div>
+                </>
+              )}
+            </div>
           )}
-          {flatHistory.length > 0 && (
+          {filteredFlat.length > 0 && (
             <>
               <table style={styles.table}>
                 <thead>
@@ -423,7 +479,7 @@ export default function HistoryPanel({ onOpenFile }) {
                     ].map((col, i) => (
                       <th
                         key={i}
-                        style={{ ...styles.th, cursor: col.key ? "pointer" : "default", userSelect: "none" }}
+                        style={{ ...styles.th, cursor: col.key ? "pointer" : "default" }}
                         onClick={() => col.key && toggleSort(col.key)}
                       >
                         {col.label}
@@ -460,20 +516,20 @@ export default function HistoryPanel({ onOpenFile }) {
                       <td style={styles.td}>
                         <span style={{
                           ...styles.statusBadge,
-                          background: row.status === "success"
-                            ? "color-mix(in srgb, var(--havn-green) 12%, transparent)"
-                            : "color-mix(in srgb, var(--havn-red) 12%, transparent)",
-                          color: row.status === "success" ? "var(--havn-green)" : "var(--havn-red)",
-                        }}>{row.status}</span>
+                          ...statusStyle(row.status),
+                        }}>{statusIcon(row.status)} {row.status}</span>
                       </td>
-                      <td style={{ ...styles.td, color: "var(--havn-text-secondary)" }}>
-                        {row.started_at ? row.started_at.slice(0, 19).replace("T", " ") : ""}
-                      </td>
-                      <td style={{ ...styles.td, textAlign: "right", fontFamily: "var(--havn-font-mono)" }}>
-                        {row.duration_ms != null ? `${row.duration_ms}ms` : ""}
+                      <td
+                        style={{ ...styles.td, color: "var(--havn-text-secondary)" }}
+                        title={row.started_at ? row.started_at.slice(0, 19).replace("T", " ") : ""}
+                      >
+                        {timeAgo(row.started_at)}
                       </td>
                       <td style={{ ...styles.td, textAlign: "right", fontFamily: "var(--havn-font-mono)" }}>
-                        {row.rows_affected || ""}
+                        {formatDuration(row.duration_ms)}
+                      </td>
+                      <td style={{ ...styles.td, textAlign: "right", fontFamily: "var(--havn-font-mono)" }}>
+                        {formatRows(row.rows_affected)}
                       </td>
                       <td style={{ ...styles.td, color: "var(--havn-red)", maxWidth: "300px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {row.error || ""}
@@ -505,7 +561,10 @@ const styles = {
   header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderBottom: "1px solid var(--havn-border)", gap: "8px", flexWrap: "wrap" },
   refreshBtn: { background: "var(--havn-btn-bg)", border: "1px solid var(--havn-btn-border)", borderRadius: "var(--havn-radius-lg)", color: "var(--havn-text)", padding: "4px 12px", cursor: "pointer", fontSize: "11px", fontWeight: 500 },
   loadingMsg: { padding: "24px", color: "var(--havn-text-secondary)", textAlign: "center" },
-  emptyMsg: { padding: "24px", color: "var(--havn-text-dim)", textAlign: "center" },
+  emptyState: { padding: "48px 24px", textAlign: "center" },
+  emptyTitle: { color: "var(--havn-text-secondary)", fontSize: "13px", fontWeight: 600, marginBottom: "6px" },
+  emptyHint: { color: "var(--havn-text-dim)", fontSize: "12px", lineHeight: "1.5" },
+  code: { fontFamily: "var(--havn-font-mono)", fontSize: "11px", background: "var(--havn-bg-tertiary)", padding: "1px 5px", borderRadius: "var(--havn-radius)" },
   errorMsg: { padding: "24px", color: "var(--havn-red)", textAlign: "center" },
 
   // View toggle
@@ -534,13 +593,13 @@ const styles = {
     fontSize: "12px", transition: "background 0.1s",
   },
   expandArrow: { fontSize: "9px", color: "var(--havn-text-dim)", width: "12px", flexShrink: 0 },
-  runTypeBadge: { background: "var(--havn-btn-bg)", padding: "2px 8px", borderRadius: "var(--havn-radius)", fontSize: "11px", fontWeight: 500, textTransform: "capitalize", flexShrink: 0 },
-  runTarget: { fontFamily: "var(--havn-font-mono)", fontWeight: 500, color: "var(--havn-text)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  runModels: { color: "var(--havn-text-secondary)", fontSize: "11px", flexShrink: 0, whiteSpace: "nowrap" },
-  runDuration: { fontFamily: "var(--havn-font-mono)", color: "var(--havn-text-secondary)", fontSize: "11px", flexShrink: 0 },
-  statusBadge: { padding: "2px 8px", borderRadius: "var(--havn-radius)", fontSize: "11px", fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap" },
+  runTypeBadge: { flex: "0 0 80px", background: "var(--havn-btn-bg)", padding: "2px 8px", borderRadius: "var(--havn-radius)", fontSize: "11px", fontWeight: 500, textTransform: "capitalize", boxSizing: "border-box" },
+  runTarget: { flex: "1 1 auto", fontFamily: "var(--havn-font-mono)", fontWeight: 500, color: "var(--havn-text)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  runModels: { flex: "0 0 70px", color: "var(--havn-text-secondary)", fontSize: "11px", whiteSpace: "nowrap" },
+  runDuration: { flex: "0 0 70px", fontFamily: "var(--havn-font-mono)", color: "var(--havn-text-secondary)", fontSize: "11px" },
+  statusBadge: { flex: "0 0 80px", padding: "2px 8px", borderRadius: "var(--havn-radius)", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap", boxSizing: "border-box" },
   errorCount: { fontSize: "11px", color: "var(--havn-red)", fontWeight: 600, flexShrink: 0 },
-  timeAgo: { marginLeft: "auto", color: "var(--havn-text-dim)", fontSize: "11px", flexShrink: 0, whiteSpace: "nowrap" },
+  timeAgo: { flex: "0 0 80px", textAlign: "right", color: "var(--havn-text-dim)", fontSize: "11px", whiteSpace: "nowrap" },
 
   // Expanded detail rows
   detailContainer: { background: "color-mix(in srgb, var(--havn-bg-tertiary) 50%, transparent)", borderBottom: "1px solid var(--havn-border)" },
@@ -559,7 +618,7 @@ const styles = {
   // Flat table view
   tableWrap: { flex: 1, overflow: "auto" },
   table: { width: "100%", borderCollapse: "collapse", fontSize: "12px" },
-  th: { textAlign: "left", padding: "6px 12px", borderBottom: "2px solid var(--havn-border-light)", color: "var(--havn-text-secondary)", fontWeight: 600, position: "sticky", top: 0, background: "var(--havn-bg-secondary)" },
+  th: { textAlign: "left", padding: "6px 12px", borderBottom: "2px solid var(--havn-border-light)", color: "var(--havn-text-secondary)", fontSize: "11px", fontWeight: 600, position: "sticky", top: 0, background: "var(--havn-bg-secondary)", userSelect: "none" },
   td: { padding: "5px 12px", borderBottom: "1px solid var(--havn-border)", color: "var(--havn-text)", fontSize: "12px" },
   typeBadge: { background: "var(--havn-btn-bg)", padding: "2px 8px", borderRadius: "var(--havn-radius)", fontSize: "11px", fontWeight: 500, textTransform: "capitalize" },
   fileLink: { cursor: "pointer", transition: "color 0.15s" },

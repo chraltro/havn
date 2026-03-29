@@ -51,7 +51,7 @@ import { PipelineProvider, usePipeline } from "./PipelineContext";
 
 const SECTIONS = [
   { id: "Overview", label: "Overview", tabs: [] },
-  { id: "Develop", label: "Develop", tabs: ["Editor", "Notebooks", "Data Sources", "Git"] },
+  { id: "Develop", label: "Develop", tabs: ["Editor", "Data Sources", "Git"] },
   { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "DAG", "Dashboards"] },
   { id: "Observe", label: "Observe", tabs: ["Quality", "Sentinel", "Diff", "Runs"] },
   { id: "Configure", label: "Configure", tabs: ["Masking", "Wiki", "Docs", "Settings"] },
@@ -68,6 +68,31 @@ for (const s of SECTIONS) {
 const SECTION_DEFAULT = {};
 for (const s of SECTIONS) {
   SECTION_DEFAULT[s.id] = s.tabs.length > 0 ? s.tabs[0] : s.id;
+}
+
+// URL routing helpers
+function tabToPath(tab) {
+  const section = TAB_TO_SECTION[tab];
+  if (!section) return "/";
+  const sSlug = section.toLowerCase();
+  // Overview has no sub-tabs
+  if (section === "Overview") return "/";
+  const tSlug = tab.toLowerCase().replace(/\s+/g, "-");
+  // If it's the default tab for the section, just use section path
+  if (SECTION_DEFAULT[section] === tab) return `/${sSlug}`;
+  return `/${sSlug}/${tSlug}`;
+}
+
+function pathToTab(pathname) {
+  const parts = pathname.replace(/^\/+|\/+$/g, "").toLowerCase().split("/").filter(Boolean);
+  if (parts.length === 0) return "Overview";
+  const sectionSlug = parts[0];
+  const section = SECTIONS.find(s => s.id.toLowerCase() === sectionSlug);
+  if (!section) return "Overview";
+  if (parts.length === 1) return SECTION_DEFAULT[section.id];
+  const tabSlug = parts[1];
+  const tab = section.tabs.find(t => t.toLowerCase().replace(/\s+/g, "-") === tabSlug);
+  return tab || SECTION_DEFAULT[section.id];
 }
 
 /* ------------------------------------------------------------------ */
@@ -347,13 +372,13 @@ function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
 
 const stStyles = {
   empty: { padding: "12px", color: "var(--havn-text-dim)", fontSize: "12px", textAlign: "center" },
-  schemaRow: { display: "flex", alignItems: "center", gap: "6px", padding: "4px 8px", cursor: "pointer", margin: "0 4px", borderRadius: "3px" },
-  arrow: { fontSize: "10px", color: "var(--havn-text-secondary)", width: "10px", display: "inline-block", transition: "transform 0.12s ease" },
-  schemaName: { fontSize: "13px", fontWeight: 500, color: "var(--havn-text)", fontFamily: "var(--havn-font-mono)" },
+  schemaRow: { display: "flex", alignItems: "center", gap: "6px", padding: "5px 8px", cursor: "pointer", margin: "0 4px", borderRadius: "3px" },
+  arrow: { fontSize: "10px", color: "var(--havn-text-dim)", width: "10px", display: "inline-block", transition: "transform 0.12s ease" },
+  schemaName: { fontSize: "11.5px", fontWeight: 600, color: "var(--havn-text-secondary)", fontFamily: "var(--havn-font-mono)", letterSpacing: "0.02em" },
   schemaCount: { fontSize: "10px", color: "var(--havn-text-dim)", marginLeft: "auto" },
-  tableRow: { display: "flex", alignItems: "center", gap: "6px", padding: "3px 8px 3px 30px", cursor: "pointer", fontSize: "12px", fontFamily: "var(--havn-font-mono)", margin: "0 4px", borderRadius: "3px" },
+  tableRow: { display: "flex", alignItems: "center", gap: "6px", padding: "3px 8px 3px 28px", cursor: "pointer", fontSize: "11.5px", fontFamily: "var(--havn-font-mono)", margin: "0 4px", borderRadius: "3px" },
   typeIcon: { fontSize: "9px", fontWeight: 700, flexShrink: 0 },
-  tableName: { color: "var(--havn-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  tableName: { color: "var(--havn-text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   tableNameActive: { color: "var(--havn-accent)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
 };
 
@@ -419,8 +444,17 @@ function AppContent() {
   const [previewRunning, setPreviewRunning] = useState(false);
   const [previewHeight, onPreviewResize, onPreviewResizeStart] = useResizable("havn_editor_preview_height", 200, 80, 600);
 
-  // Tab/UI state
-  const [activeTab, setActiveTab] = useState("Overview");
+  // Tab/UI state - initialize from URL
+  const [activeTab, _setActiveTab] = useState(() => pathToTab(window.location.pathname));
+
+  // Wrap setActiveTab to also push URL
+  const setActiveTab = useCallback((tab) => {
+    _setActiveTab(tab);
+    const path = tabToPath(tab);
+    if (window.location.pathname !== path) {
+      history.pushState({ tab }, "", path);
+    }
+  }, []);
   const [selectedTable, setSelectedTable] = useState(null);
 
   // Derive active section from active tab
@@ -540,6 +574,16 @@ function AppContent() {
     setOnboardingOpen(true);
   }
 
+  // Browser back/forward navigation
+  useEffect(() => {
+    function onPopState() {
+      const tab = pathToTab(window.location.pathname);
+      _setActiveTab(tab);
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
   const pendingSubTabRef = useRef(null);
 
   function navigateToTab(tab) {
@@ -590,7 +634,7 @@ function AppContent() {
     if (path.endsWith(".dpnb")) {
       setNotebookPath(path);
       setActiveFile(path);
-      setActiveTab("Notebooks");
+      setActiveTab("Editor");
       return;
     }
     if (path.endsWith(".sql") && path.startsWith("transform/") && opts.notebookView) {
@@ -991,7 +1035,7 @@ function AppContent() {
       <div style={styles.main}>
         {/* Sidebar */}
         <aside style={{ ...styles.sidebar, width: sidebarWidth }} data-havn-guide="sidebar" role="navigation" aria-label="File browser">
-          <div style={{ padding: "4px 8px", borderBottom: "1px solid var(--havn-border)" }}>
+          <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--havn-border)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--havn-text-dim)" strokeWidth="1.5" style={{ flexShrink: 0 }}>
                 <circle cx="6.5" cy="6.5" r="5"/><path d="M10.5 10.5L14.5 14.5"/>
@@ -1000,7 +1044,7 @@ function AppContent() {
                 value={sidebarFilter}
                 onChange={(e) => setSidebarFilter(e.target.value)}
                 placeholder="Filter files &amp; tables..."
-                style={{ flex: 1, padding: "3px 6px", background: "var(--havn-bg)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", outline: "none", minWidth: 0 }}
+                style={{ flex: 1, padding: "4px 8px", background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", outline: "none", minWidth: 0 }}
                 aria-label="Filter files and tables"
               />
               {sidebarFilter && (
@@ -1055,7 +1099,7 @@ function AppContent() {
                 </button>
               ))}
               {/* Editor file actions inline */}
-              {activeFile && activeTab === "Editor" && (
+              {activeFile && activeTab === "Editor" && !activeFile.endsWith(".dpnb") && (
                 <div style={styles.fileActions} data-havn-hint="editor-toolbar">
                   <span style={styles.fileName}>
                     {activeFile}
@@ -1108,6 +1152,11 @@ function AppContent() {
               </ErrorBoundary>
             )}
             {activeTab === "Editor" && (
+              activeFile?.endsWith(".dpnb") ? (
+                <ErrorBoundary name="Notebook">
+                  <NotebookPanel openPath={notebookPath} />
+                </ErrorBoundary>
+              ) : (
               <ErrorBoundary name="Editor">
                 <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
                   <div style={{ flex: 1, overflow: "hidden", minHeight: 0 }}>
@@ -1146,11 +1195,12 @@ function AppContent() {
                   )}
                 </div>
               </ErrorBoundary>
+              )
             )}
             {activeTab === "Query" && <ErrorBoundary name="Query"><QueryPanel addOutput={addOutput} onOpenModel={(key) => { const [s, t] = key.split("."); openFile(`transform/${s}/${t}.sql`); }} /></ErrorBoundary>}
-            {activeTab === "Tables" && <ErrorBoundary name="Tables"><TablesPanel selectedTable={selectedTable} onQueryTable={queryTable} /></ErrorBoundary>}
+            {activeTab === "Tables" && <ErrorBoundary name="Tables"><TablesPanel selectedTable={selectedTable} onQueryTable={queryTable} tables={tables} onSelectTable={handleSelectTable} /></ErrorBoundary>}
             {activeTab === "Data Sources" && <ErrorBoundary name="Data Sources"><DataSourcesPanel addOutput={addOutput} showConfirm={showConfirm} onDataChanged={refreshAll} /></ErrorBoundary>}
-            {activeTab === "Notebooks" && <ErrorBoundary name="Notebooks"><NotebookPanel openPath={notebookPath} /></ErrorBoundary>}
+
             {activeTab === "DAG" && <ErrorBoundary name="DAG"><DAGPanel onOpenFile={openFile} showConfirm={showConfirm} /></ErrorBoundary>}
             {activeTab === "Git" && <ErrorBoundary name="Git"><GitPanel /></ErrorBoundary>}
             {activeTab === "Sentinel" && <ErrorBoundary name="Sentinel"><SentinelPanel /></ErrorBoundary>}
@@ -1313,6 +1363,8 @@ function WarehouseConsumerBridge({ children, onPipelineComplete }) {
   const handleComplete = useCallback(() => {
     refreshAll();
     onPipelineComplete?.();
+    // Notify all panels to refresh their data
+    window.dispatchEvent(new CustomEvent("havn-data-changed"));
   }, [refreshAll, onPipelineComplete]);
   return (
     <PipelineProvider onTablesChanged={loadTables} onPipelineComplete={handleComplete}>
@@ -1376,36 +1428,36 @@ const styles = {
   loading: { display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "var(--havn-bg)", color: "var(--havn-text-secondary)", fontFamily: "var(--havn-font)", fontSize: "14px" },
 
   // Header
-  header: { display: "flex", alignItems: "center", padding: "0 16px", borderBottom: "1px solid var(--havn-border)", background: "var(--havn-bg-secondary)", minHeight: "44px", gap: "16px" },
-  logo: { display: "inline-flex", alignItems: "center", fontSize: "18px", fontWeight: 700, fontFamily: "var(--havn-font)", color: "#3ECFB4", letterSpacing: "-0.5px", background: "none", border: "none", cursor: "pointer", padding: "8px 4px", flexShrink: 0 },
+  header: { display: "flex", alignItems: "center", padding: "0 16px", borderBottom: "1px solid var(--havn-border)", background: "var(--havn-bg-secondary)", minHeight: "46px", gap: "12px" },
+  logo: { display: "inline-flex", alignItems: "center", fontSize: "17px", fontWeight: 700, fontFamily: "var(--havn-font)", color: "#3ECFB4", letterSpacing: "-0.5px", background: "none", border: "none", cursor: "pointer", padding: "8px 0", marginRight: "4px", flexShrink: 0 },
 
   // Section navigation (in header)
-  sectionNav: { display: "flex", alignItems: "center", gap: "2px", flex: 1 },
+  sectionNav: { display: "flex", alignItems: "center", gap: "1px", flex: 1 },
   section: {
-    padding: "10px 16px", background: "none", border: "none", borderBottom: "2px solid transparent",
+    padding: "12px 14px", background: "none", border: "none", borderBottom: "2px solid transparent",
     color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "13px", whiteSpace: "nowrap",
-    fontWeight: 500, transition: "color 0.15s",
+    fontWeight: 500, transition: "color 0.15s", letterSpacing: "0.01em",
   },
   sectionActive: {
-    padding: "10px 16px", background: "none", border: "none", borderBottom: "2px solid var(--havn-accent)",
+    padding: "12px 14px", background: "none", border: "none", borderBottom: "2px solid var(--havn-accent)",
     color: "var(--havn-text)", cursor: "pointer", fontSize: "13px", whiteSpace: "nowrap",
-    fontWeight: 500, transition: "color 0.15s",
+    fontWeight: 600, transition: "color 0.15s", letterSpacing: "0.01em",
   },
 
   // Header right side
   headerRight: { display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 },
-  userInfo: { display: "flex", alignItems: "center", gap: "8px", marginLeft: "4px" },
-  userName: { fontSize: "12px", color: "var(--havn-text)", fontWeight: 500 },
+  userInfo: { display: "flex", alignItems: "center", gap: "6px", marginLeft: "4px" },
+  userName: { fontSize: "11.5px", color: "var(--havn-text-secondary)", fontWeight: 500 },
   userRole: { fontSize: "10px", color: "var(--havn-text-secondary)", background: "var(--havn-btn-bg)", padding: "2px 8px", borderRadius: "10px", fontWeight: 500, textTransform: "capitalize" },
   logoutBtn: { padding: "3px 8px", background: "none", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "11px" },
 
   // Layout
   main: { display: "flex", flex: 1, overflow: "hidden" },
-  sidebar: { borderRight: "1px solid var(--havn-border)", overflow: "hidden", background: "var(--havn-bg-tertiary)", padding: "0", flexShrink: 0, display: "flex", flexDirection: "column" },
+  sidebar: { borderRight: "1px solid var(--havn-border)", overflow: "hidden", background: "var(--havn-bg)", padding: "0", flexShrink: 0, display: "flex", flexDirection: "column" },
   sidebarPane: { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" },
   sidebarPaneContent: { flex: 1, overflow: "auto", minHeight: 0, padding: "0 0 8px" },
-  sidebarDivider: { height: "1px", background: "var(--havn-border)", margin: "0 12px", flexShrink: 0 },
-  sidebarSectionHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px 6px", fontSize: "10px", fontWeight: "600", color: "var(--havn-text-dim)", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0 },
+  sidebarDivider: { height: "1px", background: "var(--havn-border)", margin: "4px 12px", flexShrink: 0 },
+  sidebarSectionHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px 6px", fontSize: "10px", fontWeight: "600", color: "var(--havn-text-dim)", letterSpacing: "0.8px", textTransform: "uppercase", flexShrink: 0 },
   sidebarNewBtn: { background: "none", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius)", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "14px", lineHeight: 1, padding: "0 5px", fontWeight: 600 },
   sidebarRefreshBtn: { background: "none", border: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "13px", padding: "0 2px", lineHeight: 1 },
   content: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" },
@@ -1414,20 +1466,23 @@ const styles = {
   // Sub-tab bar
   subTabBar: {
     display: "flex", alignItems: "center", borderBottom: "1px solid var(--havn-border)",
-    padding: "0 12px", background: "var(--havn-bg-tertiary)", minHeight: "32px",
+    padding: "0 12px", background: "var(--havn-bg)", minHeight: "34px", gap: "2px",
   },
   subTab: {
-    padding: "6px 14px", background: "none", border: "none", borderBottom: "2px solid transparent",
-    color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "12px", whiteSpace: "nowrap", fontWeight: 500,
+    padding: "7px 12px", background: "none", border: "none", borderBottom: "none",
+    color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "11.5px", whiteSpace: "nowrap", fontWeight: 500,
+    borderRadius: "var(--havn-radius) var(--havn-radius) 0 0",
   },
   subTabActive: {
-    padding: "6px 14px", background: "none", border: "none", borderBottom: "2px solid var(--havn-accent)",
-    color: "var(--havn-text)", cursor: "pointer", fontSize: "12px", whiteSpace: "nowrap", fontWeight: 600,
+    padding: "7px 12px", background: "var(--havn-bg)", border: "1px solid var(--havn-border)",
+    borderBottom: "1px solid var(--havn-bg)",
+    color: "var(--havn-text)", cursor: "pointer", fontSize: "11.5px", whiteSpace: "nowrap", fontWeight: 600,
+    borderRadius: "var(--havn-radius) var(--havn-radius) 0 0", marginBottom: "-1px",
   },
 
   // File actions (inline in sub-tab bar)
   fileActions: { marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px", paddingLeft: "16px" },
-  fileName: { fontSize: "12px", color: "var(--havn-text-secondary)", fontFamily: "var(--havn-font-mono)" },
+  fileName: { fontSize: "11px", color: "var(--havn-text-dim)", fontFamily: "var(--havn-font-mono)", maxWidth: "280px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   modifiedDot: { color: "var(--havn-accent)", fontWeight: 700 },
 
   // Panel
