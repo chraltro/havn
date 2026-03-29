@@ -1,0 +1,2735 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="The open-source data platform that runs on your machine. DuckDB + SQL transforms + Python. Data in safe waters.">
+      
+      
+      
+        <link rel="canonical" href="https://chraltro.github.io/db/internal/ideas-catalog/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>havn Ideas Catalog - havn</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Outfit:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Outfit";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#havn-ideas-catalog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="havn" class="md-header__button md-logo" aria-label="havn" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            havn
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              havn Ideas Catalog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/chraltro/db" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    chraltro/db
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../transforms/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Transforms
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../quality/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Data Quality
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../connectors/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Connectors
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../notebooks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Notebooks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../pipelines/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Pipelines
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../cli-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../api-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="havn" class="md-nav__button md-logo" aria-label="havn" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    havn
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/chraltro/db" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    chraltro/db
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../transforms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transforms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../pipelines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-read-this" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How to read this
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-backend-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Backend Engine
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Backend Engine">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#transform-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transform Engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diff-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diff Engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snapshots-rewind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Snapshots &amp; Rewind
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-quality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Quality
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#masking-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Masking &amp; Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#circuit-breaker-error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Circuit Breaker &amp; Error Handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scheduling-orchestration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheduling &amp; Orchestration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-connectors-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Connectors &amp; CLI
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Connectors &amp; CLI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#missing-connectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Missing Connectors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#connector-framework" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connector Framework
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cli-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI Commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-server-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Server &amp; API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Server &amp; API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API Design
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#auth-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auth &amp; Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#audit-observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit &amp; Observability
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pipeline-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipeline Execution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#collaboration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collaboration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#alerting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alerting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#missing-endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Missing Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-frontend-design-ux" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Frontend — Design &amp; UX
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Frontend — Design &amp; UX">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#critical-ship-blockers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Critical (Ship Blockers)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#moderate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Moderate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minor-polish" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minor Polish
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-frontend-edge-cases-bugs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Frontend — Edge Cases &amp; Bugs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Frontend — Edge Cases &amp; Bugs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#critical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Critical
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#moderate_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Moderate
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-testing-code-quality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Testing &amp; Code Quality
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-new-feature-ideas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. New Feature Ideas
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-wins-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Wins Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#strategic-priorities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Strategic Priorities
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Strategic Priorities">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#for-competitive-positioning-vs-databrickssnowflake" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For competitive positioning (vs Databricks/Snowflake)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-enterprise-readiness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For enterprise readiness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-developer-experience" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For developer experience
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-production-reliability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For production reliability
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="havn-ideas-catalog">havn Ideas Catalog<a class="headerlink" href="#havn-ideas-catalog" title="Permanent link">&para;</a></h1>
+<p>Compiled 2026-03-20. Six-agent deep analysis of the full codebase: backend engine, connectors/CLI, server/API, tests/docs, UI design, and UI edge cases.</p>
+<hr />
+<h2 id="how-to-read-this">How to read this<a class="headerlink" href="#how-to-read-this" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Priority</strong>: HIGH = blocking or high-value, MEDIUM = important but not urgent, LOW = nice-to-have</li>
+<li><strong>Effort</strong>: S = hours, M = days, L = weeks</li>
+<li>Items marked with a star are <strong>quick wins</strong> (high impact, low effort)</li>
+</ul>
+<hr />
+<h2 id="1-backend-engine">1. Backend Engine<a class="headerlink" href="#1-backend-engine" title="Permanent link">&para;</a></h2>
+<h3 id="transform-engine">Transform Engine<a class="headerlink" href="#transform-engine" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1.1</td>
+<td>Incremental config validation at discovery time (require unique_key for merge/delete+insert, validate partition_by columns exist)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>Currently only fails at runtime</td>
+</tr>
+<tr>
+<td>1.2</td>
+<td>Execution step logging &amp; replay (<code>havn replay &lt;model&gt;</code> with per-SQL-step timing)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>Hard to debug parallel failures today</td>
+</tr>
+<tr>
+<td>1.3</td>
+<td>Partition-by auto-detection (suggest partition columns from GROUP BY/ORDER BY heuristics)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>Reduces config burden</td>
+</tr>
+<tr>
+<td>1.4</td>
+<td>Schema evolution audit trail (track column additions in audit_log, add schema_hash to model_state)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>No rollback path today</td>
+</tr>
+<tr>
+<td>1.5</td>
+<td>Model-level retry with backoff for transforms (transient lock/contention failures)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Circuit breaker exists for scripts but not transforms</td>
+</tr>
+<tr>
+<td>1.6</td>
+<td>Soft delete incremental strategy (flag deleted rows instead of hard delete, with purge CLI)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Needed for CDC sources</td>
+</tr>
+<tr>
+<td>1.7</td>
+<td>Model execution timing breakdown (t_plan, t_staging, t_merge, t_insert per model)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td>Currently just total duration</td>
+</tr>
+<tr>
+<td>1.8</td>
+<td>Column lineage caching in metadata table (invalidate on upstream content_hash change)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td>Full lineage recompute is slow on 100+ models</td>
+</tr>
+</tbody>
+</table>
+<h3 id="diff-engine">Diff Engine<a class="headerlink" href="#diff-engine" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1.9</td>
+<td>3-mode diff: single model, changed+downstream, full database</td>
+<td>HIGH</td>
+<td>M</td>
+<td><strong>In progress</strong> — being built now</td>
+</tr>
+<tr>
+<td>1.10</td>
+<td>Dry-run / what-if mode (<code>havn transform --dry-run &lt;model&gt;</code> — diff without persisting)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="snapshots-rewind">Snapshots &amp; Rewind<a class="headerlink" href="#snapshots-rewind" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1.11</td>
+<td>Point-in-time restore by timestamp (<code>havn rewind --to "2h ago"</code>)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>Currently requires knowing exact run_id</td>
+</tr>
+<tr>
+<td>1.12</td>
+<td>Incremental/delta snapshots (store only changed rows for incremental models, ~70% storage savings)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>Full parquet per snapshot is wasteful</td>
+</tr>
+<tr>
+<td>1.13</td>
+<td>Snapshot diff preview before restore (show what restore would change)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>1.14</td>
+<td>GC dashboard (track freed bytes, deletion history, storage growth chart)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="data-quality">Data Quality<a class="headerlink" href="#data-quality" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1.15</td>
+<td>Contract-based alerting with thresholds (<code>row_count &gt; {previous * 0.9}</code>, freshness escalation)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>Binary pass/fail is too simple</td>
+</tr>
+<tr>
+<td>1.16</td>
+<td>Assertion debugging (on failure: show top 10 duplicates, actual values, sample null rows)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>Currently just "5 duplicates" with no detail</td>
+</tr>
+<tr>
+<td>1.17</td>
+<td>Anomaly detection via statistical profiling (Z-score on row_count/null%/distinct% over N runs)</td>
+<td>HIGH</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>1.18</td>
+<td>Assertion sampling for large tables (TABLESAMPLE for non-exhaustive checks)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>1.19</td>
+<td>Incremental assertion evaluation (skip assertions for unchanged models)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="masking-security">Masking &amp; Security<a class="headerlink" href="#masking-security" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1.20</td>
+<td>Masking policy versioning &amp; audit trail (who changed what, when, revert)</td>
+<td>HIGH</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>1.21</td>
+<td>Fine-grained role-based masking exemptions (analyst sees email but not credit_card)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>Currently all-or-nothing per role</td>
+</tr>
+<tr>
+<td>1.22</td>
+<td>Masking performance: column-level lazy evaluation, pre-compiled mask plans</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Slow on 1M rows with 50 policies</td>
+</tr>
+</tbody>
+</table>
+<h3 id="circuit-breaker-error-handling">Circuit Breaker &amp; Error Handling<a class="headerlink" href="#circuit-breaker-error-handling" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1.23</td>
+<td>Circuit breaker status UI in Observe section (state, failure count, recovery time, manual reset)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>1.24</td>
+<td>Error categorization (transient vs permanent) with auto-recovery suggestions</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="scheduling-orchestration">Scheduling &amp; Orchestration<a class="headerlink" href="#scheduling-orchestration" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1.25</td>
+<td>Stream dependency ordering (cross-stream DAG with <code>depends_on: [other_stream]</code>)</td>
+<td>HIGH</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>1.26</td>
+<td>Schedule preview (<code>havn schedule --preview</code> — show next 10 runs with timestamps)</td>
+<td>HIGH</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>1.27</td>
+<td>Backfill with date range (<code>havn stream backfill &lt;stream&gt; --from --to</code>)</td>
+<td>HIGH</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>1.28</td>
+<td>File watcher debounce configuration (currently hardcoded 2s)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-connectors-cli">2. Connectors &amp; CLI<a class="headerlink" href="#2-connectors-cli" title="Permanent link">&para;</a></h2>
+<h3 id="missing-connectors">Missing Connectors<a class="headerlink" href="#missing-connectors" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2.1</td>
+<td>Snowflake connector</td>
+<td>HIGH</td>
+<td>M</td>
+<td>Critical for competitive positioning / migration story</td>
+</tr>
+<tr>
+<td>2.2</td>
+<td>BigQuery connector</td>
+<td>HIGH</td>
+<td>M</td>
+<td>GCP trifecta</td>
+</tr>
+<tr>
+<td>2.3</td>
+<td>Redshift connector</td>
+<td>HIGH</td>
+<td>M</td>
+<td>AWS trifecta</td>
+</tr>
+<tr>
+<td>2.4</td>
+<td>MongoDB connector</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Unstructured data gap</td>
+</tr>
+<tr>
+<td>2.5</td>
+<td>Salesforce connector</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Alongside HubSpot</td>
+</tr>
+<tr>
+<td>2.6</td>
+<td>Airtable, Jira, Slack, GitHub/GitLab connectors</td>
+<td>LOW</td>
+<td>L</td>
+<td>Community value</td>
+</tr>
+</tbody>
+</table>
+<h3 id="connector-framework">Connector Framework<a class="headerlink" href="#connector-framework" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2.7</td>
+<td>ParamSpec validation (regex, enums, min/max, cross-param checks)</td>
+<td>HIGH</td>
+<td>S</td>
+<td>Catches config errors early</td>
+</tr>
+<tr>
+<td>2.8</td>
+<td>Connector dry-run (<code>havn connect --dry-run</code> — preview generated script)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>2.9</td>
+<td>Connector versioning &amp; upgrade (<code>havn connect --upgrade &lt;name&gt;</code>)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Scripts are frozen after generation today</td>
+</tr>
+<tr>
+<td>2.10</td>
+<td>Standardize incremental sync across all connectors (high-watermark pattern)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Only Postgres/MySQL have CDC today</td>
+</tr>
+<tr>
+<td>2.11</td>
+<td>Multi-table transaction safety (atomic sync option)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>2.12</td>
+<td>Connector health dashboard (last sync, duration, failure rate per source)</td>
+<td>LOW</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>2.13</td>
+<td>Community connector registry (pip-installable connector packs)</td>
+<td>LOW</td>
+<td>L</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="cli-commands">CLI Commands<a class="headerlink" href="#cli-commands" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2.14</td>
+<td><code>havn env</code> command (list/use/create environments)</td>
+<td>HIGH</td>
+<td>S</td>
+<td>Currently repeating <code>--env</code> on every command</td>
+</tr>
+<tr>
+<td>2.15</td>
+<td><code>havn sample &lt;table&gt;</code> (quick data preview without writing SQL)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>2.16</td>
+<td><code>havn export &lt;model&gt; --format csv/parquet</code></td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>2.17</td>
+<td><code>havn model &lt;name&gt; --watch</code> (auto-rebuild on save with live feedback)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>FileWatcher exists, just needs single-model mode</td>
+</tr>
+<tr>
+<td>2.18</td>
+<td><code>havn repl</code> (interactive SQL shell against warehouse)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>2.19</td>
+<td><code>havn monitor --stream &lt;name&gt;</code> (live pipeline status in terminal)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>2.20</td>
+<td><code>havn test</code> (end-to-end: ingest sample data, transform, validate, export)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>2.21</td>
+<td><code>havn context</code> (dump project metadata for debugging/onboarding)</td>
+<td>LOW</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>2.22</td>
+<td>Better error messages with hints ("No project.yml found" → suggest <code>havn init</code>)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>2.23</td>
+<td>Grouped output &amp; summary stats for large outputs (<code>--errors-only</code>, <code>--json</code>)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>2.24</td>
+<td><code>--profile</code> flag on major commands (per-step timing breakdown)</td>
+<td>HIGH</td>
+<td>S</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2.25</td>
+<td>Config validation (cron expressions, retention duration format, stream step targets)</td>
+<td>HIGH</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>2.26</td>
+<td>Config inheritance for environments (deep merge base + env overrides)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Currently must duplicate entire connection block</td>
+</tr>
+<tr>
+<td>2.27</td>
+<td>Secret reference validation (check all <code>${VAR}</code> refs exist in .env)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>2.28</td>
+<td>Per-stream config (timeout, retries, retry_delay, alert channels)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>2.29</td>
+<td>Config versioning with migration logic for breaking changes</td>
+<td>LOW</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>2.30</td>
+<td>Project templates (<code>havn init --template ecommerce/saas</code>)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-server-api">3. Server &amp; API<a class="headerlink" href="#3-server-api" title="Permanent link">&para;</a></h2>
+<h3 id="api-design">API Design<a class="headerlink" href="#api-design" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3.1</td>
+<td>Standardized response envelope (<code>{success, data, error: {code, message}}</code>)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>Inconsistent formats across 150+ endpoints</td>
+</tr>
+<tr>
+<td>3.2</td>
+<td>Pagination for high-volume list endpoints (history, audit, rewind runs, table samples)</td>
+<td>HIGH</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>3.3</td>
+<td>Centralized request validation module (file paths, SQL identifiers, git refs, resource names)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>Currently scattered, inconsistent</td>
+</tr>
+<tr>
+<td>3.4</td>
+<td>Request ID tracking (<code>X-Request-ID</code> header for correlation)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>3.5</td>
+<td>Endpoint documentation (docstrings, example requests/responses on all routes)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td>FastAPI auto-generates OpenAPI but descriptions are sparse</td>
+</tr>
+<tr>
+<td>3.6</td>
+<td>Helpful error messages ("Invalid identifier 'foo'" → "Must start with letter, contain only alphanumeric + underscore")</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="auth-security">Auth &amp; Security<a class="headerlink" href="#auth-security" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3.7</td>
+<td>Token refresh flow (short-lived access + long-lived refresh token)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>Currently fixed 30-day tokens</td>
+</tr>
+<tr>
+<td>3.8</td>
+<td>Token metadata (device name, last used, IP address)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>3.9</td>
+<td>Custom RBAC roles with fine-grained permissions</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>3.10</td>
+<td>Schema-level access control (role can query gold but not landing)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>3.11</td>
+<td>Permission denial audit logging</td>
+<td>HIGH</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>3.12</td>
+<td>Secret rotation strategy (versioning, expiry dates, rotation reminders)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>3.13</td>
+<td>SQL injection audit of dynamic SQL paths</td>
+<td>HIGH</td>
+<td>S</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="audit-observability">Audit &amp; Observability<a class="headerlink" href="#audit-observability" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3.14</td>
+<td>Expand audit actions (auth_failed, permission_denied, connector_sync, masking_policy changes, agent file edits)</td>
+<td>HIGH</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>3.15</td>
+<td>Persistent pipeline event log (store SSE events to <code>_havn.pipeline_events</code>)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Lost on server restart today</td>
+</tr>
+<tr>
+<td>3.16</td>
+<td>Circuit breaker state change logging</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>3.17</td>
+<td>Webhook retry with exponential backoff (currently fire-and-forget)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="pipeline-execution">Pipeline Execution<a class="headerlink" href="#pipeline-execution" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3.18</td>
+<td>Query cancellation via DuckDB API (cancel in-flight SQL for long transforms)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>Cancel flag not always checked</td>
+</tr>
+<tr>
+<td>3.19</td>
+<td>Pipeline pause &amp; resume (pause after current step, resume from checkpoint)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>3.20</td>
+<td>Ring buffer for pipeline events (prevent OOM on very long runs)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td>Currently unbounded list</td>
+</tr>
+</tbody>
+</table>
+<h3 id="collaboration">Collaboration<a class="headerlink" href="#collaboration" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3.21</td>
+<td>WebSocket heartbeat/ping mechanism</td>
+<td>HIGH</td>
+<td>M</td>
+<td>No reconnection on network blips</td>
+</tr>
+<tr>
+<td>3.22</td>
+<td>Session persistence to <code>_havn</code> (survive server restarts)</td>
+<td>MEDIUM</td>
+<td>L</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="alerting">Alerting<a class="headerlink" href="#alerting" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3.23</td>
+<td>New alert types: circuit_breaker_open, schema_drift, slow_query, token_expiring</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>3.24</td>
+<td>Alert deduplication (skip if same alert sent in last 5 min)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>3.25</td>
+<td>Email alert channel</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Only Slack/webhook/log today</td>
+</tr>
+<tr>
+<td>3.26</td>
+<td>Alert health check endpoint (is Slack webhook still working?)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="missing-endpoints">Missing Endpoints<a class="headerlink" href="#missing-endpoints" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3.27</td>
+<td>Pipeline dry-run (<code>POST /api/stream/{name}/dry-run</code>)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>3.28</td>
+<td>Config validation endpoint (<code>POST /api/validate/config</code>)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>3.29</td>
+<td>Audit log export (<code>GET /api/audit/export?format=csv</code>)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>3.30</td>
+<td>User session management (list/force-logout active sessions)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-frontend-design-ux">4. Frontend — Design &amp; UX<a class="headerlink" href="#4-frontend-design-ux" title="Permanent link">&para;</a></h2>
+<h3 id="critical-ship-blockers">Critical (Ship Blockers)<a class="headerlink" href="#critical-ship-blockers" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4.1</td>
+<td>Accessibility: ARIA labels, roles, semantic landmarks across all components</td>
+<td>HIGH</td>
+<td>L</td>
+<td>Zero WCAG support today</td>
+</tr>
+<tr>
+<td>4.2</td>
+<td>Visible focus indicators for keyboard navigation</td>
+<td>HIGH</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>4.3</td>
+<td>Modal focus trapping (dialogs don't trap focus or block background interaction)</td>
+<td>HIGH</td>
+<td>M</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="moderate">Moderate<a class="headerlink" href="#moderate" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4.4</td>
+<td>Consistent disabled button styling and hover states</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td>Mix of inline handlers and missing states</td>
+</tr>
+<tr>
+<td>4.5</td>
+<td>Color contrast validation across all 8 themes</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td>No WCAG AA checks</td>
+</tr>
+<tr>
+<td>4.6</td>
+<td>Reusable LoadingSpinner, EmptyState, ErrorState components</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Different patterns everywhere</td>
+</tr>
+<tr>
+<td>4.7</td>
+<td>Scroll hints on long lists (shadow/gradient at bottom)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>4.8</td>
+<td>Responsive design fixes (sidebar collapse, dialog overflow at &lt;1200px)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Desktop-only today</td>
+</tr>
+<tr>
+<td>4.9</td>
+<td>Actionable error messages ("Failed to open: Error" → explain + suggest fix)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>4.10</td>
+<td>Search/filter in file tree, schema tree, table browser</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>No search on large lists</td>
+</tr>
+<tr>
+<td>4.11</td>
+<td>Consistent spacing system (CSS variables instead of hardcoded px values)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>4.12</td>
+<td>Viewport-aware positioning for dropdowns and tooltips</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td>PipelineMenu, GuideTour can overflow</td>
+</tr>
+</tbody>
+</table>
+<h3 id="minor-polish">Minor Polish<a class="headerlink" href="#minor-polish" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4.13</td>
+<td>Tooltips for truncated table cells</td>
+<td>LOW</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>4.14</td>
+<td>Proper file type icons (replace colored dots and "V"/"T" letters)</td>
+<td>LOW</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>4.15</td>
+<td>Consistent date/time formatting (relative time everywhere, absolute on hover)</td>
+<td>LOW</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>4.16</td>
+<td>Breadcrumb / back navigation for deep views</td>
+<td>LOW</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>4.17</td>
+<td>Standardize button text casing (mix of "Run", "LINT", "Format SQL")</td>
+<td>LOW</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>4.18</td>
+<td>DAG node dynamic sizing for long model names</td>
+<td>LOW</td>
+<td>S</td>
+<td>Fixed 160px truncates</td>
+</tr>
+<tr>
+<td>4.19</td>
+<td>Colorblind-safe status indicators (icons + text, not just red/green)</td>
+<td>LOW</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>4.20</td>
+<td>Dark mode <code>&lt;meta name="color-scheme"&gt;</code> tag</td>
+<td>LOW</td>
+<td>S</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-frontend-edge-cases-bugs">5. Frontend — Edge Cases &amp; Bugs<a class="headerlink" href="#5-frontend-edge-cases-bugs" title="Permanent link">&para;</a></h2>
+<h3 id="critical">Critical<a class="headerlink" href="#critical" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5.1</td>
+<td>SSE stream reconnection with backoff (server restart mid-pipeline = silent hang)</td>
+<td>HIGH</td>
+<td>M</td>
+<td><strong>Most critical frontend bug</strong></td>
+</tr>
+<tr>
+<td>5.2</td>
+<td>API error handling: retry logic, human-readable errors instead of raw HTML</td>
+<td>HIGH</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>5.3</td>
+<td>File edit conflict detection (etag/version check before save, agent vs user)</td>
+<td>HIGH</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>5.4</td>
+<td>Monaco size limit check (warn &gt;10MB, refuse &gt;50MB)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="moderate_1">Moderate<a class="headerlink" href="#moderate_1" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5.5</td>
+<td>Autocomplete debounce (fires on every keystroke, no debounce)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>5.6</td>
+<td>Schema cache expiry (global Map with no TTL, stale completions)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>5.7</td>
+<td>Git panel merge conflict detection and display</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Pull succeeds but conflicts invisible</td>
+</tr>
+<tr>
+<td>5.8</td>
+<td>Git branch name validation before creation</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>5.9</td>
+<td>Rewind timeline virtualization (5000 runs = 250K snapshots in state)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>5.10</td>
+<td>Prevent multiple dialogs opening simultaneously (single dialog queue)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>5.11</td>
+<td>Unsaved changes warning before file delete</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>5.12</td>
+<td>WarehouseContext: show error when initial load fails (tables/files/streams)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td>Fails silently, shows blank</td>
+</tr>
+<tr>
+<td>5.13</td>
+<td>sessionStorage quota handling (try-catch on writes, LRU eviction)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>5.14</td>
+<td>FileTree memoization and virtualization for large projects</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Re-sorts on every render</td>
+</tr>
+<tr>
+<td>5.15</td>
+<td>OutputPanel regex link detection improvements (Windows paths, dashes in names)</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>5.16</td>
+<td>WebSocket cleanup on sidebar close / page unload</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>5.17</td>
+<td>Autocomplete dropdown viewport clamping</td>
+<td>LOW</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>5.18</td>
+<td>DAG layout cycle handling (circular deps = corrupted visualization)</td>
+<td>LOW</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>5.19</td>
+<td>Query history deduplication and bounded growth</td>
+<td>LOW</td>
+<td>S</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-testing-code-quality">6. Testing &amp; Code Quality<a class="headerlink" href="#6-testing-code-quality" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>6.1</td>
+<td>Custom exception hierarchy (<code>HavnError</code>, <code>TransformError</code>, <code>ConnectorError</code>, etc.)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>83 bare <code>except Exception:</code> blocks</td>
+</tr>
+<tr>
+<td>6.2</td>
+<td>Performance benchmarks with regression detection (pytest-benchmark)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>No guardrails against perf regressions</td>
+</tr>
+<tr>
+<td>6.3</td>
+<td>Chaos/failure injection tests (connection loss mid-pipeline, timeouts, corrupted snapshots)</td>
+<td>HIGH</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>6.4</td>
+<td>Structured logging with correlation IDs (JSON format, run_id tracing)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>123 logging calls, no structure</td>
+</tr>
+<tr>
+<td>6.5</td>
+<td>Centralized input validation module (Pydantic models for identifiers, paths, cron)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Duplicated across modules</td>
+</tr>
+<tr>
+<td>6.6</td>
+<td>Shared test fixtures in conftest.py (sample_project, complex_dag)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td>Repeated setup across 40 files</td>
+</tr>
+<tr>
+<td>6.7</td>
+<td>Windows-specific CI tests (file locking, path separators, CRLF)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>6.8</td>
+<td>Integration tests with real external services (Postgres, MySQL via docker-compose)</td>
+<td>MEDIUM</td>
+<td>L</td>
+<td>All tests use local DuckDB only</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="7-new-feature-ideas">7. New Feature Ideas<a class="headerlink" href="#7-new-feature-ideas" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Priority</th>
+<th>Effort</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>7.1</td>
+<td>Query plan visualization in web UI (EXPLAIN ANALYZE with operator tree)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>DuckDB generates detailed plans, UI doesn't show them</td>
+</tr>
+<tr>
+<td>7.2</td>
+<td>Model validation report UI (run all checks before pipeline, show fixes)</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>7.3</td>
+<td>Column ownership &amp; CODEOWNERS-style docs per model/column</td>
+<td>MEDIUM</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>7.4</td>
+<td>Script parameter passing (<code>havn run ingest/fetch.py --param source=prod</code>)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>Currently all hardcoded</td>
+</tr>
+<tr>
+<td>7.5</td>
+<td>Structured script output protocol (JSON metrics from scripts, not just regex)</td>
+<td>HIGH</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>7.6</td>
+<td>CDC watermark management UI (inspect, reset, sync history per connector)</td>
+<td>HIGH</td>
+<td>M</td>
+<td>Currently requires raw SQL to fix</td>
+</tr>
+<tr>
+<td>7.7</td>
+<td>Multi-project workspace support (multiple warehouses in one server)</td>
+<td>MEDIUM</td>
+<td>L</td>
+<td></td>
+</tr>
+<tr>
+<td>7.8</td>
+<td>OpenTelemetry distributed tracing (optional)</td>
+<td>LOW</td>
+<td>M</td>
+<td></td>
+</tr>
+<tr>
+<td>7.9</td>
+<td>Health check &amp; Prometheus metrics endpoints</td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+<tr>
+<td>7.10</td>
+<td>Architecture Decision Records (ADRs) in <code>docs/adr/</code></td>
+<td>MEDIUM</td>
+<td>S</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="quick-wins-summary">Quick Wins Summary<a class="headerlink" href="#quick-wins-summary" title="Permanent link">&para;</a></h2>
+<p>High impact, low effort — do these first:</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Idea</th>
+<th>Est.</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2.7</td>
+<td>Connector ParamSpec validation</td>
+<td>hours</td>
+</tr>
+<tr>
+<td>2.14</td>
+<td><code>havn env</code> command</td>
+<td>hours</td>
+</tr>
+<tr>
+<td>2.24</td>
+<td><code>--profile</code> flag on major commands</td>
+<td>hours</td>
+</tr>
+<tr>
+<td>3.14</td>
+<td>Expand audit log actions</td>
+<td>hours</td>
+</tr>
+<tr>
+<td>3.6</td>
+<td>Helpful API error messages</td>
+<td>hours</td>
+</tr>
+<tr>
+<td>3.13</td>
+<td>SQL injection audit of dynamic SQL</td>
+<td>hours</td>
+</tr>
+<tr>
+<td>4.2</td>
+<td>Visible focus indicators</td>
+<td>hours</td>
+</tr>
+<tr>
+<td>5.5</td>
+<td>Autocomplete debounce</td>
+<td>hours</td>
+</tr>
+<tr>
+<td>5.8</td>
+<td>Git branch name validation</td>
+<td>hours</td>
+</tr>
+<tr>
+<td>5.11</td>
+<td>Unsaved changes warning before delete</td>
+<td>hours</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="strategic-priorities">Strategic Priorities<a class="headerlink" href="#strategic-priorities" title="Permanent link">&para;</a></h2>
+<h3 id="for-competitive-positioning-vs-databrickssnowflake">For competitive positioning (vs Databricks/Snowflake)<a class="headerlink" href="#for-competitive-positioning-vs-databrickssnowflake" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Snowflake + BigQuery + Redshift connectors (2.1–2.3)</li>
+<li>Query plan visualization (7.1)</li>
+<li>Anomaly detection (1.17)</li>
+</ul>
+<h3 id="for-enterprise-readiness">For enterprise readiness<a class="headerlink" href="#for-enterprise-readiness" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Token refresh flow (3.7)</li>
+<li>Custom RBAC (3.9)</li>
+<li>Audit completeness (3.14)</li>
+<li>Masking policy versioning (1.20)</li>
+</ul>
+<h3 id="for-developer-experience">For developer experience<a class="headerlink" href="#for-developer-experience" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>havn env</code> (2.14), <code>havn sample</code> (2.15), <code>havn export</code> (2.16)</li>
+<li>Watch mode (2.17)</li>
+<li>Better error messages (2.22, 3.6)</li>
+<li>Assertion debugging (1.16)</li>
+</ul>
+<h3 id="for-production-reliability">For production reliability<a class="headerlink" href="#for-production-reliability" title="Permanent link">&para;</a></h3>
+<ul>
+<li>SSE reconnection (5.1)</li>
+<li>Chaos tests (6.3)</li>
+<li>Circuit breaker UI (1.23)</li>
+<li>Pipeline pause/resume (3.19)</li>
+</ul>
+<hr />
+<p><em>Generated by 6 parallel analysis agents scanning the full havn codebase.</em></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

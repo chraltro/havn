@@ -1,0 +1,3778 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="The open-source data platform that runs on your machine. DuckDB + SQL transforms + Python. Data in safe waters.">
+      
+      
+      
+        <link rel="canonical" href="https://chraltro.github.io/db/api-reference/">
+      
+      
+        <link rel="prev" href="../cli-reference/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>API Reference - havn</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Outfit:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Outfit";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#api-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="havn" class="md-header__button md-logo" aria-label="havn" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            havn
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              API Reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/chraltro/db" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    chraltro/db
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../transforms/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Transforms
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../quality/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Data Quality
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../connectors/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Connectors
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../notebooks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Notebooks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../pipelines/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Pipelines
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../cli-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="havn" class="md-nav__button md-logo" aria-label="havn" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    havn
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/chraltro/db" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    chraltro/db
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transforms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transforms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipelines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Authentication">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-apiauthlogin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/auth/login
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiauthme" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/auth/me
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiauthstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/auth/status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiauthsetup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/auth/setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#user-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User Management
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="User Management">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apiusers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/users
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiusers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/users
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#put-apiusersusername" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PUT /api/users/{username}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delete-apiusersusername" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DELETE /api/users/{username}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#secrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Secrets">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apisecrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/secrets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apisecrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/secrets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delete-apisecretskey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DELETE /api/secrets/{key}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Files
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apifiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apifilespath" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/files/{path}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#put-apifilespath" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PUT /api/files/{path}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delete-apifilespath" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DELETE /api/files/{path}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Query
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Query">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-apiquery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/query
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tables
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tables">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apitables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/tables
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apitablesschematable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/tables/{schema}/{table}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apitablesschematablesample" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/tables/{schema}/{table}/sample
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apitablesschematableprofile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/tables/{schema}/{table}/profile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiautocomplete" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/autocomplete
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Models
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Models">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apimodels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/models
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apitransform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/transform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apimodelscreate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/models/create
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apicheck" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/check
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apidiff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/diff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apimodelsmodel_namenotebook-view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/models/{model_name}/notebook-view
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DAG
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DAG">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apidag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/dag
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apidagfull" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/dag/full
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lineage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lineage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Lineage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apilineagemodel_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/lineage/{model_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apilineage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/lineage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiimpactmodel_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/impact/{model_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipeline
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pipeline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-apirun" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apistreamstream_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/stream/{stream_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apistreams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/streams
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apihistory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apischeduler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/scheduler
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connectors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Connectors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apiconnectorsavailable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/connectors/available
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiconnectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/connectors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiconnectorstest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/connectors/test
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiconnectorsdiscover" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/connectors/discover
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiconnectorssetup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/connectors/setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiconnectorsregenerateconnection_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/connectors/regenerate/{connection_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiconnectorssyncconnection_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/connectors/sync/{connection_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delete-apiconnectorsconnection_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DELETE /api/connectors/{connection_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiconnectorshealth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/connectors/health
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiwebhookwebhook_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/webhook/{webhook_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cdc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CDC
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CDC">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apicdc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/cdc
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apicdcconnector_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/cdc/{connector_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apicdcconnector_namereset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/cdc/{connector_name}/reset
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-quality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Quality
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Quality">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apifreshness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/freshness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiprofiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/profiles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiprofilesmodel_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/profiles/{model_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiassertions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/assertions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiassertionsmodel_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/assertions/{model_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apialerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/alerts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apialertstest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/alerts/test
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apicontracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/contracts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apicontractsrun" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/contracts/run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apicontractshistory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/contracts/history
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#masking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Masking
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Masking">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apimaskingpolicies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/masking/policies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apimaskingpolicies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/masking/policies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apimaskingpoliciespolicy_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/masking/policies/{policy_id}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#put-apimaskingpoliciespolicy_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PUT /api/masking/policies/{policy_id}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delete-apimaskingpoliciespolicy_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DELETE /api/masking/policies/{policy_id}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalog
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Catalog">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apiseeds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/seeds
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiseeds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/seeds
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apisources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/sources
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apisourcesfreshness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/sources/freshness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiexposures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/exposures
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apienvironment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#put-apienvironmentenv_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PUT /api/environment/{env_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apioverview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/overview
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#versioning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Versioning
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Versioning">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apiversions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/versions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiversions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/versions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiversionsversion_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/versions/{version_id}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiversionsfrom_versiondiff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/versions/{from_version}/diff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiversionsversion_idrestore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/versions/{version_id}/restore
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiversionstimelinetable_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/versions/timeline/{table_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Documentation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apidocsmarkdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/docs/markdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apidocsstructured" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/docs/structured
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lint
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Lint">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-apilint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/lint
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#git" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Git
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Git">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apigitstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/git/status
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wiki" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wiki
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Wiki">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apiwiki" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/wiki
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiwikislug" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/wiki/{slug}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#collaboration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collaboration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Collaboration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#websocket-wscollaborate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WebSocket /ws/collaborate
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notebooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notebooks
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Notebooks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#various-notebook-endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Various notebook endpoints
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Authentication">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-apiauthlogin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/auth/login
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiauthme" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/auth/me
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiauthstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/auth/status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiauthsetup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/auth/setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#user-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User Management
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="User Management">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apiusers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/users
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiusers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/users
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#put-apiusersusername" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PUT /api/users/{username}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delete-apiusersusername" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DELETE /api/users/{username}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#secrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Secrets">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apisecrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/secrets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apisecrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/secrets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delete-apisecretskey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DELETE /api/secrets/{key}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Files
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apifiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apifilespath" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/files/{path}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#put-apifilespath" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PUT /api/files/{path}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delete-apifilespath" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DELETE /api/files/{path}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Query
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Query">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-apiquery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/query
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tables
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tables">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apitables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/tables
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apitablesschematable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/tables/{schema}/{table}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apitablesschematablesample" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/tables/{schema}/{table}/sample
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apitablesschematableprofile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/tables/{schema}/{table}/profile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiautocomplete" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/autocomplete
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Models
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Models">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apimodels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/models
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apitransform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/transform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apimodelscreate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/models/create
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apicheck" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/check
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apidiff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/diff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apimodelsmodel_namenotebook-view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/models/{model_name}/notebook-view
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DAG
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DAG">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apidag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/dag
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apidagfull" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/dag/full
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lineage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lineage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Lineage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apilineagemodel_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/lineage/{model_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apilineage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/lineage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiimpactmodel_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/impact/{model_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipeline
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pipeline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-apirun" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apistreamstream_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/stream/{stream_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apistreams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/streams
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apihistory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apischeduler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/scheduler
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connectors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Connectors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apiconnectorsavailable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/connectors/available
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiconnectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/connectors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiconnectorstest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/connectors/test
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiconnectorsdiscover" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/connectors/discover
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiconnectorssetup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/connectors/setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiconnectorsregenerateconnection_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/connectors/regenerate/{connection_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiconnectorssyncconnection_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/connectors/sync/{connection_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delete-apiconnectorsconnection_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DELETE /api/connectors/{connection_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiconnectorshealth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/connectors/health
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiwebhookwebhook_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/webhook/{webhook_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cdc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CDC
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CDC">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apicdc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/cdc
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apicdcconnector_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/cdc/{connector_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apicdcconnector_namereset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/cdc/{connector_name}/reset
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-quality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Quality
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Quality">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apifreshness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/freshness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiprofiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/profiles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiprofilesmodel_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/profiles/{model_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiassertions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/assertions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiassertionsmodel_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/assertions/{model_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apialerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/alerts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apialertstest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/alerts/test
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apicontracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/contracts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apicontractsrun" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/contracts/run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apicontractshistory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/contracts/history
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#masking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Masking
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Masking">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apimaskingpolicies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/masking/policies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apimaskingpolicies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/masking/policies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apimaskingpoliciespolicy_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/masking/policies/{policy_id}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#put-apimaskingpoliciespolicy_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PUT /api/masking/policies/{policy_id}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delete-apimaskingpoliciespolicy_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DELETE /api/masking/policies/{policy_id}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalog
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Catalog">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apiseeds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/seeds
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiseeds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/seeds
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apisources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/sources
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apisourcesfreshness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/sources/freshness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiexposures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/exposures
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apienvironment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#put-apienvironmentenv_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PUT /api/environment/{env_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apioverview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/overview
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#versioning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Versioning
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Versioning">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apiversions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/versions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiversions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/versions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiversionsversion_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/versions/{version_id}
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiversionsfrom_versiondiff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/versions/{from_version}/diff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiversionsversion_idrestore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/versions/{version_id}/restore
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiversionstimelinetable_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/versions/timeline/{table_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Documentation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apidocsmarkdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/docs/markdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apidocsstructured" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/docs/structured
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lint
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Lint">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-apilint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/lint
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#git" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Git
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Git">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apigitstatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/git/status
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wiki" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wiki
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Wiki">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apiwiki" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/wiki
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiwikislug" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/wiki/{slug}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#collaboration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collaboration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Collaboration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#websocket-wscollaborate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WebSocket /ws/collaborate
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notebooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notebooks
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Notebooks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#various-notebook-endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Various notebook endpoints
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="api-reference">API Reference<a class="headerlink" href="#api-reference" title="Permanent link">&para;</a></h1>
+<p>havn exposes a REST API via FastAPI at <code>http://localhost:3000</code>. All endpoints are prefixed with <code>/api/</code>. When authentication is enabled (<code>havn serve --auth</code>), include an <code>Authorization: Bearer &lt;token&gt;</code> header.</p>
+<h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
+<h3 id="post-apiauthlogin">POST /api/auth/login<a class="headerlink" href="#post-apiauthlogin" title="Permanent link">&para;</a></h3>
+<p>Authenticate and receive a token.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;username&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;admin&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;password&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;your-password&quot;</span><span class="p">}</span>
+</code></pre></div>
+<p>Returns: <code>{"token": "...", "username": "admin"}</code></p>
+<h3 id="get-apiauthme">GET /api/auth/me<a class="headerlink" href="#get-apiauthme" title="Permanent link">&para;</a></h3>
+<p>Get the current authenticated user. Returns username, role, and display name.</p>
+<h3 id="get-apiauthstatus">GET /api/auth/status<a class="headerlink" href="#get-apiauthstatus" title="Permanent link">&para;</a></h3>
+<p>Check if auth is enabled and whether initial setup is needed.</p>
+<p>Returns: <code>{"auth_enabled": true, "needs_setup": false}</code></p>
+<h3 id="post-apiauthsetup">POST /api/auth/setup<a class="headerlink" href="#post-apiauthsetup" title="Permanent link">&para;</a></h3>
+<p>Create the first admin user. Only works when no users exist.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;username&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;admin&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;password&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;password&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;admin&quot;</span><span class="p">}</span>
+</code></pre></div>
+<h2 id="user-management">User Management<a class="headerlink" href="#user-management" title="Permanent link">&para;</a></h2>
+<p>Requires <code>admin</code> role.</p>
+<h3 id="get-apiusers">GET /api/users<a class="headerlink" href="#get-apiusers" title="Permanent link">&para;</a></h3>
+<p>List all users (no passwords returned).</p>
+<h3 id="post-apiusers">POST /api/users<a class="headerlink" href="#post-apiusers" title="Permanent link">&para;</a></h3>
+<p>Create a new user.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;username&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;analyst&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;password&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;pass&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;viewer&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;display_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Data Analyst&quot;</span><span class="p">}</span>
+</code></pre></div>
+<h3 id="put-apiusersusername">PUT /api/users/{username}<a class="headerlink" href="#put-apiusersusername" title="Permanent link">&para;</a></h3>
+<p>Update user role, password, or display name.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;editor&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;display_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Senior Analyst&quot;</span><span class="p">}</span>
+</code></pre></div>
+<h3 id="delete-apiusersusername">DELETE /api/users/{username}<a class="headerlink" href="#delete-apiusersusername" title="Permanent link">&para;</a></h3>
+<p>Delete a user and revoke all their tokens.</p>
+<h2 id="secrets">Secrets<a class="headerlink" href="#secrets" title="Permanent link">&para;</a></h2>
+<p>Requires <code>admin</code> role.</p>
+<h3 id="get-apisecrets">GET /api/secrets<a class="headerlink" href="#get-apisecrets" title="Permanent link">&para;</a></h3>
+<p>List secrets (keys and masked values).</p>
+<h3 id="post-apisecrets">POST /api/secrets<a class="headerlink" href="#post-apisecrets" title="Permanent link">&para;</a></h3>
+<p>Set or update a secret.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;DB_PASSWORD&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;new_value&quot;</span><span class="p">}</span>
+</code></pre></div>
+<h3 id="delete-apisecretskey">DELETE /api/secrets/{key}<a class="headerlink" href="#delete-apisecretskey" title="Permanent link">&para;</a></h3>
+<p>Delete a secret from <code>.env</code>.</p>
+<h2 id="files">Files<a class="headerlink" href="#files" title="Permanent link">&para;</a></h2>
+<h3 id="get-apifiles">GET /api/files<a class="headerlink" href="#get-apifiles" title="Permanent link">&para;</a></h3>
+<p>List project files as a tree structure.</p>
+<h3 id="get-apifilespath">GET /api/files/{path}<a class="headerlink" href="#get-apifilespath" title="Permanent link">&para;</a></h3>
+<p>Read a file's content. Returns <code>{path, content, language}</code>.</p>
+<h3 id="put-apifilespath">PUT /api/files/{path}<a class="headerlink" href="#put-apifilespath" title="Permanent link">&para;</a></h3>
+<p>Save or create a file. Allowed extensions: <code>.sql</code>, <code>.py</code>, <code>.yml</code>, <code>.yaml</code>, <code>.dpnb</code>, <code>.sqlfluff</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;content&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;SELECT 1&quot;</span><span class="p">}</span>
+</code></pre></div>
+<h3 id="delete-apifilespath">DELETE /api/files/{path}<a class="headerlink" href="#delete-apifilespath" title="Permanent link">&para;</a></h3>
+<p>Delete a file. Optional <code>?drop_object=true</code> to also drop the corresponding database object.</p>
+<h2 id="query">Query<a class="headerlink" href="#query" title="Permanent link">&para;</a></h2>
+<h3 id="post-apiquery">POST /api/query<a class="headerlink" href="#post-apiquery" title="Permanent link">&para;</a></h3>
+<p>Execute an ad-hoc SQL query with timeout (30s).</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;sql&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;SELECT * FROM gold.summary&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;limit&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1000</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;offset&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">}</span>
+</code></pre></div>
+<p>Returns: <code>{columns, rows, truncated, offset, limit}</code></p>
+<p>Also intercepts masking SQL commands: <code>SHOW MASKING POLICIES</code>, <code>CREATE MASKING POLICY ON ...</code>, <code>DROP MASKING POLICY &lt;id&gt;</code>.</p>
+<h2 id="tables">Tables<a class="headerlink" href="#tables" title="Permanent link">&para;</a></h2>
+<h3 id="get-apitables">GET /api/tables<a class="headerlink" href="#get-apitables" title="Permanent link">&para;</a></h3>
+<p>List warehouse tables and views. Optional <code>?schema=gold</code> filter.</p>
+<p>Returns: <code>[{schema, name, type}]</code></p>
+<h3 id="get-apitablesschematable">GET /api/tables/{schema}/{table}<a class="headerlink" href="#get-apitablesschematable" title="Permanent link">&para;</a></h3>
+<p>Describe a table's columns.</p>
+<p>Returns: <code>{schema, name, columns: [{name, type, nullable}]}</code></p>
+<h3 id="get-apitablesschematablesample">GET /api/tables/{schema}/{table}/sample<a class="headerlink" href="#get-apitablesschematablesample" title="Permanent link">&para;</a></h3>
+<p>Get sample rows with pagination.</p>
+<p>Query params: <code>?limit=100&amp;offset=0</code></p>
+<p>Returns: <code>{schema, table, columns, rows, limit, offset}</code></p>
+<h3 id="get-apitablesschematableprofile">GET /api/tables/{schema}/{table}/profile<a class="headerlink" href="#get-apitablesschematableprofile" title="Permanent link">&para;</a></h3>
+<p>Get column-level statistics: null counts, distinct counts, min/max, averages, sample values.</p>
+<h3 id="get-apiautocomplete">GET /api/autocomplete<a class="headerlink" href="#get-apiautocomplete" title="Permanent link">&para;</a></h3>
+<p>Get table and column names for query editor autocomplete.</p>
+<h2 id="models">Models<a class="headerlink" href="#models" title="Permanent link">&para;</a></h2>
+<h3 id="get-apimodels">GET /api/models<a class="headerlink" href="#get-apimodels" title="Permanent link">&para;</a></h3>
+<p>List all SQL transform models with metadata.</p>
+<p>Returns: <code>[{name, schema, full_name, materialized, depends_on, path, content_hash}]</code></p>
+<h3 id="post-apitransform">POST /api/transform<a class="headerlink" href="#post-apitransform" title="Permanent link">&para;</a></h3>
+<p>Run the SQL transformation pipeline.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;targets&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;force&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">}</span>
+</code></pre></div>
+<h3 id="post-apimodelscreate">POST /api/models/create<a class="headerlink" href="#post-apimodelscreate" title="Permanent link">&para;</a></h3>
+<p>Create a new SQL model file.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my_model&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;schema_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;silver&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;materialized&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;table&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;sql&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;SELECT 1&quot;</span><span class="p">}</span>
+</code></pre></div>
+<h3 id="post-apicheck">POST /api/check<a class="headerlink" href="#post-apicheck" title="Permanent link">&para;</a></h3>
+<p>Validate models, run assertions, and run contracts.</p>
+<h3 id="post-apidiff">POST /api/diff<a class="headerlink" href="#post-apidiff" title="Permanent link">&para;</a></h3>
+<p>Compare SQL output against materialized tables.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;targets&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;target_schema&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;full&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">}</span>
+</code></pre></div>
+<h3 id="get-apimodelsmodel_namenotebook-view">GET /api/models/{model_name}/notebook-view<a class="headerlink" href="#get-apimodelsmodel_namenotebook-view" title="Permanent link">&para;</a></h3>
+<p>Get a notebook-style view combining SQL source, sample data, lineage, and dependencies.</p>
+<h2 id="dag">DAG<a class="headerlink" href="#dag" title="Permanent link">&para;</a></h2>
+<h3 id="get-apidag">GET /api/dag<a class="headerlink" href="#get-apidag" title="Permanent link">&para;</a></h3>
+<p>Get the model dependency DAG (nodes and edges).</p>
+<h3 id="get-apidagfull">GET /api/dag/full<a class="headerlink" href="#get-apidagfull" title="Permanent link">&para;</a></h3>
+<p>Get the full DAG including seeds, sources, ingest scripts, and exposures.</p>
+<h2 id="lineage">Lineage<a class="headerlink" href="#lineage" title="Permanent link">&para;</a></h2>
+<h3 id="get-apilineagemodel_name">GET /api/lineage/{model_name}<a class="headerlink" href="#get-apilineagemodel_name" title="Permanent link">&para;</a></h3>
+<p>Get column-level lineage for a model. Returns <code>{model, columns, depends_on}</code>.</p>
+<h3 id="get-apilineage">GET /api/lineage<a class="headerlink" href="#get-apilineage" title="Permanent link">&para;</a></h3>
+<p>Get column-level lineage for all models.</p>
+<h3 id="get-apiimpactmodel_name">GET /api/impact/{model_name}<a class="headerlink" href="#get-apiimpactmodel_name" title="Permanent link">&para;</a></h3>
+<p>Analyze downstream impact. Optional <code>?column=name</code> for column-level analysis.</p>
+<h2 id="pipeline">Pipeline<a class="headerlink" href="#pipeline" title="Permanent link">&para;</a></h2>
+<h3 id="post-apirun">POST /api/run<a class="headerlink" href="#post-apirun" title="Permanent link">&para;</a></h3>
+<p>Run an ingest or export script.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;script_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ingest/customers.py&quot;</span><span class="p">}</span>
+</code></pre></div>
+<h3 id="post-apistreamstream_name">POST /api/stream/{stream_name}<a class="headerlink" href="#post-apistreamstream_name" title="Permanent link">&para;</a></h3>
+<p>Run a full stream. Optional <code>?force=true</code>.</p>
+<h3 id="get-apistreams">GET /api/streams<a class="headerlink" href="#get-apistreams" title="Permanent link">&para;</a></h3>
+<p>List configured streams with steps and schedules.</p>
+<h3 id="get-apihistory">GET /api/history<a class="headerlink" href="#get-apihistory" title="Permanent link">&para;</a></h3>
+<p>Get run history. Optional <code>?limit=50</code>.</p>
+<h3 id="get-apischeduler">GET /api/scheduler<a class="headerlink" href="#get-apischeduler" title="Permanent link">&para;</a></h3>
+<p>Get scheduler status and scheduled streams.</p>
+<h2 id="connectors">Connectors<a class="headerlink" href="#connectors" title="Permanent link">&para;</a></h2>
+<h3 id="get-apiconnectorsavailable">GET /api/connectors/available<a class="headerlink" href="#get-apiconnectorsavailable" title="Permanent link">&para;</a></h3>
+<p>List all available connector types with parameters.</p>
+<h3 id="get-apiconnectors">GET /api/connectors<a class="headerlink" href="#get-apiconnectors" title="Permanent link">&para;</a></h3>
+<p>List connectors configured in the project.</p>
+<h3 id="post-apiconnectorstest">POST /api/connectors/test<a class="headerlink" href="#post-apiconnectorstest" title="Permanent link">&para;</a></h3>
+<p>Test a connector without setup.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;connector_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;postgres&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;config&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;host&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;database&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">}}</span>
+</code></pre></div>
+<h3 id="post-apiconnectorsdiscover">POST /api/connectors/discover<a class="headerlink" href="#post-apiconnectorsdiscover" title="Permanent link">&para;</a></h3>
+<p>Discover available resources for a connector.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;connector_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;postgres&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;config&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;host&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">}}</span>
+</code></pre></div>
+<h3 id="post-apiconnectorssetup">POST /api/connectors/setup<a class="headerlink" href="#post-apiconnectorssetup" title="Permanent link">&para;</a></h3>
+<p>Full connector setup: test, generate script, update config.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;connector_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;postgres&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;connection_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod_db&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;config&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;host&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;database&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;tables&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;users&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;orders&quot;</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;target_schema&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;landing&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;schedule&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0 6 * * *&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="post-apiconnectorsregenerateconnection_name">POST /api/connectors/regenerate/{connection_name}<a class="headerlink" href="#post-apiconnectorsregenerateconnection_name" title="Permanent link">&para;</a></h3>
+<p>Regenerate the ingest script for an existing connector.</p>
+<h3 id="post-apiconnectorssyncconnection_name">POST /api/connectors/sync/{connection_name}<a class="headerlink" href="#post-apiconnectorssyncconnection_name" title="Permanent link">&para;</a></h3>
+<p>Run sync for a configured connector.</p>
+<h3 id="delete-apiconnectorsconnection_name">DELETE /api/connectors/{connection_name}<a class="headerlink" href="#delete-apiconnectorsconnection_name" title="Permanent link">&para;</a></h3>
+<p>Remove a connector (script and config).</p>
+<h3 id="get-apiconnectorshealth">GET /api/connectors/health<a class="headerlink" href="#get-apiconnectorshealth" title="Permanent link">&para;</a></h3>
+<p>Get last sync status for each connector.</p>
+<h3 id="post-apiwebhookwebhook_name">POST /api/webhook/{webhook_name}<a class="headerlink" href="#post-apiwebhookwebhook_name" title="Permanent link">&para;</a></h3>
+<p>Receive webhook data and store in <code>landing.&lt;name&gt;_inbox</code>.</p>
+<h2 id="cdc">CDC<a class="headerlink" href="#cdc" title="Permanent link">&para;</a></h2>
+<h3 id="get-apicdc">GET /api/cdc<a class="headerlink" href="#get-apicdc" title="Permanent link">&para;</a></h3>
+<p>Get CDC state for all tracked connectors.</p>
+<h3 id="get-apicdcconnector_name">GET /api/cdc/{connector_name}<a class="headerlink" href="#get-apicdcconnector_name" title="Permanent link">&para;</a></h3>
+<p>Get CDC state for a specific connector.</p>
+<h3 id="post-apicdcconnector_namereset">POST /api/cdc/{connector_name}/reset<a class="headerlink" href="#post-apicdcconnector_namereset" title="Permanent link">&para;</a></h3>
+<p>Reset CDC watermarks for a connector.</p>
+<h2 id="data-quality">Data Quality<a class="headerlink" href="#data-quality" title="Permanent link">&para;</a></h2>
+<h3 id="get-apifreshness">GET /api/freshness<a class="headerlink" href="#get-apifreshness" title="Permanent link">&para;</a></h3>
+<p>Check model freshness. Optional <code>?max_hours=24</code>.</p>
+<h3 id="get-apiprofiles">GET /api/profiles<a class="headerlink" href="#get-apiprofiles" title="Permanent link">&para;</a></h3>
+<p>Get profile stats for all models.</p>
+<h3 id="get-apiprofilesmodel_name">GET /api/profiles/{model_name}<a class="headerlink" href="#get-apiprofilesmodel_name" title="Permanent link">&para;</a></h3>
+<p>Get profile stats for a specific model.</p>
+<h3 id="get-apiassertions">GET /api/assertions<a class="headerlink" href="#get-apiassertions" title="Permanent link">&para;</a></h3>
+<p>Get recent assertion results. Optional <code>?limit=100</code>.</p>
+<h3 id="get-apiassertionsmodel_name">GET /api/assertions/{model_name}<a class="headerlink" href="#get-apiassertionsmodel_name" title="Permanent link">&para;</a></h3>
+<p>Get assertion results for a specific model.</p>
+<h3 id="get-apialerts">GET /api/alerts<a class="headerlink" href="#get-apialerts" title="Permanent link">&para;</a></h3>
+<p>Get alert history. Optional <code>?limit=50</code>.</p>
+<h3 id="post-apialertstest">POST /api/alerts/test<a class="headerlink" href="#post-apialertstest" title="Permanent link">&para;</a></h3>
+<p>Send a test alert.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;channel&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;slack&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;slack_webhook_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://hooks.slack.com/...&quot;</span><span class="p">}</span>
+</code></pre></div>
+<h3 id="get-apicontracts">GET /api/contracts<a class="headerlink" href="#get-apicontracts" title="Permanent link">&para;</a></h3>
+<p>List all discovered contracts.</p>
+<h3 id="post-apicontractsrun">POST /api/contracts/run<a class="headerlink" href="#post-apicontractsrun" title="Permanent link">&para;</a></h3>
+<p>Run all data contracts.</p>
+<h3 id="get-apicontractshistory">GET /api/contracts/history<a class="headerlink" href="#get-apicontractshistory" title="Permanent link">&para;</a></h3>
+<p>Get contract evaluation history.</p>
+<h2 id="masking">Masking<a class="headerlink" href="#masking" title="Permanent link">&para;</a></h2>
+<h3 id="get-apimaskingpolicies">GET /api/masking/policies<a class="headerlink" href="#get-apimaskingpolicies" title="Permanent link">&para;</a></h3>
+<p>List all masking policies.</p>
+<h3 id="post-apimaskingpolicies">POST /api/masking/policies<a class="headerlink" href="#post-apimaskingpolicies" title="Permanent link">&para;</a></h3>
+<p>Create a new masking policy.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;schema_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gold&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;table_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;customers&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;column_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;email&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;method&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;hash&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;exempted_roles&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;admin&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="get-apimaskingpoliciespolicy_id">GET /api/masking/policies/{policy_id}<a class="headerlink" href="#get-apimaskingpoliciespolicy_id" title="Permanent link">&para;</a></h3>
+<p>Get a specific masking policy.</p>
+<h3 id="put-apimaskingpoliciespolicy_id">PUT /api/masking/policies/{policy_id}<a class="headerlink" href="#put-apimaskingpoliciespolicy_id" title="Permanent link">&para;</a></h3>
+<p>Update a masking policy.</p>
+<h3 id="delete-apimaskingpoliciespolicy_id">DELETE /api/masking/policies/{policy_id}<a class="headerlink" href="#delete-apimaskingpoliciespolicy_id" title="Permanent link">&para;</a></h3>
+<p>Delete a masking policy.</p>
+<h2 id="catalog">Catalog<a class="headerlink" href="#catalog" title="Permanent link">&para;</a></h2>
+<h3 id="get-apiseeds">GET /api/seeds<a class="headerlink" href="#get-apiseeds" title="Permanent link">&para;</a></h3>
+<p>List all seed CSV files.</p>
+<h3 id="post-apiseeds">POST /api/seeds<a class="headerlink" href="#post-apiseeds" title="Permanent link">&para;</a></h3>
+<p>Load all seeds. Body: <code>{"force": false, "schema_name": "seeds"}</code></p>
+<h3 id="get-apisources">GET /api/sources<a class="headerlink" href="#get-apisources" title="Permanent link">&para;</a></h3>
+<p>List declared sources from sources.yml.</p>
+<h3 id="get-apisourcesfreshness">GET /api/sources/freshness<a class="headerlink" href="#get-apisourcesfreshness" title="Permanent link">&para;</a></h3>
+<p>Check source freshness against SLAs.</p>
+<h3 id="get-apiexposures">GET /api/exposures<a class="headerlink" href="#get-apiexposures" title="Permanent link">&para;</a></h3>
+<p>List declared exposures.</p>
+<h3 id="get-apienvironment">GET /api/environment<a class="headerlink" href="#get-apienvironment" title="Permanent link">&para;</a></h3>
+<p>Get current and available environments.</p>
+<h3 id="put-apienvironmentenv_name">PUT /api/environment/{env_name}<a class="headerlink" href="#put-apienvironmentenv_name" title="Permanent link">&para;</a></h3>
+<p>Switch the active environment.</p>
+<h3 id="get-apioverview">GET /api/overview<a class="headerlink" href="#get-apioverview" title="Permanent link">&para;</a></h3>
+<p>Get platform overview: schemas, tables, rows, recent runs, connectors.</p>
+<h2 id="versioning">Versioning<a class="headerlink" href="#versioning" title="Permanent link">&para;</a></h2>
+<h3 id="get-apiversions">GET /api/versions<a class="headerlink" href="#get-apiversions" title="Permanent link">&para;</a></h3>
+<p>List all warehouse versions.</p>
+<h3 id="post-apiversions">POST /api/versions<a class="headerlink" href="#post-apiversions" title="Permanent link">&para;</a></h3>
+<p>Create a new version snapshot.</p>
+<h3 id="get-apiversionsversion_id">GET /api/versions/{version_id}<a class="headerlink" href="#get-apiversionsversion_id" title="Permanent link">&para;</a></h3>
+<p>Get version details.</p>
+<h3 id="get-apiversionsfrom_versiondiff">GET /api/versions/{from_version}/diff<a class="headerlink" href="#get-apiversionsfrom_versiondiff" title="Permanent link">&para;</a></h3>
+<p>Diff two versions. Optional <code>?to_version=...</code> (defaults to current state).</p>
+<h3 id="post-apiversionsversion_idrestore">POST /api/versions/{version_id}/restore<a class="headerlink" href="#post-apiversionsversion_idrestore" title="Permanent link">&para;</a></h3>
+<p>Restore tables from a version.</p>
+<h3 id="get-apiversionstimelinetable_name">GET /api/versions/timeline/{table_name}<a class="headerlink" href="#get-apiversionstimelinetable_name" title="Permanent link">&para;</a></h3>
+<p>Get version history for a specific table.</p>
+<h2 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h2>
+<h3 id="get-apidocsmarkdown">GET /api/docs/markdown<a class="headerlink" href="#get-apidocsmarkdown" title="Permanent link">&para;</a></h3>
+<p>Generate markdown documentation for the project.</p>
+<h3 id="get-apidocsstructured">GET /api/docs/structured<a class="headerlink" href="#get-apidocsstructured" title="Permanent link">&para;</a></h3>
+<p>Generate structured documentation for the UI.</p>
+<h2 id="lint">Lint<a class="headerlink" href="#lint" title="Permanent link">&para;</a></h2>
+<h3 id="post-apilint">POST /api/lint<a class="headerlink" href="#post-apilint" title="Permanent link">&para;</a></h3>
+<p>Lint SQL files. Body: <code>{"fix": false}</code></p>
+<h2 id="git">Git<a class="headerlink" href="#git" title="Permanent link">&para;</a></h2>
+<h3 id="get-apigitstatus">GET /api/git/status<a class="headerlink" href="#get-apigitstatus" title="Permanent link">&para;</a></h3>
+<p>Get git status: branch, dirty flag, changed files, last commit.</p>
+<h2 id="wiki">Wiki<a class="headerlink" href="#wiki" title="Permanent link">&para;</a></h2>
+<h3 id="get-apiwiki">GET /api/wiki<a class="headerlink" href="#get-apiwiki" title="Permanent link">&para;</a></h3>
+<p>List all wiki pages with slugs, titles, and categories.</p>
+<h3 id="get-apiwikislug">GET /api/wiki/{slug}<a class="headerlink" href="#get-apiwikislug" title="Permanent link">&para;</a></h3>
+<p>Get a wiki page by slug. Returns title, content (markdown), and category.</p>
+<h2 id="collaboration">Collaboration<a class="headerlink" href="#collaboration" title="Permanent link">&para;</a></h2>
+<h3 id="websocket-wscollaborate">WebSocket /ws/collaborate<a class="headerlink" href="#websocket-wscollaborate" title="Permanent link">&para;</a></h3>
+<p>Real-time collaboration WebSocket for concurrent file editing.</p>
+<h2 id="notebooks">Notebooks<a class="headerlink" href="#notebooks" title="Permanent link">&para;</a></h2>
+<h3 id="various-notebook-endpoints">Various notebook endpoints<a class="headerlink" href="#various-notebook-endpoints" title="Permanent link">&para;</a></h3>
+<p>Notebook endpoints handle listing, reading, executing cells, and saving <code>.dpnb</code> files. See the FastAPI auto-generated docs at <code>/docs</code> for the full notebook API.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

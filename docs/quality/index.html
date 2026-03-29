@@ -1,0 +1,1863 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="The open-source data platform that runs on your machine. DuckDB + SQL transforms + Python. Data in safe waters.">
+      
+      
+      
+        <link rel="canonical" href="https://chraltro.github.io/db/quality/">
+      
+      
+        <link rel="prev" href="../transforms/">
+      
+      
+        <link rel="next" href="../connectors/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Data Quality - havn</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Outfit:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Outfit";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#data-quality" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="havn" class="md-header__button md-logo" aria-label="havn" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            havn
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Data Quality
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/chraltro/db" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    chraltro/db
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../transforms/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Transforms
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Data Quality
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../connectors/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Connectors
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../notebooks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Notebooks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../pipelines/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Pipelines
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../cli-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../api-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="havn" class="md-nav__button md-logo" aria-label="havn" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    havn
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/chraltro/db" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    chraltro/db
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transforms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transforms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Quality
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#inline-assertions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inline Assertions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Inline Assertions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#available-assertion-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available Assertion Types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Available Assertion Types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#row_count-n" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        row_count &gt; N
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#uniquecolumn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        unique(column)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#no_nullscolumn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        no_nulls(column)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#accepted_valuescolumn-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        accepted_values(column, [values])
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-sql-expressions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom SQL Expressions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assertion-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assertion Behavior
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assertion-debugging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assertion Debugging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#viewing-assertion-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Viewing Assertion Results
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-profiling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Profiling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Profiling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#viewing-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Viewing Profiles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#profile-via-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Profile via API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#table-level-profiling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Table-Level Profiling
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#freshness-monitoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Freshness Monitoring
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Freshness Monitoring">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#check-model-freshness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check Model Freshness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#check-source-freshness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check Source Freshness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#freshness-alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Freshness Alerts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#freshness-via-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Freshness via API
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#combined-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Combined Validation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Combined Validation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cicd-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI/CD Integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alerts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Alerts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#alert-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alert Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#test-alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test Alerts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#alert-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alert History
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#anomaly-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Anomaly Detection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Anomaly Detection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#viewing-anomalies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Viewing Anomalies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#edge-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Edge Cases
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related Pages
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipelines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#inline-assertions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inline Assertions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Inline Assertions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#available-assertion-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available Assertion Types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Available Assertion Types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#row_count-n" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        row_count &gt; N
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#uniquecolumn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        unique(column)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#no_nullscolumn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        no_nulls(column)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#accepted_valuescolumn-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        accepted_values(column, [values])
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-sql-expressions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom SQL Expressions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assertion-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assertion Behavior
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assertion-debugging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assertion Debugging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#viewing-assertion-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Viewing Assertion Results
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-profiling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Profiling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Profiling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#viewing-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Viewing Profiles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#profile-via-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Profile via API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#table-level-profiling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Table-Level Profiling
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#freshness-monitoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Freshness Monitoring
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Freshness Monitoring">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#check-model-freshness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check Model Freshness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#check-source-freshness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check Source Freshness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#freshness-alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Freshness Alerts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#freshness-via-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Freshness via API
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#combined-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Combined Validation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Combined Validation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cicd-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI/CD Integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alerts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Alerts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#alert-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alert Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#test-alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test Alerts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#alert-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alert History
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#anomaly-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Anomaly Detection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Anomaly Detection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#viewing-anomalies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Viewing Anomalies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#edge-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Edge Cases
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related Pages
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="data-quality">Data Quality<a class="headerlink" href="#data-quality" title="Permanent link">&para;</a></h1>
+<p>havn provides a comprehensive data quality framework with three complementary systems: inline assertions in SQL models, automatic profiling, and freshness monitoring. For standalone quality rules, see <a href="contracts">Contracts</a>.</p>
+<h2 id="inline-assertions">Inline Assertions<a class="headerlink" href="#inline-assertions" title="Permanent link">&para;</a></h2>
+<p>Add <code>-- assert:</code> comments to SQL model files. Assertions are evaluated after each model builds during <code>havn transform</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">-- config: materialized=table, schema=gold</span>
+<span class="c1">-- depends_on: silver.customers</span>
+<span class="c1">-- assert: row_count &gt; 0</span>
+<span class="c1">-- assert: unique(customer_id)</span>
+<span class="c1">-- assert: no_nulls(customer_id)</span>
+<span class="c1">-- assert: no_nulls(email)</span>
+<span class="c1">-- assert: accepted_values(status, [&#39;active&#39;, &#39;inactive&#39;, &#39;suspended&#39;])</span>
+<span class="c1">-- assert: &quot;lifetime_value &gt;= 0&quot;</span>
+
+<span class="k">SELECT</span>
+<span class="w">    </span><span class="n">customer_id</span><span class="p">,</span>
+<span class="w">    </span><span class="n">email</span><span class="p">,</span>
+<span class="w">    </span><span class="n">status</span><span class="p">,</span>
+<span class="w">    </span><span class="k">SUM</span><span class="p">(</span><span class="n">order_total</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">lifetime_value</span>
+<span class="k">FROM</span><span class="w"> </span><span class="n">silver</span><span class="p">.</span><span class="n">customers</span>
+<span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span>
+</code></pre></div>
+<h3 id="available-assertion-types">Available Assertion Types<a class="headerlink" href="#available-assertion-types" title="Permanent link">&para;</a></h3>
+<h4 id="row_count-n"><code>row_count &gt; N</code><a class="headerlink" href="#row_count-n" title="Permanent link">&para;</a></h4>
+<p>Checks that the table has more than N rows:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">-- assert: row_count &gt; 0</span>
+<span class="c1">-- assert: row_count &gt; 100</span>
+<span class="c1">-- assert: row_count &gt;= 1000</span>
+</code></pre></div>
+<h4 id="uniquecolumn"><code>unique(column)</code><a class="headerlink" href="#uniquecolumn" title="Permanent link">&para;</a></h4>
+<p>Checks that a column contains no duplicate values:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">-- assert: unique(customer_id)</span>
+<span class="c1">-- assert: unique(email)</span>
+</code></pre></div>
+<h4 id="no_nullscolumn"><code>no_nulls(column)</code><a class="headerlink" href="#no_nullscolumn" title="Permanent link">&para;</a></h4>
+<p>Checks that a column contains no NULL values:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">-- assert: no_nulls(customer_id)</span>
+<span class="c1">-- assert: no_nulls(email)</span>
+</code></pre></div>
+<h4 id="accepted_valuescolumn-values"><code>accepted_values(column, [values])</code><a class="headerlink" href="#accepted_valuescolumn-values" title="Permanent link">&para;</a></h4>
+<p>Checks that all values in a column are within the allowed set:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">-- assert: accepted_values(status, [&#39;active&#39;, &#39;inactive&#39;, &#39;suspended&#39;])</span>
+<span class="c1">-- assert: accepted_values(country_code, [&#39;US&#39;, &#39;CA&#39;, &#39;GB&#39;, &#39;DE&#39;])</span>
+</code></pre></div>
+<h4 id="custom-sql-expressions">Custom SQL Expressions<a class="headerlink" href="#custom-sql-expressions" title="Permanent link">&para;</a></h4>
+<p>Any boolean SQL expression can be used as an assertion. Wrap complex expressions in quotes:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">-- assert: &quot;AVG(amount) &gt; 0&quot;</span>
+<span class="c1">-- assert: &quot;MAX(created_at) &gt; CURRENT_DATE - INTERVAL &#39;7 days&#39;&quot;</span>
+<span class="c1">-- assert: &quot;COUNT(DISTINCT region) &gt; 1&quot;</span>
+</code></pre></div>
+<p>Custom expressions are evaluated as <code>SELECT (&lt;expression&gt;) FROM &lt;table&gt;</code> and must return a single truthy value.</p>
+<h3 id="assertion-behavior">Assertion Behavior<a class="headerlink" href="#assertion-behavior" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Assertions run <strong>after</strong> a model is built (after <code>CREATE OR REPLACE TABLE</code>)</li>
+<li>If an assertion <strong>fails</strong>, the model status is set to <code>assertion_failed</code></li>
+<li>The model data is <strong>not rolled back</strong> -- the table exists but is flagged</li>
+<li>All assertions for a model are evaluated (not short-circuited)</li>
+<li>Results are stored in <code>_havn.assertion_results</code></li>
+</ul>
+<h3 id="assertion-debugging">Assertion Debugging<a class="headerlink" href="#assertion-debugging" title="Permanent link">&para;</a></h3>
+<p>When an assertion fails, havn provides diagnostic details to help you find the problem:</p>
+<ul>
+<li><strong><code>unique(col)</code> failure</strong> — shows top 10 duplicated values with counts</li>
+<li><strong><code>no_nulls(col)</code> failure</strong> — shows null count, percentage, and sample rows with NULLs</li>
+<li><strong><code>accepted_values(col, [...])</code> failure</strong> — shows unexpected values with counts</li>
+<li><strong><code>row_count</code> failure</strong> — shows actual count vs threshold</li>
+</ul>
+<p>To re-run assertions with full diagnostics on demand:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>http://localhost:3000/api/quality/assertion-debug/gold.customer_summary
+</code></pre></div>
+<p>In the web UI, click <strong>"Re-run with diagnostics"</strong> on any failed assertion in the Observe → Quality panel to see detailed debugging output.</p>
+<h3 id="viewing-assertion-results">Viewing Assertion Results<a class="headerlink" href="#viewing-assertion-results" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>assertions
+</code></pre></div>
+<p>Shows recent assertion results with pass/fail status and details.</p>
+<p>Via API:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># All assertions</span>
+curl<span class="w"> </span>http://localhost:3000/api/assertions
+
+<span class="c1"># For a specific model</span>
+curl<span class="w"> </span>http://localhost:3000/api/assertions/gold.customer_summary
+</code></pre></div>
+<h2 id="data-profiling">Data Profiling<a class="headerlink" href="#data-profiling" title="Permanent link">&para;</a></h2>
+<p>havn automatically computes column-level statistics for every model after it builds. Profiles include:</p>
+<ul>
+<li><strong>Row count</strong> -- Total number of rows</li>
+<li><strong>Column count</strong> -- Number of columns</li>
+<li><strong>Null percentages</strong> -- Percentage of NULL values per column</li>
+<li><strong>Distinct counts</strong> -- Number of distinct values per column</li>
+</ul>
+<h3 id="viewing-profiles">Viewing Profiles<a class="headerlink" href="#viewing-profiles" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Summary of all models</span>
+havn<span class="w"> </span>profile
+
+<span class="c1"># Detailed profile for one model</span>
+havn<span class="w"> </span>profile<span class="w"> </span>gold.earthquake_summary
+</code></pre></div>
+<p>The detailed view shows per-column statistics:</p>
+<div class="highlight"><pre><span></span><code>gold.earthquake_summary  (1,234 rows, 8 columns)
+  Profiled at: 2025-01-15 06:00:12
+
+  Column         Null %   Distinct   Status
+  region             0%        42   ok
+  magnitude          0%       156   ok
+  location          12%       891   has nulls
+  depth              0%       734   ok
+</code></pre></div>
+<h3 id="profile-via-api">Profile via API<a class="headerlink" href="#profile-via-api" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># All profiles</span>
+curl<span class="w"> </span>http://localhost:3000/api/profiles
+
+<span class="c1"># Specific model</span>
+curl<span class="w"> </span>http://localhost:3000/api/profiles/gold.earthquake_summary
+</code></pre></div>
+<h3 id="table-level-profiling">Table-Level Profiling<a class="headerlink" href="#table-level-profiling" title="Permanent link">&para;</a></h3>
+<p>The table browser in the web UI provides interactive profiling for any table:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>http://localhost:3000/api/tables/gold/earthquake_summary/profile
+</code></pre></div>
+<p>Returns detailed statistics including min/max values, averages (for numeric columns), and sample values.</p>
+<h2 id="freshness-monitoring">Freshness Monitoring<a class="headerlink" href="#freshness-monitoring" title="Permanent link">&para;</a></h2>
+<p>Freshness monitoring detects models that have not been rebuilt within a specified time window.</p>
+<h3 id="check-model-freshness">Check Model Freshness<a class="headerlink" href="#check-model-freshness" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>freshness<span class="w"> </span>--hours<span class="w"> </span><span class="m">24</span>
+</code></pre></div>
+<p>Shows all models with their last run time and whether they are stale (not rebuilt within 24 hours).</p>
+<h3 id="check-source-freshness">Check Source Freshness<a class="headerlink" href="#check-source-freshness" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>freshness<span class="w"> </span>--sources
+</code></pre></div>
+<p>Checks source freshness against SLAs declared in <code>project.yml</code>. See <a href="sources">Sources</a>.</p>
+<h3 id="freshness-alerts">Freshness Alerts<a class="headerlink" href="#freshness-alerts" title="Permanent link">&para;</a></h3>
+<p>Send alerts for stale models:</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>freshness<span class="w"> </span>--hours<span class="w"> </span><span class="m">24</span><span class="w"> </span>--alert
+</code></pre></div>
+<p>This sends notifications via Slack or webhook (requires alert configuration in <code>project.yml</code>).</p>
+<h3 id="freshness-via-api">Freshness via API<a class="headerlink" href="#freshness-via-api" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span><span class="s2">&quot;http://localhost:3000/api/freshness?max_hours=24&quot;</span>
+</code></pre></div>
+<h2 id="combined-validation">Combined Validation<a class="headerlink" href="#combined-validation" title="Permanent link">&para;</a></h2>
+<p>The <code>havn check</code> command runs all quality checks in one pass:</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>check
+</code></pre></div>
+<p>This executes:</p>
+<ol>
+<li><strong>Model validation</strong> -- SQL syntax, dependency resolution, column references</li>
+<li><strong>Inline assertions</strong> -- <code>-- assert:</code> comments against live data</li>
+<li><strong>YAML contracts</strong> -- Rules from <code>contracts/</code> directory</li>
+</ol>
+<h3 id="cicd-integration">CI/CD Integration<a class="headerlink" href="#cicd-integration" title="Permanent link">&para;</a></h3>
+<p>Use <code>havn check</code> in your CI/CD pipeline:</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>check<span class="w"> </span>--env<span class="w"> </span><span class="nb">test</span>
+</code></pre></div>
+<p>Exit code 1 if any validation or assertion fails, making it suitable for automated quality gates.</p>
+<h2 id="alerts">Alerts<a class="headerlink" href="#alerts" title="Permanent link">&para;</a></h2>
+<p>havn supports alerting for pipeline events:</p>
+<h3 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">alerts</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">channels</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">slack</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">webhook</span>
+<span class="w">  </span><span class="nt">slack_webhook_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${SLACK_WEBHOOK_URL}</span>
+<span class="w">  </span><span class="nt">webhook_url</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;https://alerts.internal/havn&quot;</span>
+<span class="w">  </span><span class="nt">on_success</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">  </span><span class="nt">on_failure</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</code></pre></div>
+<h3 id="alert-types">Alert Types<a class="headerlink" href="#alert-types" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Pipeline failure</strong> -- Sent when a transform or stream fails</li>
+<li><strong>Assertion failure</strong> -- Sent when data quality assertions fail</li>
+<li><strong>Stale data</strong> -- Sent when models exceed freshness thresholds</li>
+</ul>
+<h3 id="test-alerts">Test Alerts<a class="headerlink" href="#test-alerts" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:3000/api/alerts/test<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;channel&quot;: &quot;slack&quot;, &quot;slack_webhook_url&quot;: &quot;https://hooks.slack.com/...&quot;}&#39;</span>
+</code></pre></div>
+<h3 id="alert-history">Alert History<a class="headerlink" href="#alert-history" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>http://localhost:3000/api/alerts
+</code></pre></div>
+<h2 id="anomaly-detection">Anomaly Detection<a class="headerlink" href="#anomaly-detection" title="Permanent link">&para;</a></h2>
+<p>havn tracks profile statistics over time and automatically detects anomalies using Z-score analysis. When the current run's metrics deviate significantly from the historical baseline, an anomaly is flagged.</p>
+<h3 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h3>
+<p>After each transform run, havn compares the current profile (row_count, null percentages, distinct counts) against the last N runs (default 30). If the Z-score exceeds the threshold (default 2.0), an anomaly is logged.</p>
+<h3 id="configuration_1">Configuration<a class="headerlink" href="#configuration_1" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">quality</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">anomaly_detection</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">lookback</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span><span class="w">          </span><span class="c1"># Number of historical runs to compare</span>
+<span class="w">    </span><span class="nt">threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.0</span><span class="w">        </span><span class="c1"># Z-score threshold for flagging</span>
+<span class="w">    </span><span class="nt">notify</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">slack</span><span class="p p-Indicator">]</span><span class="w">       </span><span class="c1"># Alert channels</span>
+</code></pre></div>
+<h3 id="viewing-anomalies">Viewing Anomalies<a class="headerlink" href="#viewing-anomalies" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Recent anomalies</span>
+curl<span class="w"> </span>http://localhost:3000/api/anomalies
+
+<span class="c1"># Anomalies for a specific model</span>
+curl<span class="w"> </span>http://localhost:3000/api/anomalies/gold.customer_summary
+</code></pre></div>
+<p>In the web UI, anomalies appear in the Observe → Quality panel with severity coloring, showing the current value vs expected range.</p>
+<h3 id="edge-cases">Edge Cases<a class="headerlink" href="#edge-cases" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Fewer than 3 historical profiles → skipped (not enough baseline data)</li>
+<li>Zero standard deviation → skipped (constant value, no deviation possible)</li>
+<li>First run → skipped (no baseline)</li>
+</ul>
+<h2 id="related-pages">Related Pages<a class="headerlink" href="#related-pages" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="contracts">Contracts</a> -- Standalone YAML data quality rules</li>
+<li><a href="transforms">Transforms</a> -- Adding assertions to SQL models</li>
+<li><a href="sources">Sources</a> -- Source freshness SLAs</li>
+<li><a href="lineage">Lineage</a> -- Understanding data dependencies</li>
+<li><a href="cli-reference">CLI Reference</a> -- Quality-related commands</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

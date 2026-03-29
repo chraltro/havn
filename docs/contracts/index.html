@@ -1,0 +1,1405 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="The open-source data platform that runs on your machine. DuckDB + SQL transforms + Python. Data in safe waters.">
+      
+      
+      
+        <link rel="canonical" href="https://chraltro.github.io/db/contracts/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Data Contracts - havn</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Outfit:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Outfit";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#data-contracts" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="havn" class="md-header__button md-logo" aria-label="havn" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            havn
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Data Contracts
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/chraltro/db" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    chraltro/db
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../transforms/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Transforms
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../quality/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Data Quality
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../connectors/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Connectors
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../notebooks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Notebooks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../pipelines/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Pipelines
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../cli-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../api-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="havn" class="md-nav__button md-logo" aria-label="havn" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    havn
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/chraltro/db" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    chraltro/db
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transforms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transforms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipelines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#contract-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contract Format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#contract-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contract Properties
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#assertion-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assertion Types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Assertion Types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#row_count-n" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        row_count &gt; N
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#uniquecolumn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        unique(column)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#no_nullscolumn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        no_nulls(column)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#accepted_valuescolumn-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        accepted_values(column, [values])
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-sql-expressions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom SQL Expressions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#severity-levels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Severity Levels
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Severity Levels">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#error-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        error (default)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#warn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        warn
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running Contracts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Running Contracts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#run-all-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run All Contracts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-specific-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run Specific Contracts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#view-contract-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        View Contract History
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#contract-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contract History
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Contract History">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#history-via-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        History via API
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#contracts-via-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contracts via API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Contracts via API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#list-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        List Contracts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run Contracts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#contracts-in-havn-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contracts in havn check
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#contracts-vs-inline-assertions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contracts vs Inline Assertions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#best-practices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Best Practices
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related Pages
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="data-contracts">Data Contracts<a class="headerlink" href="#data-contracts" title="Permanent link">&para;</a></h1>
+<p>Data contracts are standalone YAML files that define data quality rules. They complement inline <code>-- assert:</code> comments in SQL models by providing reusable, centralized quality definitions with severity levels and historical tracking.</p>
+<h2 id="contract-format">Contract Format<a class="headerlink" href="#contract-format" title="Permanent link">&para;</a></h2>
+<p>Contracts live in the <code>contracts/</code> directory as YAML files:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># contracts/orders.yml</span>
+<span class="nt">contracts</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">orders_not_empty</span>
+<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Orders</span><span class="nv"> </span><span class="s">table</span><span class="nv"> </span><span class="s">must</span><span class="nv"> </span><span class="s">have</span><span class="nv"> </span><span class="s">data&quot;</span>
+<span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gold.orders</span>
+<span class="w">    </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">error</span>
+<span class="w">    </span><span class="nt">assertions</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">row_count &gt; 0</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">no_nulls(order_id)</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unique(order_id)</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">accepted_values(status, [&#39;pending&#39;, &#39;shipped&#39;, &#39;delivered&#39;])</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;total_amount</span><span class="nv"> </span><span class="s">&gt;=</span><span class="nv"> </span><span class="s">0&quot;</span>
+
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customers_fresh</span>
+<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Customers</span><span class="nv"> </span><span class="s">must</span><span class="nv"> </span><span class="s">be</span><span class="nv"> </span><span class="s">loaded</span><span class="nv"> </span><span class="s">within</span><span class="nv"> </span><span class="s">24h&quot;</span>
+<span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">silver.customers</span>
+<span class="w">    </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warn</span>
+<span class="w">    </span><span class="nt">assertions</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">row_count &gt; 0</span>
+</code></pre></div>
+<p>Each YAML file can contain multiple contracts under the <code>contracts:</code> key.</p>
+<h2 id="contract-properties">Contract Properties<a class="headerlink" href="#contract-properties" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>yes</td>
+<td>file stem</td>
+<td>Unique contract identifier</td>
+</tr>
+<tr>
+<td><code>model</code></td>
+<td>string</td>
+<td>yes</td>
+<td>--</td>
+<td>Target model as <code>schema.table</code></td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>no</td>
+<td><code>""</code></td>
+<td>Human-readable description</td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td>string</td>
+<td>no</td>
+<td><code>error</code></td>
+<td><code>error</code> or <code>warn</code></td>
+</tr>
+<tr>
+<td><code>assertions</code></td>
+<td>list</td>
+<td>yes</td>
+<td>--</td>
+<td>List of assertion expressions</td>
+</tr>
+</tbody>
+</table>
+<h2 id="assertion-types">Assertion Types<a class="headerlink" href="#assertion-types" title="Permanent link">&para;</a></h2>
+<p>Contracts support the same assertion expressions as inline <code>-- assert:</code> comments:</p>
+<h3 id="row_count-n"><code>row_count &gt; N</code><a class="headerlink" href="#row_count-n" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">assertions</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">row_count &gt; 0</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">row_count &gt; 1000</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">row_count &gt;= 100</span>
+</code></pre></div>
+<h3 id="uniquecolumn"><code>unique(column)</code><a class="headerlink" href="#uniquecolumn" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">assertions</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unique(order_id)</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unique(email)</span>
+</code></pre></div>
+<h3 id="no_nullscolumn"><code>no_nulls(column)</code><a class="headerlink" href="#no_nullscolumn" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">assertions</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">no_nulls(customer_id)</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">no_nulls(email)</span>
+</code></pre></div>
+<h3 id="accepted_valuescolumn-values"><code>accepted_values(column, [values])</code><a class="headerlink" href="#accepted_valuescolumn-values" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">assertions</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">accepted_values(status, [&#39;pending&#39;, &#39;shipped&#39;, &#39;delivered&#39;])</span>
+</code></pre></div>
+<h3 id="custom-sql-expressions">Custom SQL Expressions<a class="headerlink" href="#custom-sql-expressions" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">assertions</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;AVG(amount)</span><span class="nv"> </span><span class="s">&gt;</span><span class="nv"> </span><span class="s">0&quot;</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;MAX(created_at)</span><span class="nv"> </span><span class="s">&gt;</span><span class="nv"> </span><span class="s">CURRENT_DATE</span><span class="nv"> </span><span class="s">-</span><span class="nv"> </span><span class="s">INTERVAL</span><span class="nv"> </span><span class="s">&#39;7</span><span class="nv"> </span><span class="s">days&#39;&quot;</span>
+</code></pre></div>
+<h2 id="severity-levels">Severity Levels<a class="headerlink" href="#severity-levels" title="Permanent link">&para;</a></h2>
+<h3 id="error-default"><code>error</code> (default)<a class="headerlink" href="#error-default" title="Permanent link">&para;</a></h3>
+<p>Contract failures with <code>error</code> severity cause <code>havn check</code> and <code>havn contracts</code> to exit with code 1. Use this for critical data quality rules that must be enforced.</p>
+<h3 id="warn"><code>warn</code><a class="headerlink" href="#warn" title="Permanent link">&para;</a></h3>
+<p>Contract failures with <code>warn</code> severity are reported but do not cause command failure. Use this for aspirational quality goals or non-critical checks.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">contracts</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">revenue_positive</span>
+<span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gold.daily_revenue</span>
+<span class="w">    </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">error</span><span class="w">                </span><span class="c1"># Must pass</span>
+<span class="w">    </span><span class="nt">assertions</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">row_count &gt; 0</span>
+
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">high_cardinality</span>
+<span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gold.daily_revenue</span>
+<span class="w">    </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warn</span><span class="w">                 </span><span class="c1"># Nice to have</span>
+<span class="w">    </span><span class="nt">assertions</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;COUNT(DISTINCT</span><span class="nv"> </span><span class="s">region)</span><span class="nv"> </span><span class="s">&gt;</span><span class="nv"> </span><span class="s">5&quot;</span>
+</code></pre></div>
+<h2 id="running-contracts">Running Contracts<a class="headerlink" href="#running-contracts" title="Permanent link">&para;</a></h2>
+<h3 id="run-all-contracts">Run All Contracts<a class="headerlink" href="#run-all-contracts" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>contracts
+</code></pre></div>
+<p>Discovers all YAML files in <code>contracts/</code>, evaluates each contract, and reports results:</p>
+<div class="highlight"><pre><span></span><code>Running 3 contract(s)...
+
+  PASS  orders_not_empty (gold.orders) [12ms]
+         pass  row_count &gt; 0
+         pass  unique(order_id)
+         pass  no_nulls(order_id)
+
+  FAIL  customers_fresh (silver.customers) [8ms]
+         pass  row_count &gt; 0
+         FAIL  &quot;MAX(updated_at) &gt; CURRENT_DATE - INTERVAL &#39;24 hours&#39;&quot; (value: false)
+
+  PASS  revenue_check (gold.daily_revenue) [5ms]
+         pass  row_count &gt; 0
+
+2 contract(s) passed, 1 failed.
+</code></pre></div>
+<h3 id="run-specific-contracts">Run Specific Contracts<a class="headerlink" href="#run-specific-contracts" title="Permanent link">&para;</a></h3>
+<p>Filter by contract name or model name:</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>contracts<span class="w"> </span>orders_not_empty
+havn<span class="w"> </span>contracts<span class="w"> </span>gold.orders
+</code></pre></div>
+<h3 id="view-contract-history">View Contract History<a class="headerlink" href="#view-contract-history" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>contracts<span class="w"> </span>--history
+</code></pre></div>
+<p>Shows the pass/fail history of all contract evaluations, ordered by most recent.</p>
+<h2 id="contract-history">Contract History<a class="headerlink" href="#contract-history" title="Permanent link">&para;</a></h2>
+<p>Every contract evaluation is recorded in <code>_havn.contract_results</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>VARCHAR</td>
+<td>Unique result ID</td>
+</tr>
+<tr>
+<td><code>contract_name</code></td>
+<td>VARCHAR</td>
+<td>Contract identifier</td>
+</tr>
+<tr>
+<td><code>model</code></td>
+<td>VARCHAR</td>
+<td>Target model</td>
+</tr>
+<tr>
+<td><code>passed</code></td>
+<td>BOOLEAN</td>
+<td>Whether all assertions passed</td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td>VARCHAR</td>
+<td><code>error</code> or <code>warn</code></td>
+</tr>
+<tr>
+<td><code>detail</code></td>
+<td>JSON</td>
+<td>Per-assertion results</td>
+</tr>
+<tr>
+<td><code>checked_at</code></td>
+<td>TIMESTAMP</td>
+<td>Evaluation timestamp</td>
+</tr>
+</tbody>
+</table>
+<h3 id="history-via-api">History via API<a class="headerlink" href="#history-via-api" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>http://localhost:3000/api/contracts/history
+</code></pre></div>
+<h2 id="contracts-via-api">Contracts via API<a class="headerlink" href="#contracts-via-api" title="Permanent link">&para;</a></h2>
+<h3 id="list-contracts">List Contracts<a class="headerlink" href="#list-contracts" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>http://localhost:3000/api/contracts
+</code></pre></div>
+<p>Returns all discovered contracts with their names, models, assertions, and severity.</p>
+<h3 id="run-contracts">Run Contracts<a class="headerlink" href="#run-contracts" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:3000/api/contracts/run
+</code></pre></div>
+<p>Returns:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;passed&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;failed&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;results&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;contract_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;orders_not_empty&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;model&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gold.orders&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;passed&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;severity&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;error&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;duration_ms&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;error&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;assertions&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">        </span><span class="p">{</span><span class="nt">&quot;expression&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;row_count &gt; 0&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;passed&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;detail&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1234&quot;</span><span class="p">}</span>
+<span class="w">      </span><span class="p">]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<h2 id="contracts-in-havn-check">Contracts in havn check<a class="headerlink" href="#contracts-in-havn-check" title="Permanent link">&para;</a></h2>
+<p>The <code>havn check</code> command includes contract evaluation:</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>check
+</code></pre></div>
+<p>This runs:
+1. SQL model validation
+2. Inline assertions (<code>-- assert:</code>)
+3. YAML contracts from <code>contracts/</code></p>
+<p>All three must pass for <code>havn check</code> to exit with code 0.</p>
+<h2 id="contracts-vs-inline-assertions">Contracts vs Inline Assertions<a class="headerlink" href="#contracts-vs-inline-assertions" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Inline Assertions</th>
+<th>YAML Contracts</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Location</td>
+<td>Inside SQL files</td>
+<td>Separate YAML files</td>
+</tr>
+<tr>
+<td>Evaluated</td>
+<td>During <code>havn transform</code></td>
+<td>During <code>havn contracts</code> or <code>havn check</code></td>
+</tr>
+<tr>
+<td>Severity</td>
+<td>Always error</td>
+<td>Configurable (error/warn)</td>
+</tr>
+<tr>
+<td>History</td>
+<td>Stored in <code>assertion_results</code></td>
+<td>Stored in <code>contract_results</code></td>
+</tr>
+<tr>
+<td>Use case</td>
+<td>Model-specific checks</td>
+<td>Cross-model, reusable rules</td>
+</tr>
+</tbody>
+</table>
+<p>Use inline assertions for model-specific quality checks that should run on every build. Use contracts for cross-cutting quality rules, SLA enforcement, and checks that should be run independently of transforms.</p>
+<h2 id="best-practices">Best Practices<a class="headerlink" href="#best-practices" title="Permanent link">&para;</a></h2>
+<ol>
+<li>
+<p><strong>Start with row_count</strong> -- Every critical table should have <code>row_count &gt; 0</code> as a minimum quality check.</p>
+</li>
+<li>
+<p><strong>Enforce primary keys</strong> -- Use <code>unique(pk_column)</code> and <code>no_nulls(pk_column)</code> for every table that has a primary key.</p>
+</li>
+<li>
+<p><strong>Use severity wisely</strong> -- Reserve <code>error</code> for must-have guarantees. Use <code>warn</code> for aspirational goals or new checks that are not yet enforced.</p>
+</li>
+<li>
+<p><strong>Organize by domain</strong> -- Group related contracts in the same YAML file: <code>contracts/finance.yml</code>, <code>contracts/customers.yml</code>, etc.</p>
+</li>
+<li>
+<p><strong>Run in CI/CD</strong> -- Add <code>havn contracts</code> to your CI/CD pipeline to catch quality regressions before deployment.</p>
+</li>
+</ol>
+<h2 id="related-pages">Related Pages<a class="headerlink" href="#related-pages" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="quality">Quality</a> -- Data quality overview</li>
+<li><a href="transforms">Transforms</a> -- Inline assertions in SQL models</li>
+<li><a href="cli-reference">CLI Reference</a> -- Contract-related commands</li>
+<li><a href="api-reference">API Reference</a> -- Contract API endpoints</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

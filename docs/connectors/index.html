@@ -1,0 +1,1409 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="The open-source data platform that runs on your machine. DuckDB + SQL transforms + Python. Data in safe waters.">
+      
+      
+      
+        <link rel="canonical" href="https://chraltro.github.io/db/connectors/">
+      
+      
+        <link rel="prev" href="../quality/">
+      
+      
+        <link rel="next" href="../notebooks/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Connectors - havn</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Outfit:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Outfit";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#connectors" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="havn" class="md-header__button md-logo" aria-label="havn" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            havn
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Connectors
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/chraltro/db" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    chraltro/db
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../transforms/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Transforms
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../quality/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Data Quality
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Connectors
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../notebooks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Notebooks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../pipelines/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Pipelines
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../cli-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../api-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="havn" class="md-nav__button md-logo" aria-label="havn" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    havn
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/chraltro/db" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    chraltro/db
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transforms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transforms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#available-connectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available Connectors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setting-up-a-connector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting Up a Connector
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Setting Up a Connector">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#interactive-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interactive Setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Options
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#managing-connectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managing Connectors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Managing Connectors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#list-configured-connectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        List Configured Connectors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#test-a-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test a Connection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sync-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sync Data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#regenerate-script" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regenerate Script
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remove-a-connector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remove a Connector
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connector-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connector Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Connector Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#secret-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secret Handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#webhook-connector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Webhook Connector
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connector-health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connector Health
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related Pages
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipelines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#available-connectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available Connectors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setting-up-a-connector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting Up a Connector
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Setting Up a Connector">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#interactive-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interactive Setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Options
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#managing-connectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managing Connectors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Managing Connectors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#list-configured-connectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        List Configured Connectors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#test-a-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test a Connection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sync-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sync Data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#regenerate-script" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regenerate Script
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remove-a-connector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remove a Connector
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connector-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connector Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Connector Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#secret-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secret Handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#webhook-connector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Webhook Connector
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connector-health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connector Health
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related Pages
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="connectors">Connectors<a class="headerlink" href="#connectors" title="Permanent link">&para;</a></h1>
+<p>Connectors automate data ingestion from external sources. havn includes pre-built connectors for databases, SaaS APIs, file storage, and webhooks. Each connector tests the connection, discovers available resources, generates an ingest script, and updates <code>project.yml</code>.</p>
+<h2 id="available-connectors">Available Connectors<a class="headerlink" href="#available-connectors" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Connector</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PostgreSQL</td>
+<td><code>postgres</code></td>
+<td>PostgreSQL database tables</td>
+</tr>
+<tr>
+<td>MySQL</td>
+<td><code>mysql</code></td>
+<td>MySQL/MariaDB database tables</td>
+</tr>
+<tr>
+<td>CSV Files</td>
+<td><code>csv</code></td>
+<td>Local or remote CSV files</td>
+</tr>
+<tr>
+<td>Stripe</td>
+<td><code>stripe</code></td>
+<td>Stripe payments data</td>
+</tr>
+<tr>
+<td>Shopify</td>
+<td><code>shopify</code></td>
+<td>Shopify e-commerce data</td>
+</tr>
+<tr>
+<td>HubSpot</td>
+<td><code>hubspot</code></td>
+<td>HubSpot CRM data</td>
+</tr>
+<tr>
+<td>Google Sheets</td>
+<td><code>google_sheets</code></td>
+<td>Google Spreadsheets</td>
+</tr>
+<tr>
+<td>REST API</td>
+<td><code>rest_api</code></td>
+<td>Generic REST API endpoints</td>
+</tr>
+<tr>
+<td>S3/GCS</td>
+<td><code>s3_gcs</code></td>
+<td>Amazon S3 or Google Cloud Storage files</td>
+</tr>
+<tr>
+<td>Webhook</td>
+<td><code>webhook</code></td>
+<td>Receive webhook data via HTTP POST</td>
+</tr>
+</tbody>
+</table>
+<p>List all available connectors:</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>connectors<span class="w"> </span>available
+</code></pre></div>
+<h2 id="setting-up-a-connector">Setting Up a Connector<a class="headerlink" href="#setting-up-a-connector" title="Permanent link">&para;</a></h2>
+<h3 id="interactive-setup">Interactive Setup<a class="headerlink" href="#interactive-setup" title="Permanent link">&para;</a></h3>
+<p>Use <code>havn connect</code> to set up a connector interactively:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># PostgreSQL</span>
+havn<span class="w"> </span>connect<span class="w"> </span>postgres<span class="w"> </span>--host<span class="w"> </span>localhost<span class="w"> </span>--database<span class="w"> </span>mydb<span class="w"> </span>--user<span class="w"> </span>admin<span class="w"> </span>--password<span class="w"> </span>secret
+
+<span class="c1"># Stripe</span>
+havn<span class="w"> </span>connect<span class="w"> </span>stripe<span class="w"> </span>--api-key<span class="w"> </span>sk_live_xxx
+
+<span class="c1"># CSV file</span>
+havn<span class="w"> </span>connect<span class="w"> </span>csv<span class="w"> </span>--path<span class="w"> </span>/data/customers.csv
+
+<span class="c1"># Google Sheets</span>
+havn<span class="w"> </span>connect<span class="w"> </span>google-sheets<span class="w"> </span>--set<span class="w"> </span><span class="nv">spreadsheet_id</span><span class="o">=</span>1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms
+
+<span class="c1"># With JSON config</span>
+havn<span class="w"> </span>connect<span class="w"> </span>postgres<span class="w"> </span>--config<span class="w"> </span><span class="s1">&#39;{&quot;host&quot;:&quot;db.prod&quot;,&quot;database&quot;:&quot;app&quot;,&quot;user&quot;:&quot;ro&quot;,&quot;password&quot;:&quot;s3cret&quot;}&#39;</span>
+
+<span class="c1"># From a config file</span>
+havn<span class="w"> </span>connect<span class="w"> </span>postgres<span class="w"> </span>--config<span class="w"> </span>./postgres.json
+</code></pre></div>
+<p>The setup process:</p>
+<ol>
+<li><strong>Tests the connection</strong> -- Verifies credentials and connectivity</li>
+<li><strong>Discovers resources</strong> -- Lists available tables, endpoints, or sheets</li>
+<li><strong>Generates an ingest script</strong> -- Creates <code>ingest/connector_&lt;name&gt;.py</code></li>
+<li><strong>Updates project.yml</strong> -- Adds the connection and creates a sync stream</li>
+<li><strong>Stores secrets in .env</strong> -- Passwords and API keys go to <code>.env</code>, not <code>project.yml</code></li>
+</ol>
+<h3 id="configuration-options">Configuration Options<a class="headerlink" href="#configuration-options" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>connect<span class="w"> </span>&lt;type&gt;<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
+
+Options:
+<span class="w">  </span>--name,<span class="w"> </span>-n<span class="w">          </span>Connection<span class="w"> </span>name<span class="w"> </span><span class="o">(</span>default:<span class="w"> </span>auto-generated<span class="o">)</span>
+<span class="w">  </span>--tables,<span class="w"> </span>-t<span class="w">        </span>Comma-separated<span class="w"> </span>tables<span class="w"> </span>to<span class="w"> </span>sync
+<span class="w">  </span>--schema,<span class="w"> </span>-s<span class="w">        </span>Target<span class="w"> </span>schema<span class="w"> </span><span class="o">(</span>default:<span class="w"> </span>landing<span class="o">)</span>
+<span class="w">  </span>--schedule<span class="w">          </span>Cron<span class="w"> </span>schedule<span class="w"> </span><span class="k">for</span><span class="w"> </span>automatic<span class="w"> </span>sync
+<span class="w">  </span>--test<span class="w">              </span>Only<span class="w"> </span><span class="nb">test</span><span class="w"> </span>the<span class="w"> </span>connection
+<span class="w">  </span>--discover<span class="w">          </span>Only<span class="w"> </span>list<span class="w"> </span>available<span class="w"> </span>resources
+<span class="w">  </span>--config,<span class="w"> </span>-c<span class="w">        </span>JSON<span class="w"> </span>string<span class="w"> </span>or<span class="w"> </span>file<span class="w"> </span>path<span class="w"> </span>with<span class="w"> </span>params
+<span class="w">  </span>--set<span class="w"> </span><span class="nv">key</span><span class="o">=</span>value<span class="w">     </span>Set<span class="w"> </span>individual<span class="w"> </span>parameters<span class="w"> </span><span class="o">(</span>repeatable<span class="o">)</span>
+</code></pre></div>
+<p>Convenience shortcuts for common parameters:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span>--host<span class="w">              </span>Hostname
+<span class="w">  </span>--port<span class="w">              </span>Port<span class="w"> </span>number
+<span class="w">  </span>--database<span class="w">          </span>Database<span class="w"> </span>name
+<span class="w">  </span>--user<span class="w">              </span>Username
+<span class="w">  </span>--password<span class="w">          </span>Password
+<span class="w">  </span>--url<span class="w">               </span>URL
+<span class="w">  </span>--api-key<span class="w">           </span>API<span class="w"> </span>key
+<span class="w">  </span>--token<span class="w">             </span>Access<span class="w"> </span>token
+<span class="w">  </span>--path<span class="w">              </span>File<span class="w"> </span>or<span class="w"> </span>bucket<span class="w"> </span>path
+</code></pre></div>
+<h2 id="managing-connectors">Managing Connectors<a class="headerlink" href="#managing-connectors" title="Permanent link">&para;</a></h2>
+<h3 id="list-configured-connectors">List Configured Connectors<a class="headerlink" href="#list-configured-connectors" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>connectors<span class="w"> </span>list
+</code></pre></div>
+<p>Shows all connectors in <code>project.yml</code> with their type, script path, and status.</p>
+<h3 id="test-a-connection">Test a Connection<a class="headerlink" href="#test-a-connection" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>connectors<span class="w"> </span><span class="nb">test</span><span class="w"> </span>prod_postgres
+</code></pre></div>
+<p>Verifies that the connection still works with the stored credentials.</p>
+<h3 id="sync-data">Sync Data<a class="headerlink" href="#sync-data" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>connectors<span class="w"> </span>sync<span class="w"> </span>prod_postgres
+</code></pre></div>
+<p>Runs the generated ingest script for a connector.</p>
+<h3 id="regenerate-script">Regenerate Script<a class="headerlink" href="#regenerate-script" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>connectors<span class="w"> </span>regenerate<span class="w"> </span>prod_postgres
+</code></pre></div>
+<p>Re-discovers resources and regenerates the ingest script. Useful when the connector code is updated or configuration changes.</p>
+<h3 id="remove-a-connector">Remove a Connector<a class="headerlink" href="#remove-a-connector" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>connectors<span class="w"> </span>remove<span class="w"> </span>prod_postgres
+</code></pre></div>
+<p>Deletes the ingest script and removes the connection from <code>project.yml</code>.</p>
+<h2 id="connector-architecture">Connector Architecture<a class="headerlink" href="#connector-architecture" title="Permanent link">&para;</a></h2>
+<p>Each connector implements the <code>BaseConnector</code> contract:</p>
+<ul>
+<li><code>test_connection(config)</code> -- Verify the connection works</li>
+<li><code>discover(config)</code> -- List available tables/resources</li>
+<li><code>generate_script(config, tables, target_schema)</code> -- Emit a Python ingest script</li>
+</ul>
+<p>The generated ingest script is a standard havn Python script that uses the <code>db</code> DuckDB connection. You can customize it after generation.</p>
+<h3 id="secret-handling">Secret Handling<a class="headerlink" href="#secret-handling" title="Permanent link">&para;</a></h3>
+<p>Connector parameters marked as <code>secret</code> (passwords, API keys, tokens) are:</p>
+<ol>
+<li>Stored in <code>.env</code> as environment variables (e.g., <code>PROD_POSTGRES_PASSWORD=...</code>)</li>
+<li>Referenced in <code>project.yml</code> as <code>${ENV_VAR_NAME}</code> placeholders</li>
+<li>Never written to <code>project.yml</code> in plaintext</li>
+</ol>
+<h2 id="webhook-connector">Webhook Connector<a class="headerlink" href="#webhook-connector" title="Permanent link">&para;</a></h2>
+<p>The webhook connector receives data via HTTP POST and stores it in a landing table:</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>connect<span class="w"> </span>webhook<span class="w"> </span>--name<span class="w"> </span>orders_webhook
+</code></pre></div>
+<p>Once configured, send data to the webhook endpoint:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:3000/api/webhook/orders<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;order_id&quot;: 123, &quot;amount&quot;: 99.99}&#39;</span>
+</code></pre></div>
+<p>Data is stored in <code>landing.&lt;webhook_name&gt;_inbox</code> with columns: <code>id</code>, <code>received_at</code>, <code>payload</code> (JSON).</p>
+<h2 id="connector-health">Connector Health<a class="headerlink" href="#connector-health" title="Permanent link">&para;</a></h2>
+<p>Check the last sync status for each connector:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Via API</span>
+curl<span class="w"> </span>http://localhost:3000/api/connectors/health
+</code></pre></div>
+<p>Returns the most recent run status, timestamp, and duration for each ingest script.</p>
+<h2 id="related-pages">Related Pages<a class="headerlink" href="#related-pages" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="cdc">CDC</a> -- Incremental sync with change data capture</li>
+<li><a href="configuration">Configuration</a> -- Connection configuration in project.yml</li>
+<li><a href="pipelines">Pipelines</a> -- Running connectors as pipeline steps</li>
+<li><a href="api-reference">API Reference</a> -- Connector API endpoints</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
