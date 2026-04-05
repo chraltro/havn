@@ -289,6 +289,33 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
             expires_at  TIMESTAMP NOT NULL
         )
     """)
+    # Orchestration job runs
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS _havn.job_runs (
+            id              VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+            job_name        VARCHAR NOT NULL,
+            job_file        VARCHAR NOT NULL,
+            target          VARCHAR NOT NULL,
+            status          VARCHAR NOT NULL DEFAULT 'running',
+            steps_total     INTEGER NOT NULL DEFAULT 0,
+            steps_completed INTEGER NOT NULL DEFAULT 0,
+            steps_failed    INTEGER NOT NULL DEFAULT 0,
+            steps_skipped   INTEGER NOT NULL DEFAULT 0,
+            started_at      TIMESTAMP DEFAULT current_timestamp,
+            finished_at     TIMESTAMP,
+            duration_ms     BIGINT,
+            trigger         VARCHAR DEFAULT 'manual',
+            error           VARCHAR,
+            step_details    JSON
+        )
+    """)
+    # Migration for databases that predate steps_skipped
+    try:
+        conn.execute(
+            "ALTER TABLE _havn.job_runs ADD COLUMN IF NOT EXISTS steps_skipped INTEGER DEFAULT 0"
+        )
+    except Exception:
+        pass
 
 
 def ensure_circuit_state_table(conn: duckdb.DuckDBPyConnection) -> None:

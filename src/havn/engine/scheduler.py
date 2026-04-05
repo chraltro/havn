@@ -118,7 +118,10 @@ class SchedulerThread(threading.Thread):
         self._stop_event.set()
 
     def _should_run(self, name: str, cron_expr: str) -> bool:
-        """Check if a cron expression matches the current minute."""
+        """Check if a cron expression matches the current minute.
+
+        Uses POSIX cron weekday convention: 0=Sunday, 1=Monday, ..., 6=Saturday.
+        """
         import datetime
 
         now = datetime.datetime.now()
@@ -126,30 +129,38 @@ class SchedulerThread(threading.Thread):
         if len(parts) != 5:
             return False
 
+        # POSIX cron weekday: 0=Sun..6=Sat. Python's weekday(): 0=Mon..6=Sun.
+        posix_weekday = (now.weekday() + 1) % 7
         checks = [
             (parts[0], now.minute),
             (parts[1], now.hour),
             (parts[2], now.day),
             (parts[3], now.month),
-            (parts[4], now.weekday()),  # 0=Monday in Python
+            (parts[4], posix_weekday),
         ]
 
         for pattern, current in checks:
             if pattern == "*":
                 continue
-            if "/" in pattern:
-                # */5 = every 5 units
-                _, step = pattern.split("/", 1)
-                if current % int(step) != 0:
+            try:
+                if "/" in pattern:
+                    # */5 = every 5 units
+                    _, step_str = pattern.split("/", 1)
+                    step = int(step_str)
+                    if step <= 0:
+                        return False
+                    if current % step != 0:
+                        return False
+                elif "," in pattern:
+                    if current not in [int(v) for v in pattern.split(",")]:
+                        return False
+                elif "-" in pattern:
+                    lo, hi = pattern.split("-", 1)
+                    if not (int(lo) <= current <= int(hi)):
+                        return False
+                elif current != int(pattern):
                     return False
-            elif "," in pattern:
-                if current not in [int(v) for v in pattern.split(",")]:
-                    return False
-            elif "-" in pattern:
-                lo, hi = pattern.split("-", 1)
-                if not (int(lo) <= current <= int(hi)):
-                    return False
-            elif current != int(pattern):
+            except (ValueError, ZeroDivisionError):
                 return False
 
         # Don't run more than once per minute
@@ -185,6 +196,70 @@ class SchedulerThread(threading.Thread):
                             console.print(f"[bold green]Scheduler:[/bold green] Stream '{name}' completed")
                         except Exception as e:
                             console.print(f"[bold red]Scheduler:[/bold red] Stream '{name}' failed: {e}")
+
+                # --- Orchestration jobs ---
+                try:
+                    from havn.engine.database import connect
+                    from havn.engine.database import ensure_meta_table as _emt
+                    from havn.engine.orchestration import (
+                        discover_jobs,
+                        ensure_job_runs_table,
+                        execute_job,
+                        resolve_execution_plan,
+                    )
+                    from havn.engine.transform.discovery import (
+                        build_dag,
+                        discover_models,
+                    )
+
+                    orch_jobs = discover_jobs(self.project_dir)
+                    for job in orch_jobs:
+                        if not job.enabled or not job.cron:
+                            continue
+                        if self._should_run(f"job:{job.name}", job.cron):
+                            import datetime
+
+                            mk = datetime.datetime.now().replace(
+                                second=0, microsecond=0
+                            ).timestamp()
+                            self._last_run[f"job:{job.name}"] = mk
+                            logger.info("Scheduler triggering job: %s", job.name)
+                            console.print(
+                                f"[bold blue]Scheduler:[/bold blue] Running job '{job.name}'"
+                            )
+                            jconn = None
+                            try:
+                                db_path = self.project_dir / config.database.path
+                                jconn = connect(db_path, project_dir=self.project_dir)
+                                _emt(jconn)
+                                ensure_job_runs_table(jconn)
+                                models = discover_models(self.project_dir / "transform")
+                                dag = build_dag(models)
+                                plan = resolve_execution_plan(
+                                    job.target,
+                                    dag,
+                                    self.project_dir,
+                                    conn=jconn,
+                                    resolve=job.resolve,
+                                )
+                                execute_job(
+                                    job, plan, jconn, self.project_dir, trigger="scheduled"
+                                )
+                                console.print(
+                                    f"[bold green]Scheduler:[/bold green] Job '{job.name}' completed"
+                                )
+                            except Exception as e:
+                                console.print(
+                                    f"[bold red]Scheduler:[/bold red] Job '{job.name}' failed: {e}"
+                                )
+                            finally:
+                                if jconn is not None:
+                                    try:
+                                        jconn.close()
+                                    except Exception:
+                                        pass
+                except Exception as e:
+                    logger.debug("Orchestration scheduler check failed: %s", e)
             except Exception as e:
                 logger.error("Scheduler error: %s", e)
 
