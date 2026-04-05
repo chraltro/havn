@@ -11,7 +11,7 @@
   <br />
   <br />
 
-  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+  [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
   [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB.svg)](https://python.org)
   [![DuckDB](https://img.shields.io/badge/Powered%20by-DuckDB-FFF000.svg)](https://duckdb.org)
   [![Tests](https://img.shields.io/github/actions/workflow/status/chraltro/db/ci.yml?label=tests)](https://github.com/chraltro/db/actions)
@@ -19,6 +19,8 @@
 </p>
 
 ---
+
+> **License notice:** havn is source-available under the [Business Source License 1.1](LICENSE). You can read, run, modify, and use it for any internal or commercial purpose — including in production at your company or at client sites. The one restriction is that you may not offer havn to third parties as a competing hosted or managed service. Each release automatically converts to Apache 2.0 four years after its release date (the current release converts on **2030-04-05**). See the [License FAQ](#license) below for details.
 
 **havn** (Danish/Norwegian for *harbour*) is a self-hosted data platform - a Nordic alternative to Databricks and Snowflake for teams that want analytics without the complexity, cost, or data leaving their infrastructure.
 
@@ -261,4 +263,15 @@ pytest tests/
 
 ## License
 
-[MIT](LICENSE) - use it however you want.
+havn is licensed under the [Business Source License 1.1](LICENSE). Each release automatically converts to the Apache License 2.0 four years after its release date — the current release converts on **2030-04-05**.
+
+BSL 1.1 is a source-available license created by MariaDB and used by projects like HashiCorp Terraform/Vault, Sentry, and CockroachDB. It keeps the full source public while protecting against commercial resale as a competing hosted service.
+
+**FAQ**
+
+- **Can I use havn at my company for free?** Yes. Install it, run it, use it in production. There are no restrictions on internal use — no user tiers, no seat counts, no "contact sales".
+- **Can I modify havn for my own needs?** Yes. Fork it, change it, run your modified version internally. The only thing you can't do is sell the modified version as a hosted service.
+- **Can my consultancy deploy havn at client sites?** Yes. Deploying and configuring havn for a client is a service, not hosting. The restriction is on offering havn itself as an ongoing hosted product.
+- **What exactly is forbidden?** Taking havn and offering it to third parties as a paid hosted or managed service that competes with the licensor's commercial offerings.
+- **When does it become fully open source?** Each release converts to Apache 2.0 four years after its release date. The current release converts on 2030-04-05.
+- **Can I contribute?** Yes — see [CONTRIBUTING.md](CONTRIBUTING.md). Contributions will require a Contributor License Agreement so they can be included in both the BSL core and any future commercial distribution.

@@ -109,4 +109,6 @@ Open an issue on GitHub with:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE).
+havn is licensed under the [Business Source License 1.1](LICENSE), which auto-converts to Apache 2.0 four years after each release.
+
+By contributing, you agree that your contributions will be licensed under the same terms. In addition, we are in the process of rolling out a Contributor License Agreement (CLA): once it is live, contributors will be asked to sign the CLA so that contributed code can be included in both the BSL core and any future commercial distributions (e.g., `havn cloud`). Until the CLA is set up, opening a pull request is taken as agreement that your contribution may be used under these terms.
