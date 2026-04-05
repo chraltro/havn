@@ -32,6 +32,7 @@ import ModelNotebookView from "./ModelNotebookView";
 import NewModelDialog from "./NewModelDialog";
 import GitPanel from "./GitPanel";
 import OrchestrationPanel from "./OrchestrationPanel";
+import ReviewsPanel from "./ReviewsPanel";
 import AgentSidebar from "./AgentSidebar";
 import CommandPalette from "./CommandPalette";
 import FocusTrap from "./FocusTrap";
@@ -52,7 +53,7 @@ import { PipelineProvider, usePipeline } from "./PipelineContext";
 
 const SECTIONS = [
   { id: "Overview", label: "Overview", tabs: [] },
-  { id: "Develop", label: "Develop", tabs: ["Editor", "Data Sources", "Orchestration", "Git"] },
+  { id: "Develop", label: "Develop", tabs: ["Editor", "Data Sources", "Orchestration", "Reviews", "Git"] },
   { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "DAG", "Dashboards"] },
   { id: "Observe", label: "Observe", tabs: ["Quality", "Sentinel", "Diff", "Runs"] },
   { id: "Configure", label: "Configure", tabs: ["Masking", "Wiki", "Docs", "Settings"] },
@@ -509,6 +510,25 @@ function AppContent() {
 
   // Agent sidebar state
   const [agentSidebarOpen, setAgentSidebarOpen] = useState(false);
+
+  // When any panel dispatches 'havn-agent-send' (e.g. ReviewsPanel's AI Review
+  // button), open the agent sidebar first, then re-dispatch the event so the
+  // now-mounted sidebar can pick it up and forward it to the WebSocket.
+  useEffect(() => {
+    const handler = (e) => {
+      const prompt = e?.detail?.prompt;
+      if (!prompt) return;
+      if (agentSidebarOpen) return; // sidebar already listening
+      setAgentSidebarOpen(true);
+      // Delay re-dispatch until after the sidebar mounts and attaches its
+      // own listener
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("havn-agent-send", { detail: e.detail }));
+      }, 100);
+    };
+    window.addEventListener("havn-agent-send", handler);
+    return () => window.removeEventListener("havn-agent-send", handler);
+  }, [agentSidebarOpen]);
 
   // Run status indicator (header)
   const [recentStatus, setRecentStatus] = useState(null); // "success" | "failed" | null
@@ -1205,6 +1225,7 @@ function AppContent() {
             {activeTab === "DAG" && <ErrorBoundary name="DAG"><DAGPanel onOpenFile={openFile} showConfirm={showConfirm} /></ErrorBoundary>}
             {activeTab === "Git" && <ErrorBoundary name="Git"><GitPanel /></ErrorBoundary>}
             {activeTab === "Orchestration" && <ErrorBoundary name="Orchestration"><OrchestrationPanel /></ErrorBoundary>}
+            {activeTab === "Reviews" && <ErrorBoundary name="Reviews"><ReviewsPanel /></ErrorBoundary>}
             {activeTab === "Sentinel" && <ErrorBoundary name="Sentinel"><SentinelPanel /></ErrorBoundary>}
             {activeTab === "Diff" && <ErrorBoundary name="Diff"><DiffPanel api={api} addOutput={addOutput} /></ErrorBoundary>}
             {activeTab === "Docs" && <ErrorBoundary name="Docs"><DocsPanel /></ErrorBoundary>}

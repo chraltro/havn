@@ -427,6 +427,37 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
     setTimeout(() => textareaRef.current?.focus(), 0);
   };
 
+  // Programmatic prompt hook: other panels (e.g. ReviewsPanel's AI Review
+  // button) can dispatch a 'havn-agent-send' CustomEvent with { detail:
+  // { prompt } } to submit a message through the current agent connection.
+  // Note: this listener only fires when the sidebar is mounted (isOpen=true).
+  // App.jsx also listens for the event and opens the sidebar + re-dispatches
+  // the event so the sidebar can pick it up after mounting.
+  useEffect(() => {
+    const handler = (e) => {
+      const prompt = e?.detail?.prompt;
+      if (!prompt || typeof prompt !== "string") return;
+      const ws = socketsRef.current[selectedAgent];
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        setInput(prompt);
+        return;
+      }
+      if (cur.isStreaming) {
+        setInput(prompt);
+        return;
+      }
+      updateAgent(selectedAgent, (st) => ({
+        ...st,
+        messages: [...st.messages, { role: "user", content: prompt, ts: timestamp() }],
+        isStreaming: true,
+      }));
+      ws.send(JSON.stringify({ type: "message", message: prompt }));
+    };
+    window.addEventListener("havn-agent-send", handler);
+    return () => window.removeEventListener("havn-agent-send", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAgent, cur.isStreaming]);
+
   const switchAgent = (agentId) => {
     if (agentId === selectedAgent) return;
     setSelectedAgent(agentId);

@@ -281,6 +281,73 @@ export interface JobPlan {
   export_count: number;
 }
 
+// ---- Pull request types ----
+
+export interface PRComment {
+  id: string;
+  author: string;
+  body: string;
+  created_at: string;
+  comment_type: string;
+  file: string | null;
+  line: number | null;
+}
+
+export interface PullRequest {
+  id: string;
+  title: string;
+  description: string;
+  base_ref: string;
+  head_ref: string;
+  author: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  comments: PRComment[];
+  approvers: string[];
+  change_requesters: string[];
+  require_approval: boolean;
+  merged_by: string | null;
+  merged_at: string | null;
+  closed_by: string | null;
+  closed_at: string | null;
+}
+
+export interface PrBuildDiffEntry {
+  status: string;
+  main_rows: number;
+  pr_rows: number;
+  added_rows: number;
+  removed_rows: number;
+  schema_changes: Array<{
+    type: string;
+    column: string;
+    from?: string;
+    to?: string;
+    data_type?: string;
+  }>;
+}
+
+export interface PrBuild {
+  id: string;
+  pr_id: string;
+  branch_head: string | null;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+  data_diff: Record<string, PrBuildDiffEntry> | null;
+  lineage_impact: { changed: string[]; impacted: string[] } | null;
+  contract_results: Array<Record<string, unknown>> | null;
+  error: string | null;
+}
+
+export interface PrStateStatus {
+  is_git_repo: boolean;
+  dirty: boolean;
+  unpushed_count: number;
+}
+
 // ---- API client ----
 
 const BASE = "/api";
@@ -1030,4 +1097,86 @@ export const api = {
   getJobRun: (id: string) => request<JobRun>(`/job-runs/${id}`),
   cancelJobRun: (id: string) =>
     request(`/job-runs/${id}/cancel`, { method: "POST" }),
+
+  // Pull requests
+  listPrs: (status?: string) =>
+    request<PullRequest[]>(`/prs${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  createPr: (data: {
+    title: string;
+    description?: string;
+    base_ref: string;
+    head_ref: string;
+    author?: string;
+    require_approval?: boolean;
+  }) => request<PullRequest>("/prs", { method: "POST", body: JSON.stringify(data) }),
+  getPr: (id: string) => request<PullRequest>(`/prs/${encodeURIComponent(id)}`),
+  updatePr: (
+    id: string,
+    data: { title?: string; description?: string; require_approval?: boolean },
+  ) =>
+    request<PullRequest>(`/prs/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  closePr: (id: string, user: string = "local") =>
+    request<PullRequest>(`/prs/${encodeURIComponent(id)}/close`, {
+      method: "POST",
+      body: JSON.stringify({ user }),
+    }),
+  listPrComments: (id: string) =>
+    request<PRComment[]>(`/prs/${encodeURIComponent(id)}/comments`),
+  addPrComment: (
+    id: string,
+    data: {
+      body: string;
+      author?: string;
+      comment_type?: string;
+      file?: string;
+      line?: number;
+    },
+  ) =>
+    request<PRComment>(`/prs/${encodeURIComponent(id)}/comments`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  approvePr: (id: string, reviewer: string = "local") =>
+    request<PullRequest>(`/prs/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ reviewer }),
+    }),
+  requestPrChanges: (id: string, reviewer: string = "local", reason: string = "") =>
+    request<PullRequest>(`/prs/${encodeURIComponent(id)}/request-changes`, {
+      method: "POST",
+      body: JSON.stringify({ reviewer, reason }),
+    }),
+  buildPr: (id: string) =>
+    request<{ status: string; pr_id: string }>(`/prs/${encodeURIComponent(id)}/build`, {
+      method: "POST",
+    }),
+  getPrBuild: (id: string) =>
+    request<PrBuild | { pr_id: string; status: string }>(
+      `/prs/${encodeURIComponent(id)}/build`,
+    ),
+  mergePr: (id: string, user: string = "local") =>
+    request<{ success: boolean; merge_commit?: string; base_ref?: string; head_ref?: string }>(
+      `/prs/${encodeURIComponent(id)}/merge`,
+      { method: "POST", body: JSON.stringify({ user }) },
+    ),
+  getPrReviewPrompt: async (id: string): Promise<string> => {
+    // Plain-text endpoint — bypass the JSON wrapper
+    const res = await fetch(`/api/prs/${encodeURIComponent(id)}/review-prompt`, {
+      headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+    });
+    if (!res.ok) throw new Error(`Failed to load review prompt: ${res.status}`);
+    return await res.text();
+  },
+  getPrDiff: (id: string) =>
+    request<{ files: string[]; base_ref: string; head_ref: string }>(
+      `/prs/${encodeURIComponent(id)}/diff`,
+    ),
+  getPrLineageImpact: (id: string) =>
+    request<{ changed: string[]; impacted: string[] }>(
+      `/prs/${encodeURIComponent(id)}/lineage-impact`,
+    ),
+  getPrStateStatus: () => request<PrStateStatus>("/prs/state-status"),
 };
