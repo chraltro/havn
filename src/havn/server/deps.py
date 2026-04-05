@@ -209,6 +209,14 @@ def _get_shared_conn(*, require_exists: bool = False) -> duckdb.DuckDBPyConnecti
                 register_macros(_shared_conn, project_dir)
             except Exception:
                 logger.debug("Macro registration skipped (no macros/ dir or error)")
+            # Clean up any orchestration job_runs rows that were left in
+            # 'running' state by a previous server crash. Uses a 1-hour grace
+            # window so in-flight jobs from concurrent processes aren't killed.
+            try:
+                from havn.engine.orchestration import mark_stale_runs_failed
+                mark_stale_runs_failed(_shared_conn)
+            except Exception:
+                logger.debug("mark_stale_runs_failed skipped on startup")
         return _shared_conn
 
 

@@ -58,6 +58,7 @@ from havn.cli import admin  # noqa: E402, F401
 from havn.cli import connectors  # noqa: E402, F401
 from havn.cli import diff  # noqa: E402, F401
 from havn.cli import env  # noqa: E402, F401
+from havn.cli import jobs  # noqa: E402, F401
 from havn.cli import macros  # noqa: E402, F401
 from havn.cli import models  # noqa: E402, F401
 from havn.cli import pipeline  # noqa: E402, F401

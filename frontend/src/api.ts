@@ -213,6 +213,74 @@ export interface StreamConfig {
   steps: { ingest?: string[]; transform?: string[]; export?: string[] }[];
 }
 
+// ---- Orchestration job types ----
+
+export interface OrchestrationJob {
+  name: string;
+  target: string;
+  resolve: string;
+  cron: string;
+  enabled: boolean;
+  notify: string[];
+  retry: number;
+  retry_delay: number;
+  timeout_minutes: number;
+  description: string;
+  file: string;
+  last_run: {
+    status: string;
+    started_at: string | null;
+    duration_ms: number | null;
+    steps_completed?: number;
+    steps_total?: number;
+    steps_skipped?: number;
+    steps_failed?: number;
+  } | null;
+  next_run: string | null;
+}
+
+export interface JobStepDetail {
+  step: number;
+  type: string;
+  target: string;
+  status: string;
+  duration_ms?: number;
+  rows_affected?: number;
+  error?: string;
+}
+
+export interface JobRun {
+  id: string;
+  job_name: string;
+  status: string;
+  steps_total: number;
+  steps_completed: number;
+  steps_failed: number;
+  steps_skipped: number;
+  duration_ms: number | null;
+  trigger: string;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  step_details: JobStepDetail[];
+}
+
+export interface JobPlanStep {
+  step: number;
+  type: string;
+  target: string;
+  estimated_duration_ms: number;
+}
+
+export interface JobPlan {
+  steps: JobPlanStep[];
+  total_steps: number;
+  total_estimated_ms: number;
+  ingest_count: number;
+  transform_count: number;
+  export_count: number;
+}
+
 // ---- API client ----
 
 const BASE = "/api";
@@ -935,4 +1003,31 @@ export const api = {
     }),
   clearDashboardCache: (dashboardId: string) =>
     request(`/dashboards/${dashboardId}/cache`, { method: "DELETE" }),
+
+  // Orchestration Jobs
+  listJobs: () => request<OrchestrationJob[]>("/jobs"),
+  getJob: (name: string) =>
+    request<OrchestrationJob & { plan: JobPlan }>(`/jobs/${encodeURIComponent(name)}`),
+  getJobPlan: (name: string) =>
+    request<JobPlan>(`/jobs/${encodeURIComponent(name)}/plan`),
+  runJob: (name: string) =>
+    request(`/jobs/${encodeURIComponent(name)}/run`, { method: "POST" }),
+  createJob: (data: Partial<OrchestrationJob>) =>
+    request("/jobs", { method: "POST", body: JSON.stringify(data) }),
+  updateJob: (name: string, data: Partial<OrchestrationJob>) =>
+    request(`/jobs/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  deleteJob: (name: string) =>
+    request(`/jobs/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  getJobHistory: (name: string, limit: number = 50) =>
+    request<JobRun[]>(`/jobs/${encodeURIComponent(name)}/history?limit=${limit}`),
+  listJobRuns: (limit: number = 100, job?: string) =>
+    request<JobRun[]>(
+      `/job-runs?limit=${limit}${job ? `&job=${encodeURIComponent(job)}` : ""}`,
+    ),
+  getJobRun: (id: string) => request<JobRun>(`/job-runs/${id}`),
+  cancelJobRun: (id: string) =>
+    request(`/job-runs/${id}/cancel`, { method: "POST" }),
 };
