@@ -10,7 +10,8 @@ function renderMarkdown(md) {
   );
   // Inline code
   html = html.replace(/`([^`]+)`/g, '<code style="background:var(--havn-btn-bg);padding:2px 6px;border-radius:3px;font-size:0.9em;font-family:var(--havn-font-mono)">$1</code>');
-  // Headers
+  // Headers (most specific first to avoid h4 matching h3 pattern)
+  html = html.replace(/^#### (.+)$/gm, '<h4 style="color:var(--havn-text);font-size:14px;font-weight:600;margin:16px 0 6px">$1</h4>');
   html = html.replace(/^### (.+)$/gm, '<h3 style="color:var(--havn-text);font-size:16px;margin:20px 0 8px">$1</h3>');
   html = html.replace(/^## (.+)$/gm, '<h2 style="color:var(--havn-text);font-size:20px;margin:24px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--havn-border)">$1</h2>');
   html = html.replace(/^# (.+)$/gm, '<h1 style="color:var(--havn-text);font-size:26px;margin:0 0 16px;padding-bottom:8px;border-bottom:1px solid var(--havn-border-light)">$1</h1>');
@@ -44,13 +45,15 @@ function renderMarkdown(md) {
   });
   html = html.replace(/(^\d+\. .+$\n?)+/gm, (block) => {
     const items = block.trim().split('\n').map(l => l.replace(/^\d+\. /, ''));
-    return '<ol style="margin:8px 0;padding-left:24px">' + items.map(t => `<li style="margin:4px 0">${t}</li>`).join('') + '</ol>';
+    return '<ol style="margin:8px 0;padding-left:24px;list-style-type:decimal">' + items.map(t => `<li style="margin:4px 0;list-style-type:decimal">${t}</li>`).join('') + '</ol>';
   });
   // Paragraphs (double newlines)
   html = html.replace(/\n\n/g, '</p><p style="margin:8px 0;line-height:1.6">');
   // Single newlines that aren't tags
   html = html.replace(/\n(?!<)/g, '<br/>');
-  return `<p style="margin:8px 0;line-height:1.6">${html}</p>`;
+  // Use a div wrapper so block elements (headings, lists, tables, pre) don't
+  // create invalid block-inside-inline nesting that causes browser mis-parsing.
+  return `<div style="margin:8px 0;line-height:1.6"><p style="margin:8px 0;line-height:1.6">${html}</p></div>`;
 }
 
 export default function WikiPanel() {

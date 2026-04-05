@@ -445,6 +445,43 @@ def git_remote_url(project_dir: Path) -> str | None:
     return url if url else None
 
 
+def git_init(project_dir: Path, initial_branch: str = "main") -> dict:
+    """Initialize a new git repository in the project directory.
+
+    Returns ``{success, error}``. Refuses to reinitialize if the directory
+    already contains a git repository.
+    """
+    if is_git_repo(project_dir):
+        return {"success": False, "error": "Already a git repository"}
+    if not _validate_branch_name(initial_branch):
+        return {"success": False, "error": "Invalid initial branch name"}
+    # Use -b only on git >= 2.28; fall back to init + rename on older versions
+    result = subprocess.run(
+        ["git", "init", "-b", initial_branch],
+        cwd=project_dir,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        # Retry without -b for older git
+        result = subprocess.run(
+            ["git", "init"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return {
+                "success": False,
+                "error": result.stderr.strip() or "git init failed",
+            }
+        # Rename default branch if the old init created "master"
+        _run_git(project_dir, "symbolic-ref", "HEAD", f"refs/heads/{initial_branch}")
+    return {"success": True, "output": result.stdout.strip()}
+
+
 def git_status_detailed(project_dir: Path) -> list[dict]:
     """Get detailed file status with staged/unstaged distinction.
 

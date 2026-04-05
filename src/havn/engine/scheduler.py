@@ -212,11 +212,37 @@ class SchedulerThread(threading.Thread):
                         discover_models,
                     )
 
+                    from havn.engine.orchestration import (
+                        is_interval_schedule,
+                        parse_interval,
+                    )
                     orch_jobs = discover_jobs(self.project_dir)
                     for job in orch_jobs:
-                        if not job.enabled or not job.cron:
+                        if not job.enabled:
                             continue
-                        if self._should_run(f"job:{job.name}", job.cron):
+                        schedules = job.schedules or ([job.cron] if job.cron else [])
+                        if not schedules:
+                            continue
+                        # Trigger if ANY schedule matches
+                        triggering = None
+                        for sched in schedules:
+                            if is_interval_schedule(sched):
+                                delta = parse_interval(sched)
+                                if delta is None:
+                                    continue
+                                key = f"job:{job.name}:interval:{sched}"
+                                import time as _t
+                                now_ts = _t.time()
+                                last = self._last_run.get(key)
+                                if last is None or (now_ts - last) >= delta.total_seconds():
+                                    triggering = sched
+                                    self._last_run[key] = now_ts
+                                    break
+                            else:
+                                if self._should_run(f"job:{job.name}:{sched}", sched):
+                                    triggering = sched
+                                    break
+                        if triggering:
                             import datetime
 
                             mk = datetime.datetime.now().replace(
@@ -236,7 +262,7 @@ class SchedulerThread(threading.Thread):
                                 models = discover_models(self.project_dir / "transform")
                                 dag = build_dag(models)
                                 plan = resolve_execution_plan(
-                                    job.target,
+                                    job.targets or [job.target],
                                     dag,
                                     self.project_dir,
                                     conn=jconn,

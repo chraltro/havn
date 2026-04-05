@@ -154,6 +154,52 @@ export default function ReviewsPanel() {
             <div style={{ ...s.cardValue, color: "var(--havn-text-dim)" }}>{counts.closed}</div>
           </div>
         </div>
+        {stateStatus && !stateStatus.is_git_repo && (
+          <div style={{
+            marginTop: 4,
+            marginBottom: 8,
+            padding: "12px 14px",
+            background: "color-mix(in srgb, var(--havn-accent) 8%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--havn-accent) 30%, transparent)",
+            borderRadius: 6,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+          }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--havn-text)" }}>
+                Not a git repository yet
+              </div>
+              <div style={{ fontSize: 11, color: "var(--havn-text-dim)", marginTop: 2 }}>
+                Pull requests and PR state sharing require git. Initialize here
+                to start tracking changes.
+              </div>
+            </div>
+            <button
+              style={{
+                padding: "6px 14px",
+                background: "var(--havn-accent)",
+                color: "#fff",
+                border: "1px solid var(--havn-accent)",
+                borderRadius: "var(--havn-radius-lg)",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 500,
+              }}
+              onClick={async () => {
+                try {
+                  await api.initGit("main");
+                  await loadStateStatus();
+                  await loadPrs();
+                } catch (e) {
+                  setError(e.message || "Failed to initialize git");
+                }
+              }}
+            >
+              Initialize git
+            </button>
+          </div>
+        )}
         {stateStatus && stateStatus.is_git_repo && (stateStatus.dirty || stateStatus.unpushed_count > 0) && (
           <div style={s.banner}>
             <strong>PR state has unpushed changes.</strong>{" "}

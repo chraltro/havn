@@ -114,11 +114,16 @@ def test_discover_no_dir(tmp_path):
 
 
 def test_discover_skips_bad_cron(project):
+    """Invalid cron entries are dropped from the schedules list but the job
+    itself is kept (with empty schedules) so the user can see and fix it."""
     (project / "orchestration" / "badcron.yml").write_text(
         "name: badcron\ntarget: bronze.orders\ncron: \"invalid\"\n"
     )
     jobs = discover_jobs(project)
-    assert len(jobs) == 0
+    bad = next((j for j in jobs if j.name == "badcron"), None)
+    assert bad is not None
+    assert bad.schedules == []
+    assert bad.cron == ""
 
 
 # --- Plan resolution ---
@@ -177,6 +182,355 @@ def test_preview_plan(project, conn):
     assert result["total_steps"] >= 2
     assert "transform_count" in result
     assert result["transform_count"] >= 2
+
+
+# --- Multi-target ---
+
+
+def test_resolve_multi_target(project, conn):
+    """Multiple targets should be unioned into a single plan."""
+    from havn.engine.transform.discovery import build_dag, discover_models
+
+    dag = build_dag(discover_models(project / "transform"))
+    plan = resolve_execution_plan(
+        ["bronze.orders", "silver.orders"], dag, project, resolve="none"
+    )
+    targets = [s.target for s in plan.steps if s.type == "transform"]
+    assert "bronze.orders" in targets
+    assert "silver.orders" in targets
+
+
+def test_resolve_multi_target_with_script(project, conn):
+    """Mixing script and model targets in one job."""
+    from havn.engine.transform.discovery import build_dag, discover_models
+
+    dag = build_dag(discover_models(project / "transform"))
+    plan = resolve_execution_plan(
+        ["ingest/orders.py", "silver.orders"], dag, project, resolve="upstream"
+    )
+    types = [s.type for s in plan.steps]
+    assert "ingest" in types
+    assert "transform" in types
+    # Explicit ingest target should appear exactly once
+    ingest_targets = [s.target for s in plan.steps if s.type == "ingest"]
+    assert ingest_targets.count("ingest/orders.py") == 1
+
+
+def test_resolve_downstream_prefix(project, conn):
+    """+downstream:X should include X and everything that depends on it."""
+    from havn.engine.transform.discovery import build_dag, discover_models
+
+    dag = build_dag(discover_models(project / "transform"))
+    plan = resolve_execution_plan(
+        ["+downstream:bronze.orders"], dag, project, resolve="none"
+    )
+    targets = [s.target for s in plan.steps if s.type == "transform"]
+    assert "bronze.orders" in targets
+    # silver.orders depends on bronze.orders in the test fixture
+    assert "silver.orders" in targets
+
+
+def test_job_targets_field_populated(project):
+    """Job.__post_init__ mirrors target <-> targets for backward compat."""
+    from havn.engine.orchestration import Job
+
+    j1 = Job(name="a", target="silver.x", file_path=project / ".havn/prs/a.yml")
+    assert j1.targets == ["silver.x"]
+    j2 = Job(name="b", target="", targets=["silver.x", "silver.y"],
+             file_path=project / ".havn/prs/b.yml")
+    assert j2.target == "silver.x"
+
+
+def test_discover_jobs_reads_targets_list(project):
+    """discover_jobs should accept YAML with a targets list."""
+    (project / "orchestration" / "multi.yml").write_text(
+        "name: multi\ntargets:\n  - bronze.orders\n  - silver.orders\n"
+    )
+    jobs = discover_jobs(project)
+    multi = next((j for j in jobs if j.name == "multi"), None)
+    assert multi is not None
+    assert multi.targets == ["bronze.orders", "silver.orders"]
+    assert multi.target == "bronze.orders"  # first element mirrored
+
+
+def test_save_job_with_targets_list(project):
+    """save_job should persist targets and mirror to target for BC readers."""
+    path = save_job(project, {
+        "name": "multi-save",
+        "targets": ["bronze.orders", "silver.orders"],
+    })
+    import yaml as _yaml
+    data = _yaml.safe_load(path.read_text())
+    assert data["targets"] == ["bronze.orders", "silver.orders"]
+    assert data["target"] == "bronze.orders"
+
+
+# --- Multi-schedule + tags ---
+
+
+def test_discover_jobs_reads_schedules_list(project):
+    """discover_jobs should accept a schedules list and mirror to cron."""
+    (project / "orchestration" / "multi-sched.yml").write_text(
+        "name: multi-sched\n"
+        "target: silver.orders\n"
+        "schedules:\n"
+        "  - 0 6 * * *\n"
+        "  - 0 18 * * *\n"
+    )
+    jobs = discover_jobs(project)
+    j = next((x for x in jobs if x.name == "multi-sched"), None)
+    assert j is not None
+    assert j.schedules == ["0 6 * * *", "0 18 * * *"]
+    assert j.cron == "0 6 * * *"  # first mirrored for BC
+
+
+def test_save_job_persists_schedules(project):
+    path = save_job(project, {
+        "name": "daily-twice",
+        "target": "silver.orders",
+        "schedules": ["0 6 * * *", "0 18 * * *"],
+    })
+    import yaml as _yaml
+    data = _yaml.safe_load(path.read_text())
+    assert data["schedules"] == ["0 6 * * *", "0 18 * * *"]
+    assert data["cron"] == "0 6 * * *"
+
+
+def test_save_job_rejects_invalid_schedule(project):
+    """Schedule validation happens on save (vs on discover where we drop it)."""
+    import pytest as _pt
+    with _pt.raises(ValueError, match="cron"):
+        save_job(project, {
+            "name": "bad",
+            "target": "silver.orders",
+            "schedules": ["not valid"],
+        })
+
+
+def test_tags_persisted_and_discovered(project):
+    save_job(project, {
+        "name": "tagged",
+        "target": "silver.orders",
+        "tags": ["daily", "critical"],
+    })
+    jobs = discover_jobs(project)
+    j = next((x for x in jobs if x.name == "tagged"), None)
+    assert j is not None
+    assert j.tags == ["daily", "critical"]
+
+
+def test_get_earliest_next_run_multi_schedule():
+    """Earliest next run across multiple schedules should return the soonest."""
+    from havn.engine.orchestration import get_earliest_next_run
+    result = get_earliest_next_run(["0 6 * * *", "* * * * *"])
+    # `* * * * *` fires every minute, so earliest should be within a minute
+    assert result is not None
+    import datetime
+    parsed = datetime.datetime.fromisoformat(result)
+    delta = (parsed - datetime.datetime.now()).total_seconds()
+    assert delta < 120  # within 2 minutes
+
+
+def test_get_earliest_next_run_empty():
+    from havn.engine.orchestration import get_earliest_next_run
+    assert get_earliest_next_run([]) is None
+    assert get_earliest_next_run(["invalid"]) is None
+
+
+# --- Interval schedules ---
+
+
+def test_parse_interval():
+    from havn.engine.orchestration import parse_interval, is_interval_schedule
+
+    assert is_interval_schedule("every 2 weeks")
+    assert is_interval_schedule("every 3 days")
+    assert is_interval_schedule("every 1 minute")
+    assert is_interval_schedule("every 30 minutes")
+    assert not is_interval_schedule("0 6 * * *")
+    assert not is_interval_schedule("")
+    assert not is_interval_schedule("every banana")
+
+    import datetime
+    assert parse_interval("every 2 weeks") == datetime.timedelta(days=14)
+    assert parse_interval("every 3 days") == datetime.timedelta(days=3)
+    assert parse_interval("every 15 minutes") == datetime.timedelta(minutes=15)
+    assert parse_interval("every 1 hour") == datetime.timedelta(hours=1)
+    assert parse_interval("every 2 months") == datetime.timedelta(days=60)
+    assert parse_interval("bad") is None
+    assert parse_interval("every 0 weeks") is None
+
+
+def test_is_valid_schedule():
+    from havn.engine.orchestration import is_valid_schedule
+
+    assert is_valid_schedule("0 6 * * *")
+    assert is_valid_schedule("every 2 weeks")
+    assert not is_valid_schedule("")
+    assert not is_valid_schedule("bad")
+    assert not is_valid_schedule("0 6 * *")  # 4 fields
+
+
+def test_discover_jobs_accepts_interval_schedule(project):
+    (project / "orchestration" / "biweekly.yml").write_text(
+        "name: biweekly\n"
+        "target: silver.orders\n"
+        "schedules:\n"
+        "  - every 2 weeks\n"
+    )
+    jobs = discover_jobs(project)
+    j = next((x for x in jobs if x.name == "biweekly"), None)
+    assert j is not None
+    assert j.schedules == ["every 2 weeks"]
+
+
+def test_save_job_accepts_interval(project):
+    path = save_job(project, {
+        "name": "fortnightly",
+        "target": "silver.orders",
+        "schedules": ["every 2 weeks"],
+    })
+    import yaml as _yaml
+    data = _yaml.safe_load(path.read_text())
+    assert data["schedules"] == ["every 2 weeks"]
+
+
+def test_save_job_rejects_invalid_interval(project):
+    import pytest as _pt
+    with _pt.raises(ValueError):
+        save_job(project, {
+            "name": "bad",
+            "target": "silver.orders",
+            "schedules": ["every banana"],
+        })
+
+
+def test_get_next_run_interval_no_last_fire():
+    """Without a last_fire, interval next-run is now + interval."""
+    from havn.engine.orchestration import get_next_run
+    import datetime
+    before = datetime.datetime.now()
+    result = get_next_run("every 1 hour")
+    after = datetime.datetime.now()
+    assert result is not None
+    parsed = datetime.datetime.fromisoformat(result)
+    # Should be roughly 1 hour from now (within a few seconds)
+    delta = (parsed - before).total_seconds()
+    assert 3595 < delta < 3605
+
+
+def test_get_next_run_interval_with_last_fire():
+    """With a last_fire timestamp, next run is last_fire + interval."""
+    from havn.engine.orchestration import get_next_run
+    last = "2026-04-01T12:00:00"
+    result = get_next_run("every 2 weeks", last_fire_iso=last)
+    # 2 weeks after 2026-04-01 is 2026-04-15
+    assert "2026-04-15" in result
+
+
+# --- Ingest detection beyond landing.* ---
+
+
+# --- dbt-style selectors ---
+
+
+def test_selector_plus_prefix_means_upstream(project, conn):
+    """+silver.orders should include silver.orders and all its upstream."""
+    from havn.engine.transform.discovery import build_dag, discover_models
+
+    dag = build_dag(discover_models(project / "transform"))
+    plan = resolve_execution_plan("+silver.orders", dag, project, resolve="none")
+    targets = [s.target for s in plan.steps if s.type == "transform"]
+    assert "silver.orders" in targets
+    assert "bronze.orders" in targets
+
+
+def test_selector_plus_suffix_means_downstream(project, conn):
+    """bronze.orders+ should include bronze.orders and all downstream."""
+    from havn.engine.transform.discovery import build_dag, discover_models
+
+    dag = build_dag(discover_models(project / "transform"))
+    plan = resolve_execution_plan("bronze.orders+", dag, project, resolve="none")
+    targets = [s.target for s in plan.steps if s.type == "transform"]
+    assert "bronze.orders" in targets
+    assert "silver.orders" in targets
+
+
+def test_selector_both_sides(project, conn):
+    """+silver.orders+ should include silver + everything upstream + everything downstream."""
+    from havn.engine.transform.discovery import build_dag, discover_models
+
+    dag = build_dag(discover_models(project / "transform"))
+    plan = resolve_execution_plan("+silver.orders+", dag, project, resolve="none")
+    targets = [s.target for s in plan.steps if s.type == "transform"]
+    assert "bronze.orders" in targets
+    assert "silver.orders" in targets
+
+
+def test_selector_bare_target_no_expansion_with_resolve_none(project, conn):
+    """Without selector markers and resolve=none, only the literal target runs."""
+    from havn.engine.transform.discovery import build_dag, discover_models
+
+    dag = build_dag(discover_models(project / "transform"))
+    plan = resolve_execution_plan("silver.orders", dag, project, resolve="none")
+    targets = [s.target for s in plan.steps if s.type == "transform"]
+    assert targets == ["silver.orders"]
+
+
+def test_selector_bare_target_bc_with_resolve_upstream(project, conn):
+    """Legacy BC: bare target + resolve=upstream = auto-prefix with +."""
+    from havn.engine.transform.discovery import build_dag, discover_models
+
+    dag = build_dag(discover_models(project / "transform"))
+    plan = resolve_execution_plan("silver.orders", dag, project, resolve="upstream")
+    targets = [s.target for s in plan.steps if s.type == "transform"]
+    assert "bronze.orders" in targets
+    assert "silver.orders" in targets
+
+
+def test_selector_wildcard_with_downstream(project, conn):
+    from havn.engine.transform.discovery import build_dag, discover_models
+
+    dag = build_dag(discover_models(project / "transform"))
+    plan = resolve_execution_plan("bronze.*+", dag, project, resolve="none")
+    targets = [s.target for s in plan.steps if s.type == "transform"]
+    assert "bronze.orders" in targets
+    assert "silver.orders" in targets  # downstream of bronze.orders
+
+
+def test_parse_selector_helper():
+    from havn.engine.orchestration import _parse_selector
+
+    assert _parse_selector("foo") == (False, False, "foo")
+    assert _parse_selector("+foo") == (True, False, "foo")
+    assert _parse_selector("foo+") == (False, True, "foo")
+    assert _parse_selector("+foo+") == (True, True, "foo")
+    # legacy
+    assert _parse_selector("+downstream:foo") == (False, True, "foo")
+
+
+def test_ingest_detection_works_for_non_landing_schema(tmp_path):
+    """Ingest scripts should be detected even when the source schema isn't
+    'landing' — this was a bug where any other schema (raw, source, etc.)
+    was silently ignored."""
+    from havn.engine.transform.discovery import build_dag, discover_models
+
+    (tmp_path / "transform" / "bronze").mkdir(parents=True)
+    (tmp_path / "ingest").mkdir()
+    # A bronze model that depends on raw.customers (NOT landing.*)
+    (tmp_path / "transform" / "bronze" / "customers.sql").write_text(
+        "-- config: materialized=table, schema=bronze\n"
+        "-- depends_on: raw.customers\n\n"
+        "SELECT * FROM raw.customers\n"
+    )
+    (tmp_path / "ingest" / "sync_customers.py").write_text(
+        "db.execute('CREATE SCHEMA IF NOT EXISTS raw')\n"
+        "db.execute('CREATE OR REPLACE TABLE raw.customers AS SELECT 1 AS id')\n"
+    )
+    dag = build_dag(discover_models(tmp_path / "transform"))
+    plan = resolve_execution_plan("bronze.customers", dag, tmp_path)
+    ingest_targets = [s.target for s in plan.steps if s.type == "ingest"]
+    assert "ingest/sync_customers.py" in ingest_targets
 
 
 # --- Execution ---

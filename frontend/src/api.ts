@@ -217,9 +217,12 @@ export interface StreamConfig {
 
 export interface OrchestrationJob {
   name: string;
-  target: string;
+  target: string;            // legacy single-target (= targets[0])
+  targets: string[];         // preferred multi-target list
   resolve: string;
-  cron: string;
+  cron: string;              // legacy single-schedule (= schedules[0])
+  schedules: string[];       // preferred multi-schedule list
+  tags: string[];
   enabled: boolean;
   notify: string[];
   retry: number;
@@ -237,6 +240,30 @@ export interface OrchestrationJob {
     steps_failed?: number;
   } | null;
   next_run: string | null;
+  sparkline: Array<{
+    status: string;
+    duration_ms: number | null;
+    started_at: string | null;
+  }>;
+}
+
+export interface OrchestrationDagNode {
+  id: string;
+  kind: "ingest" | "transform" | "export";
+  label: string;
+  schema: string;
+  path?: string | null;
+  materialized?: string;
+  depends_on?: string[];
+  row_count?: number | null;
+  last_run_at?: string | null;
+  duration_ms?: number | null;
+}
+
+export interface OrchestrationDag {
+  nodes: OrchestrationDagNode[];
+  edges: { source: string; target: string; kind: string }[];
+  schemas: string[];
 }
 
 export interface JobStepDetail {
@@ -811,6 +838,11 @@ export const api = {
     }),
 
   // Git operations
+  initGit: (initial_branch: string = "main") =>
+    request<{ success: boolean; output?: string }>("/git/init", {
+      method: "POST",
+      body: JSON.stringify({ initial_branch }),
+    }),
   getGitStatus: () => request("/git/status"),
   getGitLog: (limit: number = 20) => request(`/git/log?limit=${limit}`),
   getGitDiff: (file?: string, staged?: boolean) => {
@@ -1097,6 +1129,9 @@ export const api = {
   getJobRun: (id: string) => request<JobRun>(`/job-runs/${id}`),
   cancelJobRun: (id: string) =>
     request(`/job-runs/${id}/cancel`, { method: "POST" }),
+
+  // Orchestration DAG picker
+  getOrchestrationDag: () => request<OrchestrationDag>("/dag/orchestration"),
 
   // Pull requests
   listPrs: (status?: string) =>

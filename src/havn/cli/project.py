@@ -27,9 +27,11 @@ def init(
         SAMPLE_CONTRACTS_YML,
         SAMPLE_EXPLORE_NOTEBOOK,
         SAMPLE_EXPORT_SCRIPT,
+        SAMPLE_FULL_REFRESH_JOB,
         SAMPLE_GOLD_REGIONS_SQL,
         SAMPLE_GOLD_SUMMARY_SQL,
         SAMPLE_GOLD_TOP_SQL,
+        SAMPLE_INCREMENTAL_JOB,
         SAMPLE_INGEST_NOTEBOOK,
         SAMPLE_MACRO_GEO,
         SAMPLE_SEED_CSV,
@@ -43,7 +45,7 @@ def init(
 
     dirs = [
         "ingest", "transform/bronze", "transform/silver", "transform/gold",
-        "export", "seeds", "contracts", "notebooks", "macros",
+        "export", "seeds", "contracts", "notebooks", "macros", "orchestration",
     ]
     for d in dirs:
         (target / d).mkdir(parents=True, exist_ok=True)
@@ -66,6 +68,9 @@ def init(
         (target / "seeds" / "magnitude_scale.csv").write_text(SAMPLE_SEED_CSV)
         (target / "contracts" / "quality.yml").write_text(SAMPLE_CONTRACTS_YML)
         (target / "notebooks" / "explore.dpnb").write_text(SAMPLE_EXPLORE_NOTEBOOK)
+        # Starter orchestration jobs (replaces the old streams: stanza)
+        (target / "orchestration" / "full-refresh.yml").write_text(SAMPLE_FULL_REFRESH_JOB)
+        (target / "orchestration" / "incremental.yml").write_text(SAMPLE_INCREMENTAL_JOB)
 
     # Config files (both empty and sample projects)
     (target / ".env").write_text(ENV_TEMPLATE)
@@ -110,8 +115,9 @@ def init(
     else:
         console.print("Quick start:")
         console.print(f"  cd {name}")
-        console.print("  havn stream full-refresh    # run the full earthquake pipeline")
-        console.print("  havn stream incremental     # quick re-run (only changed models)")
+        console.print("  havn seed                   # load the magnitude_scale reference CSV")
+        console.print("  havn jobs run full-refresh  # rebuild every model + export")
+        console.print("  havn jobs run incremental   # quick re-run (only changed models)")
         console.print("  havn tables                 # see what was built")
         console.print("  havn macros                 # see Python functions usable in SQL")
         console.print("  havn serve                  # open web UI")

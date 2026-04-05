@@ -33,21 +33,9 @@ connections: {{}}
   #   user: ${{POSTGRES_USER}}
   #   password: ${{POSTGRES_PASSWORD}}
 
-streams:
-  full-refresh:
-    description: "Full pipeline: seed reference data, ingest live data, transform, export"
-    steps:
-      - seed: [all]
-      - ingest: [all]
-      - transform: [all]
-      - export: [all]
-    schedule: null  # on-demand; use cron for scheduled runs, e.g. "0 6 * * *"
-
-  incremental:
-    description: "Quick refresh: ingest new data and rebuild only changed models"
-    steps:
-      - ingest: [all]
-      - transform: [all]
+# Pipelines live in orchestration/ as individual YAML job files. Edit them
+# in the web UI (Develop -> Orchestration) or directly on disk. The starter
+# jobs in this sample project run the earthquake pipeline end-to-end.
 
 # alerts:
 #   slack:
@@ -77,15 +65,10 @@ connections: {{}}
   #   user: ${{POSTGRES_USER}}
   #   password: ${{POSTGRES_PASSWORD}}
 
-streams: {{}}
-  # Example: define a pipeline
-  # daily-refresh:
-  #   description: "Daily ETL pipeline"
-  #   steps:
-  #     - ingest: [all]
-  #     - transform: [all]
-  #     - export: [all]
-  #   schedule: "0 6 * * *"
+# Pipelines live in orchestration/ as individual YAML job files.
+# Create them via the web UI (Develop -> Orchestration) or add YAML
+# files directly. Each job picks targets from your DAG; schedules can
+# be cron expressions (e.g. "0 6 * * *") or intervals (e.g. "every 2 weeks").
 
 lint:
   dialect: duckdb
@@ -491,6 +474,40 @@ Great,8.0,10.0,Great earthquake,critical,Can totally destroy communities near ep
 # ---------------------------------------------------------------------------
 # Contracts — data quality rules
 # ---------------------------------------------------------------------------
+
+SAMPLE_FULL_REFRESH_JOB = """\
+name: full-refresh
+description: Full pipeline — rebuild every gold model and export the results
+targets:
+  - gold.*
+  - export/earthquake_report.py
+resolve: upstream
+tags:
+  - daily
+enabled: true
+retry: 1
+retry_delay: 30
+timeout_minutes: 60
+# Uncomment to run automatically:
+# schedules:
+#   - "0 6 * * *"          # every day at 6:00 AM
+#   - "every 1 day"        # or an interval, whichever you prefer
+"""
+
+SAMPLE_INCREMENTAL_JOB = """\
+name: incremental
+description: Quick refresh — only rebuild changed gold models and their upstream
+targets:
+  - gold.*
+resolve: upstream
+tags:
+  - hourly
+enabled: true
+retry: 0
+timeout_minutes: 30
+# schedules:
+#   - "0 * * * *"          # every hour on the hour
+"""
 
 SAMPLE_CONTRACTS_YML = """\
 contracts:
