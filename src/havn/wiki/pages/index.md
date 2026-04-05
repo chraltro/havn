@@ -65,6 +65,7 @@ The havn web interface is a React SPA (Single Page Application) built with Vite 
 - **SQL Transforms** -- Plain SQL with `-- config:` and `-- depends_on:` comments; no Jinja or templating. Supports table, view, and incremental materializations. See [Transforms](transforms).
 - **DAG Engine** -- Automatic dependency resolution and topological ordering with parallel execution and change detection via SHA256 hashing. See [Transforms](transforms).
 - **Streams** -- Multi-step pipelines (ingest, seed, transform, export) defined in `project.yml` with retries, webhook notifications, and real-time SSE streaming. See [Pipelines](pipelines).
+- **Orchestration Jobs** -- YAML-defined jobs with dbt-style selectors, multiple schedules (cron and interval), tags, and a visual DAG picker. See [Orchestration Jobs](orchestration-jobs).
 - **Seeds** -- CSV files loaded as reference tables with change detection. See [Seeds](seeds).
 
 ### Connectors and Integration
@@ -94,6 +95,7 @@ The havn web interface is a React SPA (Single Page Application) built with Vite 
 - **SQL Promotion** -- Convert ad-hoc queries or notebook cells into proper transform models. See [Notebooks](notebooks).
 - **Agent Sidebar** -- AI coding assistant embedded in the UI for code generation, debugging, and optimization.
 - **Collaboration** -- Real-time collaborative editing sessions with live cursor sync.
+- **Pull Requests** -- Local PR system: create, build-in-worktree, review (AI or human), approve, and merge with pre-merge data diffs. See [Pull Requests](pull-requests).
 
 ### Versioning and Time Travel
 - **Versioning** -- Parquet-based snapshots with time travel, diff, and restore. See [Versioning](versioning).
@@ -123,9 +125,9 @@ havn serve
 | Category | Pages |
 |----------|-------|
 | Getting Started | [Getting Started](getting-started), [Configuration](configuration), [Environments](environments) |
-| Core Concepts | [Transforms](transforms), [Pipelines](pipelines), [Seeds](seeds), [Sources](sources) |
+| Core Concepts | [Transforms](transforms), [Pipelines](pipelines), [Seeds](seeds), [Sources](sources), [Migration: Streams to Jobs](streams-to-jobs) |
 | Data Integration | [Connectors](connectors), [CDC](cdc) |
 | Data Quality | [Quality](quality), [Contracts](contracts), [Sentinel](sentinel), [Lineage](lineage) |
 | Security | [Auth](auth), [Masking](masking) |
-| Advanced | [Scheduler](scheduler), [Notebooks](notebooks), [Versioning](versioning) |
+| Advanced | [Scheduler](scheduler), [Notebooks](notebooks), [Versioning](versioning), [Orchestration Jobs](orchestration-jobs), [Pull Requests](pull-requests) |
 | Reference | [CLI Reference](cli-reference), [API Reference](api-reference) |

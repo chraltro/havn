@@ -44,6 +44,9 @@ def _extract_category(slug: str) -> str:
         "scheduler": "Advanced",
         "notebooks": "Advanced",
         "versioning": "Advanced",
+        "orchestration-jobs": "Advanced",
+        "pull-requests": "Advanced",
+        "streams-to-jobs": "Core Concepts",
         "cli-reference": "Reference",
         "api-reference": "Reference",
     }

@@ -214,7 +214,43 @@ export default function GitPanel() {
   // Render
   if (loading) return <div style={st.container}><div style={st.center}>Loading git status...</div></div>;
   if (error) return <div style={st.container}><div style={st.center}><span style={{ color: "var(--havn-red)" }}>{error}</span></div></div>;
-  if (!status?.is_git_repo) return <div style={st.container}><div style={st.center}>Not a git repository. Run <code>git init</code> to get started.</div></div>;
+  if (!status?.is_git_repo) {
+    return (
+      <div style={st.container}>
+        <div style={{ ...st.center, display: "flex", flexDirection: "column", gap: 12, alignItems: "center", padding: 40 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--havn-text)" }}>
+            Not a git repository
+          </div>
+          <div style={{ fontSize: 12, color: "var(--havn-text-dim)", textAlign: "center", maxWidth: 420, lineHeight: 1.5 }}>
+            Initialize git here to track changes, create pull requests, and
+            share project state (including .havn/prs/) with collaborators.
+          </div>
+          <button
+            style={{
+              padding: "8px 18px",
+              background: "var(--havn-accent)",
+              color: "#fff",
+              border: "1px solid var(--havn-accent)",
+              borderRadius: "var(--havn-radius-lg)",
+              cursor: "pointer",
+              fontSize: 13,
+              fontWeight: 500,
+            }}
+            onClick={async () => {
+              try {
+                await api.initGit("main");
+                await refresh();
+              } catch (e) {
+                setError(e.message || "Failed to initialize git");
+              }
+            }}
+          >
+            Initialize git repository
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={st.container}>

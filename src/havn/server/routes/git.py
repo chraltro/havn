@@ -150,6 +150,23 @@ def get_git_remote(request: Request) -> dict:
 # --- Write endpoints ---
 
 
+class InitRequest(BaseModel):
+    initial_branch: str = "main"
+
+
+@router.post("/api/git/init")
+def post_git_init(request: Request, req: InitRequest) -> dict:
+    """Initialize a new git repository in the project directory."""
+    _require_permission(request, "write")
+    from havn.engine.git import git_init
+
+    project_dir = _get_project_dir()
+    result = git_init(project_dir, initial_branch=req.initial_branch)
+    if not result.get("success"):
+        raise HTTPException(400, result.get("error", "git init failed"))
+    return result
+
+
 @router.post("/api/git/stage")
 def post_git_stage(request: Request, req: StageRequest) -> dict:
     """Stage files."""

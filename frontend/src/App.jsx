@@ -30,9 +30,8 @@ import { useHintTriggerFn } from "./HintSystem";
 import EnvironmentSwitcher from "./EnvironmentSwitcher";
 import ModelNotebookView from "./ModelNotebookView";
 import NewModelDialog from "./NewModelDialog";
-import GitPanel from "./GitPanel";
+import GitReviewsPanel from "./GitReviewsPanel";
 import OrchestrationPanel from "./OrchestrationPanel";
-import ReviewsPanel from "./ReviewsPanel";
 import AgentSidebar from "./AgentSidebar";
 import CommandPalette from "./CommandPalette";
 import FocusTrap from "./FocusTrap";
@@ -53,7 +52,7 @@ import { PipelineProvider, usePipeline } from "./PipelineContext";
 
 const SECTIONS = [
   { id: "Overview", label: "Overview", tabs: [] },
-  { id: "Develop", label: "Develop", tabs: ["Editor", "Data Sources", "Orchestration", "Reviews", "Git"] },
+  { id: "Develop", label: "Develop", tabs: ["Editor", "Data Sources", "Orchestration", "Git"] },
   { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "DAG", "Dashboards"] },
   { id: "Observe", label: "Observe", tabs: ["Quality", "Sentinel", "Diff", "Runs"] },
   { id: "Configure", label: "Configure", tabs: ["Masking", "Wiki", "Docs", "Settings"] },
@@ -1223,9 +1222,8 @@ function AppContent() {
             {activeTab === "Data Sources" && <ErrorBoundary name="Data Sources"><DataSourcesPanel addOutput={addOutput} showConfirm={showConfirm} onDataChanged={refreshAll} /></ErrorBoundary>}
 
             {activeTab === "DAG" && <ErrorBoundary name="DAG"><DAGPanel onOpenFile={openFile} showConfirm={showConfirm} /></ErrorBoundary>}
-            {activeTab === "Git" && <ErrorBoundary name="Git"><GitPanel /></ErrorBoundary>}
+            {activeTab === "Git" && <ErrorBoundary name="Git"><GitReviewsPanel /></ErrorBoundary>}
             {activeTab === "Orchestration" && <ErrorBoundary name="Orchestration"><OrchestrationPanel /></ErrorBoundary>}
-            {activeTab === "Reviews" && <ErrorBoundary name="Reviews"><ReviewsPanel /></ErrorBoundary>}
             {activeTab === "Sentinel" && <ErrorBoundary name="Sentinel"><SentinelPanel /></ErrorBoundary>}
             {activeTab === "Diff" && <ErrorBoundary name="Diff"><DiffPanel api={api} addOutput={addOutput} /></ErrorBoundary>}
             {activeTab === "Docs" && <ErrorBoundary name="Docs"><DocsPanel /></ErrorBoundary>}
