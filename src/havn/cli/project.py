@@ -71,7 +71,24 @@ def init(
     (target / ".env").write_text(ENV_TEMPLATE)
     (target / ".gitignore").write_text(
         "warehouse.duckdb\nwarehouse.duckdb.wal\n__pycache__/\n*.pyc\n.venv/\n.env\noutput/\n_snapshots/\n"
+        ".havn/pr-build/\n"
     )
+    # .havn/ holds shareable PR state. .havn/prs/ travels with the repo (commit
+    # the JSON files there to share PRs with collaborators); .havn/pr-build/ is
+    # a transient worktree directory and is gitignored above.
+    havn_dir = target / ".havn"
+    havn_dir.mkdir(parents=True, exist_ok=True)
+    (havn_dir / "README.md").write_text(
+        "# .havn/\n\n"
+        "This directory holds havn state that is shared via git.\n\n"
+        "- `prs/` — Pull request definitions (JSON). Commit and push these to\n"
+        "  share PRs with your team. Each developer runs their own havn\n"
+        "  locally; PR state travels with the repository.\n"
+        "- `pr-build/` — Transient git worktrees used by `havn pr build`.\n"
+        "  Automatically cleaned up after each build. Gitignored.\n"
+    )
+    (havn_dir / "prs").mkdir(exist_ok=True)
+    (havn_dir / "prs" / ".gitkeep").write_text("")
     (target / "CLAUDE.md").write_text(CLAUDE_MD_TEMPLATE.format(name=name))
     (target / ".cursorrules").write_text(CURSORRULES_TEMPLATE)
     (target / ".github").mkdir(parents=True, exist_ok=True)

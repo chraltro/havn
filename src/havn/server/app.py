@@ -37,7 +37,7 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
     ],
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -117,6 +117,7 @@ from havn.server.routes.git import router as git_router  # noqa: E402
 from havn.server.routes.macros import router as macros_router  # noqa: E402
 from havn.server.routes.dashboards import router as dashboards_router  # noqa: E402
 from havn.server.routes.jobs import router as jobs_router  # noqa: E402
+from havn.server.routes.pr import router as pr_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(files_router)
@@ -142,6 +143,7 @@ app.include_router(git_router)
 app.include_router(macros_router)
 app.include_router(dashboards_router)
 app.include_router(jobs_router)
+app.include_router(pr_router)
 
 # Register WebSocket endpoints (can't use APIRouter for WebSocket)
 register_websocket(app)
