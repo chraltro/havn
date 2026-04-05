@@ -34,11 +34,32 @@ def _reject_traversal(value: str) -> str:
     return value
 
 
+def _validate_target_list(v: list[str] | None) -> list[str] | None:
+    if v is None:
+        return None
+    if not isinstance(v, list):
+        raise ValueError("targets must be a list of strings")
+    for t in v:
+        if not isinstance(t, str) or not t.strip():
+            raise ValueError("each target must be a non-empty string")
+        # Allow +downstream: prefix — strip for validation
+        raw = t[len("+downstream:") :] if t.startswith("+downstream:") else t
+        _reject_traversal(raw)
+    return v
+
+
 class CreateJobRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
-    target: str = Field(..., min_length=1, max_length=500)
+    # Either `target` (legacy single) or `targets` (preferred list). At least
+    # one must be provided; both are supported for backward compatibility.
+    target: str | None = Field(default=None, min_length=1, max_length=500)
+    targets: list[str] | None = Field(default=None, max_length=200)
     resolve: str = Field(default="upstream", pattern="^(upstream|none)$")
+    # Either `cron` (legacy single) or `schedules` (preferred list). Either
+    # can be omitted for on-demand-only jobs.
     cron: str = Field(default="")
+    schedules: list[str] | None = Field(default=None, max_length=50)
+    tags: list[str] = Field(default_factory=list, max_length=20)
     enabled: bool = True
     notify: list[str] = Field(default_factory=list)
     retry: int = Field(default=0, ge=0, le=10)
@@ -48,15 +69,25 @@ class CreateJobRequest(BaseModel):
 
     @field_validator("target")
     @classmethod
-    def _validate_target(cls, v: str) -> str:
+    def _validate_target(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
         return _reject_traversal(v)
+
+    @field_validator("targets")
+    @classmethod
+    def _validate_targets(cls, v: list[str] | None) -> list[str] | None:
+        return _validate_target_list(v)
 
 
 class UpdateJobRequest(BaseModel):
     name: str | None = None
     target: str | None = None
+    targets: list[str] | None = None
     resolve: str | None = None
     cron: str | None = None
+    schedules: list[str] | None = None
+    tags: list[str] | None = None
     enabled: bool | None = None
     notify: list[str] | None = None
     retry: int | None = None
@@ -70,6 +101,11 @@ class UpdateJobRequest(BaseModel):
         if v is None:
             return v
         return _reject_traversal(v)
+
+    @field_validator("targets")
+    @classmethod
+    def _validate_targets(cls, v: list[str] | None) -> list[str] | None:
+        return _validate_target_list(v)
 
 
 # --- Helpers ---
@@ -115,14 +151,15 @@ def list_jobs(request: Request, conn: DbConnReadOnly):
     from havn.engine.orchestration import (
         discover_jobs,
         ensure_job_runs_table,
-        get_next_run,
+        get_earliest_next_run,
     )
 
     project_dir = _get_project_dir()
     ensure_job_runs_table(conn)
     jobs = discover_jobs(project_dir)
-    # Get last run per job
+    # Get last run per job + last 10 runs per job for sparkline
     last_runs: dict[str, dict] = {}
+    sparklines: dict[str, list[dict]] = {}
     try:
         rows = conn.execute(
             "SELECT job_name, status, started_at, duration_ms, steps_completed, "
@@ -140,15 +177,33 @@ def list_jobs(request: Request, conn: DbConnReadOnly):
                 "steps_skipped": r[6] or 0,
                 "steps_failed": r[7] or 0,
             }
+        # Last 10 runs per job (ordered oldest to newest for sparkline rendering)
+        spark_rows = conn.execute(
+            "SELECT job_name, status, duration_ms, started_at FROM ("
+            "  SELECT job_name, status, duration_ms, started_at, "
+            "    ROW_NUMBER() OVER (PARTITION BY job_name ORDER BY started_at DESC) AS rn "
+            "  FROM _havn.job_runs"
+            ") WHERE rn <= 10 ORDER BY job_name, started_at"
+        ).fetchall()
+        for row in spark_rows:
+            sparklines.setdefault(row[0], []).append({
+                "status": row[1],
+                "duration_ms": row[2],
+                "started_at": str(row[3]) if row[3] else None,
+            })
     except Exception:
         pass
     result = []
     for job in jobs:
+        schedules = job.schedules or ([job.cron] if job.cron else [])
         result.append({
             "name": job.name,
             "target": job.target,
+            "targets": job.targets or [job.target],
             "resolve": job.resolve,
             "cron": job.cron,
+            "schedules": schedules,
+            "tags": job.tags,
             "enabled": job.enabled,
             "notify": job.notify,
             "retry": job.retry,
@@ -156,8 +211,12 @@ def list_jobs(request: Request, conn: DbConnReadOnly):
             "timeout_minutes": job.timeout_minutes,
             "description": job.description,
             "file": job.file_path.name,
+            "sparkline": sparklines.get(job.name, []),
             "last_run": last_runs.get(job.name),
-            "next_run": get_next_run(job.cron) if job.enabled and job.cron else None,
+            "next_run": get_earliest_next_run(
+                schedules,
+                last_fire_iso=(last_runs.get(job.name) or {}).get("started_at"),
+            ) if job.enabled and schedules else None,
         })
     return result
 
@@ -168,7 +227,7 @@ def get_job(name: str, request: Request, conn: DbConnReadOnly):
     from havn.engine.orchestration import (
         _find_job,
         ensure_job_runs_table,
-        get_next_run,
+        get_earliest_next_run,
         preview_plan,
     )
 
@@ -178,12 +237,30 @@ def get_job(name: str, request: Request, conn: DbConnReadOnly):
     if not job:
         raise HTTPException(404, f"Job '{name}' not found")
     dag = _get_dag(project_dir)
-    plan = preview_plan(job.target, dag, project_dir, conn=conn, resolve=job.resolve)
+    plan = preview_plan(
+        job.targets or [job.target], dag, project_dir, conn=conn, resolve=job.resolve
+    )
+    schedules = job.schedules or ([job.cron] if job.cron else [])
+    # Fetch last successful fire for interval-schedule next-run computation
+    last_fire_iso = None
+    try:
+        row = conn.execute(
+            "SELECT started_at FROM _havn.job_runs WHERE job_name = ? "
+            "ORDER BY started_at DESC LIMIT 1",
+            [job.name],
+        ).fetchone()
+        if row and row[0]:
+            last_fire_iso = str(row[0])
+    except Exception:
+        pass
     return {
         "name": job.name,
         "target": job.target,
+        "targets": job.targets,
         "resolve": job.resolve,
         "cron": job.cron,
+        "schedules": schedules,
+        "tags": job.tags,
         "enabled": job.enabled,
         "description": job.description,
         "retry": job.retry,
@@ -191,7 +268,7 @@ def get_job(name: str, request: Request, conn: DbConnReadOnly):
         "timeout_minutes": job.timeout_minutes,
         "notify": job.notify,
         "file": job.file_path.name,
-        "next_run": get_next_run(job.cron) if job.enabled and job.cron else None,
+        "next_run": get_earliest_next_run(schedules, last_fire_iso=last_fire_iso) if job.enabled and schedules else None,
         "plan": plan,
     }
 
@@ -206,7 +283,9 @@ def get_job_plan(name: str, request: Request, conn: DbConnReadOnly):
     if not job:
         raise HTTPException(404, f"Job '{name}' not found")
     dag = _get_dag(project_dir)
-    return preview_plan(job.target, dag, project_dir, conn=conn, resolve=job.resolve)
+    return preview_plan(
+        job.targets or [job.target], dag, project_dir, conn=conn, resolve=job.resolve
+    )
 
 
 @router.post("/api/jobs/{name}/run")
@@ -226,7 +305,7 @@ def run_job(name: str, request: Request, conn: DbConn):
         raise HTTPException(404, f"Job '{name}' not found")
     dag = _get_dag(project_dir)
     plan = resolve_execution_plan(
-        job.target, dag, project_dir, conn=conn, resolve=job.resolve
+        job.targets or [job.target], dag, project_dir, conn=conn, resolve=job.resolve
     )
 
     # Run on a background thread with a dedicated cursor from the shared
@@ -259,8 +338,14 @@ def create_job(req: CreateJobRequest, request: Request):
     from havn.engine.orchestration import save_job
 
     project_dir = _get_project_dir()
-    data = req.model_dump()
-    path = save_job(project_dir, data)
+    data = req.model_dump(exclude_none=True)
+    # Must have at least one of target/targets
+    if not data.get("targets") and not data.get("target"):
+        raise HTTPException(400, "Must provide 'targets' (list) or 'target' (string)")
+    try:
+        path = save_job(project_dir, data)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return {"status": "created", "file": path.name}
 
 
@@ -277,6 +362,23 @@ def update_job(name: str, req: UpdateJobRequest, request: Request):
         raise HTTPException(404, f"Job '{name}' not found")
     data = yaml.safe_load(job.file_path.read_text()) or {}
     updates = req.model_dump(exclude_none=True)
+    # If `targets` is sent, replace both targets and the mirrored target field
+    if "targets" in updates:
+        data["targets"] = updates["targets"]
+        data["target"] = updates["targets"][0] if updates["targets"] else data.get("target", "")
+        updates.pop("targets", None)
+        updates.pop("target", None)
+    # If `schedules` is sent, replace both schedules and the mirrored cron field
+    if "schedules" in updates:
+        new_schedules = updates["schedules"] or []
+        # Validate each schedule
+        for sched in new_schedules:
+            if len(sched.split()) != 5:
+                raise HTTPException(400, f"Invalid cron (need 5 fields): {sched}")
+        data["schedules"] = new_schedules
+        data["cron"] = new_schedules[0] if new_schedules else ""
+        updates.pop("schedules", None)
+        updates.pop("cron", None)
     data.update(updates)
     job.file_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
     return {"status": "updated", "file": job.file_path.name}

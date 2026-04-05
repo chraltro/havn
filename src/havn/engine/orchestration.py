@@ -24,9 +24,9 @@ logger = logging.getLogger("havn.orchestration")
 @dataclass
 class Job:
     name: str
-    target: str
+    target: str                          # legacy single-target (= targets[0])
     resolve: str = "upstream"            # "upstream" or "none"
-    cron: str = ""
+    cron: str = ""                       # legacy single-schedule (= schedules[0])
     enabled: bool = True
     notify: list[str] = field(default_factory=list)
     retry: int = 0
@@ -34,6 +34,21 @@ class Job:
     timeout_minutes: int = 60
     description: str = ""
     file_path: Path = field(default_factory=lambda: Path())
+    targets: list[str] = field(default_factory=list)      # preferred multi-target
+    schedules: list[str] = field(default_factory=list)    # preferred multi-schedule
+    tags: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # Mirror target <-> targets for backward compatibility
+        if not self.targets and self.target:
+            self.targets = [self.target]
+        if self.targets and not self.target:
+            self.target = self.targets[0]
+        # Mirror cron <-> schedules
+        if not self.schedules and self.cron:
+            self.schedules = [self.cron]
+        if self.schedules and not self.cron:
+            self.cron = self.schedules[0]
 
 
 @dataclass
@@ -135,7 +150,12 @@ def mark_stale_runs_failed(conn) -> int:
 
 
 def discover_jobs(project_dir: Path) -> list[Job]:
-    """Glob orchestration/*.yml, parse each, return list of Job objects."""
+    """Glob orchestration/*.yml, parse each, return list of Job objects.
+
+    Accepts either ``target: <str>`` (legacy single-target) or ``targets:
+    [<str>, ...]`` (preferred multi-target). If both are present, ``targets``
+    wins and ``target`` is set to the first element.
+    """
     orch_dir = project_dir / "orchestration"
     if not orch_dir.exists():
         return []
@@ -143,19 +163,54 @@ def discover_jobs(project_dir: Path) -> list[Job]:
     for yml_file in sorted(orch_dir.glob("*.yml")):
         try:
             data = yaml.safe_load(yml_file.read_text())
-            if not isinstance(data, dict) or "target" not in data:
+            if not isinstance(data, dict):
                 logger.warning("Skipping invalid job file: %s", yml_file.name)
                 continue
-            # Validate cron (5 fields) if present
-            cron = data.get("cron", "") or ""
-            if cron and len(str(cron).strip().split()) != 5:
-                logger.warning("Invalid cron in %s: %s", yml_file.name, cron)
+            # Accept either `targets` (list) or `target` (single)
+            raw_targets = data.get("targets")
+            targets: list[str] = []
+            if isinstance(raw_targets, list) and raw_targets:
+                targets = [str(t) for t in raw_targets if t]
+            elif "target" in data and data["target"]:
+                targets = [str(data["target"])]
+            if not targets:
+                logger.warning(
+                    "Skipping %s: no target/targets defined", yml_file.name
+                )
                 continue
+            # Accept either `schedules` (list) or `cron` (single, legacy)
+            raw_schedules = data.get("schedules")
+            schedules: list[str] = []
+            if isinstance(raw_schedules, list):
+                schedules = [str(s).strip() for s in raw_schedules if s]
+            elif data.get("cron"):
+                schedules = [str(data["cron"]).strip()]
+            # Validate each schedule — accept cron OR interval syntax.
+            # Drop invalid entries individually so the rest of the job still
+            # loads and the user can fix them in place.
+            valid_schedules: list[str] = []
+            for sched in schedules:
+                if not sched:
+                    continue
+                if not is_valid_schedule(sched):
+                    logger.warning(
+                        "Invalid schedule in %s: %s (skipping)",
+                        yml_file.name,
+                        sched,
+                    )
+                    continue
+                valid_schedules.append(sched)
+            tags = data.get("tags", []) or []
+            if not isinstance(tags, list):
+                tags = [str(tags)]
             jobs.append(Job(
                 name=data.get("name", yml_file.stem),
-                target=data["target"],
+                target=targets[0],
+                targets=targets,
                 resolve=data.get("resolve", "upstream"),
-                cron=str(cron),
+                cron=valid_schedules[0] if valid_schedules else "",
+                schedules=valid_schedules,
+                tags=[str(t) for t in tags if t],
                 enabled=data.get("enabled", True),
                 notify=data.get("notify", []) or [],
                 retry=int(data.get("retry", 0) or 0),
@@ -207,103 +262,215 @@ def _validate_script_target(project_dir: Path, target: str) -> None:
         raise ValueError(f"Invalid target path {target}: {e}") from e
 
 
+def _collect_downstream(
+    target_name: str, model_map: dict, visited: set
+) -> None:
+    """Recursively collect all downstream model names for a given target."""
+    if target_name in visited:
+        return
+    visited.add(target_name)
+    for name, model in model_map.items():
+        if target_name in (model.depends_on or []):
+            _collect_downstream(name, model_map, visited)
+
+
+def _parse_selector(target: str) -> tuple[bool, bool, str]:
+    """Parse a dbt-style selector into (include_upstream, include_downstream, bare_target).
+
+    ``+foo`` -> (True, False, "foo")
+    ``foo+`` -> (False, True, "foo")
+    ``+foo+`` -> (True, True, "foo")
+    ``foo`` -> (False, False, "foo")
+
+    The legacy ``+downstream:`` prefix is still accepted for back-compat.
+    """
+    if target.startswith("+downstream:"):  # legacy
+        return (False, True, target[len("+downstream:") :])
+    up = False
+    down = False
+    inner = target
+    if inner.startswith("+"):
+        up = True
+        inner = inner[1:]
+    if inner.endswith("+"):
+        down = True
+        inner = inner[:-1]
+    return (up, down, inner)
+
+
 def resolve_execution_plan(
-    target: str,
+    targets: str | list[str],
     dag: list,
     project_dir: Path,
     conn=None,
     resolve: str = "upstream",
 ) -> ExecutionPlan:
-    """Build an ordered execution plan for a target.
+    """Build an ordered execution plan for one or more targets.
 
-    Handles model targets (schema.name), script targets (ingest/*.py, export/*.py),
-    and wildcard targets (bronze.*).
+    Accepts either a single target string (legacy) or a list of targets. All
+    targets are unioned into a single plan with steps in dependency order.
+
+    Each target string is a **dbt-style selector**:
+
+    - ``schema.name`` — just this model, no upstream, no downstream
+    - ``+schema.name`` — this model plus every upstream dependency
+    - ``schema.name+`` — this model plus every downstream consumer
+    - ``+schema.name+`` — upstream + this + downstream
+    - ``schema.*`` — wildcard over every model in ``schema``
+    - ``+schema.*`` / ``schema.*+`` / ``+schema.*+`` — upstream/downstream of all matched
+    - ``ingest/script.py`` — run that ingest script
+    - ``export/script.py`` — run that export script (and its referenced models
+      when the selector includes ``+`` prefix)
+    - ``ingest/script.py+`` — run ingest, then all models that eventually
+      depend on tables it creates (handy for a fresh-data refresh)
 
     Args:
-        target: The target to resolve.
+        targets: One or more targets.
         dag: List of SQLModels from build_dag().
         project_dir: Project root.
-        conn: Optional DB connection (used for historical duration estimates).
-        resolve: "upstream" to include all transitive deps, "none" to run only
-            the literal target (no upstream rebuilds).
+        conn: Optional DB connection (used for duration estimates).
+        resolve: Legacy knob. When "upstream" (the old default), bare targets
+            without ``+`` markers are treated as ``+target`` for backward
+            compatibility with jobs saved before selectors existed. When set
+            to "none", bare targets run literally with no expansion. New jobs
+            should rely on the selector syntax and leave this at the default.
     """
+    if isinstance(targets, str):
+        targets = [targets]
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    targets = [t for t in targets if not (t in seen or seen.add(t))]
+
     model_map = {m.full_name: m for m in dag}
-    steps: list[ExecutionStep] = []
     needed_models: set[str] = set()
-    is_export_target = target.startswith("export/")
-    is_ingest_target = target.startswith("ingest/")
-    is_wildcard = "*" in target
+    explicit_ingest_scripts: list[str] = []
+    explicit_export_scripts: list[str] = []
 
-    # Validate script targets for path traversal
-    if is_ingest_target or is_export_target:
-        _validate_script_target(project_dir, target)
+    for target in targets:
+        up, down, inner = _parse_selector(target)
+        # If no explicit selector markers, honour the legacy resolve mode
+        # so existing jobs keep working
+        if not up and not down and resolve == "upstream":
+            up = True
 
-    if is_ingest_target:
-        # Ingest script — no upstream, just run it
-        steps.append(ExecutionStep(step=1, type="ingest", target=target))
-        return ExecutionPlan(steps=steps)
+        is_ingest_target = inner.startswith("ingest/")
+        is_export_target = inner.startswith("export/")
+        is_wildcard = "*" in inner
 
-    if is_wildcard:
-        # Expand wildcard: e.g. "bronze.*" -> all models with schema=bronze
-        schema_prefix = target.replace(".*", "")
-        matching = [
-            m.full_name
-            for m in dag
-            if m.schema == schema_prefix or m.full_name.startswith(schema_prefix + ".")
-        ]
-        if not matching:
-            logger.warning(
-                "Wildcard target '%s' matched no models in the DAG", target
-            )
-        if resolve == "none":
-            needed_models = set(matching)
-        else:
+        if is_ingest_target or is_export_target:
+            _validate_script_target(project_dir, inner)
+
+        if is_ingest_target:
+            if inner not in explicit_ingest_scripts:
+                explicit_ingest_scripts.append(inner)
+            # +ingest/x.py doesn't make sense (no upstream); we silently
+            # ignore the + prefix. ingest/x.py+ pulls in every model that
+            # depends on tables this script creates.
+            if down:
+                # Scan the script source to discover landing tables it creates
+                script_path = project_dir / inner
+                try:
+                    src = script_path.read_text() if script_path.exists() else ""
+                except Exception:
+                    src = ""
+                # For each model whose depends_on matches something in the
+                # ingest script's source, treat it as downstream origin
+                for m_name, m in model_map.items():
+                    for dep in m.depends_on or []:
+                        if dep not in model_map and (dep in src or dep.split(".")[-1] in src):
+                            needed_models.add(m_name)
+                            downstream: set[str] = set()
+                            _collect_downstream(m_name, model_map, downstream)
+                            needed_models.update(downstream)
+                            break
+            continue
+
+        if is_export_target:
+            if inner not in explicit_export_scripts:
+                explicit_export_scripts.append(inner)
+            # +export/x.py pulls in the models it references + their upstream
+            if up:
+                script_path = project_dir / inner
+                try:
+                    src = script_path.read_text() if script_path.exists() else ""
+                except Exception:
+                    src = ""
+                for m_name in model_map:
+                    if m_name in src:
+                        _collect_upstream(m_name, model_map, needed_models)
+            # export+ doesn't make sense (exports are terminal); ignore down
+            continue
+
+        if is_wildcard:
+            schema_prefix = inner.replace(".*", "")
+            matching = [
+                m.full_name
+                for m in dag
+                if m.schema == schema_prefix
+                or m.full_name.startswith(schema_prefix + ".")
+            ]
+            if not matching:
+                logger.warning("Wildcard target '%s' matched no models", target)
             for mname in matching:
-                _collect_upstream(mname, model_map, needed_models)
-    elif is_export_target:
-        # Export script — try to find deps from its Python source
-        script_path = project_dir / target
-        if script_path.exists() and resolve != "none":
-            try:
-                source = script_path.read_text()
-            except Exception:
-                source = ""
-            for m_name in model_map:
-                if m_name in source:
-                    _collect_upstream(m_name, model_map, needed_models)
-        # If no deps detected, just run the export itself — do NOT rebuild the
-        # entire warehouse. Users wanting a full rebuild should name a wildcard
-        # target explicitly.
-    else:
-        # Model target: schema.name
-        if target not in model_map:
-            logger.warning("Target '%s' not found in the DAG", target)
-        if resolve == "none":
-            if target in model_map:
-                needed_models.add(target)
-        else:
-            _collect_upstream(target, model_map, needed_models)
+                if up:
+                    _collect_upstream(mname, model_map, needed_models)
+                else:
+                    needed_models.add(mname)
+                if down:
+                    downstream = set()
+                    _collect_downstream(mname, model_map, downstream)
+                    if resolve == "upstream":
+                        for m_name in downstream:
+                            _collect_upstream(m_name, model_map, needed_models)
+                    else:
+                        needed_models.update(downstream)
+            continue
 
-    # Find ingest scripts needed: models depending on landing.* tables
-    ingest_scripts: list[str] = []
-    landing_deps: set[str] = set()
+        # Plain model target
+        if inner not in model_map:
+            logger.warning("Target '%s' not found in the DAG", target)
+            continue
+        if up:
+            _collect_upstream(inner, model_map, needed_models)
+        else:
+            needed_models.add(inner)
+        if down:
+            downstream = set()
+            _collect_downstream(inner, model_map, downstream)
+            if resolve == "upstream":
+                for m_name in downstream:
+                    _collect_upstream(m_name, model_map, needed_models)
+            else:
+                needed_models.update(downstream)
+
+    # Find ingest scripts that feed the selected models. Previously this only
+    # considered ``landing.*`` deps, which silently dropped ingest steps for
+    # projects using any other source schema (``raw.``, ``source.``, etc.).
+    # Now we treat ANY dep not in the model_map as an external/source table
+    # candidate and match it against ingest script sources.
+    ingest_scripts: list[str] = list(explicit_ingest_scripts)
+    external_deps: set[str] = set()
     if resolve != "none":
         for name in needed_models:
             if name in model_map:
-                for dep in model_map[name].depends_on:
-                    if dep.startswith("landing.") and dep not in model_map:
-                        landing_deps.add(dep)
-        # Try to match landing tables to ingest scripts
+                for dep in model_map[name].depends_on or []:
+                    if dep not in model_map:
+                        external_deps.add(dep)
         ingest_dir = project_dir / "ingest"
-        if ingest_dir.exists() and landing_deps:
-            for script in sorted(ingest_dir.glob("*.py")):
+        if ingest_dir.exists() and external_deps:
+            ingest_files = list(ingest_dir.glob("*.py")) + list(ingest_dir.glob("*.dpnb"))
+            for script in sorted(ingest_files, key=lambda p: p.name):
                 if script.name.startswith("_"):
                     continue
-                # Heuristic: read script source, check if it references any landing table
                 try:
                     src = script.read_text()
-                    for ldep in landing_deps:
-                        if ldep in src or ldep.split(".")[-1] in src:
+                    for dep in external_deps:
+                        # Match on the fully-qualified name first, then fall
+                        # back to the bare table name so scripts that build
+                        # the table via ``CREATE TABLE raw.orders AS`` or
+                        # via a pandas ``to_sql('orders', schema='raw')``
+                        # both get picked up.
+                        if dep in src or dep.split(".")[-1] in src:
                             rel = f"ingest/{script.name}"
                             if rel not in ingest_scripts:
                                 ingest_scripts.append(rel)
@@ -315,11 +482,15 @@ def resolve_execution_plan(
     sorter: TopologicalSorter[str] = TopologicalSorter()
     for name in needed_models:
         if name in model_map:
-            known_deps = [d for d in model_map[name].depends_on if d in needed_models]
+            known_deps = [
+                d for d in (model_map[name].depends_on or []) if d in needed_models
+            ]
             sorter.add(name, *known_deps)
-    sorted_models = [n for n in sorter.static_order() if n in needed_models and n in model_map]
+    sorted_models = [
+        n for n in sorter.static_order() if n in needed_models and n in model_map
+    ]
 
-    # Estimate durations from historical run_log
+    # Duration estimates from run_log
     estimates: dict[str, int] = {}
     if conn is not None:
         try:
@@ -327,29 +498,47 @@ def resolve_execution_plan(
                 "SELECT target, AVG(duration_ms)::INTEGER FROM _havn.run_log "
                 "WHERE status = 'success' GROUP BY target"
             ).fetchall()
-            estimates = {r[0]: r[1] for r in rows if r[0] is not None and r[1] is not None}
+            estimates = {
+                r[0]: r[1]
+                for r in rows
+                if r[0] is not None and r[1] is not None
+            }
         except Exception:
             pass
 
-    # Build step list: ingest first, then transforms, then export target
+    # Build ordered step list
+    steps: list[ExecutionStep] = []
     step_num = 1
     for script in ingest_scripts:
-        steps.append(ExecutionStep(
-            step=step_num, type="ingest", target=script,
-            estimated_duration_ms=estimates.get(script, 0),
-        ))
+        steps.append(
+            ExecutionStep(
+                step=step_num,
+                type="ingest",
+                target=script,
+                estimated_duration_ms=estimates.get(script, 0),
+            )
+        )
         step_num += 1
     for model_name in sorted_models:
-        steps.append(ExecutionStep(
-            step=step_num, type="transform", target=model_name,
-            estimated_duration_ms=estimates.get(model_name, 0),
-        ))
+        steps.append(
+            ExecutionStep(
+                step=step_num,
+                type="transform",
+                target=model_name,
+                estimated_duration_ms=estimates.get(model_name, 0),
+            )
+        )
         step_num += 1
-    if is_export_target:
-        steps.append(ExecutionStep(
-            step=step_num, type="export", target=target,
-            estimated_duration_ms=estimates.get(target, 0),
-        ))
+    for export_script in explicit_export_scripts:
+        steps.append(
+            ExecutionStep(
+                step=step_num,
+                type="export",
+                target=export_script,
+                estimated_duration_ms=estimates.get(export_script, 0),
+            )
+        )
+        step_num += 1
 
     total_est = sum(s.estimated_duration_ms for s in steps)
     return ExecutionPlan(steps=steps, total_estimated_ms=total_est)
@@ -601,14 +790,14 @@ def cancel_job_run(run_id: str) -> bool:
 
 
 def preview_plan(
-    target: str,
+    targets: str | list[str],
     dag: list,
     project_dir: Path,
     conn=None,
     resolve: str = "upstream",
 ) -> dict:
     """Return a JSON-serializable plan preview without executing."""
-    plan = resolve_execution_plan(target, dag, project_dir, conn=conn, resolve=resolve)
+    plan = resolve_execution_plan(targets, dag, project_dir, conn=conn, resolve=resolve)
     return {
         "steps": [
             {
@@ -627,16 +816,101 @@ def preview_plan(
     }
 
 
-def get_next_run(cron_expr: str) -> str | None:
-    """Calculate the next run time for a cron expression. Returns ISO string."""
+# ---------------------------------------------------------------------------
+# Interval schedules (alongside standard cron)
+# ---------------------------------------------------------------------------
+#
+# 5-field cron cannot express "every 2 weeks" or "every 3 days from now" —
+# these require state (when was the last run). We accept a second schedule
+# format: human strings like ``every 2 weeks`` or ``every 3 days`` that the
+# scheduler evaluates as "elapsed since last fire >= interval". The two
+# formats coexist in the same ``schedules`` list.
+#
+# Supported units: minute(s), hour(s), day(s), week(s), month(s), year(s).
+# Month = 30 days, year = 365 days (approximations; exact calendar
+# arithmetic isn't needed for scheduling pipelines).
+
+_INTERVAL_RE = re.compile(
+    r"^\s*every\s+(\d+)\s+(minute|hour|day|week|month|year)s?\s*$",
+    re.IGNORECASE,
+)
+
+_UNIT_SECONDS = {
+    "minute": 60,
+    "hour": 3600,
+    "day": 86400,
+    "week": 86400 * 7,
+    "month": 86400 * 30,
+    "year": 86400 * 365,
+}
+
+
+def is_interval_schedule(expr: str) -> bool:
+    return bool(_INTERVAL_RE.match(expr or ""))
+
+
+def parse_interval(expr: str) -> datetime.timedelta | None:
+    """Parse an ``every N unit`` interval string into a ``timedelta``."""
+    m = _INTERVAL_RE.match(expr or "")
+    if not m:
+        return None
+    n = int(m.group(1))
+    if n <= 0:
+        return None
+    unit = m.group(2).lower()
+    return datetime.timedelta(seconds=n * _UNIT_SECONDS[unit])
+
+
+def is_valid_schedule(expr: str) -> bool:
+    """Accepts either 5-field cron or an ``every N unit`` interval string."""
+    if not expr or not expr.strip():
+        return False
+    if is_interval_schedule(expr):
+        return parse_interval(expr) is not None
+    return len(expr.strip().split()) == 5
+
+
+def describe_interval(expr: str) -> str | None:
+    m = _INTERVAL_RE.match(expr or "")
+    if not m:
+        return None
+    n = int(m.group(1))
+    unit = m.group(2).lower()
+    return f"Every {n} {unit}{'s' if n != 1 else ''}"
+
+
+def get_next_run(cron_expr: str, last_fire_iso: str | None = None) -> str | None:
+    """Calculate the next run time for a cron or interval expression.
+
+    For cron: iterates forward minute-by-minute until a match is found.
+    For interval: returns ``last_fire + interval``, or ``now`` if there is
+    no prior fire.
+
+    Returns an ISO 8601 string or ``None`` for invalid expressions.
+    """
     if not cron_expr or not cron_expr.strip():
         return None
+    # Interval path
+    if is_interval_schedule(cron_expr):
+        delta = parse_interval(cron_expr)
+        if delta is None:
+            return None
+        if last_fire_iso:
+            try:
+                base = datetime.datetime.fromisoformat(last_fire_iso.replace("Z", "+00:00"))
+                if base.tzinfo is not None:
+                    base = base.replace(tzinfo=None)
+            except Exception:
+                base = datetime.datetime.now()
+        else:
+            base = datetime.datetime.now()
+        return (base + delta).isoformat()
+    # Cron path
     parts = cron_expr.strip().split()
     if len(parts) != 5:
         return None
     try:
         now = datetime.datetime.now()
-        # Check every minute for the next 48 hours
         candidate = now.replace(second=0, microsecond=0) + datetime.timedelta(minutes=1)
         for _ in range(48 * 60):
             if _matches_cron(parts, candidate):
@@ -645,6 +919,28 @@ def get_next_run(cron_expr: str) -> str | None:
     except Exception:
         return None
     return None
+
+
+def get_earliest_next_run(
+    schedules: list[str],
+    last_fire_iso: str | None = None,
+) -> str | None:
+    """Return the earliest upcoming run across a list of schedules.
+
+    For interval schedules, ``last_fire_iso`` is used as the base timestamp
+    (the last successful fire of the job). If omitted, intervals are
+    computed from "now" (i.e. the job would fire one interval from now).
+    """
+    if not schedules:
+        return None
+    candidates: list[str] = []
+    for sched in schedules:
+        result = get_next_run(sched, last_fire_iso=last_fire_iso)
+        if result:
+            candidates.append(result)
+    if not candidates:
+        return None
+    return min(candidates)
 
 
 def _matches_cron(parts: list[str], dt: datetime.datetime) -> bool:
@@ -689,19 +985,70 @@ def _matches_cron(parts: list[str], dt: datetime.datetime) -> bool:
 
 
 def save_job(project_dir: Path, job_data: dict) -> Path:
-    """Write a job YAML file to orchestration/."""
+    """Write a job YAML file to ``orchestration/``.
+
+    Accepts either legacy single-value fields (``target``, ``cron``) or the
+    preferred list fields (``targets``, ``schedules``). Both are validated.
+    When both are present, the list fields win and the single-value fields
+    are normalized to the first element for backward compatibility.
+    """
     orch_dir = project_dir / "orchestration"
     orch_dir.mkdir(exist_ok=True)
     raw_name = str(job_data.get("name", "job")).lower()
     slug = re.sub(r"[^a-z0-9]+", "-", raw_name).strip("-") or "job"
-    # Validate target for path traversal before persisting
-    target = str(job_data.get("target", ""))
-    if target.startswith(("ingest/", "export/")):
-        _validate_script_target(project_dir, target)
-    if ".." in target:
-        raise ValueError(f"Invalid target (contains '..'): {target}")
+
+    # Normalize targets
+    raw_targets = job_data.get("targets")
+    targets: list[str] = []
+    if isinstance(raw_targets, list) and raw_targets:
+        targets = [str(t) for t in raw_targets if t]
+    elif job_data.get("target"):
+        targets = [str(job_data["target"])]
+    if not targets:
+        raise ValueError("Job must have at least one target")
+
+    for t in targets:
+        if ".." in t:
+            raise ValueError(f"Invalid target (contains '..'): {t}")
+        if t.startswith(("ingest/", "export/")):
+            _validate_script_target(project_dir, t)
+        if t.startswith("+downstream:"):
+            inner = t[len("+downstream:") :]
+            if ".." in inner:
+                raise ValueError(f"Invalid target (contains '..'): {t}")
+
+    # Normalize schedules: list form is canonical; fall back to legacy cron
+    raw_schedules = job_data.get("schedules")
+    schedules: list[str] = []
+    if isinstance(raw_schedules, list):
+        schedules = [str(s).strip() for s in raw_schedules if s]
+    elif job_data.get("cron"):
+        schedules = [str(job_data["cron"]).strip()]
+    for sched in schedules:
+        if not is_valid_schedule(sched):
+            raise ValueError(
+                f"Invalid schedule (expected cron 5-field or 'every N unit'): {sched!r}"
+            )
+
+    # Normalize tags
+    tags = job_data.get("tags") or []
+    if not isinstance(tags, list):
+        tags = [str(tags)]
+    tags = [str(t).strip() for t in tags if t]
+
+    out_data = dict(job_data)
+    out_data["targets"] = targets
+    out_data["target"] = targets[0]
+    if schedules:
+        out_data["schedules"] = schedules
+        out_data["cron"] = schedules[0]
+    else:
+        out_data.pop("schedules", None)
+        out_data["cron"] = ""
+    out_data["tags"] = tags
+
     path = orch_dir / f"{slug}.yml"
-    path.write_text(yaml.dump(job_data, default_flow_style=False, sort_keys=False))
+    path.write_text(yaml.dump(out_data, default_flow_style=False, sort_keys=False))
     return path
 
 
