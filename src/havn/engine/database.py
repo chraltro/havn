@@ -316,6 +316,22 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
         )
     except Exception:
         pass
+    # Pull request build records
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS _havn.pr_builds (
+            id               VARCHAR PRIMARY KEY,
+            pr_id            VARCHAR NOT NULL,
+            branch_head      VARCHAR,
+            status           VARCHAR NOT NULL DEFAULT 'running',
+            started_at       TIMESTAMP DEFAULT current_timestamp,
+            finished_at      TIMESTAMP,
+            duration_ms      BIGINT,
+            data_diff        JSON,
+            lineage_impact   JSON,
+            contract_results JSON,
+            error            VARCHAR
+        )
+    """)
 
 
 def ensure_circuit_state_table(conn: duckdb.DuckDBPyConnection) -> None:

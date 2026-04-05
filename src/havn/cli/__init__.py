@@ -62,6 +62,7 @@ from havn.cli import jobs  # noqa: E402, F401
 from havn.cli import macros  # noqa: E402, F401
 from havn.cli import models  # noqa: E402, F401
 from havn.cli import pipeline  # noqa: E402, F401
+from havn.cli import pr  # noqa: E402, F401
 from havn.cli import project  # noqa: E402, F401
 from havn.cli import quality  # noqa: E402, F401
 from havn.cli import query  # noqa: E402, F401
