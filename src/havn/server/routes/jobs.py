@@ -308,9 +308,43 @@ def run_job(name: str, request: Request, conn: DbConn):
         job.targets or [job.target], dag, project_dir, conn=conn, resolve=job.resolve
     )
 
-    # Run on a background thread with a dedicated cursor from the shared
-    # connection. Cursors are thread-safe per DuckDB docs and avoid contending
-    # with concurrent API requests that also use per-request cursors.
+    # Try to use the pipeline SSE infrastructure so the UI sees live output.
+    # Falls back to a plain background thread if the pipeline is already busy.
+    try:
+        from havn.server.routes.pipeline import _start_operation, _emit, _finish_operation
+
+        def _run_with_sse():
+            from havn.server.deps import _get_shared_conn
+
+            cursor = None
+            try:
+                cursor = _get_shared_conn().cursor()
+                execute_job(job, plan, cursor, project_dir, trigger="manual", emit=_emit)
+            except Exception as e:
+                logger.error("Job '%s' failed: %s", name, e)
+            finally:
+                if cursor is not None:
+                    try:
+                        cursor.close()
+                    except Exception:
+                        pass
+                _finish_operation()
+
+        result = _start_operation("job", f"Job: {name}", _run_with_sse, ())
+        if result.get("status") == "already_running":
+            # Pipeline is busy — fall back to background thread without SSE
+            _run_job_background(job, plan, project_dir, name)
+        return {"status": "started", "job": name, "steps": len(plan.steps)}
+    except ImportError:
+        # Pipeline routes not available — fall back
+        _run_job_background(job, plan, project_dir, name)
+        return {"status": "started", "job": name, "steps": len(plan.steps)}
+
+
+def _run_job_background(job, plan, project_dir, name):
+    """Run a job on a background thread without SSE (fallback)."""
+    from havn.engine.orchestration import execute_job
+
     def _run():
         from havn.server.deps import _get_shared_conn
 
@@ -329,7 +363,6 @@ def run_job(name: str, request: Request, conn: DbConn):
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
-    return {"status": "started", "job": name, "steps": len(plan.steps)}
 
 
 @router.post("/api/jobs")
@@ -454,6 +487,51 @@ def get_job_run(run_id: str, request: Request, conn: DbConnReadOnly):
     if not rows:
         raise HTTPException(404, "Run not found")
     return _run_row_to_dict(rows[0])
+
+
+@router.get("/api/step-preview/{schema_name}/{table_name}")
+def get_step_preview(
+    schema_name: str, table_name: str, request: Request, conn: DbConnReadOnly, limit: int = 10
+):
+    """Return a small sample of rows from a model table for inline preview.
+
+    Masking policies are applied so non-exempt users never see raw PII.
+    """
+    user = _require_permission(request, "read")
+    import re
+
+    from havn.engine.masking import apply_masking
+
+    # Validate identifiers to prevent injection
+    ident_re = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+    if not ident_re.match(schema_name) or not ident_re.match(table_name):
+        raise HTTPException(400, "Invalid schema or table name")
+    limit = min(max(limit, 1), 50)
+    fqn = f"{schema_name}.{table_name}"
+    try:
+        desc = conn.execute(f"SELECT column_name FROM information_schema.columns WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position", [schema_name, table_name]).fetchall()
+        columns = [r[0] for r in desc]
+        rows_raw = conn.execute(f"SELECT * FROM {fqn} LIMIT {limit}").fetchall()
+        rows = []
+        for row in rows_raw:
+            rows.append([_serialize_cell(v) for v in row])
+        # Apply masking policies so sensitive data stays masked
+        rows = apply_masking(
+            columns, rows, user.get("role", "viewer"), conn,
+            schema=schema_name, table=table_name,
+        )
+        return {"columns": columns, "rows": rows, "table": fqn}
+    except Exception as e:
+        raise HTTPException(404, f"Table not found: {fqn} ({e})")
+
+
+def _serialize_cell(value):
+    """Make a cell value JSON-safe."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float, bool, str)):
+        return value
+    return str(value)
 
 
 @router.post("/api/job-runs/{run_id}/cancel")

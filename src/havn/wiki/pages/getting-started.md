@@ -101,7 +101,7 @@ my-project/
 The scaffolded project includes a complete earthquake data pipeline. Run it:
 
 ```bash
-havn stream full-refresh
+havn jobs run full-refresh
 ```
 
 This executes the pipeline steps defined in `project.yml`:

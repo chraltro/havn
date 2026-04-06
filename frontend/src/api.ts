@@ -1130,6 +1130,12 @@ export const api = {
   cancelJobRun: (id: string) =>
     request(`/job-runs/${id}/cancel`, { method: "POST" }),
 
+  // Step data preview (inline in Job Results)
+  getStepPreview: (schema: string, table: string, limit: number = 10) =>
+    request<{ columns: string[]; rows: any[][]; table: string }>(
+      `/step-preview/${encodeURIComponent(schema)}/${encodeURIComponent(table)}?limit=${limit}`,
+    ),
+
   // Orchestration DAG picker
   getOrchestrationDag: () => request<OrchestrationDag>("/dag/orchestration"),
 

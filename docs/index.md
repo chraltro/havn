@@ -8,7 +8,7 @@ havn is a self-hosted data platform — a lightweight, Nordic alternative to Dat
 pip install havn
 havn init my-project
 cd my-project
-havn stream full-refresh
+havn jobs run full-refresh
 havn serve
 ```
 

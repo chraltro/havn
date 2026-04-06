@@ -121,9 +121,7 @@ def _start_operation(operation: str, label: str, target_fn, args: tuple) -> dict
                 "operation": _pipeline_state["operation"],
                 "operation_label": _pipeline_state["operation_label"],
             }
-
-    _cancel_flag.clear()
-    with _pipeline_lock:
+        _cancel_flag.clear()
         _pipeline_state["running"] = True
         _pipeline_state["operation"] = operation
         _pipeline_state["operation_label"] = label
@@ -380,6 +378,9 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
     start = _time.perf_counter()
     has_error = False
     cancelled = False
+    completed_count = 0
+    failed_count = 0
+    skipped_count = 0
 
     def _is_cancelled():
         return _cancel_flag.is_set()
@@ -453,6 +454,23 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
             dag_deps[nid] = transform_node_ids.copy()
 
         total_items = len(nodes)
+
+        # Record job_run so this stream appears in Job Results
+        try:
+            from havn.engine.orchestration import ensure_job_runs_table
+            _jr_conn = _get_shared_conn()
+            _jr_cur = _jr_conn.cursor()
+            try:
+                ensure_job_runs_table(_jr_cur)
+                _jr_cur.execute(
+                    "INSERT INTO _havn.job_runs (id, job_name, job_file, target, status, steps_total, trigger) "
+                    "VALUES (?, ?, ?, ?, 'running', ?, ?)",
+                    [pipeline_run_id, f"stream ({stream_name})", "stream", stream_name, total_items, "pipeline"],
+                )
+            finally:
+                _jr_cur.close()
+        except Exception:
+            logger.debug("Failed to insert job_run for stream pipeline", exc_info=True)
 
         # Numbering assigned at runtime as nodes START
         _node_number = {}
@@ -617,6 +635,11 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
 
             if status in ("error", "assertion_failed"):
                 has_error = True
+                failed_count += 1
+            elif status == "skipped":
+                skipped_count += 1
+            else:
+                completed_count += 1
 
             # Mark node as done -- this may release dependent nodes
             sorter.done(node_id)
@@ -662,6 +685,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
 
     except Exception as e:
         logger.error("Pipeline thread error: %s", e, exc_info=True)
+        has_error = True
         duration_s = round(_time.perf_counter() - start, 1)
         emit("complete", {
             "stream": stream_name,
@@ -670,6 +694,25 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
             "pipeline_run_id": pipeline_run_id,
         })
     finally:
+        # Update job_run with final status
+        try:
+            from havn.engine.orchestration import ensure_job_runs_table
+            _fin_conn = _get_shared_conn()
+            _fin_cur = _fin_conn.cursor()
+            try:
+                ensure_job_runs_table(_fin_cur)
+                status_val = "failure" if has_error else ("cancelled" if cancelled else "success")
+                duration_ms = int((_time.perf_counter() - start) * 1000)
+                _fin_cur.execute(
+                    "UPDATE _havn.job_runs SET status = ?, finished_at = current_timestamp, "
+                    "duration_ms = ?, steps_completed = ?, steps_failed = ?, steps_skipped = ? "
+                    "WHERE id = ?",
+                    [status_val, duration_ms, completed_count, failed_count, skipped_count, pipeline_run_id],
+                )
+            finally:
+                _fin_cur.close()
+        except Exception:
+            logger.debug("Failed to update job_run for stream pipeline", exc_info=True)
         _finish_operation()
 
 
@@ -706,6 +749,9 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
     start = _time.perf_counter()
     has_error = False
     cancelled = False
+    completed_count = 0
+    failed_count = 0
+    skipped_count = 0
 
     def _is_cancelled():
         return _cancel_flag.is_set()
@@ -778,6 +824,23 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
             dag_deps[nid] = transform_node_ids.copy()
 
         total_items = len(nodes)
+
+        # Record job_run so this pipeline appears in Job Results
+        try:
+            from havn.engine.orchestration import ensure_job_runs_table
+            _jr_conn = _get_shared_conn()
+            _jr_cur = _jr_conn.cursor()
+            try:
+                ensure_job_runs_table(_jr_cur)
+                _jr_cur.execute(
+                    "INSERT INTO _havn.job_runs (id, job_name, job_file, target, status, steps_total, trigger) "
+                    "VALUES (?, ?, ?, ?, 'running', ?, ?)",
+                    [pipeline_run_id, f"pipeline ({step_label})", "pipeline", step_label, total_items, "pipeline"],
+                )
+            finally:
+                _jr_cur.close()
+        except Exception:
+            logger.debug("Failed to insert job_run for selective pipeline", exc_info=True)
 
         _node_number = {}
         _next_num = [1]
@@ -937,6 +1000,11 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
 
             if status in ("error", "assertion_failed"):
                 has_error = True
+                failed_count += 1
+            elif status == "skipped":
+                skipped_count += 1
+            else:
+                completed_count += 1
 
             sorter.done(node_id)
 
@@ -979,6 +1047,7 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
 
     except Exception as e:
         logger.error("Selective pipeline thread error: %s", e, exc_info=True)
+        has_error = True
         duration_s = round(_time.perf_counter() - start, 1)
         emit("complete", {
             "stream": "pipeline",
@@ -987,6 +1056,25 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
             "pipeline_run_id": pipeline_run_id,
         })
     finally:
+        # Update job_run with final status
+        try:
+            from havn.engine.orchestration import ensure_job_runs_table
+            _fin_conn = _get_shared_conn()
+            _fin_cur = _fin_conn.cursor()
+            try:
+                ensure_job_runs_table(_fin_cur)
+                status_val = "failure" if has_error else ("cancelled" if cancelled else "success")
+                duration_ms = int((_time.perf_counter() - start) * 1000)
+                _fin_cur.execute(
+                    "UPDATE _havn.job_runs SET status = ?, finished_at = current_timestamp, "
+                    "duration_ms = ?, steps_completed = ?, steps_failed = ?, steps_skipped = ? "
+                    "WHERE id = ?",
+                    [status_val, duration_ms, completed_count, failed_count, skipped_count, pipeline_run_id],
+                )
+            finally:
+                _fin_cur.close()
+        except Exception:
+            logger.debug("Failed to update job_run for selective pipeline", exc_info=True)
         _finish_operation()
 
 

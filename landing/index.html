@@ -995,7 +995,7 @@ a:focus-visible, button:focus-visible {
     <div class="code-block reveal d1" role="region" aria-label="Terminal example">
       <div class="code-block-header">
         <span>terminal</span>
-        <button class="code-copy" onclick="navigator.clipboard.writeText('pip install havn\nhavn init my-project && cd my-project\nhavn stream full-refresh\nhavn serve').then(()=>{this.textContent='copied';setTimeout(()=>this.textContent='copy',1500)})" aria-label="Copy terminal commands">copy</button>
+        <button class="code-copy" onclick="navigator.clipboard.writeText('pip install havn\nhavn init my-project && cd my-project\nhavn jobs run full-refresh\nhavn serve').then(()=>{this.textContent='copied';setTimeout(()=>this.textContent='copy',1500)})" aria-label="Copy terminal commands">copy</button>
       </div>
       <pre><span class="c"># install</span>
 <span class="t">pip install</span> havn
@@ -1004,7 +1004,7 @@ a:focus-visible, button:focus-visible {
 <span class="t">havn init</span> <span class="s">my-project</span> && <span class="t">cd</span> my-project
 
 <span class="c"># run pipeline</span>
-<span class="t">havn stream</span> full-refresh
+<span class="t">havn jobs run</span> full-refresh
   <span style="color:#7a7a74">bronze.raw_orders</span>       <span class="g">done</span>  0.2s
   <span style="color:#7a7a74">silver.fct_orders</span>       <span class="g">done</span>  0.6s
   <span style="color:#7a7a74">gold.revenue_daily</span>      <span class="g">done</span>  0.4s

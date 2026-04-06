@@ -123,12 +123,12 @@ havn transform [TARGETS...] [--force] [--parallel] [--workers N] [--env NAME] [-
 | `--env, -e` | none | Environment override |
 | `--skip-check` | false | Skip pre-transform validation |
 
-### havn stream
+### havn jobs run
 
-Run a full stream from project.yml.
+Run an orchestration job from project.yml.
 
 ```bash
-havn stream NAME [--force] [--env NAME] [--project PATH]
+havn jobs run NAME [--force] [--env NAME] [--project PATH]
 ```
 
 ### havn lint

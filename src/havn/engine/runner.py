@@ -118,13 +118,31 @@ def _run_notebook_as_script(
         except Exception as e:
             logger.debug("Could not get result metadata: %s", e)
 
+    # Build log_output from cell results so Job Results can show it
+    log_lines: list[str] = []
+    for cr in cell_results:
+        cell_type = cr.get("type", "")
+        cell_id = cr.get("cell_id", "")
+        cell_dur = cr.get("duration_ms", 0)
+        cell_label = f"[{cell_type}] {cell_id}" if cell_id else f"[{cell_type}]"
+        for out in cr.get("outputs", []):
+            text = out.get("text", "").strip()
+            if text:
+                log_lines.append(f"{cell_label}: {text}")
+        if not any(out.get("text", "").strip() for out in cr.get("outputs", [])):
+            if cr.get("has_error"):
+                log_lines.append(f"{cell_label}: (error, {cell_dur}ms)")
+            elif cell_dur:
+                log_lines.append(f"{cell_label}: ok ({cell_dur}ms)")
+    log_output = "\n".join(log_lines)
+
     if errors:
         error_msg = "\n".join(errors)
         return {
             "script": notebook_path.name,
             "status": "error",
             "duration_ms": duration_ms,
-            "log_output": error_msg,
+            "log_output": error_msg + ("\n" + log_output if log_output else ""),
             "error": error_msg,
             "cell_results": cell_results,
             "output_tables": output_tables,
@@ -134,7 +152,7 @@ def _run_notebook_as_script(
         "script": notebook_path.name,
         "status": "success",
         "duration_ms": duration_ms,
-        "log_output": "",
+        "log_output": log_output,
         "error": None,
         "rows_affected": rows_affected,
         "cell_results": cell_results,

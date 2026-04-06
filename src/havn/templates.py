@@ -551,7 +551,7 @@ SAMPLE_EXPLORE_NOTEBOOK = json.dumps({
             "source": (
                 "# Earthquake Explorer\n\n"
                 "Interactive analysis of earthquake data. "
-                "Run `havn stream full-refresh` first to populate the warehouse."
+                "Run `havn jobs run full-refresh` first to populate the warehouse."
             ),
         },
         {
@@ -630,7 +630,7 @@ SAMPLE_EXPLORE_NOTEBOOK = json.dumps({
                 "## Next steps\n\n"
                 "- Add new SQL models in `transform/` to explore different angles\n"
                 "- Create Python macros in `macros/` for reusable SQL functions\n"
-                "- Run `havn stream incremental` for a fast re-run (only changed models)\n"
+                "- Run `havn jobs run incremental` for a fast re-run (only changed models)\n"
                 "- Run `havn diff` to see what changed in the data\n"
                 "- Use `havn query \"SELECT ...\"` for quick ad-hoc queries\n"
                 "- Run `havn contracts` to validate data quality rules"
@@ -665,7 +665,7 @@ You are working on a havn data platform project. havn uses DuckDB + plain SQL tr
 # Key commands:
 # havn transform        — build SQL models (incremental change detection)
 # havn run <script>     — run an ingest or export script
-# havn stream <name>    — run a pipeline (full-refresh or incremental)
+# havn jobs run <name>  — run a pipeline (full-refresh or incremental)
 # havn query "<sql>"    — run ad-hoc SQL queries
 # havn macros           — list Python SQL macros
 # havn tables           — list warehouse tables
@@ -721,7 +721,7 @@ Then call directly in SQL: `SELECT my_func(col) FROM table`
 db.execute("CREATE OR REPLACE TABLE landing.x AS SELECT * FROM ...")
 ```
 
-### Key commands: `havn transform`, `havn run <script>`, `havn stream <name>`, `havn query "<sql>"`, `havn macros`, `havn diff`, `havn lint`, `havn tables`, `havn serve`
+### Key commands: `havn transform`, `havn run <script>`, `havn jobs run <name>`, `havn query "<sql>"`, `havn macros`, `havn diff`, `havn lint`, `havn tables`, `havn serve`
 
 ### Code patterns:
 - `from __future__ import annotations` in all Python files
@@ -745,8 +745,8 @@ This is a havn data platform project. havn uses DuckDB for analytics, plain SQL 
 havn transform              # build SQL models in dependency order
 havn transform --force      # force rebuild all
 havn run ingest/script.py   # run a single script
-havn stream full-refresh    # run full pipeline (seed -> ingest -> transform -> export)
-havn stream incremental     # quick refresh (only changed models)
+havn jobs run full-refresh  # run full pipeline (seed -> ingest -> transform -> export)
+havn jobs run incremental   # quick refresh (only changed models)
 havn seed                   # load CSV files from seeds/ into DuckDB
 havn query "SELECT 1"       # ad-hoc SQL query
 havn tables                 # list warehouse objects

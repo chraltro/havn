@@ -279,7 +279,7 @@ export default function HistoryPanel({ onOpenFile }) {
             <>
               <div style={styles.emptyTitle}>No pipeline runs yet</div>
               <div style={styles.emptyHint}>
-                Run <code style={styles.code}>havn transform</code> or <code style={styles.code}>havn stream</code> to build models and see run history here.
+                Run <code style={styles.code}>havn transform</code> or <code style={styles.code}>havn jobs run</code> to build models and see run history here.
               </div>
             </>
           ) : (
@@ -452,7 +452,7 @@ export default function HistoryPanel({ onOpenFile }) {
                 <>
                   <div style={styles.emptyTitle}>No pipeline runs yet</div>
                   <div style={styles.emptyHint}>
-                    Run <code style={styles.code}>havn transform</code> or <code style={styles.code}>havn stream</code> to build models and see run history here.
+                    Run <code style={styles.code}>havn transform</code> or <code style={styles.code}>havn jobs run</code> to build models and see run history here.
                   </div>
                 </>
               ) : (
