@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { api } from "./api";
+import { usePipeline } from "./PipelineContext";
 
 /* =====================================================================
  * OrchestrationPanel — Plan Jobs (with inline row form, cron wizard,
@@ -1199,6 +1200,56 @@ function DagPickerModal({ initialTargets, onCancel, onSave }) {
     return result;
   };
 
+  // Build adjacency lists for upstream/downstream traversal
+  const { upstreamOf, downstreamOf } = useMemo(() => {
+    if (!dag) return { upstreamOf: {}, downstreamOf: {} };
+    const up = {};   // nodeId -> Set of upstream node ids
+    const down = {}; // nodeId -> Set of downstream node ids
+    for (const n of dag.nodes) {
+      up[n.id] = new Set();
+      down[n.id] = new Set();
+    }
+    for (const e of dag.edges || []) {
+      // e.source flows INTO e.target (source is upstream of target)
+      if (up[e.target]) up[e.target].add(e.source);
+      if (down[e.source]) down[e.source].add(e.target);
+    }
+    // Transitive closure helper
+    const collect = (start, adj) => {
+      const result = new Set();
+      const queue = [start];
+      while (queue.length) {
+        const cur = queue.pop();
+        for (const nb of adj[cur] || []) {
+          if (!result.has(nb)) { result.add(nb); queue.push(nb); }
+        }
+      }
+      return result;
+    };
+    // Pre-compute full transitive sets
+    const upFull = {};
+    const downFull = {};
+    for (const n of dag.nodes) {
+      upFull[n.id] = collect(n.id, up);
+      downFull[n.id] = collect(n.id, down);
+    }
+    return { upstreamOf: upFull, downstreamOf: downFull };
+  }, [dag]);
+
+  // Compute the set of nodes "affected" by selector expansion (highlighted)
+  const affectedNodes = useMemo(() => {
+    const affected = new Set();
+    for (const [id, markers] of selection) {
+      if (markers.up) {
+        for (const n of upstreamOf[id] || []) affected.add(n);
+      }
+      if (markers.down) {
+        for (const n of downstreamOf[id] || []) affected.add(n);
+      }
+    }
+    return affected;
+  }, [selection, upstreamOf, downstreamOf]);
+
   // Live plan preview: count selected nodes per kind. The backend will
   // expand selector markers (+/+) at run time.
   useEffect(() => {
@@ -1261,18 +1312,23 @@ function DagPickerModal({ initialTargets, onCancel, onSave }) {
                         const markers = selection.get(n.id);
                         const selected = markers != null;
                         const isHover = hover === n.id;
+                        const isAffected = !selected && affectedNodes.has(n.id);
                         return (
                           <div
                             key={n.id}
                             style={{
                               ...s.dagBox,
-                              borderColor: selected ? col.color : "var(--havn-border)",
+                              borderColor: selected ? col.color : isAffected ? col.color : "var(--havn-border)",
+                              borderStyle: isAffected ? "dashed" : "solid",
                               background: selected
                                 ? `color-mix(in srgb, ${col.color} 18%, var(--havn-bg-secondary))`
-                                : isHover
-                                  ? "var(--havn-bg-tertiary)"
-                                  : "var(--havn-bg-secondary)",
+                                : isAffected
+                                  ? `color-mix(in srgb, ${col.color} 8%, var(--havn-bg-secondary))`
+                                  : isHover
+                                    ? "var(--havn-bg-tertiary)"
+                                    : "var(--havn-bg-secondary)",
                               boxShadow: isHover ? `0 0 0 1px ${col.color}` : "none",
+                              opacity: isAffected ? 0.85 : 1,
                             }}
                             onMouseEnter={() => setHover(n.id)}
                             onMouseLeave={() => setHover((h) => (h === n.id ? null : h))}
@@ -1430,7 +1486,7 @@ function buildSelector(inner, up, down) {
   return `${up ? "+" : ""}${inner}${down ? "+" : ""}`;
 }
 
-function PlanJobsTab({ onSwitchToResults }) {
+function PlanJobsTab({ onSwitchToResults, showConfirm }) {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -1569,7 +1625,8 @@ function PlanJobsTab({ onSwitchToResults }) {
   };
 
   const handleDelete = async (name) => {
-    if (!window.confirm(`Delete job "${name}"?`)) return;
+    const ok = await showConfirm("Delete Job", `Are you sure you want to delete job "${name}"?`, "Delete", true);
+    if (!ok) return;
     try {
       await api.deleteJob(name);
       await loadJobs();
@@ -2149,6 +2206,7 @@ function JobResultsTab() {
   const [selectedRun, setSelectedRun] = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [error, setError] = useState(null);
+  const { running: pipelineRunning } = usePipeline();
 
   const loadRuns = useCallback(async () => {
     try {
@@ -2163,12 +2221,23 @@ function JobResultsTab() {
 
   useEffect(() => { loadRuns(); }, [loadRuns]);
 
+  // Poll while any job is running (fast) or pipeline is active (medium).
+  // Also do a background poll every 10s so new runs always appear.
   useEffect(() => {
     const hasRunning = runs.some((r) => r.status === "running");
-    if (!hasRunning) return;
-    const id = setInterval(loadRuns, 3000);
+    const interval = hasRunning ? 2000 : pipelineRunning ? 3000 : 10000;
+    const id = setInterval(loadRuns, interval);
     return () => clearInterval(id);
-  }, [runs, loadRuns]);
+  }, [runs, loadRuns, pipelineRunning]);
+
+  // Refresh immediately when pipeline stops (a run just finished)
+  const prevPipelineRunning = useRef(pipelineRunning);
+  useEffect(() => {
+    if (prevPipelineRunning.current && !pipelineRunning) {
+      loadRuns();
+    }
+    prevPipelineRunning.current = pipelineRunning;
+  }, [pipelineRunning, loadRuns]);
 
   const openRun = async (run) => {
     try {
@@ -2230,7 +2299,16 @@ function JobResultsTab() {
           <div style={s.emptyText}>Run a job from the Plan Jobs tab to see results here.</div>
         </div>
       ) : (
-        <table style={s.table}>
+        <table style={{ ...s.table, tableLayout: "fixed" }}>
+          <colgroup>
+            <col style={{ width: "auto" }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 140 }} />
+            <col style={{ width: 80 }} />
+            <col style={{ width: 72 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 72 }} />
+          </colgroup>
           <thead>
             <tr>
               <th style={s.th}>Job</th>
@@ -2245,17 +2323,17 @@ function JobResultsTab() {
           <tbody>
             {filteredRuns.map((run) => (
               <tr key={run.id} style={{ cursor: "pointer" }} onClick={() => openRun(run)}>
-                <td style={s.td}><strong>{run.job_name}</strong></td>
+                <td style={{ ...s.td, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><strong>{run.job_name}</strong></td>
                 <td style={s.td}><StatusBadge status={run.status} /></td>
                 <td style={s.td}>
                   {run.steps_completed}/{run.steps_total}
                   {run.steps_failed > 0 && (
-                    <span style={{ color: "var(--havn-red)", marginLeft: 6 }}>
+                    <span style={{ color: "var(--havn-red)", marginLeft: 6, fontSize: 11 }}>
                       ({run.steps_failed} failed)
                     </span>
                   )}
                   {run.steps_skipped > 0 && (
-                    <span style={{ color: "var(--havn-text-dim)", marginLeft: 6 }}>
+                    <span style={{ color: "var(--havn-text-dim)", marginLeft: 6, fontSize: 11 }}>
                       ({run.steps_skipped} skipped)
                     </span>
                   )}
@@ -2284,7 +2362,21 @@ function JobResultsTab() {
   );
 }
 
-function JobRunDetail({ run, onBack, onRerun }) {
+function JobRunDetail({ run: initialRun, onBack, onRerun }) {
+  const [run, setRun] = useState(initialRun);
+
+  // Auto-refresh while the run is still in progress
+  useEffect(() => {
+    if (run.status !== "running") return;
+    const id = setInterval(async () => {
+      try {
+        const updated = await api.getJobRun(run.id);
+        setRun(updated);
+      } catch (_e) { /* ignore */ }
+    }, 2000);
+    return () => clearInterval(id);
+  }, [run.id, run.status]);
+
   const completed = run.steps_completed || 0;
   const failed = run.steps_failed || 0;
   const total = run.steps_total || 0;
@@ -2345,33 +2437,111 @@ function JobRunDetail({ run, onBack, onRerun }) {
   );
 }
 
+function RowDelta({ current, previous }) {
+  if (previous == null || current == null) return null;
+  const delta = current - previous;
+  if (delta === 0) return <span style={{ fontSize: 10, color: "var(--havn-text-dim)", marginLeft: 4 }}>{"\u00B1"}0</span>;
+  const color = delta > 0 ? "var(--havn-green)" : "var(--havn-red)";
+  const sign = delta > 0 ? "+" : "";
+  return <span style={{ fontSize: 10, color, marginLeft: 4, fontWeight: 500 }}>{sign}{delta.toLocaleString()}</span>;
+}
+
+function StepPreview({ target }) {
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const parts = target.split(".");
+    if (parts.length !== 2) return;
+    setLoading(true);
+    api.getStepPreview(parts[0], parts[1], 8)
+      .then(setPreview)
+      .catch((e) => setError(e.message || "Preview unavailable"))
+      .finally(() => setLoading(false));
+  }, [target]);
+
+  if (loading) return <div style={{ padding: "6px 0", fontSize: 11, color: "var(--havn-text-dim)" }}>Loading preview...</div>;
+  if (error) return null;
+  if (!preview || !preview.rows?.length) return null;
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 10, color: "var(--havn-text-dim)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.3px" }}>
+        Data preview ({preview.rows.length} rows)
+      </div>
+      <div style={{ overflow: "auto", maxHeight: 200, border: "1px solid var(--havn-border)", borderRadius: 3 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: "var(--havn-font-mono)" }}>
+          <thead>
+            <tr>
+              {preview.columns.map((col) => (
+                <th key={col} style={{ padding: "3px 8px", borderBottom: "1px solid var(--havn-border)", background: "var(--havn-bg-secondary)", color: "var(--havn-text-secondary)", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap", position: "sticky", top: 0 }}>
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {preview.rows.map((row, ri) => (
+              <tr key={ri}>
+                {row.map((cell, ci) => (
+                  <td key={ci} style={{ padding: "2px 8px", borderBottom: "1px solid var(--havn-border)", color: cell == null ? "var(--havn-text-dim)" : "var(--havn-text)", fontStyle: cell == null ? "italic" : "normal", whiteSpace: "nowrap", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {cell == null ? "NULL" : String(cell)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function StepDetailRow({ step }) {
   const [expanded, setExpanded] = useState(false);
   const hasError = step.status === "error" && step.error;
+  const hasOutput = !!(step.log_output);
+  const isTransform = step.type === "transform";
+  const canExpand = hasError || hasOutput || (isTransform && step.status === "success");
+  const rows = step.rows_affected;
+  const prevRows = step.previous_row_count;
   return (
     <div style={{ borderBottom: "1px solid var(--havn-border)" }}>
       <div
-        style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", fontSize: 13, cursor: hasError ? "pointer" : "default" }}
-        onClick={() => hasError && setExpanded(!expanded)}
+        style={{ display: "flex", alignItems: "center", padding: "8px 12px", fontSize: 13, cursor: canExpand ? "pointer" : "default" }}
+        onClick={() => canExpand && setExpanded(!expanded)}
       >
-        <span style={{ color: "var(--havn-text-dim)", minWidth: 24 }}>{step.step}.</span>
-        <TypeBadge type={step.type} />
-        <code style={{ ...s.codeSm, flex: 1 }}>{step.target}</code>
-        <StatusBadge status={step.status} />
-        {step.duration_ms != null && (
-          <span style={{ fontSize: 11, color: "var(--havn-text-dim)", minWidth: 56, textAlign: "right" }}>
-            {formatDuration(step.duration_ms)}
-          </span>
-        )}
-        {step.rows_affected != null && step.rows_affected > 0 && (
-          <span style={{ fontSize: 11, color: "var(--havn-text-dim)" }}>
-            {step.rows_affected.toLocaleString()} rows
-          </span>
-        )}
+        <span style={{ color: "var(--havn-text-dim)", width: 28, flexShrink: 0, textAlign: "right", marginRight: 8 }}>{step.step}.</span>
+        <span style={{ width: 40, flexShrink: 0, marginRight: 8 }}><TypeBadge type={step.type} /></span>
+        <code style={{ ...s.codeSm, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{step.target}</code>
+        <span style={{ width: 72, flexShrink: 0, textAlign: "center", marginLeft: 8 }}><StatusBadge status={step.status} /></span>
+        <span style={{ width: 64, flexShrink: 0, textAlign: "right", fontSize: 11, color: "var(--havn-text-dim)", marginLeft: 8 }}>
+          {step.duration_ms != null ? formatDuration(step.duration_ms) : ""}
+        </span>
+        <span style={{ width: 100, flexShrink: 0, textAlign: "right", fontSize: 11, color: "var(--havn-text-dim)", marginLeft: 8, display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+          {rows != null && rows > 0 && <span>{rows.toLocaleString()} rows</span>}
+          <RowDelta current={rows} previous={prevRows} />
+        </span>
+        <span style={{ width: 16, flexShrink: 0, textAlign: "center", fontSize: 10, color: "var(--havn-text-dim)", marginLeft: 4 }}>
+          {canExpand ? (expanded ? "\u25BE" : "\u25B8") : ""}
+        </span>
       </div>
-      {expanded && hasError && (
-        <div style={{ padding: "8px 16px 10px 56px", fontFamily: "var(--havn-font-mono)", fontSize: 11, color: "var(--havn-red)", whiteSpace: "pre-wrap", background: "color-mix(in srgb, var(--havn-red) 4%, transparent)" }}>
-          {step.error}
+      {expanded && (
+        <div style={{ padding: "8px 16px 10px 84px" }}>
+          {hasError && (
+            <div style={{ fontFamily: "var(--havn-font-mono)", fontSize: 11, whiteSpace: "pre-wrap", color: "var(--havn-red)", padding: "6px 8px", background: "color-mix(in srgb, var(--havn-red) 4%, transparent)", borderRadius: 3, marginBottom: hasOutput ? 6 : 0 }}>
+              {step.error}
+            </div>
+          )}
+          {hasOutput && (
+            <div style={{ fontFamily: "var(--havn-font-mono)", fontSize: 11, whiteSpace: "pre-wrap", color: "var(--havn-text-secondary)", padding: "6px 8px", background: "color-mix(in srgb, var(--havn-text) 3%, transparent)", borderRadius: 3 }}>
+              {step.log_output}
+            </div>
+          )}
+          {isTransform && step.status === "success" && step.target.includes(".") && (
+            <StepPreview target={step.target} />
+          )}
         </div>
       )}
     </div>
@@ -2382,7 +2552,7 @@ function StepDetailRow({ step }) {
 /* Root                                                                */
 /* ------------------------------------------------------------------ */
 
-export default function OrchestrationPanel() {
+export default function OrchestrationPanel({ showConfirm }) {
   const [subTab, setSubTab] = useState("plan-jobs");
   return (
     <div style={s.container}>
@@ -2402,7 +2572,7 @@ export default function OrchestrationPanel() {
           ))}
         </div>
       </div>
-      {subTab === "plan-jobs" && <PlanJobsTab onSwitchToResults={() => setSubTab("job-results")} />}
+      {subTab === "plan-jobs" && <PlanJobsTab onSwitchToResults={() => setSubTab("job-results")} showConfirm={showConfirm} />}
       {subTab === "job-results" && <JobResultsTab />}
     </div>
   );

@@ -31,7 +31,7 @@ jobs:
         run: pip install havn
 
       - name: Build current branch
-        run: havn stream full-refresh
+        run: havn jobs run full-refresh
 
       - name: Create baseline and diff
         run: |
@@ -40,12 +40,12 @@ jobs:
 
           # Build main baseline
           git checkout main
-          havn stream full-refresh
+          havn jobs run full-refresh
           havn snapshot create main-baseline
 
           # Switch back and rebuild
           git checkout "$CURRENT_BRANCH"
-          havn stream full-refresh
+          havn jobs run full-refresh
 
           # Generate diff
           havn diff --snapshot main-baseline --format json > diff-results.json

@@ -236,7 +236,7 @@ function ToolEntry({ tool }) {
   );
 }
 
-export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFile, onSelectTable }) {
+export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFile, onSelectTable, pendingPrompt, onPromptConsumed }) {
   const [selectedAgent, setSelectedAgent] = useState("claude");
   const [availableAgents, setAvailableAgents] = useState(null);
   // Per-agent state: { messages, isConnected, isStreaming, permissionMode, selectedModel }
@@ -457,6 +457,32 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
     return () => window.removeEventListener("havn-agent-send", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAgent, cur.isStreaming]);
+
+  // Consume a pending prompt queued by App.jsx when the sidebar was closed.
+  // The parent stores the prompt in a ref and passes it as a prop so we can
+  // pick it up reliably after mount — no setTimeout race.
+  useEffect(() => {
+    if (!pendingPrompt?.prompt || !isOpen) return;
+    const ws = socketsRef.current[selectedAgent];
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      setInput(pendingPrompt.prompt);
+      onPromptConsumed?.();
+      return;
+    }
+    if (cur.isStreaming) {
+      setInput(pendingPrompt.prompt);
+      onPromptConsumed?.();
+      return;
+    }
+    updateAgent(selectedAgent, (st) => ({
+      ...st,
+      messages: [...st.messages, { role: "user", content: pendingPrompt.prompt, ts: timestamp() }],
+      isStreaming: true,
+    }));
+    ws.send(JSON.stringify({ type: "message", message: pendingPrompt.prompt }));
+    onPromptConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingPrompt, isOpen]);
 
   const switchAgent = (agentId) => {
     if (agentId === selectedAgent) return;

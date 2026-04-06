@@ -10,7 +10,7 @@ import ReviewsPanel from "./ReviewsPanel";
  * Matches the Observe -> Quality sub-tab pattern so users have one consistent
  * place for everything git/PR-related.
  */
-export default function GitReviewsPanel() {
+export default function GitReviewsPanel({ showConfirm }) {
   const [sub, setSub] = useState("status");
   return (
     <div style={styles.container}>
@@ -31,7 +31,7 @@ export default function GitReviewsPanel() {
       </div>
       <div style={styles.content}>
         {sub === "status" && <GitPanel />}
-        {sub === "reviews" && <ReviewsPanel />}
+        {sub === "reviews" && <ReviewsPanel showConfirm={showConfirm} />}
       </div>
     </div>
   );

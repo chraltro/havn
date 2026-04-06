@@ -122,10 +122,6 @@ def init(
         console.print("  havn macros                 # see Python functions usable in SQL")
         console.print("  havn serve                  # open web UI")
         console.print("  havn contracts              # check data quality")
-        console.print()
-        console.print("[dim]Works offline — the ingest notebook falls back to sample data if the USGS API is unavailable.[/dim]")
-        console.print("[dim]Includes Python SQL macros, incremental models, data quality contracts, and more.[/dim]")
-        console.print("[dim]AI assistant ready — CLAUDE.md included for Claude Code, Cursor, and others.[/dim]")
 
 
 @app.command()
@@ -515,7 +511,7 @@ def context(
     lines.append("- havn transform — build SQL models in dependency order")
     lines.append("- havn transform --force — force rebuild all")
     lines.append("- havn run <script> — run an ingest or export script")
-    lines.append("- havn stream <name> — run a full pipeline")
+    lines.append("- havn jobs run <name> — run a job (full-refresh, incremental, etc.)")
     lines.append("- havn query \"<sql>\" — run ad-hoc SQL queries")
     lines.append("- havn tables — list warehouse tables")
     lines.append("- havn lint — lint SQL files")

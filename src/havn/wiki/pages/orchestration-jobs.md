@@ -171,11 +171,19 @@ Estimated: 45.2s
 Orchestration jobs are managed in **Develop -> Orchestration**. The tab has two sub-tabs:
 
 - **Plan Jobs** -- The job list with inline creation, editing, tag filtering, a sparkline of the last 10 runs, and a clone button per row.
-- **Job Results** -- A timeline of recent runs with step-by-step output.
+- **Job Results** -- A timeline of recent runs with step-by-step output. This tab also shows output from the pipeline **Run** button in the toolbar (not just orchestration jobs), so all pipeline execution is visible in one place.
 
 ### Creating a Job in the UI
 
 Click the **+** button at the top of the job list. A new row appears inline (no modal). Fill in the name, select targets using the DAG picker, choose a schedule with the cron wizard, add tags, then save.
+
+### Streaming Output (SSE)
+
+When a job is run from the web UI, its output streams to the Job Results tab in real time via Server-Sent Events (SSE). Each step reports its status as it executes (start, done, skip, fail), with row counts, duration, and error messages. You do not need to wait for the job to finish to see progress.
+
+### Expandable Step Details
+
+In the Job Results tab, each step in a completed run can be expanded to show its full output (`log_output`). Click a step row to toggle the detail view and inspect captured stdout/stderr, error tracebacks, or row-level diagnostics.
 
 ### DAG Picker
 
@@ -184,6 +192,7 @@ Click the target field to open the DAG picker. The picker shows your full pipeli
 - Click a node to toggle it as an explicit target.
 - Click the left arrow (upstream) on a node to add the `+` prefix and include all upstream dependencies automatically.
 - Click the right arrow (downstream) to add the `+` suffix and include downstream models and export scripts.
+- When an upstream or downstream selector is active, the DAG picker highlights the affected nodes so you can see exactly which models and scripts will be included in the job.
 
 ### Cron Wizard
 

@@ -176,6 +176,41 @@ class SchedulerThread(threading.Thread):
 
         logger.info("Scheduler started for %s", self.project_dir)
 
+        # Restore last-fire timestamps for interval schedules from the database
+        # so that "every 2 weeks" doesn't re-fire immediately after restart.
+        try:
+            from havn.engine.database import connect as _connect
+            from havn.engine.orchestration import (
+                discover_jobs as _discover_jobs,
+                ensure_job_runs_table as _ensure_runs,
+                is_interval_schedule as _is_interval,
+            )
+
+            config_init = load_project(self.project_dir)
+            db_path_init = self.project_dir / config_init.database.path
+            conn_init = _connect(db_path_init, project_dir=self.project_dir)
+            try:
+                _ensure_runs(conn_init)
+                for job in _discover_jobs(self.project_dir):
+                    schedules = job.schedules or ([job.cron] if job.cron else [])
+                    for sched in schedules:
+                        if not _is_interval(sched):
+                            continue
+                        key = f"job:{job.name}:interval:{sched}"
+                        row = conn_init.execute(
+                            "SELECT MAX(started_at) FROM _havn.job_runs WHERE job_name = ?",
+                            [job.name],
+                        ).fetchone()
+                        if row and row[0] is not None:
+                            self._last_run[key] = row[0].timestamp()
+                            logger.debug(
+                                "Restored interval last-run for %s: %s", key, row[0]
+                            )
+            finally:
+                conn_init.close()
+        except Exception as exc:
+            logger.debug("Could not restore interval timestamps: %s", exc)
+
         while not self._stop_event.is_set():
             try:
                 config = load_project(self.project_dir)
@@ -298,7 +333,7 @@ class SchedulerThread(threading.Thread):
 class FileWatcher(threading.Thread):
     """Watches transform/ and ingest/ for changes, triggers rebuilds."""
 
-    def __init__(self, project_dir: Path, on_change: callable | None = None):
+    def __init__(self, project_dir: Path, on_change=None):
         super().__init__(daemon=True, name="havn-watcher")
         self.project_dir = project_dir
         self.on_change = on_change
