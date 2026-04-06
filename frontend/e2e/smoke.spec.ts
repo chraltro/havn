@@ -2,7 +2,7 @@
  * Comprehensive E2E smoke test for havn web UI.
  *
  * Prerequisites – run once before the test suite:
- *   cd test-project && havn stream full-refresh --force && havn serve
+ *   cd test-project && havn jobs run full-refresh --force && havn serve
  *
  * Then from frontend/:
  *   npx playwright test

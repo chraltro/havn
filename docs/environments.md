@@ -41,7 +41,7 @@ havn env use prod
 # Now all commands use prod automatically
 havn transform              # uses prod
 havn query "SELECT 1"       # uses prod
-havn stream daily-etl       # uses prod
+havn jobs run daily-etl      # uses prod
 
 # Check which environment is active
 havn env show
@@ -73,8 +73,8 @@ havn transform --env dev
 # Query the production database
 havn query "SELECT COUNT(*) FROM gold.customers" --env prod
 
-# Run a stream against staging
-havn stream daily-etl --env staging
+# Run a job against staging
+havn jobs run daily-etl --env staging
 
 # List tables in the dev database
 havn tables --env dev
@@ -165,7 +165,7 @@ havn serve --env dev
 Production:
 
 ```bash
-havn stream daily-etl --env prod
+havn jobs run daily-etl --env prod
 ```
 
 ### In-Memory Testing

@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from graphlib import TopologicalSorter
 from pathlib import Path
@@ -579,6 +580,7 @@ def execute_job(
     conn,
     project_dir: Path,
     trigger: str = "manual",
+    emit: Callable | None = None,
 ) -> JobResult:
     """Execute a job's plan step by step, logging to _havn.job_runs."""
     from havn.engine.runner import run_script
@@ -609,6 +611,20 @@ def execute_job(
     start = time.perf_counter()
     timeout_ms = job.timeout_minutes * 60 * 1000
     failed_targets: set[str] = set()
+
+    def _emit(event_type: str, data: dict) -> None:
+        if emit is not None:
+            try:
+                emit(event_type, data)
+            except Exception:
+                pass
+
+    _emit("start", {
+        "operation": "job",
+        "label": f"Job: {job.name}",
+        "total": len(plan.steps),
+        "pipeline_run_id": run_id,
+    })
 
     try:
         # Build model map for transform steps
@@ -645,6 +661,7 @@ def execute_job(
                         "duration_ms": 0,
                         "rows_affected": 0,
                         "error": "Upstream dependency failed",
+                        "log_output": "Skipped: upstream dependency failed",
                     })
                     result.steps_skipped += 1
                     failed_targets.add(step.target)  # propagate to further downstream
@@ -653,6 +670,25 @@ def execute_job(
             step_start = time.perf_counter()
             step_result: dict = {"step": step.step, "type": step.type, "target": step.target}
 
+            # Capture previous row count for delta display
+            prev_rows = None
+            if step.type == "transform" and step.target in model_map:
+                try:
+                    pr = conn.execute(
+                        "SELECT row_count FROM _havn.model_state WHERE model_path = ?",
+                        [step.target],
+                    ).fetchone()
+                    if pr and pr[0] is not None:
+                        prev_rows = pr[0]
+                except Exception:
+                    pass
+
+            _emit("model_start", {
+                "name": step.target,
+                "action": step.type,
+                "num": step.step,
+            })
+
             try:
                 if step.type in ("ingest", "export"):
                     script_path = project_dir / step.target
@@ -660,6 +696,7 @@ def execute_job(
                     step_result["status"] = r.get("status", "error")
                     step_result["duration_ms"] = r.get("duration_ms", 0)
                     step_result["rows_affected"] = r.get("rows_affected", 0)
+                    step_result["log_output"] = r.get("log_output", "")
                     if r.get("error"):
                         step_result["error"] = r["error"]
                 elif step.type == "transform":
@@ -667,6 +704,7 @@ def execute_job(
                     if model is None:
                         step_result["status"] = "error"
                         step_result["error"] = f"Model not found: {step.target}"
+                        step_result["log_output"] = f"Model not found: {step.target}"
                         step_result["duration_ms"] = int((time.perf_counter() - step_start) * 1000)
                     else:
                         duration_ms, row_count = execute_model(conn, model)
@@ -674,9 +712,13 @@ def execute_job(
                         step_result["status"] = "success"
                         step_result["duration_ms"] = duration_ms
                         step_result["rows_affected"] = row_count
+                        if prev_rows is not None:
+                            step_result["previous_row_count"] = prev_rows
+                        step_result["log_output"] = f"Built {step.target} — {row_count:,} rows ({duration_ms}ms)"
             except Exception as e:
                 step_result["status"] = "error"
                 step_result["error"] = str(e)
+                step_result["log_output"] = str(e)
                 step_result["duration_ms"] = int((time.perf_counter() - step_start) * 1000)
 
             # Handle retries for failed steps
@@ -700,6 +742,7 @@ def execute_job(
                                 step_result["status"] = "success"
                                 step_result["duration_ms"] = r.get("duration_ms", 0)
                                 step_result["rows_affected"] = r.get("rows_affected", 0)
+                                step_result["log_output"] = r.get("log_output", "")
                                 step_result.pop("error", None)
                                 break
                         elif step.type == "transform" and step.target in model_map:
@@ -708,12 +751,24 @@ def execute_job(
                             step_result["status"] = "success"
                             step_result["duration_ms"] = duration_ms
                             step_result["rows_affected"] = row_count
+                            step_result["log_output"] = f"Built {step.target} — {row_count:,} rows ({duration_ms}ms)"
                             step_result.pop("error", None)
                             break
                     except Exception:
                         pass
 
             result.step_details.append(step_result)
+
+            _emit("model_end", {
+                "name": step.target,
+                "action": step.type,
+                "status": step_result.get("status", "error"),
+                "duration_ms": step_result.get("duration_ms", 0),
+                "row_count": step_result.get("rows_affected", 0),
+                "error": step_result.get("error"),
+                "num": step.step,
+            })
+
             status = step_result.get("status")
             if status == "success":
                 result.steps_completed += 1
@@ -770,6 +825,13 @@ def execute_job(
             )
         except Exception as e:
             logger.debug("Final run update failed: %s", e)
+
+        _emit("complete", {
+            "stream": f"job:{job.name}",
+            "status": result.status,
+            "duration_seconds": round(result.duration_ms / 1000, 1),
+            "pipeline_run_id": run_id,
+        })
     finally:
         _cancel_flags.pop(run_id, None)
 

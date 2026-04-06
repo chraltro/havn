@@ -378,7 +378,7 @@ Same tool for local development and production deployment. Environment overrides
 | `havn transform` | Build SQL models (DAG-ordered, change-detected) |
 | `havn transform --force` | Force rebuild all models |
 | `havn run <script>` | Execute an ingest/export Python script |
-| `havn stream <name>` | Run a named multi-step pipeline |
+| `havn jobs run <name>` | Run a named multi-step pipeline |
 | `havn query "<sql>"` | Ad-hoc SQL execution |
 | `havn tables` | List warehouse objects |
 | `havn lint` | Check SQL style |

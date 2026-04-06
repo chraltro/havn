@@ -509,21 +509,18 @@ function AppContent() {
 
   // Agent sidebar state
   const [agentSidebarOpen, setAgentSidebarOpen] = useState(false);
+  const pendingAgentPromptRef = useRef(null);
 
   // When any panel dispatches 'havn-agent-send' (e.g. ReviewsPanel's AI Review
-  // button), open the agent sidebar first, then re-dispatch the event so the
-  // now-mounted sidebar can pick it up and forward it to the WebSocket.
+  // button) while the sidebar is closed, queue the prompt in a ref and open
+  // the sidebar.  AgentSidebar picks it up on mount via the pendingPrompt prop.
   useEffect(() => {
     const handler = (e) => {
       const prompt = e?.detail?.prompt;
       if (!prompt) return;
       if (agentSidebarOpen) return; // sidebar already listening
+      pendingAgentPromptRef.current = e.detail;
       setAgentSidebarOpen(true);
-      // Delay re-dispatch until after the sidebar mounts and attaches its
-      // own listener
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent("havn-agent-send", { detail: e.detail }));
-      }, 100);
     };
     window.addEventListener("havn-agent-send", handler);
     return () => window.removeEventListener("havn-agent-send", handler);
@@ -1222,13 +1219,13 @@ function AppContent() {
             {activeTab === "Data Sources" && <ErrorBoundary name="Data Sources"><DataSourcesPanel addOutput={addOutput} showConfirm={showConfirm} onDataChanged={refreshAll} /></ErrorBoundary>}
 
             {activeTab === "DAG" && <ErrorBoundary name="DAG"><DAGPanel onOpenFile={openFile} showConfirm={showConfirm} /></ErrorBoundary>}
-            {activeTab === "Git" && <ErrorBoundary name="Git"><GitReviewsPanel /></ErrorBoundary>}
-            {activeTab === "Orchestration" && <ErrorBoundary name="Orchestration"><OrchestrationPanel /></ErrorBoundary>}
+            {activeTab === "Git" && <ErrorBoundary name="Git"><GitReviewsPanel showConfirm={showConfirm} /></ErrorBoundary>}
+            {activeTab === "Orchestration" && <ErrorBoundary name="Orchestration"><OrchestrationPanel showConfirm={showConfirm} /></ErrorBoundary>}
             {activeTab === "Sentinel" && <ErrorBoundary name="Sentinel"><SentinelPanel /></ErrorBoundary>}
             {activeTab === "Diff" && <ErrorBoundary name="Diff"><DiffPanel api={api} addOutput={addOutput} /></ErrorBoundary>}
             {activeTab === "Docs" && <ErrorBoundary name="Docs"><DocsPanel /></ErrorBoundary>}
             {activeTab === "Quality" && <ErrorBoundary name="Quality"><QualityPanel addOutput={addOutput} /></ErrorBoundary>}
-            {activeTab === "Masking" && <ErrorBoundary name="Masking"><MaskingPanel /></ErrorBoundary>}
+            {activeTab === "Masking" && <ErrorBoundary name="Masking"><MaskingPanel showConfirm={showConfirm} /></ErrorBoundary>}
             {activeTab === "Wiki" && <ErrorBoundary name="Wiki"><WikiPanel /></ErrorBoundary>}
             {activeTab === "Runs" && <ErrorBoundary name="Runs"><HistoryPanel onOpenFile={openFile} /></ErrorBoundary>}
             {activeTab === "Settings" && <ErrorBoundary name="Settings"><SettingsPanel onShowGuide={showGuide} showConfirm={showConfirm} /></ErrorBoundary>}
@@ -1276,6 +1273,8 @@ function AppContent() {
                 onFileChanged={() => { reloadActiveFile(); refreshAll(); }}
                 onOpenFile={openFile}
                 onSelectTable={handleSelectTable}
+                pendingPrompt={pendingAgentPromptRef.current}
+                onPromptConsumed={() => { pendingAgentPromptRef.current = null; }}
               />
             </div>
           </>

@@ -34,7 +34,7 @@ def run(
 
     if script_path.is_dir():
         console.print(f"[red]Expected a script file, got a directory: {script_path}[/red]")
-        console.print("Hint: use [bold]havn stream[/bold] to run a full pipeline, or specify a file like [bold]havn run ingest/script.py[/bold]")
+        console.print("Hint: use [bold]havn jobs run[/bold] to run a job, or specify a file like [bold]havn run ingest/script.py[/bold]")
         raise typer.Exit(1)
 
     # Determine script type from immediate parent directory

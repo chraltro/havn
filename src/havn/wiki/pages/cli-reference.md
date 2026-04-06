@@ -123,12 +123,12 @@ havn transform [TARGETS...] [--force] [--sequential] [--workers N] [--env NAME] 
 | `--env, -e` | none | Environment override |
 | `--skip-check` | false | Skip pre-transform validation |
 
-### havn stream
+### havn jobs run
 
-Run a full stream from project.yml.
+Run a job or stream by name.
 
 ```bash
-havn stream NAME [--force] [--env NAME] [--project PATH]
+havn jobs run NAME [--force] [--env NAME] [--project PATH]
 ```
 
 | Flag | Default | Description |

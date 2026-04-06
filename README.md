@@ -27,7 +27,7 @@
 Your entire warehouse lives in a single DuckDB file. Transforms are plain SQL. Ingest and export scripts are Python. There's no Jinja, no compilation step, no profiles.yml, and no YAML spaghetti.
 
 ```
-git clone https://github.com/chraltro/db.git && cd db && pip install -e . && cd frontend && npm install && npm run build && cd .. && havn init my-project && cd my-project && havn stream full-refresh && havn serve
+git clone https://github.com/chraltro/db.git && cd db && pip install -e . && cd frontend && npm install && npm run build && cd .. && havn init my-project && cd my-project && havn jobs run full-refresh && havn serve
 ```
 
 <!-- Screenshot placeholder: replace with actual screenshot of havn web UI -->
@@ -160,7 +160,7 @@ This scaffolds a complete project with a sample pipeline that fetches earthquake
 ### Run the pipeline
 
 ```bash
-havn stream full-refresh
+havn jobs run full-refresh
 ```
 
 ### Explore your data
@@ -202,7 +202,7 @@ The warehouse is a single DuckDB file. Copy it, back it up, version it - it's ju
 | Command | Description |
 |---|---|
 | `havn init <name>` | Scaffold a new project |
-| `havn stream <name>` | Run a full pipeline (ingest → transform → export) |
+| `havn jobs run <name>` | Run a full pipeline (ingest → transform → export) |
 | `havn transform` | Build SQL models in dependency order |
 | `havn run <script>` | Run a single ingest/export script or notebook |
 | `havn query "<sql>"` | Run ad-hoc SQL queries |

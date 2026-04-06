@@ -81,8 +81,8 @@ havn transform --env dev
 # Query the production database
 havn query "SELECT COUNT(*) FROM gold.customers" --env prod
 
-# Run a stream against staging
-havn stream daily-etl --env staging
+# Run a job against staging
+havn jobs run daily-etl --env staging
 
 # List tables in the dev database
 havn tables --env dev
@@ -159,7 +159,7 @@ havn serve --env dev
 Production:
 
 ```bash
-havn stream daily-etl --env prod
+havn jobs run daily-etl --env prod
 ```
 
 ### In-Memory Testing

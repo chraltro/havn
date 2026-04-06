@@ -61,7 +61,7 @@ function DiffStatusBadge({ status }) {
 
 const LIST_SUB_TABS = ["Open", "Merged", "Closed", "All"];
 
-export default function ReviewsPanel() {
+export default function ReviewsPanel({ showConfirm }) {
   const [prs, setPrs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
@@ -536,7 +536,8 @@ function PrDetail({ prId, onBack }) {
   };
 
   const handleMerge = async () => {
-    if (!window.confirm(`Merge ${prId} into ${pr.base_ref}?`)) return;
+    const ok = await showConfirm("Merge Pull Request", `Merge ${prId} into ${pr.base_ref}?`, "Merge");
+    if (!ok) return;
     setAction("merging");
     try {
       const result = await api.mergePr(prId, currentUser);
@@ -551,7 +552,8 @@ function PrDetail({ prId, onBack }) {
   };
 
   const handleClose = async () => {
-    if (!window.confirm(`Close ${prId} without merging?`)) return;
+    const ok = await showConfirm("Close Pull Request", `Close ${prId} without merging? This action cannot be undone.`, "Close", true);
+    if (!ok) return;
     setAction("closing");
     try {
       await api.closePr(prId, currentUser);

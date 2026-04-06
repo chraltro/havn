@@ -30,7 +30,7 @@ havn tables                     # list warehouse objects
 havn serve                      # start web UI on :3000
 havn serve --auth               # with authentication
 havn run ingest/example.py      # run a script
-havn stream full-refresh        # run full pipeline
+havn jobs run full-refresh      # run full pipeline
 havn history                    # show run log
 havn env use prod               # switch environment
 havn env list                   # show all environments
@@ -101,7 +101,7 @@ User project layout (created by `havn init`):
   export/         Python scripts (or .dpnb notebooks)
   notebooks/      .dpnb interactive notebooks
   macros/         Python SQL macros (auto-registered as DuckDB UDFs)
-  project.yml     Config: streams, connections, schedules
+  project.yml     Config: connections, lint, alerts
   .env            Secrets (never committed)
   .havn-env       Active environment (local, not committed)
   warehouse.duckdb   Single-file DuckDB database
@@ -193,16 +193,22 @@ connections:
     type: postgres
     host: ${DB_HOST}          # env var expansion via .env
     password: ${DB_PASSWORD}
-streams:
-  daily-refresh:
-    description: "Daily ETL"
-    schedule: "0 6 * * *"     # 5-field cron
-    steps:
-      - ingest: [all]
-      - transform: [all]
-      - export: [all]
 lint:
   dialect: duckdb
+```
+
+Pipelines are defined as YAML job files in `orchestration/`:
+
+```yaml
+# orchestration/full-refresh.yml
+name: full-refresh
+targets:
+  - gold.*
+  - export/earthquake_report.py
+resolve: upstream
+retry: 1
+# schedules:
+#   - "0 6 * * *"
 ```
 
 ## Development Workflow

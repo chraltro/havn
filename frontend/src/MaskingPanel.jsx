@@ -84,18 +84,20 @@ function RoleBadge({ role }) {
   );
 }
 
-// --- Modal ---
+/* ------------------------------------------------------------------ */
+/* Inline form row (replaces modal)                                    */
+/* ------------------------------------------------------------------ */
 
-function PolicyModal({ mode, initial, methods, onSave, onClose, saving }) {
+function PolicyFormRow({ initial, methods, onSave, onCancel, saving, colSpan }) {
   const [form, setForm] = useState(initial);
   const [showCondition, setShowCondition] = useState(!!(initial.condition_column));
+  const isEdit = !!(initial.id);
 
-  // Cascading dropdowns: schemas → tables → columns
+  // Cascading dropdowns: schemas -> tables -> columns
   const [schemas, setSchemas] = useState([]);
   const [tablesForSchema, setTablesForSchema] = useState([]);
   const [columnsForTable, setColumnsForTable] = useState([]);
 
-  // Load all schemas on mount
   useEffect(() => {
     api.listTables().then(tables => {
       const unique = [...new Set(tables.map(t => t.schema))].filter(s => s !== '_havn' && s !== 'information_schema').sort(schemaCompare);
@@ -103,16 +105,14 @@ function PolicyModal({ mode, initial, methods, onSave, onClose, saving }) {
     }).catch(() => {});
   }, []);
 
-  // Load tables when schema changes
   useEffect(() => {
     if (!form.schema_name) { setTablesForSchema([]); setColumnsForTable([]); return; }
     api.listTables(form.schema_name).then(tables => {
       setTablesForSchema(tables.filter(t => t.schema === form.schema_name).map(t => t.name).sort());
     }).catch(() => setTablesForSchema([]));
-    setColumnsForTable([]);
-  }, [form.schema_name]);
+    if (!isEdit) setColumnsForTable([]);
+  }, [form.schema_name, isEdit]);
 
-  // Load columns when table changes
   useEffect(() => {
     if (!form.schema_name || !form.table_name) { setColumnsForTable([]); return; }
     api.describeTable(form.schema_name, form.table_name).then(desc => {
@@ -154,22 +154,6 @@ function PolicyModal({ mode, initial, methods, onSave, onClose, saving }) {
     }));
   }, []);
 
-  const handleSubmit = useCallback(() => {
-    const payload = { ...form };
-    if (!selectedMethod?.config?.length) delete payload.method_config;
-    else {
-      // Remove empty string config values
-      const cleaned = {};
-      for (const [k, v] of Object.entries(payload.method_config || {})) {
-        if (v !== '' && v !== null && v !== undefined) cleaned[k] = v;
-      }
-      payload.method_config = Object.keys(cleaned).length > 0 ? cleaned : undefined;
-      if (!payload.method_config) delete payload.method_config;
-    }
-    if (!payload.condition_column) { delete payload.condition_column; delete payload.condition_value; }
-    onSave(payload);
-  }, [form, selectedMethod, onSave]);
-
   const grouped = useMemo(() => {
     const groups = {};
     for (const cat of CATEGORY_ORDER) groups[cat] = [];
@@ -181,157 +165,152 @@ function PolicyModal({ mode, initial, methods, onSave, onClose, saving }) {
     return groups;
   }, [methods]);
 
+  const handleSubmit = useCallback(() => {
+    const payload = { ...form };
+    delete payload.id;
+    if (!selectedMethod?.config?.length) delete payload.method_config;
+    else {
+      const cleaned = {};
+      for (const [k, v] of Object.entries(payload.method_config || {})) {
+        if (v !== '' && v !== null && v !== undefined) cleaned[k] = v;
+      }
+      payload.method_config = Object.keys(cleaned).length > 0 ? cleaned : undefined;
+      if (!payload.method_config) delete payload.method_config;
+    }
+    if (!payload.condition_column) { delete payload.condition_column; delete payload.condition_value; }
+    onSave(payload);
+  }, [form, selectedMethod, onSave]);
+
   const canSave = form.schema_name && form.table_name && form.column_name && !saving;
 
   return (
-    <div style={s.overlay} onClick={onClose}>
-      <div style={s.modal} onClick={e => e.stopPropagation()}>
-        <div style={s.modalHeader}>
-          <span style={s.modalTitle}>{mode === 'edit' ? 'Edit Masking Policy' : 'New Masking Policy'}</span>
-          <button style={s.closeBtn} onClick={onClose}>&times;</button>
-        </div>
-
-        <div style={s.modalBody}>
-          {/* Target fields */}
-          <div style={s.fieldGroup}>
-            <div style={s.fieldGroupLabel}>Target</div>
-            <div style={s.formGrid3}>
-              <div>
+    <tr>
+      <td colSpan={colSpan} style={{ padding: 0, borderBottom: '1px solid var(--havn-border)' }}>
+        <div style={s.formRow}>
+          <div style={s.formRowHeader}>
+            <span style={s.formRowTitle}>{isEdit ? 'Edit Policy' : 'New Policy'}</span>
+          </div>
+          <div style={s.formRowBody}>
+            {/* Target row */}
+            <div style={s.formFieldRow}>
+              <div style={s.formField}>
                 <label style={s.label}>Schema</label>
                 <select style={s.select} value={form.schema_name} onChange={e => { updateForm('schema_name', e.target.value); updateForm('table_name', ''); updateForm('column_name', ''); }}>
-                  <option value="">Select schema...</option>
+                  <option value="">Select...</option>
                   {schemas.map(sc => <option key={sc} value={sc}>{sc}</option>)}
                 </select>
               </div>
-              <div>
+              <div style={s.formField}>
                 <label style={s.label}>Table</label>
                 <select style={s.select} value={form.table_name} onChange={e => { updateForm('table_name', e.target.value); updateForm('column_name', ''); }} disabled={!form.schema_name}>
-                  <option value="">Select table...</option>
+                  <option value="">Select...</option>
                   {tablesForSchema.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
-              <div>
+              <div style={s.formField}>
                 <label style={s.label}>Column</label>
                 <select style={s.select} value={form.column_name} onChange={e => updateForm('column_name', e.target.value)} disabled={!form.table_name}>
-                  <option value="">Select column...</option>
+                  <option value="">Select...</option>
                   {columnsForTable.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
+              <div style={{ ...s.formField, flex: 1.5 }}>
+                <label style={s.label}>Masking Method</label>
+                <select style={s.select} value={form.method} onChange={e => handleMethodChange(e.target.value)}>
+                  {CATEGORY_ORDER.map(cat => (
+                    grouped[cat]?.length > 0 && (
+                      <optgroup key={cat} label={CATEGORY_LABELS[cat]}>
+                        {grouped[cat].map(m => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </optgroup>
+                    )
+                  ))}
+                </select>
+              </div>
             </div>
-          </div>
 
-          {/* Method selector */}
-          <div style={s.fieldGroup}>
-            <div style={s.fieldGroupLabel}>Masking Method</div>
-            <select style={s.select} value={form.method} onChange={e => handleMethodChange(e.target.value)}>
-              {CATEGORY_ORDER.map(cat => (
-                grouped[cat]?.length > 0 && (
-                  <optgroup key={cat} label={CATEGORY_LABELS[cat]}>
-                    {grouped[cat].map(m => (
-                      <option key={m.id} value={m.id}>{m.name}</option>
-                    ))}
-                  </optgroup>
-                )
-              ))}
-            </select>
+            {/* Method info */}
             {selectedMethod && (
               <div style={s.methodInfo}>
-                <div style={s.methodDescription}>{selectedMethod.description}</div>
+                <span style={s.methodDescription}>{selectedMethod.description}</span>
                 {selectedMethod.example && (
-                  <div style={s.methodExample}>
+                  <span style={{ marginLeft: 12 }}>
                     <code style={s.exampleCode}>{selectedMethod.example.input}</code>
-                    <span style={s.exampleArrow}>&rarr;</span>
+                    <span style={s.exampleArrow}>{' \u2192 '}</span>
                     <code style={s.exampleCode}>{selectedMethod.example.output}</code>
-                  </div>
+                  </span>
                 )}
               </div>
             )}
-          </div>
 
-          {/* Dynamic config fields */}
-          {selectedMethod?.config?.length > 0 && (
-            <div style={s.fieldGroup}>
-              <div style={s.fieldGroupLabel}>Configuration</div>
-              <div style={s.formGrid2}>
-                {selectedMethod.config.map(field => (
-                  <div key={field.key}>
-                    <label style={s.label}>{field.label}</label>
-                    <input
-                      style={s.input}
-                      type={field.type === 'int' || field.type === 'float' ? 'number' : 'text'}
-                      step={field.type === 'float' ? '0.1' : undefined}
-                      value={form.method_config[field.key] ?? field.default ?? ''}
-                      onChange={e => updateConfig(field.key, e.target.value, field.type)}
-                      placeholder={field.default != null ? String(field.default) : ''}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Condition (collapsible) */}
-          <div style={s.fieldGroup}>
-            <div
-              style={{ ...s.fieldGroupLabel, cursor: 'pointer', userSelect: 'none' }}
-              onClick={() => setShowCondition(v => !v)}
-            >
-              {showCondition ? '\u25BE' : '\u25B8'} Condition (optional)
-            </div>
-            {showCondition && (
-              <div style={s.formGrid2}>
-                <div>
-                  <label style={s.label}>Condition Column</label>
-                  <input style={s.input} value={form.condition_column} onChange={e => updateForm('condition_column', e.target.value)} placeholder="e.g. region" />
+            {/* Config fields + roles on one row */}
+            <div style={s.formFieldRow}>
+              {selectedMethod?.config?.length > 0 && selectedMethod.config.map(field => (
+                <div key={field.key} style={s.formField}>
+                  <label style={s.label}>{field.label}</label>
+                  <input
+                    style={s.input}
+                    type={field.type === 'int' || field.type === 'float' ? 'number' : 'text'}
+                    step={field.type === 'float' ? '0.1' : undefined}
+                    value={form.method_config[field.key] ?? field.default ?? ''}
+                    onChange={e => updateConfig(field.key, e.target.value, field.type)}
+                    placeholder={field.default != null ? String(field.default) : ''}
+                  />
                 </div>
-                <div>
-                  <label style={s.label}>Condition Value</label>
-                  <input style={s.input} value={form.condition_value} onChange={e => updateForm('condition_value', e.target.value)} placeholder="e.g. EU" />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Exempted roles */}
-          <div style={s.fieldGroup}>
-            <div style={s.fieldGroupLabel}>Exempted Roles</div>
-            <div style={{ display: 'flex', gap: 16 }}>
-              {ROLES.map(role => (
-                <label key={role} style={s.checkLabel}>
-                  <input type="checkbox" checked={form.exempted_roles.includes(role)} onChange={() => toggleRole(role)} />
-                  <span>{role}</span>
-                </label>
               ))}
+              <div style={s.formField}>
+                <label style={s.label}>Exempted Roles</label>
+                <div style={{ display: 'flex', gap: 10, paddingTop: 4 }}>
+                  {ROLES.map(role => (
+                    <label key={role} style={s.checkLabel}>
+                      <input type="checkbox" checked={form.exempted_roles.includes(role)} onChange={() => toggleRole(role)} />
+                      <span>{role}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div style={s.formField}>
+                <label style={{ ...s.label, cursor: 'pointer', userSelect: 'none' }} onClick={() => setShowCondition(v => !v)}>
+                  {showCondition ? '\u25BE' : '\u25B8'} Condition
+                </label>
+                {showCondition && (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input style={{ ...s.input, flex: 1 }} value={form.condition_column} onChange={e => updateForm('condition_column', e.target.value)} placeholder="column" />
+                    <input style={{ ...s.input, flex: 1 }} value={form.condition_value} onChange={e => updateForm('condition_value', e.target.value)} placeholder="value" />
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div style={s.modalFooter}>
-          <button style={s.btnCancel} onClick={onClose}>Cancel</button>
-          <button style={s.btnPrimary} onClick={handleSubmit} disabled={!canSave}>
-            {saving ? 'Saving...' : mode === 'edit' ? 'Update Policy' : 'Create Policy'}
-          </button>
+          {/* Actions */}
+          <div style={s.formRowActions}>
+            <button style={s.btnCancel} onClick={onCancel}>Cancel</button>
+            <button style={s.btnPrimary} onClick={handleSubmit} disabled={!canSave}>
+              {saving ? 'Saving...' : isEdit ? 'Save' : 'Create'}
+            </button>
+          </div>
         </div>
-      </div>
-    </div>
+      </td>
+    </tr>
   );
 }
 
 
-// --- Main Panel ---
+/* ------------------------------------------------------------------ */
+/* Main Panel                                                          */
+/* ------------------------------------------------------------------ */
 
-export default function MaskingPanel() {
+export default function MaskingPanel({ showConfirm }) {
   const [policies, setPolicies] = useState([]);
   const [methods, setMethods] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState(null);
-  const [deleting, setDeleting] = useState(false);
 
-  // Modal state
-  const [modalMode, setModalMode] = useState(null); // null | 'new' | 'edit'
-  const [editTarget, setEditTarget] = useState(null); // policy id for edit
+  // Inline form state: null | 'new' | policy id (for edit)
+  const [formMode, setFormMode] = useState(null);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -341,12 +320,10 @@ export default function MaskingPanel() {
   // Sort
   const sort = useSortable('schema_name');
 
-  // Load methods on mount (cached)
   useEffect(() => {
     api.getMaskingMethods().then(setMethods).catch(() => {});
   }, []);
 
-  // Load policies
   const loadPolicies = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -362,7 +339,6 @@ export default function MaskingPanel() {
 
   useEffect(() => { loadPolicies(); }, [loadPolicies]);
 
-  // Derived data
   const schemas = useMemo(() => {
     const set = new Set(policies.map(p => p.schema_name).filter(Boolean));
     return [...set].sort(schemaCompare);
@@ -395,58 +371,50 @@ export default function MaskingPanel() {
     });
   }, [policies, search, filterSchema, filterMethod, sort.sortKey, sort.sortDir]);
 
-  // Handlers
-  const handleOpenNew = useCallback(() => {
-    setEditTarget(null);
-    setModalMode('new');
-  }, []);
+  const handleOpenNew = useCallback(() => setFormMode('new'), []);
 
-  const handleEdit = useCallback((policy) => {
-    setEditTarget(policy.id);
-    setModalMode('edit');
-  }, []);
+  const handleEdit = useCallback((policy) => setFormMode(policy.id), []);
 
-  const handleCloseModal = useCallback(() => {
-    setModalMode(null);
-    setEditTarget(null);
-  }, []);
+  const handleCloseForm = useCallback(() => setFormMode(null), []);
 
   const handleSave = useCallback(async (payload) => {
     setSaving(true);
     setError(null);
     try {
-      if (modalMode === 'new') {
+      if (formMode === 'new') {
         await api.createMaskingPolicy(payload);
       } else {
-        await api.updateMaskingPolicy(editTarget, payload);
+        await api.updateMaskingPolicy(formMode, payload);
       }
-      handleCloseModal();
+      setFormMode(null);
       await loadPolicies();
     } catch (e) {
       setError(e.message || 'Save failed');
     } finally {
       setSaving(false);
     }
-  }, [modalMode, editTarget, handleCloseModal, loadPolicies]);
+  }, [formMode, loadPolicies]);
 
   const handleDelete = useCallback(async (id) => {
-    setDeleting(true);
+    if (showConfirm) {
+      const ok = await showConfirm("Delete Masking Policy", "Are you sure you want to delete this masking policy? This action cannot be undone.", "Delete", true);
+      if (!ok) return;
+    }
     try {
       await api.deleteMaskingPolicy(id);
-      setDeleteConfirm(null);
       await loadPolicies();
     } catch (e) {
       setError(e.message || 'Delete failed');
-    } finally {
-      setDeleting(false);
     }
-  }, [loadPolicies]);
+  }, [loadPolicies, showConfirm]);
 
-  // Build initial form for modal
-  const modalInitial = useMemo(() => {
-    if (modalMode === 'edit' && editTarget != null) {
-      const p = policies.find(pol => pol.id === editTarget);
+  // Build initial form data for the inline form
+  const formInitial = useMemo(() => {
+    if (formMode === 'new') return emptyPolicy();
+    if (formMode != null) {
+      const p = policies.find(pol => pol.id === formMode);
       if (p) return {
+        id: p.id,
         schema_name: p.schema_name || '',
         table_name: p.table_name || '',
         column_name: p.column_name || '',
@@ -458,7 +426,9 @@ export default function MaskingPanel() {
       };
     }
     return emptyPolicy();
-  }, [modalMode, editTarget, policies]);
+  }, [formMode, policies]);
+
+  const COL_COUNT = 7;
 
   return (
     <div style={s.container}>
@@ -470,7 +440,7 @@ export default function MaskingPanel() {
             <span style={s.countBadge}>{policies.length}</span>
           )}
         </div>
-        <button style={s.btnPrimary} onClick={handleOpenNew}>+ Add Policy</button>
+        <button style={s.btnPrimary} onClick={handleOpenNew} disabled={formMode === 'new'}>+ Add Policy</button>
       </div>
 
       {/* Filter bar */}
@@ -484,7 +454,7 @@ export default function MaskingPanel() {
           />
           <select style={s.filterSelect} value={filterSchema} onChange={e => setFilterSchema(e.target.value)}>
             <option value="all">All Schemas</option>
-            {schemas.map(s => <option key={s} value={s}>{s}</option>)}
+            {schemas.map(sc => <option key={sc} value={sc}>{sc}</option>)}
           </select>
           <select style={s.filterSelect} value={filterMethod} onChange={e => setFilterMethod(e.target.value)}>
             <option value="all">All Methods</option>
@@ -513,7 +483,7 @@ export default function MaskingPanel() {
           <div style={s.emptyState}>
             <div style={s.emptyText}>Loading masking policies...</div>
           </div>
-        ) : policies.length === 0 ? (
+        ) : policies.length === 0 && formMode !== 'new' ? (
           <div style={s.emptyState}>
             <div style={s.emptyIcon}>--</div>
             <div style={s.emptyTitle}>No masking policies configured</div>
@@ -534,77 +504,74 @@ export default function MaskingPanel() {
               </tr>
             </thead>
             <tbody>
-              {filteredPolicies.length === 0 ? (
-                <tr><td colSpan={7} style={{ ...s.td, color: 'var(--havn-text-dim)', textAlign: 'center' }}>No policies match filters</td></tr>
-              ) : filteredPolicies.map(p => (
-                <tr key={p.id} style={s.row}>
-                  <td style={s.td}>
-                    <span style={{ fontWeight: 500 }}>{p.schema_name}</span>
-                    <span style={{ color: 'var(--havn-text-dim)' }}>.</span>
-                    <span>{p.table_name}</span>
-                  </td>
-                  <td style={s.td}>
-                    <code style={s.code}>{p.column_name}</code>
-                  </td>
-                  <td style={s.td}>
-                    <MethodBadge method={p.method} methods={methods} />
-                  </td>
-                  <td style={s.td}>
-                    <span style={{ fontSize: 12, color: 'var(--havn-text-secondary)' }}>
-                      {formatConfig(p.method, p.method_config)}
-                    </span>
-                  </td>
-                  <td style={s.td}>
-                    {(p.exempted_roles || []).map(r => <RoleBadge key={r} role={r} />)}
-                    {(!p.exempted_roles || p.exempted_roles.length === 0) && <span style={{ color: 'var(--havn-text-dim)', fontSize: 12 }}>{'\u2014'}</span>}
-                  </td>
-                  <td style={s.td}>
-                    <span style={{ fontSize: 12, color: 'var(--havn-text-secondary)' }}>
-                      {p.created_at ? p.created_at.slice(0, 16).replace('T', ' ') : '\u2014'}
-                    </span>
-                  </td>
-                  <td style={{ ...s.td, textAlign: 'right' }}>
-                    <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                      <button style={s.actionBtn} onClick={() => handleEdit(p)} title="Edit">Edit</button>
-                      <button style={s.actionBtnDanger} onClick={() => setDeleteConfirm(p.id)} title="Delete">Delete</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {/* Inline new form at top */}
+              {formMode === 'new' && (
+                <PolicyFormRow
+                  initial={formInitial}
+                  methods={methods}
+                  onSave={handleSave}
+                  onCancel={handleCloseForm}
+                  saving={saving}
+                  colSpan={COL_COUNT}
+                />
+              )}
+              {filteredPolicies.length === 0 && formMode !== 'new' ? (
+                <tr><td colSpan={COL_COUNT} style={{ ...s.td, color: 'var(--havn-text-dim)', textAlign: 'center' }}>No policies match filters</td></tr>
+              ) : filteredPolicies.map(p => {
+                // Inline edit form replaces this row
+                if (formMode === p.id) {
+                  return (
+                    <PolicyFormRow
+                      key={p.id}
+                      initial={formInitial}
+                      methods={methods}
+                      onSave={handleSave}
+                      onCancel={handleCloseForm}
+                      saving={saving}
+                      colSpan={COL_COUNT}
+                    />
+                  );
+                }
+                return (
+                  <tr key={p.id} style={s.row}>
+                    <td style={s.td}>
+                      <span style={{ fontWeight: 500 }}>{p.schema_name}</span>
+                      <span style={{ color: 'var(--havn-text-dim)' }}>.</span>
+                      <span>{p.table_name}</span>
+                    </td>
+                    <td style={s.td}>
+                      <code style={s.code}>{p.column_name}</code>
+                    </td>
+                    <td style={s.td}>
+                      <MethodBadge method={p.method} methods={methods} />
+                    </td>
+                    <td style={s.td}>
+                      <span style={{ fontSize: 12, color: 'var(--havn-text-secondary)' }}>
+                        {formatConfig(p.method, p.method_config)}
+                      </span>
+                    </td>
+                    <td style={s.td}>
+                      {(p.exempted_roles || []).map(r => <RoleBadge key={r} role={r} />)}
+                      {(!p.exempted_roles || p.exempted_roles.length === 0) && <span style={{ color: 'var(--havn-text-dim)', fontSize: 12 }}>{'\u2014'}</span>}
+                    </td>
+                    <td style={s.td}>
+                      <span style={{ fontSize: 12, color: 'var(--havn-text-secondary)' }}>
+                        {p.created_at ? p.created_at.slice(0, 16).replace('T', ' ') : '\u2014'}
+                      </span>
+                    </td>
+                    <td style={{ ...s.td, textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                        <button style={s.actionBtn} onClick={() => handleEdit(p)} disabled={formMode != null} title="Edit">Edit</button>
+                        <button style={s.actionBtnDanger} onClick={() => handleDelete(p.id)} disabled={formMode != null} title="Delete">Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
       </div>
-
-      {/* Policy modal */}
-      {modalMode && (
-        <PolicyModal
-          mode={modalMode}
-          initial={modalInitial}
-          methods={methods}
-          onSave={handleSave}
-          onClose={handleCloseModal}
-          saving={saving}
-        />
-      )}
-
-      {/* Delete confirmation modal */}
-      {deleteConfirm != null && (
-        <div style={s.overlay} onClick={() => setDeleteConfirm(null)}>
-          <div style={s.deleteDialog} onClick={e => e.stopPropagation()}>
-            <div style={s.deleteTitle}>Delete Masking Policy</div>
-            <div style={s.deleteBody}>
-              Are you sure you want to delete this masking policy? This action cannot be undone.
-            </div>
-            <div style={s.deleteFooter}>
-              <button style={s.btnCancel} onClick={() => setDeleteConfirm(null)}>Cancel</button>
-              <button style={s.btnDanger} onClick={() => handleDelete(deleteConfirm)} disabled={deleting}>
-                {deleting ? 'Deleting...' : 'Delete'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -633,8 +600,7 @@ const s = {
 
   // Buttons
   btnPrimary: { padding: '5px 14px', background: 'var(--havn-green)', color: '#fff', border: '1px solid var(--havn-green-border)', borderRadius: 'var(--havn-radius-lg)', cursor: 'pointer', fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap' },
-  btnCancel: { padding: '6px 14px', background: 'none', border: '1px solid var(--havn-border-light)', borderRadius: 'var(--havn-radius-lg)', color: 'var(--havn-text-secondary)', cursor: 'pointer', fontSize: 12, fontWeight: 500 },
-  btnDanger: { padding: '6px 14px', background: 'var(--havn-red)', color: '#fff', border: '1px solid var(--havn-red-border)', borderRadius: 'var(--havn-radius-lg)', cursor: 'pointer', fontSize: 12, fontWeight: 500 },
+  btnCancel: { padding: '5px 14px', background: 'none', border: '1px solid var(--havn-border-light)', borderRadius: 'var(--havn-radius-lg)', color: 'var(--havn-text-secondary)', cursor: 'pointer', fontSize: 11, fontWeight: 500 },
   actionBtn: { padding: '3px 10px', background: 'var(--havn-btn-bg)', border: '1px solid var(--havn-btn-border)', borderRadius: 'var(--havn-radius)', cursor: 'pointer', fontSize: 11, fontWeight: 500, color: 'var(--havn-text)' },
   actionBtnDanger: { padding: '3px 10px', background: 'none', border: '1px solid var(--havn-border-light)', borderRadius: 'var(--havn-radius)', cursor: 'pointer', fontSize: 11, fontWeight: 500, color: 'var(--havn-red)' },
 
@@ -649,35 +615,24 @@ const s = {
   emptyTitle: { fontSize: 15, fontWeight: 600, marginBottom: 6, color: 'var(--havn-text)' },
   emptyText: { fontSize: 13, color: 'var(--havn-text-secondary)' },
 
-  // Modal overlay & dialog
-  overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
-  modal: { background: 'var(--havn-bg-secondary)', border: '1px solid var(--havn-border)', borderRadius: 8, width: 540, maxWidth: '92vw', maxHeight: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid var(--havn-border)' },
-  modalTitle: { fontSize: 14, fontWeight: 600, color: 'var(--havn-text)' },
-  closeBtn: { background: 'none', border: 'none', color: 'var(--havn-text-secondary)', cursor: 'pointer', fontSize: 20, lineHeight: 1, padding: '0 4px' },
-  modalBody: { flex: 1, overflow: 'auto', padding: '16px 20px' },
-  modalFooter: { display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '12px 20px', borderTop: '1px solid var(--havn-border)' },
-
-  // Delete dialog
-  deleteDialog: { background: 'var(--havn-bg-secondary)', border: '1px solid var(--havn-border)', borderRadius: 8, padding: 20, width: 420, maxWidth: '90vw' },
-  deleteTitle: { fontSize: 14, fontWeight: 600, color: 'var(--havn-text)', marginBottom: 8 },
-  deleteBody: { fontSize: 13, color: 'var(--havn-text-secondary)', marginBottom: 16, lineHeight: 1.5 },
-  deleteFooter: { display: 'flex', justifyContent: 'flex-end', gap: 8 },
+  // Inline form row
+  formRow: { padding: '12px 16px', background: 'color-mix(in srgb, var(--havn-accent) 4%, var(--havn-bg))', borderTop: '1px solid var(--havn-accent)', borderBottom: '1px solid var(--havn-accent)' },
+  formRowHeader: { marginBottom: 10 },
+  formRowTitle: { fontSize: 12, fontWeight: 600, color: 'var(--havn-accent)', textTransform: 'uppercase', letterSpacing: '0.3px' },
+  formRowBody: { display: 'flex', flexDirection: 'column', gap: 10 },
+  formFieldRow: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' },
+  formField: { flex: 1, minWidth: 120 },
+  formRowActions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 },
 
   // Form fields
-  fieldGroup: { marginBottom: 16 },
-  fieldGroupLabel: { fontSize: 11, fontWeight: 600, color: 'var(--havn-text-secondary)', textTransform: 'uppercase', marginBottom: 8 },
-  formGrid3: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 },
-  formGrid2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
-  label: { display: 'block', fontSize: 12, color: 'var(--havn-text-secondary)', marginBottom: 4 },
-  input: { padding: '6px 10px', background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text)', border: '1px solid var(--havn-border-light)', borderRadius: 'var(--havn-radius-lg)', fontSize: 13, width: '100%', boxSizing: 'border-box' },
-  select: { padding: '6px 10px', background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text)', border: '1px solid var(--havn-border-light)', borderRadius: 'var(--havn-radius-lg)', fontSize: 13, width: '100%', boxSizing: 'border-box' },
-  checkLabel: { display: 'flex', alignItems: 'center', gap: 6, color: 'var(--havn-text)', fontSize: 13, cursor: 'pointer' },
+  label: { display: 'block', fontSize: 11, color: 'var(--havn-text-secondary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.3px' },
+  input: { padding: '5px 8px', background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text)', border: '1px solid var(--havn-border-light)', borderRadius: 'var(--havn-radius)', fontSize: 12, width: '100%', boxSizing: 'border-box' },
+  select: { padding: '5px 8px', background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text)', border: '1px solid var(--havn-border-light)', borderRadius: 'var(--havn-radius)', fontSize: 12, width: '100%', boxSizing: 'border-box' },
+  checkLabel: { display: 'flex', alignItems: 'center', gap: 4, color: 'var(--havn-text)', fontSize: 12, cursor: 'pointer' },
 
   // Method info
-  methodInfo: { marginTop: 8, padding: '8px 10px', background: 'var(--havn-bg-tertiary)', borderRadius: 'var(--havn-radius-lg)', border: '1px solid var(--havn-border-light)' },
-  methodDescription: { fontSize: 12, color: 'var(--havn-text-secondary)', lineHeight: 1.4 },
-  methodExample: { marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 },
-  exampleCode: { fontSize: 12, fontFamily: 'var(--havn-font-mono)', padding: '1px 5px', background: 'var(--havn-bg)', borderRadius: 3, color: 'var(--havn-text)' },
-  exampleArrow: { color: 'var(--havn-text-dim)', fontSize: 13 },
+  methodInfo: { padding: '6px 10px', background: 'var(--havn-bg-tertiary)', borderRadius: 'var(--havn-radius)', border: '1px solid var(--havn-border-light)', fontSize: 11 },
+  methodDescription: { color: 'var(--havn-text-secondary)' },
+  exampleCode: { fontSize: 11, fontFamily: 'var(--havn-font-mono)', padding: '1px 4px', background: 'var(--havn-bg)', borderRadius: 3, color: 'var(--havn-text)' },
+  exampleArrow: { color: 'var(--havn-text-dim)', fontSize: 12 },
 };

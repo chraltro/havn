@@ -79,7 +79,7 @@ Runs Python scripts from the `export/` directory:
 ### Basic Execution
 
 ```bash
-havn stream full-refresh
+havn jobs run full-refresh
 ```
 
 Executes each step in order. If any ingest step fails, the pipeline stops immediately to preserve data integrity.
@@ -87,7 +87,7 @@ Executes each step in order. If any ingest step fails, the pipeline stops immedi
 ### Force Rebuild
 
 ```bash
-havn stream full-refresh --force
+havn jobs run full-refresh --force
 ```
 
 Forces all transform models to rebuild regardless of change detection.
@@ -95,7 +95,7 @@ Forces all transform models to rebuild regardless of change detection.
 ### With Environment
 
 ```bash
-havn stream daily-etl --env prod
+havn jobs run daily-etl --env prod
 ```
 
 Uses the production database and environment settings.
