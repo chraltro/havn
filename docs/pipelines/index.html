@@ -1422,15 +1422,15 @@
 </code></pre></div>
 <h2 id="running-streams">Running Streams<a class="headerlink" href="#running-streams" title="Permanent link">&para;</a></h2>
 <h3 id="basic-execution">Basic Execution<a class="headerlink" href="#basic-execution" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>stream<span class="w"> </span>full-refresh
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span><span class="nb">jobs</span><span class="w"> </span>run<span class="w"> </span>full-refresh
 </code></pre></div>
 <p>Executes each step in order. If any ingest step fails, the pipeline stops immediately to preserve data integrity.</p>
 <h3 id="force-rebuild">Force Rebuild<a class="headerlink" href="#force-rebuild" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>stream<span class="w"> </span>full-refresh<span class="w"> </span>--force
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span><span class="nb">jobs</span><span class="w"> </span>run<span class="w"> </span>full-refresh<span class="w"> </span>--force
 </code></pre></div>
 <p>Forces all transform models to rebuild regardless of change detection.</p>
 <h3 id="with-environment">With Environment<a class="headerlink" href="#with-environment" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>stream<span class="w"> </span>daily-etl<span class="w"> </span>--env<span class="w"> </span>prod
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span><span class="nb">jobs</span><span class="w"> </span>run<span class="w"> </span>daily-etl<span class="w"> </span>--env<span class="w"> </span>prod
 </code></pre></div>
 <p>Uses the production database and environment settings.</p>
 <h2 id="error-handling">Error Handling<a class="headerlink" href="#error-handling" title="Permanent link">&para;</a></h2>

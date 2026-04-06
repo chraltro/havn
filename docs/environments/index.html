@@ -945,7 +945,7 @@ havn<span class="w"> </span>env<span class="w"> </span>use<span class="w"> </spa
 <span class="c1"># Now all commands use prod automatically</span>
 havn<span class="w"> </span>transform<span class="w">              </span><span class="c1"># uses prod</span>
 havn<span class="w"> </span>query<span class="w"> </span><span class="s2">&quot;SELECT 1&quot;</span><span class="w">       </span><span class="c1"># uses prod</span>
-havn<span class="w"> </span>stream<span class="w"> </span>daily-etl<span class="w">       </span><span class="c1"># uses prod</span>
+havn<span class="w"> </span><span class="nb">jobs</span><span class="w"> </span>run<span class="w"> </span>daily-etl<span class="w">      </span><span class="c1"># uses prod</span>
 
 <span class="c1"># Check which environment is active</span>
 havn<span class="w"> </span>env<span class="w"> </span>show
@@ -969,8 +969,8 @@ havn<span class="w"> </span>transform<span class="w"> </span>--env<span class="w
 <span class="c1"># Query the production database</span>
 havn<span class="w"> </span>query<span class="w"> </span><span class="s2">&quot;SELECT COUNT(*) FROM gold.customers&quot;</span><span class="w"> </span>--env<span class="w"> </span>prod
 
-<span class="c1"># Run a stream against staging</span>
-havn<span class="w"> </span>stream<span class="w"> </span>daily-etl<span class="w"> </span>--env<span class="w"> </span>staging
+<span class="c1"># Run a job against staging</span>
+havn<span class="w"> </span><span class="nb">jobs</span><span class="w"> </span>run<span class="w"> </span>daily-etl<span class="w"> </span>--env<span class="w"> </span>staging
 
 <span class="c1"># List tables in the dev database</span>
 havn<span class="w"> </span>tables<span class="w"> </span>--env<span class="w"> </span>dev
@@ -1029,7 +1029,7 @@ SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 havn<span class="w"> </span>serve<span class="w"> </span>--env<span class="w"> </span>dev
 </code></pre></div>
 <p>Production:</p>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>stream<span class="w"> </span>daily-etl<span class="w"> </span>--env<span class="w"> </span>prod
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span><span class="nb">jobs</span><span class="w"> </span>run<span class="w"> </span>daily-etl<span class="w"> </span>--env<span class="w"> </span>prod
 </code></pre></div>
 <h3 id="in-memory-testing">In-Memory Testing<a class="headerlink" href="#in-memory-testing" title="Permanent link">&para;</a></h3>
 <p>Use <code>:memory:</code> for fast, disposable test databases:</p>
