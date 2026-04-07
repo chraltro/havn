@@ -536,11 +536,18 @@ def context(
 
 @app.command()
 def backup(
-    output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Backup file path")] = None,
+    output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Backup file path (default: _backups/)")] = None,
+    no_verify: Annotated[bool, typer.Option("--no-verify", help="Skip integrity verification")] = False,
+    note: Annotated[str, typer.Option("--note", "-n", help="Note to attach to this backup")] = "",
+    keep: Annotated[Optional[int], typer.Option("--keep", help="Keep only the N most recent backups")] = None,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
-    """Create a backup of the warehouse database."""
-    import shutil
+    """Create a verified backup of the warehouse database.
+
+    Flushes the DuckDB WAL, copies the database file, verifies integrity,
+    and records the backup in _backups/manifest.json with a SHA-256 checksum.
+    """
+    from havn.engine.backup import BackupError, cleanup_backups, create_backup
 
     project_dir = _resolve_project(project_dir)
     from havn.config import load_project
@@ -552,33 +559,39 @@ def backup(
         console.print("[red]No warehouse database found. Nothing to backup.[/red]")
         raise typer.Exit(1)
 
-    # Default backup path: warehouse.duckdb.backup
-    if output is None:
-        from datetime import datetime
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output = project_dir / f"{config.database.path}.backup_{ts}"
-
-    # Ensure WAL is flushed by checkpointing via a temporary connection
-    from havn.engine.database import connect
     try:
-        conn = connect(db_path)
-        conn.execute("CHECKPOINT")
-        conn.close()
-    except Exception:
-        pass  # proceed with copy even if checkpoint fails
+        entry = create_backup(
+            project_dir, db_path,
+            output=output,
+            verify=not no_verify,
+            note=note,
+        )
+    except BackupError as e:
+        console.print(f"[red]Backup failed: {e}[/red]")
+        raise typer.Exit(1)
 
-    shutil.copy2(str(db_path), str(output))
-    size_mb = output.stat().st_size / (1024 * 1024)
-    console.print(f"[green]Backup created: {output} ({size_mb:.1f} MB)[/green]")
+    size_mb = entry["size_bytes"] / (1024 * 1024)
+    verified = "[green]verified[/green]" if entry["verified"] else "[yellow]not verified[/yellow]"
+    console.print(f"[green]Backup created:[/green] {entry['path']} ({size_mb:.1f} MB, {verified})")
+    console.print(f"  SHA-256: {entry['sha256'][:16]}...")
+
+    if keep is not None:
+        removed = cleanup_backups(project_dir, keep=keep)
+        if removed:
+            console.print(f"  Cleaned up {len(removed)} old backup(s)")
 
 
 @app.command()
 def restore(
     backup_path: Annotated[Path, typer.Argument(help="Path to the backup file")],
+    no_verify: Annotated[bool, typer.Option("--no-verify", help="Skip integrity verification before restore")] = False,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
-    """Restore the warehouse database from a backup."""
-    import shutil
+    """Restore the warehouse database from a backup.
+
+    Verifies the backup's integrity before restoring.  Removes stale WAL files.
+    """
+    from havn.engine.backup import BackupError, restore_backup
 
     project_dir = _resolve_project(project_dir)
     from havn.config import load_project
@@ -586,21 +599,82 @@ def restore(
     config = load_project(project_dir)
     db_path = project_dir / config.database.path
 
-    if not backup_path.exists():
-        console.print(f"[red]Backup file not found: {backup_path}[/red]")
-        raise typer.Exit(1)
-
     if db_path.exists():
         console.print(f"[yellow]Overwriting existing database: {db_path}[/yellow]")
 
-    shutil.copy2(str(backup_path), str(db_path))
-    # Remove WAL file if present (stale WAL from old db)
-    wal_path = Path(str(db_path) + ".wal")
-    if wal_path.exists():
-        wal_path.unlink()
+    try:
+        result = restore_backup(
+            project_dir, db_path, backup_path,
+            verify=not no_verify,
+        )
+    except BackupError as e:
+        console.print(f"[red]Restore failed: {e}[/red]")
+        raise typer.Exit(1)
 
-    size_mb = db_path.stat().st_size / (1024 * 1024)
+    size_mb = result["size_bytes"] / (1024 * 1024)
     console.print(f"[green]Database restored from {backup_path} ({size_mb:.1f} MB)[/green]")
+
+
+@app.command(name="backup-list")
+def backup_list(
+    project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory")] = None,
+) -> None:
+    """List all tracked backups."""
+    from havn.engine.backup import list_backups
+
+    project_dir = _resolve_project(project_dir)
+    entries = list_backups(project_dir)
+
+    if not entries:
+        console.print("[dim]No backups found.[/dim]")
+        return
+
+    from rich.table import Table
+
+    table = Table(title="Backups")
+    table.add_column("#", style="dim")
+    table.add_column("Timestamp")
+    table.add_column("File")
+    table.add_column("Size")
+    table.add_column("Verified")
+    table.add_column("Exists")
+    table.add_column("Note")
+
+    for i, entry in enumerate(reversed(entries), 1):
+        size_mb = entry.get("size_bytes", 0) / (1024 * 1024)
+        verified = "[green]yes[/green]" if entry.get("verified") else "[yellow]no[/yellow]"
+        exists = "[green]yes[/green]" if entry.get("exists") else "[red]missing[/red]"
+        ts = entry.get("timestamp", "")[:19]
+        table.add_row(
+            str(i), ts, entry.get("filename", "?"),
+            f"{size_mb:.1f} MB", verified, exists,
+            entry.get("note", ""),
+        )
+
+    console.print(table)
+
+
+@app.command(name="backup-verify")
+def backup_verify(
+    backup_path: Annotated[Path, typer.Argument(help="Path to the backup file to verify")],
+) -> None:
+    """Verify a backup file's integrity and show its contents."""
+    from havn.engine.backup import verify_backup
+
+    result = verify_backup(backup_path)
+
+    if result.get("valid"):
+        console.print(f"[green]Backup is valid:[/green] {backup_path}")
+        size_mb = result.get("size_bytes", 0) / (1024 * 1024)
+        console.print(f"  Size: {size_mb:.1f} MB")
+        console.print(f"  SHA-256: {result['sha256'][:16]}...")
+        console.print(f"  Schemas: {', '.join(result.get('schemas', []))}")
+        console.print(f"  Tables: {result.get('table_count', 0)}")
+    else:
+        console.print(f"[red]Backup is INVALID:[/red] {backup_path}")
+        if "error" in result:
+            console.print(f"  Error: {result['error']}")
+        raise typer.Exit(1)
 
 
 @app.command()
