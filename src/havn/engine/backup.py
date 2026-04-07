@@ -97,13 +97,13 @@ def create_backup(
     # Ensure parent directory exists
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    # 1. Flush WAL
+    # 1. Flush WAL via CHECKPOINT
     try:
-        conn = connect(db_path)
-        conn.execute("CHECKPOINT")
-        conn.close()
+        _conn = connect(db_path)
+        _conn.execute("CHECKPOINT")
+        _conn.close()
     except Exception as e:
-        logger.warning("CHECKPOINT failed (proceeding with copy): %s", e)
+        logger.warning("CHECKPOINT skipped (proceeding with copy): %s", e)
 
     # 2. Copy
     shutil.copy2(str(db_path), str(output))

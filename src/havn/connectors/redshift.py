@@ -80,7 +80,7 @@ class RedshiftConnector(BaseConnector):
             conn.execute(f"ATTACH '{conn_str}' AS ext_db (TYPE POSTGRES, READ_ONLY)")
             rows = conn.execute(
                 "SELECT table_schema, table_name FROM information_schema.tables "
-                "WHERE table_catalog = 'ext_db' AND table_schema = ?",
+                "WHERE table_schema = ?",
                 [schema],
             ).fetchall()
             return [DiscoveredResource(name=r[1], schema=r[0]) for r in rows]
