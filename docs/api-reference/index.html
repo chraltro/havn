@@ -1703,6 +1703,78 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#backup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Backup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-apibackup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/backup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apibackups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/backups
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apibackupverify" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/backup/verify
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apibackuprestore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/backup/restore
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apibackupcleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/backup/cleanup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#catalog" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3068,6 +3140,78 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#backup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Backup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-apibackup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/backup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apibackups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/backups
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apibackupverify" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/backup/verify
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apibackuprestore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/backup/restore
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apibackupcleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/backup/cleanup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#catalog" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3667,6 +3811,26 @@
 <p>Update a masking policy.</p>
 <h3 id="delete-apimaskingpoliciespolicy_id">DELETE /api/masking/policies/{policy_id}<a class="headerlink" href="#delete-apimaskingpoliciespolicy_id" title="Permanent link">&para;</a></h3>
 <p>Delete a masking policy.</p>
+<h2 id="backup">Backup<a class="headerlink" href="#backup" title="Permanent link">&para;</a></h2>
+<h3 id="post-apibackup">POST /api/backup<a class="headerlink" href="#post-apibackup" title="Permanent link">&para;</a></h3>
+<p>Create a verified backup with SHA-256 checksum. Optional body:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;no_verify&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;note&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;before deploy&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;keep&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">}</span>
+</code></pre></div>
+<p>Returns: <code>{path, size_bytes, sha256, timestamp}</code></p>
+<h3 id="get-apibackups">GET /api/backups<a class="headerlink" href="#get-apibackups" title="Permanent link">&para;</a></h3>
+<p>List all tracked backups from the manifest.</p>
+<h3 id="post-apibackupverify">POST /api/backup/verify<a class="headerlink" href="#post-apibackupverify" title="Permanent link">&para;</a></h3>
+<p>Verify a backup file's integrity against its stored checksum.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;_backups/warehouse_20260407_120000.duckdb&quot;</span><span class="p">}</span>
+</code></pre></div>
+<h3 id="post-apibackuprestore">POST /api/backup/restore<a class="headerlink" href="#post-apibackuprestore" title="Permanent link">&para;</a></h3>
+<p>Restore the warehouse from a backup.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;_backups/warehouse_20260407_120000.duckdb&quot;</span><span class="p">}</span>
+</code></pre></div>
+<h3 id="post-apibackupcleanup">POST /api/backup/cleanup<a class="headerlink" href="#post-apibackupcleanup" title="Permanent link">&para;</a></h3>
+<p>Remove old backups, keeping the most recent N.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;keep&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">}</span>
+</code></pre></div>
 <h2 id="catalog">Catalog<a class="headerlink" href="#catalog" title="Permanent link">&para;</a></h2>
 <h3 id="get-apiseeds">GET /api/seeds<a class="headerlink" href="#get-apiseeds" title="Permanent link">&para;</a></h3>
 <p>List all seed CSV files.</p>

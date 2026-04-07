@@ -805,6 +805,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#warehouse-connectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warehouse Connectors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Warehouse Connectors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#snowflake" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Snowflake
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bigquery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BigQuery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#redshift" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redshift
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#connector-health" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1130,6 +1180,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#warehouse-connectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warehouse Connectors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Warehouse Connectors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#snowflake" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Snowflake
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bigquery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BigQuery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#redshift" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redshift
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#connector-health" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1232,6 +1332,21 @@
 <td>Webhook</td>
 <td><code>webhook</code></td>
 <td>Receive webhook data via HTTP POST</td>
+</tr>
+<tr>
+<td>Snowflake</td>
+<td><code>snowflake</code></td>
+<td>Snowflake data warehouse (Arrow transfer)</td>
+</tr>
+<tr>
+<td>BigQuery</td>
+<td><code>bigquery</code></td>
+<td>Google BigQuery (Arrow transfer)</td>
+</tr>
+<tr>
+<td>Redshift</td>
+<td><code>redshift</code></td>
+<td>Amazon Redshift (via DuckDB postgres extension)</td>
 </tr>
 </tbody>
 </table>
@@ -1337,6 +1452,28 @@ Options:
 <span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;order_id&quot;: 123, &quot;amount&quot;: 99.99}&#39;</span>
 </code></pre></div>
 <p>Data is stored in <code>landing.&lt;webhook_name&gt;_inbox</code> with columns: <code>id</code>, <code>received_at</code>, <code>payload</code> (JSON).</p>
+<h2 id="warehouse-connectors">Warehouse Connectors<a class="headerlink" href="#warehouse-connectors" title="Permanent link">&para;</a></h2>
+<p>Install optional dependencies for warehouse connectors:</p>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>havn<span class="o">[</span>snowflake<span class="o">]</span><span class="w">     </span><span class="c1"># Snowflake</span>
+pip<span class="w"> </span>install<span class="w"> </span>havn<span class="o">[</span>bigquery<span class="o">]</span><span class="w">      </span><span class="c1"># BigQuery</span>
+pip<span class="w"> </span>install<span class="w"> </span>havn<span class="o">[</span>redshift<span class="o">]</span><span class="w">      </span><span class="c1"># Redshift (uses DuckDB postgres extension, no extra deps)</span>
+pip<span class="w"> </span>install<span class="w"> </span>havn<span class="o">[</span>warehouses<span class="o">]</span><span class="w">    </span><span class="c1"># All warehouse connectors</span>
+</code></pre></div>
+<h3 id="snowflake">Snowflake<a class="headerlink" href="#snowflake" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>connect<span class="w"> </span>snowflake<span class="w"> </span>--set<span class="w"> </span><span class="nv">account</span><span class="o">=</span>xy12345.us-east-1<span class="w"> </span>--set<span class="w"> </span><span class="nv">warehouse</span><span class="o">=</span>COMPUTE_WH<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--user<span class="w"> </span>myuser<span class="w"> </span>--password<span class="w"> </span>secret<span class="w"> </span>--database<span class="w"> </span>PROD<span class="w"> </span>--tables<span class="w"> </span>customers,orders
+</code></pre></div>
+<p>Supports full and CDC incremental sync. Data is transferred via Arrow (<code>fetch_arrow_all()</code>) for high throughput.</p>
+<h3 id="bigquery">BigQuery<a class="headerlink" href="#bigquery" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>connect<span class="w"> </span>bigquery<span class="w"> </span>--set<span class="w"> </span><span class="nv">project_id</span><span class="o">=</span>my-gcp-project<span class="w"> </span>--set<span class="w"> </span><span class="nv">dataset</span><span class="o">=</span>analytics<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--set<span class="w"> </span><span class="nv">service_account_b64</span><span class="o">=</span>&lt;base64-encoded-json&gt;<span class="w"> </span>--tables<span class="w"> </span>events,users
+</code></pre></div>
+<p>Uses Arrow transfer via <code>to_arrow()</code>. Service account credentials are base64-encoded and stored in <code>.env</code>.</p>
+<h3 id="redshift">Redshift<a class="headerlink" href="#redshift" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>connect<span class="w"> </span>redshift<span class="w"> </span>--host<span class="w"> </span>my-cluster.abc123.us-east-1.redshift.amazonaws.com<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--database<span class="w"> </span>analytics<span class="w"> </span>--user<span class="w"> </span>admin<span class="w"> </span>--password<span class="w"> </span>secret<span class="w"> </span>--tables<span class="w"> </span>orders,products
+</code></pre></div>
+<p>Uses DuckDB's built-in postgres extension for direct connectivity with no additional Python dependencies.</p>
 <h2 id="connector-health">Connector Health<a class="headerlink" href="#connector-health" title="Permanent link">&para;</a></h2>
 <p>Check the last sync status for each connector:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Via API</span>

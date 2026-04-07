@@ -803,6 +803,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#havn-backup-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        havn backup-list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#havn-backup-verify" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        havn backup-verify
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#havn-restore" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1530,6 +1552,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#havn-backup-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        havn backup-list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#havn-backup-verify" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        havn backup-verify
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#havn-restore" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2186,10 +2230,49 @@
 </code></pre></div>
 <p>Automatically stages all files except <code>.env</code>, generates a descriptive commit message from changed file paths, and commits.</p>
 <h3 id="havn-backup">havn backup<a class="headerlink" href="#havn-backup" title="Permanent link">&para;</a></h3>
-<p>Create a backup of the warehouse database.</p>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>backup<span class="w"> </span><span class="o">[</span>--output<span class="w"> </span>PATH<span class="o">]</span><span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
+<p>Create a verified backup of the warehouse database with SHA-256 checksum.</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>backup<span class="w"> </span><span class="o">[</span>--output<span class="w"> </span>PATH<span class="o">]</span><span class="w"> </span><span class="o">[</span>--no-verify<span class="o">]</span><span class="w"> </span><span class="o">[</span>--note<span class="w"> </span>TEXT<span class="o">]</span><span class="w"> </span><span class="o">[</span>--keep<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
 </code></pre></div>
-<p>Flushes the DuckDB WAL and copies the database file.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--output, -o</code></td>
+<td><code>_backups/</code></td>
+<td>Output path</td>
+</tr>
+<tr>
+<td><code>--no-verify</code></td>
+<td>false</td>
+<td>Skip post-backup integrity check</td>
+</tr>
+<tr>
+<td><code>--note</code></td>
+<td>none</td>
+<td>Attach a note to the backup manifest entry</td>
+</tr>
+<tr>
+<td><code>--keep</code></td>
+<td>none</td>
+<td>Retention: keep only the last N backups, remove older ones</td>
+</tr>
+</tbody>
+</table>
+<p>Flushes the DuckDB WAL, copies the database file, computes a SHA-256 checksum, and tracks the backup in <code>_backups/manifest.json</code>.</p>
+<h3 id="havn-backup-list">havn backup-list<a class="headerlink" href="#havn-backup-list" title="Permanent link">&para;</a></h3>
+<p>List all tracked backups from the manifest.</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>backup-list<span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
+</code></pre></div>
+<h3 id="havn-backup-verify">havn backup-verify<a class="headerlink" href="#havn-backup-verify" title="Permanent link">&para;</a></h3>
+<p>Verify the integrity of a backup file against its stored checksum.</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>backup-verify<span class="w"> </span>BACKUP_PATH<span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
+</code></pre></div>
 <h3 id="havn-restore">havn restore<a class="headerlink" href="#havn-restore" title="Permanent link">&para;</a></h3>
 <p>Restore the warehouse database from a backup.</p>
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>restore<span class="w"> </span>BACKUP_PATH<span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
