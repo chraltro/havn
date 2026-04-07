@@ -180,64 +180,95 @@ def _get_db_resource_limits() -> tuple[str | None, int | None]:
 
 
 # ---------------------------------------------------------------------------
-# Shared connection singleton
+# Write queue + read pool
 # ---------------------------------------------------------------------------
-# DuckDB on Windows only allows one connection per file. All endpoints and
-# the SSE pipeline share a single connection, using .cursor() for thread-safe
-# concurrent access (per DuckDB docs).
+# DuckDB allows one write connection at a time and unlimited concurrent
+# readers.  The WriteQueue serializes all mutations through a single
+# background thread.  The ReadPool provides separate read-only
+# connections (Linux/Mac) or cursors from the write connection (Windows,
+# where DuckDB only allows one connection per file).
+#
+# The FastAPI dependency injectors still yield cursors, so existing
+# route handlers are unchanged.
 
 import threading
 
-_shared_conn: duckdb.DuckDBPyConnection | None = None
-_shared_conn_lock = threading.Lock()
+from havn.engine.write_queue import WriteQueue, create_read_pool, ReadPool, SharedConnPool
+
+_write_queue: WriteQueue | None = None
+_read_pool: ReadPool | SharedConnPool | None = None
+_init_lock = threading.Lock()
 
 
 def _get_shared_conn(*, require_exists: bool = False) -> duckdb.DuckDBPyConnection:
-    """Get or create the shared DuckDB connection singleton."""
-    global _shared_conn
-    with _shared_conn_lock:
-        if _shared_conn is None:
+    """Get the write connection (for backward compatibility).
+
+    Prefer using ``_get_write_queue()`` or ``_get_read_pool()`` directly.
+    """
+    return _get_write_queue().conn
+
+
+def _get_write_queue() -> WriteQueue:
+    """Get or create the write queue singleton."""
+    global _write_queue, _read_pool
+    with _init_lock:
+        if _write_queue is None:
             db_path = _get_db_path()
             project_dir = _get_project_dir()
             mem, threads = _get_db_resource_limits()
-            _shared_conn = connect(db_path, memory_limit=mem, threads=threads)
+            _write_queue = WriteQueue(
+                db_path, project_dir=project_dir,
+                memory_limit=mem, threads=threads,
+            )
             from havn.engine.database import ensure_meta_table
-            ensure_meta_table(_shared_conn)
+            ensure_meta_table(_write_queue.conn)
             # Register user-defined macros from macros/ directory
             try:
                 from havn.engine.macros import register_macros
-                register_macros(_shared_conn, project_dir)
+                register_macros(_write_queue.conn, project_dir)
             except Exception:
                 logger.debug("Macro registration skipped (no macros/ dir or error)")
-            # Clean up any orchestration job_runs rows that were left in
-            # 'running' state by a previous server crash. Uses a 1-hour grace
-            # window so in-flight jobs from concurrent processes aren't killed.
+            # Clean up stale orchestration runs
             try:
                 from havn.engine.orchestration import mark_stale_runs_failed
-                mark_stale_runs_failed(_shared_conn)
+                mark_stale_runs_failed(_write_queue.conn)
             except Exception:
                 logger.debug("mark_stale_runs_failed skipped on startup")
-        return _shared_conn
+            # Initialize read pool
+            _read_pool = create_read_pool(db_path, _write_queue.conn)
+        return _write_queue
+
+
+def _get_read_pool() -> ReadPool | SharedConnPool:
+    """Get the read pool, initializing if needed."""
+    _get_write_queue()  # ensures both are initialized
+    return _read_pool  # type: ignore[return-value]
 
 
 def reset_shared_conn() -> None:
-    """Close and reset the shared connection (e.g. after DB file changes)."""
-    global _shared_conn
-    with _shared_conn_lock:
-        if _shared_conn is not None:
+    """Close and reset connections (e.g. after DB file changes)."""
+    global _write_queue, _read_pool
+    with _init_lock:
+        if _read_pool is not None:
             try:
-                _shared_conn.close()
+                _read_pool.close()
             except Exception:
                 pass
-            _shared_conn = None
+            _read_pool = None
+        if _write_queue is not None:
+            try:
+                _write_queue.close()
+            except Exception:
+                pass
+            _write_queue = None
 
 
 def get_db() -> Generator[duckdb.DuckDBPyConnection, None, None]:
-    """FastAPI dependency: yields a cursor from the shared connection."""
+    """FastAPI dependency: yields a cursor from the write connection."""
     db_path = _get_db_path()
     _require_db(db_path)
-    conn = _get_shared_conn()
-    cursor = conn.cursor()
+    wq = _get_write_queue()
+    cursor = wq.cursor()
     try:
         yield cursor
     finally:
@@ -246,8 +277,8 @@ def get_db() -> Generator[duckdb.DuckDBPyConnection, None, None]:
 
 def get_db_autocreate() -> Generator[duckdb.DuckDBPyConnection, None, None]:
     """FastAPI dependency: yields a cursor, creating the database if it doesn't exist."""
-    conn = _get_shared_conn(require_exists=False)
-    cursor = conn.cursor()
+    wq = _get_write_queue()
+    cursor = wq.cursor()
     try:
         yield cursor
     finally:
@@ -255,29 +286,23 @@ def get_db_autocreate() -> Generator[duckdb.DuckDBPyConnection, None, None]:
 
 
 def get_db_readonly() -> Generator[duckdb.DuckDBPyConnection, None, None]:
-    """FastAPI dependency: yields a cursor for read operations."""
+    """FastAPI dependency: yields a read cursor from the read pool."""
     db_path = _get_db_path()
     _require_db(db_path)
-    conn = _get_shared_conn()
-    cursor = conn.cursor()
-    try:
+    pool = _get_read_pool()
+    with pool.connection() as cursor:
         yield cursor
-    finally:
-        cursor.close()
 
 
 def get_db_readonly_optional() -> Generator[duckdb.DuckDBPyConnection | None, None, None]:
-    """FastAPI dependency: yields a cursor, or None if DB doesn't exist."""
+    """FastAPI dependency: yields a read cursor, or None if DB doesn't exist."""
     db_path = _get_db_path()
     if not db_path.exists():
         yield None
         return
-    conn = _get_shared_conn()
-    cursor = conn.cursor()
-    try:
+    pool = _get_read_pool()
+    with pool.connection() as cursor:
         yield cursor
-    finally:
-        cursor.close()
 
 
 DbConn = Annotated[duckdb.DuckDBPyConnection, Depends(get_db)]
