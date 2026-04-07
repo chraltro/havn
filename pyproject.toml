@@ -43,6 +43,15 @@ dev = [
     "pytest>=8.0",
     "httpx>=0.28.0",
 ]
+snowflake = ["snowflake-connector-python>=3.0"]
+bigquery = ["google-cloud-bigquery>=3.0", "google-auth>=2.0"]
+redshift = ["redshift-connector>=2.0"]
+warehouses = [
+    "snowflake-connector-python>=3.0",
+    "google-cloud-bigquery>=3.0",
+    "google-auth>=2.0",
+    "redshift-connector>=2.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/chraltro/db"

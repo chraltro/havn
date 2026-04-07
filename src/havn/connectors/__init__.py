@@ -16,6 +16,9 @@ from havn.connectors.hubspot import HubSpotConnector
 from havn.connectors.shopify import ShopifyConnector
 from havn.connectors.webhook import WebhookConnector
 from havn.connectors.databricks import DatabricksConnector
+from havn.connectors.snowflake import SnowflakeConnector
+from havn.connectors.bigquery import BigQueryConnector
+from havn.connectors.redshift import RedshiftConnector
 
 __all__ = [
     "PostgresConnector",
@@ -29,4 +32,7 @@ __all__ = [
     "ShopifyConnector",
     "WebhookConnector",
     "DatabricksConnector",
+    "SnowflakeConnector",
+    "BigQueryConnector",
+    "RedshiftConnector",
 ]
