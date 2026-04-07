@@ -18,6 +18,7 @@ from havn.server.deps import (
     _validate_identifier,
 )
 from havn.engine.masking import apply_masking, list_policies, create_policy, delete_policy
+from havn.engine.masking_rewriter import rewrite_query_with_masking, MaskedColumnAccessError
 
 logger = logging.getLogger("havn.server")
 
@@ -269,6 +270,15 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
     # Validate the SQL is a safe read-only query
     _validate_query_sql(sql)
 
+    # Pre-query masking: rewrite SQL to inject masking at column source level
+    try:
+        rewritten_sql, rewrite_ok, handled_ids = rewrite_query_with_masking(
+            sql, user["role"], conn,
+        )
+    except MaskedColumnAccessError as e:
+        raise HTTPException(403, str(e))
+    sql_to_execute = rewritten_sql if rewrite_ok else sql
+
     try:
         import threading
 
@@ -281,8 +291,8 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
                 # server-side cap so DuckDB never buffers millions of rows.
                 # The response includes total_rows so the user knows it was capped.
                 SERVER_ROW_CAP = 50_000
-                sql_clean = req.sql.strip().rstrip(";")
-                has_limit = bool(re.search(r'\bLIMIT\b', req.sql, re.IGNORECASE))
+                sql_clean = sql_to_execute.strip().rstrip(";")
+                has_limit = bool(re.search(r'\bLIMIT\b', sql_to_execute, re.IGNORECASE))
                 effective_limit = req.limit
 
                 if req.offset > 0 and effective_limit is not None:
@@ -295,7 +305,7 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
                     wrapped = f"SELECT * FROM ({sql_clean}) AS _q LIMIT {SERVER_ROW_CAP}"
                     effective_limit = SERVER_ROW_CAP
                 else:
-                    wrapped = req.sql
+                    wrapped = sql_to_execute
 
                 if req.offset > 0 and effective_limit is None:
                     wrapped = f"SELECT * FROM ({sql_clean}) AS _q OFFSET {req.offset}"
@@ -331,9 +341,19 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
         if query_error:
             raise query_error[0]
         data = query_result["data"]
-        data["rows"] = apply_masking(
-            data["columns"], data["rows"], user["role"], conn,
-        )
+        # Post-query masking: skip policies already handled by pre-query rewriting
+        if not rewrite_ok:
+            data["rows"] = apply_masking(
+                data["columns"], data["rows"], user["role"], conn,
+            )
+        elif handled_ids:
+            # Rewrite succeeded but some policies may still need post-query
+            # (conditional policies, unsupported methods). Run post-query
+            # skipping what was already handled.
+            data["rows"] = apply_masking(
+                data["columns"], data["rows"], user["role"], conn,
+                skip_policy_ids=handled_ids,
+            )
 
         # Log slow queries
         if duration_ms >= _SLOW_QUERY_THRESHOLD_MS:
@@ -517,9 +537,9 @@ def profile_table(
             profiles.append(stats)
 
         # Mask sample_values in profile output
-        from havn.engine.masking import _load_policies, apply_mask
+        from havn.engine.masking import load_policies, apply_mask
 
-        policies = _load_policies(conn)
+        policies = load_policies(conn)
         for col_profile in profiles:
             for p in policies:
                 if user["role"] in p["exempted_roles"]:
@@ -604,8 +624,17 @@ def export_csv(request: Request, req: ExportRequest, conn: DbConnReadOnly):
     # Validate the SQL is a safe read-only query
     _validate_query_sql(req.sql)
 
+    # Pre-query masking rewrite
     try:
-        result = conn.execute(req.sql)
+        csv_rewritten, csv_rewrite_ok, csv_handled = rewrite_query_with_masking(
+            req.sql, user["role"], conn,
+        )
+    except MaskedColumnAccessError as e:
+        raise HTTPException(403, str(e))
+    csv_sql = csv_rewritten if csv_rewrite_ok else req.sql
+
+    try:
+        result = conn.execute(csv_sql)
         columns = [desc[0] for desc in result.description]
     except Exception as e:
         raise HTTPException(400, f"SQL error: {e}")
@@ -624,7 +653,13 @@ def export_csv(request: Request, req: ExportRequest, conn: DbConnReadOnly):
             if not batch:
                 break
             serialized = [[_serialize(v) for v in row] for row in batch]
-            serialized = apply_masking(columns, serialized, user["role"], conn)
+            if not csv_rewrite_ok:
+                serialized = apply_masking(columns, serialized, user["role"], conn)
+            elif csv_handled:
+                serialized = apply_masking(
+                    columns, serialized, user["role"], conn,
+                    skip_policy_ids=csv_handled,
+                )
             for row in serialized:
                 writer.writerow(row)
             yield buf.getvalue()

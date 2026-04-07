@@ -304,7 +304,7 @@ def apply_mask(value: Any, method: str, method_config: dict | None = None) -> An
 # ---------------------------------------------------------------------------
 
 
-def _load_policies(conn: duckdb.DuckDBPyConnection) -> list[dict]:
+def load_policies(conn: duckdb.DuckDBPyConnection) -> list[dict]:
     """Load all masking policies from the database."""
     ensure_masking_table(conn)
     rows = conn.execute(
@@ -337,6 +337,7 @@ def apply_masking(
     conn: duckdb.DuckDBPyConnection,
     schema: str | None = None,
     table: str | None = None,
+    skip_policy_ids: set[str] | None = None,
 ) -> list[list[Any]]:
     """Apply masking policies to query result rows.
 
@@ -348,10 +349,11 @@ def apply_masking(
     conn : DuckDB connection for loading policies
     schema / table : when known (e.g. /sample), enables exact matching.
         When None (ad-hoc /query), does best-effort column-name matching.
+    skip_policy_ids : policy IDs already handled by pre-query rewriting.
 
     Returns the (possibly modified) rows.
     """
-    policies = _load_policies(conn)
+    policies = load_policies(conn)
     if not policies:
         return rows
 
@@ -361,6 +363,10 @@ def apply_masking(
     # Filter to relevant policies
     matched: list[tuple[dict, int]] = []  # (policy, column_index)
     for p in policies:
+        # Skip policies already handled by pre-query rewriting
+        if skip_policy_ids and p["id"] in skip_policy_ids:
+            continue
+
         # Check role exemption
         if user_role in p["exempted_roles"]:
             continue
@@ -457,7 +463,7 @@ def create_policy(
 
 def list_policies(conn: duckdb.DuckDBPyConnection) -> list[dict]:
     """Return all masking policies."""
-    return _load_policies(conn)
+    return load_policies(conn)
 
 
 def get_policy(conn: duckdb.DuckDBPyConnection, policy_id: str) -> dict | None:
