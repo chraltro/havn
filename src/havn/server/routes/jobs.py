@@ -501,6 +501,7 @@ def get_step_preview(
     import re
 
     from havn.engine.masking import apply_masking
+    from havn.engine.masking_rewriter import rewrite_query_with_masking
 
     # Validate identifiers to prevent injection
     ident_re = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
@@ -509,17 +510,26 @@ def get_step_preview(
     limit = min(max(limit, 1), 50)
     fqn = f"{schema_name}.{table_name}"
     try:
-        desc = conn.execute(f"SELECT column_name FROM information_schema.columns WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position", [schema_name, table_name]).fetchall()
-        columns = [r[0] for r in desc]
-        rows_raw = conn.execute(f"SELECT * FROM {fqn} LIMIT {limit}").fetchall()
-        rows = []
-        for row in rows_raw:
-            rows.append([_serialize_cell(v) for v in row])
-        # Apply masking policies so sensitive data stays masked
-        rows = apply_masking(
-            columns, rows, user.get("role", "viewer"), conn,
-            schema=schema_name, table=table_name,
+        preview_sql = f"SELECT * FROM {fqn} LIMIT {limit}"
+        role = user.get("role", "viewer")
+        rewritten, rw_ok, rw_handled = rewrite_query_with_masking(
+            preview_sql, role, conn,
         )
+        result = conn.execute(rewritten if rw_ok else preview_sql)
+        columns = [desc[0] for desc in result.description]
+        rows = [[_serialize_cell(v) for v in row] for row in result.fetchall()]
+        # Post-query masking for unhandled policies
+        if not rw_ok:
+            rows = apply_masking(
+                columns, rows, role, conn,
+                schema=schema_name, table=table_name,
+            )
+        elif rw_handled:
+            rows = apply_masking(
+                columns, rows, role, conn,
+                schema=schema_name, table=table_name,
+                skip_policy_ids=rw_handled,
+            )
         return {"columns": columns, "rows": rows, "table": fqn}
     except Exception as e:
         raise HTTPException(404, f"Table not found: {fqn} ({e})")

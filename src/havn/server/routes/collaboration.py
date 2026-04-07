@@ -107,15 +107,32 @@ def session_query(
     # Validate SQL is safe read-only query
     _validate_query_sql(req.sql)
 
+    # Pre-query masking rewrite
+    from havn.engine.masking_rewriter import rewrite_query_with_masking, MaskedColumnAccessError
+
+    try:
+        sess_rewritten, sess_rewrite_ok, sess_handled = rewrite_query_with_masking(
+            req.sql, user["role"], conn,
+        )
+    except MaskedColumnAccessError as e:
+        raise HTTPException(403, str(e))
+    sess_sql = sess_rewritten if sess_rewrite_ok else req.sql
+
     start = time.time()
     try:
-        result = conn.execute(req.sql)
+        result = conn.execute(sess_sql)
         columns = (
             [desc[0] for desc in result.description] if result.description else []
         )
         rows = [[_serialize(v) for v in row] for row in result.fetchall()]
-        # Apply masking policies
-        rows = apply_masking(columns, rows, user["role"], conn)
+        # Apply post-query masking for unhandled policies
+        if not sess_rewrite_ok:
+            rows = apply_masking(columns, rows, user["role"], conn)
+        elif sess_handled:
+            rows = apply_masking(
+                columns, rows, user["role"], conn,
+                skip_policy_ids=sess_handled,
+            )
         duration_ms = int((time.time() - start) * 1000)
 
         entry = session_manager.add_query_result(
