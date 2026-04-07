@@ -263,6 +263,23 @@ SELECT * FROM silver.dim_customer WHERE active = true
 
 Run `havn transform` to build it.
 
+## MemPalace (Project Memory)
+
+This repo has MemPalace configured -- a local, searchable memory system over the codebase. It's registered as an MCP server (`mempalace`) and provides tools for searching past context without re-reading files.
+
+**When to use it:** Use mempalace search as a first step when you need to find where something lives, understand how a feature works, or look up design decisions -- especially for broad "where/why" questions that span multiple files. Search with the most direct keyword from the question (e.g., if asked about masking, search "masking" -- don't over-elaborate the query).
+
+**MCP tools available:** Use the mempalace MCP tools (search, wake-up, etc.) when available. These are loaded at session start.
+
+**CLI fallback** (if MCP tools aren't loaded):
+```bash
+mempalace search "query"        # semantic search across all indexed files
+mempalace wake-up               # load core project context (~800 tokens)
+mempalace status                # show what's been indexed
+```
+
+**What's indexed:** 7,571 drawers across 8 rooms: engine, server, cli, wiki, frontend, landing, documentation, general. Re-mine after major changes with `mempalace mine .`
+
 ## Code Style
 
 - Python 3.10+, type hints used throughout
