@@ -33,3 +33,8 @@ internal_*
 .agents/
 .impeccable.md
 skills-lock.json
+
+# MemPalace
+entities.json
+mempalace.yaml
+.mempalace/
