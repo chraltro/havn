@@ -305,13 +305,25 @@ def apply_mask(value: Any, method: str, method_config: dict | None = None) -> An
 
 
 def load_policies(conn: duckdb.DuckDBPyConnection) -> list[dict]:
-    """Load all masking policies from the database."""
-    ensure_masking_table(conn)
-    rows = conn.execute(
-        "SELECT id, schema_name, table_name, column_name, method, method_config, "
-        "condition_column, condition_value, exempted_roles "
-        "FROM _havn.masking_policies"
-    ).fetchall()
+    """Load all masking policies from the database.
+
+    Safe to call on read-only connections -- returns an empty list if
+    the masking table does not exist yet.
+    """
+    try:
+        ensure_masking_table(conn)
+    except duckdb.Error:
+        # Read-only connection can't create the table; try to read it
+        pass
+    try:
+        rows = conn.execute(
+            "SELECT id, schema_name, table_name, column_name, method, method_config, "
+            "condition_column, condition_value, exempted_roles "
+            "FROM _havn.masking_policies"
+        ).fetchall()
+    except duckdb.Error:
+        # Table doesn't exist yet (no policies defined)
+        return []
     policies = []
     for r in rows:
         config = json.loads(r[5]) if r[5] else None

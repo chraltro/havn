@@ -32,7 +32,6 @@ class BigQueryConnector(BaseConnector):
         """Build a BigQuery client from config. Raises ImportError if SDK missing."""
         import base64
         import json
-        import tempfile
 
         from google.cloud import bigquery
         from google.oauth2 import service_account
@@ -227,8 +226,8 @@ for table in tables:
             db.execute(f"CREATE OR REPLACE TABLE {{dest}} AS SELECT * FROM arrow_table")
             rows = db.execute(f"SELECT COUNT(*) FROM {{dest}}").fetchone()[0]
         else:
-            db.execute(f"CREATE OR REPLACE TABLE {{dest}} AS SELECT * FROM (SELECT) WHERE false")
-            rows = 0
+            print(f"  No data returned for {{table}}, skipping")
+            continue
         total_rows += rows
         print(f"Loaded {{rows}} rows into {{dest}}")
     except Exception as e:

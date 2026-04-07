@@ -243,15 +243,15 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
         conn_rw = connect(_get_db_path())
         try:
             ensure_masking_table(conn_rw)
-            policy_id = create_policy(conn_rw, schema_name=schema, table_name=table, column_name=column, method=method, exempted_roles=exempted)
-            return {"columns": ["result", "id"], "rows": [["Masking policy created", policy_id]], "row_count": 1, "truncated": False}
+            policy = create_policy(conn_rw, schema_name=schema, table_name=table, column_name=column, method=method, exempted_roles=exempted)
+            return {"columns": ["result", "id"], "rows": [["Masking policy created", policy["id"]]], "row_count": 1, "truncated": False}
         finally:
             conn_rw.close()
 
     # DROP MASKING POLICY <id>
-    drop_match = re.match(r'^\s*DROP\s+MASKING\s+POLICY\s+(\d+)\s*$', sql_stripped, re.IGNORECASE | re.DOTALL)
+    drop_match = re.match(r'^\s*DROP\s+MASKING\s+POLICY\s+([\w-]+)\s*$', sql_stripped, re.IGNORECASE | re.DOTALL)
     if drop_match:
-        policy_id = int(drop_match.group(1))
+        policy_id = drop_match.group(1)
         from havn.server.deps import _get_db_path
         from havn.engine.database import connect
         from havn.engine.masking import ensure_masking_table
