@@ -100,7 +100,9 @@ class ExplainRequest(BaseModel):
     sql: str = Field(..., min_length=1, max_length=100_000)
 
 
-_QUERY_TIMEOUT_SECONDS = 30
+from havn.engine.query_governor import QueryTimeoutError, get_timeout_for_role
+
+_QUERY_TIMEOUT_SECONDS = 30  # fallback; overridden per-role below
 
 
 # --- Explain / Profile endpoints ---
@@ -326,15 +328,18 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
             except Exception as e:
                 query_error.append(e)
 
+        query_timeout = get_timeout_for_role(user.get("role", "viewer"))
         t_start = time.monotonic()
         thread = threading.Thread(target=_exec_query, daemon=True)
         thread.start()
-        thread.join(timeout=_QUERY_TIMEOUT_SECONDS)
+        thread.join(timeout=query_timeout)
 
         if thread.is_alive():
             conn.interrupt()
             raise HTTPException(
-                408, f"Query timed out after {_QUERY_TIMEOUT_SECONDS}s"
+                408,
+                f"Query exceeded {query_timeout}s timeout. "
+                f"Try adding filters or a LIMIT clause.",
             )
         duration_ms = int((time.monotonic() - t_start) * 1000)
 
@@ -633,9 +638,13 @@ def export_csv(request: Request, req: ExportRequest, conn: DbConnReadOnly):
         raise HTTPException(403, str(e))
     csv_sql = csv_rewritten if csv_rewrite_ok else req.sql
 
+    csv_timeout = get_timeout_for_role(user.get("role", "viewer"))
     try:
-        result = conn.execute(csv_sql)
+        from havn.engine.query_governor import execute_governed
+        result, _ = execute_governed(conn, csv_sql, timeout_s=csv_timeout)
         columns = [desc[0] for desc in result.description]
+    except QueryTimeoutError as e:
+        raise HTTPException(408, str(e))
     except Exception as e:
         raise HTTPException(400, f"SQL error: {e}")
 
