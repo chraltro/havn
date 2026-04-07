@@ -16,6 +16,9 @@ Connectors automate data ingestion from external sources. havn includes pre-buil
 | REST API | `rest_api` | Generic REST API endpoints |
 | S3/GCS | `s3_gcs` | Amazon S3 or Google Cloud Storage files |
 | Webhook | `webhook` | Receive webhook data via HTTP POST |
+| Snowflake | `snowflake` | Snowflake data warehouse (Arrow transfer) |
+| BigQuery | `bigquery` | Google BigQuery (Arrow transfer) |
+| Redshift | `redshift` | Amazon Redshift (via DuckDB postgres extension) |
 
 List all available connectors:
 
@@ -164,6 +167,44 @@ curl -X POST http://localhost:3000/api/webhook/orders \
 ```
 
 Data is stored in `landing.<webhook_name>_inbox` with columns: `id`, `received_at`, `payload` (JSON).
+
+## Warehouse Connectors
+
+Install optional dependencies for warehouse connectors:
+
+```bash
+pip install havn[snowflake]     # Snowflake
+pip install havn[bigquery]      # BigQuery
+pip install havn[redshift]      # Redshift (uses DuckDB postgres extension, no extra deps)
+pip install havn[warehouses]    # All warehouse connectors
+```
+
+### Snowflake
+
+```bash
+havn connect snowflake --set account=xy12345.us-east-1 --set warehouse=COMPUTE_WH \
+  --user myuser --password secret --database PROD --tables customers,orders
+```
+
+Supports full and CDC incremental sync. Data is transferred via Arrow (`fetch_arrow_all()`) for high throughput.
+
+### BigQuery
+
+```bash
+havn connect bigquery --set project_id=my-gcp-project --set dataset=analytics \
+  --set service_account_b64=<base64-encoded-json> --tables events,users
+```
+
+Uses Arrow transfer via `to_arrow()`. Service account credentials are base64-encoded and stored in `.env`.
+
+### Redshift
+
+```bash
+havn connect redshift --host my-cluster.abc123.us-east-1.redshift.amazonaws.com \
+  --database analytics --user admin --password secret --tables orders,products
+```
+
+Uses DuckDB's built-in postgres extension for direct connectivity with no additional Python dependencies.
 
 ## Connector Health
 

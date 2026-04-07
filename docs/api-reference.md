@@ -389,6 +389,46 @@ Update a masking policy.
 
 Delete a masking policy.
 
+## Backup
+
+### POST /api/backup
+
+Create a verified backup with SHA-256 checksum. Optional body:
+
+```json
+{"no_verify": false, "note": "before deploy", "keep": 10}
+```
+
+Returns: `{path, size_bytes, sha256, timestamp}`
+
+### GET /api/backups
+
+List all tracked backups from the manifest.
+
+### POST /api/backup/verify
+
+Verify a backup file's integrity against its stored checksum.
+
+```json
+{"path": "_backups/warehouse_20260407_120000.duckdb"}
+```
+
+### POST /api/backup/restore
+
+Restore the warehouse from a backup.
+
+```json
+{"path": "_backups/warehouse_20260407_120000.duckdb"}
+```
+
+### POST /api/backup/cleanup
+
+Remove old backups, keeping the most recent N.
+
+```json
+{"keep": 5}
+```
+
 ## Catalog
 
 ### GET /api/seeds
