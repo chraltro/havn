@@ -38,6 +38,11 @@ havn diff gold.orders           # diff a single model
 havn diff                       # diff changed models + downstream
 havn diff --all                 # diff entire database
 havn macros                     # list registered SQL macros
+havn backup                     # create verified backup
+havn backup --keep 10           # backup with retention
+havn backup-list                # list tracked backups
+havn backup-verify <path>       # verify backup integrity
+havn restore <path>             # restore from backup
 ```
 
 ## Project Structure
@@ -58,6 +63,10 @@ src/havn/                       # Python package (the platform itself)
     secrets.py                # .env secrets management
     scheduler.py              # Cron scheduler (Huey) + file watcher
     importer.py               # Data import wizard (CSV, Parquet, DB)
+    masking_rewriter.py       # Pre-query SQL masking (alias bypass prevention)
+    write_queue.py            # Write queue + read pool for DuckDB connections
+    query_governor.py         # Query timeout enforcement via DuckDB interrupt()
+    backup.py                 # Verified backup/restore with integrity checks
     notebook/                 # .dpnb notebook execution
     docs.py                   # Markdown doc generator
   lint/
@@ -87,6 +96,11 @@ tests/                        # pytest test suite
   test_docs.py                # Doc generation
   test_importer.py            # Data import
   test_notebook_runner.py     # Notebook execution
+  test_masking_rewriter.py    # Pre-query masking rewriter
+  test_backup.py              # Backup/restore
+  test_query_governor.py      # Query timeouts
+  test_e2e_api.py             # End-to-end API tests
+  test_connectors_warehouse.py # Warehouse migration connectors
 ```
 
 ## Architecture
