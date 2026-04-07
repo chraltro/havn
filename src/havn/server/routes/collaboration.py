@@ -118,9 +118,15 @@ def session_query(
         raise HTTPException(403, str(e))
     sess_sql = sess_rewritten if sess_rewrite_ok else req.sql
 
+    from havn.engine.query_governor import QueryTimeoutError, execute_governed, get_timeout_for_role
+
+    query_timeout = get_timeout_for_role(user.get("role", "viewer"))
     start = time.time()
     try:
-        result = conn.execute(sess_sql)
+        try:
+            result, _ = execute_governed(conn, sess_sql, timeout_s=query_timeout)
+        except QueryTimeoutError as e:
+            raise HTTPException(408, str(e))
         columns = (
             [desc[0] for desc in result.description] if result.description else []
         )
