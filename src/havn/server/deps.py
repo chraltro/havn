@@ -212,30 +212,32 @@ def _get_write_queue() -> WriteQueue:
     """Get or create the write queue singleton."""
     global _write_queue, _read_pool
     with _init_lock:
-        if _write_queue is None:
+        if _write_queue is None or _read_pool is None:
             db_path = _get_db_path()
             project_dir = _get_project_dir()
             mem, threads = _get_db_resource_limits()
-            _write_queue = WriteQueue(
-                db_path, project_dir=project_dir,
-                memory_limit=mem, threads=threads,
-            )
-            from havn.engine.database import ensure_meta_table
-            ensure_meta_table(_write_queue.conn)
-            # Register user-defined macros from macros/ directory
-            try:
-                from havn.engine.macros import register_macros
-                register_macros(_write_queue.conn, project_dir)
-            except Exception:
-                logger.debug("Macro registration skipped (no macros/ dir or error)")
-            # Clean up stale orchestration runs
-            try:
-                from havn.engine.orchestration import mark_stale_runs_failed
-                mark_stale_runs_failed(_write_queue.conn)
-            except Exception:
-                logger.debug("mark_stale_runs_failed skipped on startup")
-            # Initialize read pool
-            _read_pool = create_read_pool(db_path, _write_queue.conn)
+            if _write_queue is None:
+                _write_queue = WriteQueue(
+                    db_path, project_dir=project_dir,
+                    memory_limit=mem, threads=threads,
+                )
+                from havn.engine.database import ensure_meta_table
+                ensure_meta_table(_write_queue.conn)
+                # Register user-defined macros from macros/ directory
+                try:
+                    from havn.engine.macros import register_macros
+                    register_macros(_write_queue.conn, project_dir)
+                except Exception:
+                    logger.debug("Macro registration skipped (no macros/ dir or error)")
+                # Clean up stale orchestration runs
+                try:
+                    from havn.engine.orchestration import mark_stale_runs_failed
+                    mark_stale_runs_failed(_write_queue.conn)
+                except Exception:
+                    logger.debug("mark_stale_runs_failed skipped on startup")
+            # Initialize read pool (even if write queue already existed)
+            if _read_pool is None:
+                _read_pool = create_read_pool(db_path, _write_queue.conn)
         return _write_queue
 
 
