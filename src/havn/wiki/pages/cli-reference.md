@@ -59,13 +59,36 @@ Automatically stages all files except `.env`, generates a descriptive commit mes
 
 ### havn backup
 
-Create a backup of the warehouse database.
+Create a verified backup of the warehouse database with SHA-256 checksum.
 
 ```bash
-havn backup [--output PATH] [--project PATH]
+havn backup [--output PATH] [--no-verify] [--note TEXT] [--keep N] [--project PATH]
 ```
 
-Flushes the DuckDB WAL and copies the database file with a timestamped name.
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--output, -o` | `_backups/` | Output path |
+| `--no-verify` | false | Skip post-backup integrity check |
+| `--note` | none | Attach a note to the backup manifest entry |
+| `--keep` | none | Retention: keep only the last N backups, remove older ones |
+
+Flushes the DuckDB WAL, copies the database file, computes a SHA-256 checksum, and tracks the backup in `_backups/manifest.json`.
+
+### havn backup-list
+
+List all tracked backups from the manifest.
+
+```bash
+havn backup-list [--project PATH]
+```
+
+### havn backup-verify
+
+Verify the integrity of a backup file against its stored checksum.
+
+```bash
+havn backup-verify BACKUP_PATH [--project PATH]
+```
 
 ### havn restore
 
@@ -400,7 +423,7 @@ havn connect TYPE [OPTIONS]
 | `--host`, `--port`, `--database`, `--user`, `--password` | Common connection params |
 | `--url`, `--api-key`, `--token`, `--path` | Additional connection params |
 
-Available types: `postgres`, `mysql`, `csv`, `stripe`, `shopify`, `hubspot`, `google_sheets`, `rest_api`, `s3_gcs`, `webhook`
+Available types: `postgres`, `mysql`, `csv`, `stripe`, `shopify`, `hubspot`, `google_sheets`, `rest_api`, `s3_gcs`, `webhook`, `snowflake`, `bigquery`, `redshift`
 
 ### havn connectors
 

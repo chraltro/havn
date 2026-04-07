@@ -1,6 +1,6 @@
 # Data Masking
 
-havn provides column-level data masking to protect sensitive data. Masking policies are applied to query results after execution, before returning data to the client. Policies support multiple masking methods, conditional application, and role-based exemptions.
+havn provides column-level data masking to protect sensitive data. Masking is applied via pre-query SQL rewriting (with post-query fallback), preventing alias bypass and inference attacks. Policies support multiple masking methods, conditional application, and role-based exemptions.
 
 ## Masking Methods
 
@@ -151,13 +151,32 @@ When a user queries data:
 
 ## How Masking Is Applied
 
-Masking is applied **post-query** -- after the SQL query executes but before results are returned to the client. This means:
+Masking uses a two-tier approach: **pre-query SQL rewriting** (primary) with a **post-query fallback**.
 
-- **Queries run on unmasked data** -- Filters, aggregations, and joins operate on real values
-- **Results are masked** -- Only the returned column values are transformed
+### Pre-query rewriting (primary)
+
+Before a query executes, havn parses the SQL using SQLGlot and rewrites masked columns inline with their masking expressions. This prevents alias bypass -- `SELECT email AS x` still gets masked because the rewriter operates on the parsed AST, not column names in results. All 14 masking methods are supported in the rewriter.
+
+### Post-query fallback
+
+When SQLGlot cannot parse a query (e.g., DuckDB-specific syntax), havn falls back to post-query masking -- applying masking functions to result columns after execution. This ensures masking is always applied, even for edge-case SQL.
+
+### Matching behavior
+
 - **Schema-aware matching** -- When querying a specific table (e.g., `/api/tables/{schema}/{table}/sample`), policies are matched by exact schema and table name
 - **Column-name matching** -- For ad-hoc queries (`/api/query`), policies are matched by column name alone (best-effort)
 - **Profile masking** -- Sample values in table profiles are also masked
+
+## Security: Masked Column Access Restrictions
+
+Non-exempt users are **denied** from using masked columns in filtering, sorting, joining, or grouping contexts. Specifically, the following operations on masked columns return HTTP 403:
+
+- **WHERE** clauses -- `WHERE email = 'x'` is blocked
+- **ORDER BY** clauses -- `ORDER BY email` is blocked
+- **JOIN ON** conditions -- `JOIN ... ON a.email = b.email` is blocked
+- **HAVING** clauses -- `HAVING email IS NOT NULL` is blocked
+
+This prevents data exfiltration through inference attacks (e.g., binary search via WHERE filters). Exempt roles (as configured per policy) are not restricted.
 
 ## Managing Policies
 
