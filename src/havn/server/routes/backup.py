@@ -19,7 +19,7 @@ def _validate_backup_path(path_str: str, project_dir: Path) -> Path:
     """Validate that a backup path resolves within the project directory."""
     resolved = Path(path_str).resolve()
     project_resolved = project_dir.resolve()
-    if not str(resolved).startswith(str(project_resolved)):
+    if not resolved.is_relative_to(project_resolved):
         raise HTTPException(403, "Backup path must be within the project directory")
     return resolved
 

@@ -109,15 +109,15 @@ def _sql_range(col: str, cfg: dict) -> str:
     )
 
 
-def _sql_noise(col: str, cfg: dict) -> str:
+def _sql_noise(col: str, cfg: dict) -> str | None:
     pct = float(cfg.get("percentage", 10.0))
-    seed_key = cfg.get("seed_key", "")
+    seed_key = str(cfg.get("seed_key", "")).replace("'", "''")
     # Deterministic noise using HASH for reproducibility.
     # DuckDB HASH returns a UBIGINT; we mod and scale to [-pct, +pct].
     scale = 1_000_000
     pct_scaled = int(pct * 2 * scale / 100)  # range width in micro-units
     if pct_scaled == 0:
-        return str(col)
+        return None  # percentage too small to mask; leave for post-query
     return (
         f"CAST({col} AS DOUBLE) * "
         f"(1.0 + (CAST(HASH(CAST({col} AS VARCHAR) || '{seed_key}') % {pct_scaled} AS DOUBLE) "
@@ -127,7 +127,7 @@ def _sql_noise(col: str, cfg: dict) -> str:
 
 def _sql_date_shift(col: str, cfg: dict) -> str:
     max_days = int(cfg.get("max_days", 30))
-    seed_key = cfg.get("seed_key", "")
+    seed_key = str(cfg.get("seed_key", "")).replace("'", "''")
     range_width = max_days * 2 + 1
     return (
         f"CAST({col} AS DATE) + "
