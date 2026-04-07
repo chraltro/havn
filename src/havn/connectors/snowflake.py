@@ -301,7 +301,8 @@ for table in tables:
             if arrow_table is not None and len(arrow_table) > 0:
                 db.execute(f"CREATE OR REPLACE TABLE {{dest}} AS SELECT * FROM arrow_table")
             else:
-                db.execute(f"CREATE OR REPLACE TABLE {{dest}} AS SELECT * FROM (SELECT) WHERE false")
+                print(f"  No data returned for {{table}}, skipping")
+                continue
 
         rows = db.execute(f"SELECT COUNT(*) FROM {{dest}}").fetchone()[0]
         total_rows += rows
