@@ -460,6 +460,47 @@ a:focus-visible, button:focus-visible {
   font-weight: 700;
 }
 
+.platform-shot {
+  margin: 0 auto 3rem;
+  max-width: 1120px;
+  position: relative;
+}
+
+.platform-shot-frame {
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  box-shadow: 0 24px 60px rgba(17, 17, 16, 0.12), 0 2px 8px rgba(17, 17, 16, 0.04);
+  background: var(--ink);
+  line-height: 0;
+}
+
+.platform-shot-frame img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.platform-shot-caption {
+  margin-top: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-size: 0.8125rem;
+  color: var(--text-tertiary);
+  font-family: var(--mono);
+}
+
+.platform-shot-caption::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--teal);
+  box-shadow: 0 0 0 3px rgba(62, 207, 180, 0.2);
+  flex-shrink: 0;
+}
+
 .platform-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1308,6 +1349,18 @@ a:focus-visible, button:focus-visible {
       Not just smaller than the cloud stack, <b>wider</b>. PR review, CI/CD, lineage, quality checks, dashboards, notebooks, masking: built in, not bolted on.
     </p>
   </div>
+  <figure class="platform-shot reveal">
+    <div class="platform-shot-frame">
+      <img
+        src="./screenshots/overview.webp"
+        srcset="./screenshots/overview-1x.webp 1280w, ./screenshots/overview.webp 2560w"
+        sizes="(max-width: 1120px) 100vw, 1120px"
+        alt="havn web UI showing the project overview: pipeline health with running models, warehouse schemas, and live log output"
+        loading="lazy"
+        width="2560" height="1600">
+    </div>
+    <figcaption class="platform-shot-caption">Overview page, mid-run. Pipeline health, warehouse browser, live log, all in one view.</figcaption>
+  </figure>
   <div class="platform-grid">
     <div class="platform-item">
       <strong>Ingest</strong>
