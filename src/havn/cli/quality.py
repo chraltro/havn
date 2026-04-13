@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 import typer
 from rich.table import Table
 
-from havn.cli import _load_config, _resolve_project, app, console
+from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, console
 
 
 @app.command()
@@ -24,7 +24,7 @@ def check(
     against upstream tables. Then runs inline -- assert: assertions and
     YAML contracts from contracts/ against live data. Reports all errors.
     """
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.seeds import discover_seeds
     from havn.engine.transform import discover_models, run_assertions, validate_models
 
@@ -32,8 +32,6 @@ def check(
     config = _load_config(project_dir, env)
     transform_dir = project_dir / "transform"
     seeds_dir = project_dir / "seeds"
-    db_path = project_dir / config.database.path
-
     models = discover_models(transform_dir)
     if not models:
         console.print("[yellow]No SQL models found in transform/[/yellow]")
@@ -60,8 +58,8 @@ def check(
             source_columns[full] = {c.name for c in t.columns}
 
     conn = None
-    if db_path.exists():
-        conn = connect(db_path)
+    if _warehouse_exists(config, project_dir):
+        conn = open_warehouse(config, project_dir)
         ensure_meta_table(conn)
 
     has_failure = False
@@ -152,18 +150,16 @@ def freshness(
     Without --sources, checks model freshness as before.
     With --sources, checks source freshness against SLAs declared in sources.yml.
     """
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.transform import check_freshness
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir, env)
-    db_path = project_dir / config.database.path
-
-    if not db_path.exists():
+    if not _warehouse_exists(config, project_dir):
         console.print("[yellow]No warehouse database found.[/yellow]")
         return
 
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         ensure_meta_table(conn)
         results = check_freshness(conn, max_age_hours=hours)
@@ -220,17 +216,15 @@ def profile(
     import json as json_mod
 
     from havn.config import load_project
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
-    db_path = project_dir / config.database.path
-
-    if not db_path.exists():
+    if not _warehouse_exists(config, project_dir):
         console.print("[yellow]No warehouse database found.[/yellow]")
         return
 
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         ensure_meta_table(conn)
 
@@ -297,17 +291,15 @@ def assertions(
 ) -> None:
     """Show recent data quality assertion results."""
     from havn.config import load_project
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
-    db_path = project_dir / config.database.path
-
-    if not db_path.exists():
+    if not _warehouse_exists(config, project_dir):
         console.print("[yellow]No warehouse database found.[/yellow]")
         return
 
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         ensure_meta_table(conn)
         rows = conn.execute(
@@ -363,17 +355,15 @@ def contracts(
     """
     from havn.config import load_project
     from havn.engine.contracts import get_contract_history, run_contracts
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
-    db_path = project_dir / config.database.path
-
-    if not db_path.exists():
+    if not _warehouse_exists(config, project_dir):
         console.print("[yellow]No warehouse database found. Run a pipeline first.[/yellow]")
         raise typer.Exit(1)
 
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         if history:
             results = get_contract_history(conn, limit=50)

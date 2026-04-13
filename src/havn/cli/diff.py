@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 import typer
 from rich.table import Table
 
-from havn.cli import _resolve_project, app, console
+from havn.cli import _resolve_project, _warehouse_exists, app, console
 
 
 @app.command()
@@ -26,22 +26,20 @@ def diff(
     import json as json_mod
 
     from havn.config import load_project
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.diff import DiffResult, diff_model, diff_models, get_primary_key
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
     transform_dir = project_dir / "transform"
-    db_path = project_dir / config.database.path
-
-    if not db_path.exists():
+    if not _warehouse_exists(config, project_dir):
         console.print("[yellow]No warehouse database found. Run a pipeline first.[/yellow]")
         raise typer.Exit(1)
 
     # Snapshot comparison mode
     if snapshot:
         from havn.engine.snapshot import diff_against_snapshot
-        conn = connect(db_path)
+        conn = open_warehouse(config, project_dir)
         try:
             snap_results = diff_against_snapshot(conn, project_dir, snapshot)
             if snap_results is None:
@@ -75,7 +73,7 @@ def diff(
             console.print(f"[green]No model SQL files changed vs {against}. Nothing to diff.[/green]")
             return
 
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         ensure_meta_table(conn)
         diff_targets = targets or filter_targets

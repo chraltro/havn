@@ -5,17 +5,31 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 
 class DatabaseConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    path: str = "warehouse.duckdb"
-    memory_limit: str | None = None  # e.g. "4GB", "75%", "512MB"
-    threads: int | None = None  # max DuckDB threads (default: all cores)
+    backend: Literal["duckdb", "ducklake"] = "duckdb"
+    path: str = "warehouse.duckdb"           # duckdb backend only
+    catalog: str | None = None                # ducklake: postgres URI or .ducklake file
+    data_path: str | None = None              # ducklake: local dir or s3:// URI
+    metadata_schema: str | None = None        # ducklake: Postgres schema override (cloud)
+    encrypted: bool = False                   # ducklake: Parquet encryption
+    memory_limit: str | None = None           # e.g. "4GB", "75%", "512MB"
+    threads: int | None = None                # max DuckDB threads
+
+    @model_validator(mode="after")
+    def _validate_ducklake(self) -> "DatabaseConfig":
+        if self.backend == "ducklake":
+            if not self.catalog:
+                raise ValueError("ducklake backend requires 'catalog'")
+            if not self.data_path:
+                raise ValueError("ducklake backend requires 'data_path'")
+        return self
 
 
 class ConnectionConfig(BaseModel):
@@ -279,7 +293,7 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
 
     # Database
     db_raw = raw.get("database", {})
-    database = DatabaseConfig(path=db_raw.get("path", "warehouse.duckdb"))
+    database = DatabaseConfig(**db_raw)
 
     # Connections (make a deep copy of each dict to avoid mutating raw)
     connections = {}
@@ -375,8 +389,7 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
     if active_env and active_env in environments:
         env_cfg = environments[active_env]
         if env_cfg.database:
-            if "path" in env_cfg.database:
-                database = DatabaseConfig(path=env_cfg.database["path"])
+            database = DatabaseConfig(**{**db_raw, **env_cfg.database})
         for conn_name, conn_overrides in env_cfg.connections.items():
             if conn_name in connections:
                 connections[conn_name].params.update(conn_overrides)

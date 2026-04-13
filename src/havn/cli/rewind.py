@@ -167,7 +167,7 @@ def restore(
 
     Optionally re-runs all downstream models (cascade) to propagate the restored data.
     """
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
     from havn.engine.snapshots import (
         get_downstream_models,
         get_runs,
@@ -186,8 +186,7 @@ def restore(
         raise typer.Exit(1)
     full_run_id = matched[0].run_id
 
-    db_path = project_dir / config.database.path
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     transform_dir = project_dir / "transform"
 
     try:
@@ -202,7 +201,7 @@ def restore(
 
             result = restore_with_cascade(
                 project_dir, conn, full_run_id, model, transform_dir,
-                db_path=str(db_path),
+                db_config=config.database,
             )
         else:
             console.print(f"[bold]Restoring {model} from run {full_run_id[:12]}... (no cascade)[/bold]")

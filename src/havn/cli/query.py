@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 import typer
 from rich.table import Table
 
-from havn.cli import _load_config, _resolve_project, app, console
+from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, console
 
 
 @app.command()
@@ -23,7 +23,7 @@ def query(
     """Run an ad-hoc SQL query against the warehouse."""
     import json as json_mod
 
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir, env)
@@ -33,12 +33,11 @@ def query(
         console.print("[red]Empty query. Provide a SQL statement to execute.[/red]")
         raise typer.Exit(1)
 
-    db_path = project_dir / config.database.path
-    if not db_path.exists():
+    if not _warehouse_exists(config, project_dir):
         console.print("[yellow]No warehouse database found. Run a pipeline first.[/yellow]")
         raise typer.Exit(1)
 
-    conn = connect(db_path, read_only=True)
+    conn = open_warehouse(config, project_dir, read_only=True)
     try:
         result = conn.execute(sql)
         if result.description is None:
@@ -95,17 +94,16 @@ def tables(
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
     """List tables and views in the warehouse."""
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir, env)
 
-    db_path = project_dir / config.database.path
-    if not db_path.exists():
+    if not _warehouse_exists(config, project_dir):
         console.print("[yellow]No warehouse database found. Run a pipeline first.[/yellow]")
         return
 
-    conn = connect(db_path, read_only=True)
+    conn = open_warehouse(config, project_dir, read_only=True)
     try:
         if schema:
             sql = """
@@ -149,17 +147,16 @@ def history(
     import duckdb
 
     from havn.config import load_project
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
 
-    db_path = project_dir / config.database.path
-    if not db_path.exists():
+    if not _warehouse_exists(config, project_dir):
         console.print("[yellow]No warehouse database found.[/yellow]")
         return
 
-    conn = connect(db_path, read_only=True)
+    conn = open_warehouse(config, project_dir, read_only=True)
     try:
         try:
             result = conn.execute(

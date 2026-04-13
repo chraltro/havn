@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 import typer
 from rich.table import Table
 
-from havn.cli import _load_config, _resolve_project, app, console
+from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, console
 
 
 @app.command("mask")
@@ -36,7 +36,7 @@ def mask(
         havn mask add --schema gold --table customers --column ssn --method partial --show-first 0 --show-last 4
         havn mask remove --id <policy-id>
     """
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.masking import (
         create_policy,
         delete_policy,
@@ -46,13 +46,11 @@ def mask(
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir, env)
-    db_path = project_dir / config.database.path
-
-    if not db_path.exists():
+    if not _warehouse_exists(config, project_dir):
         console.print("[yellow]No warehouse database found.[/yellow]")
         raise typer.Exit(1)
 
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         ensure_meta_table(conn)
         ensure_masking_table(conn)

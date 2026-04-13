@@ -74,6 +74,27 @@ lint:
   dialect: duckdb
 """
 
+PROJECT_YML_DUCKLAKE_TEMPLATE = """\
+name: {name}
+description: "A havn sample project (DuckLake backend)"
+sample: {sample}
+
+database:
+  backend: ducklake
+  catalog: .havn/catalog.ducklake
+  data_path: .havn/data
+  encrypted: false
+  memory_limit: 75%
+  threads: 4
+
+connections: {{}}
+
+# Pipelines live in orchestration/ as individual YAML job files.
+
+lint:
+  dialect: duckdb
+"""
+
 # ---------------------------------------------------------------------------
 # Ingest notebook — fetches USGS earthquake data, falls back to sample data
 # ---------------------------------------------------------------------------

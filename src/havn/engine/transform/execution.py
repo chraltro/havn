@@ -215,12 +215,22 @@ def _execute_single_model(
     model: SQLModel,
     force: bool,
     model_map: dict[str, SQLModel],
+    db_config: object | None = None,
+    project_dir: object | None = None,
 ) -> tuple[str, ModelResult]:
     """Execute a single model in its own connection (for parallel execution).
 
+    If ``db_config`` is provided, the connection is opened through the
+    warehouse backend (supports DuckLake). Otherwise falls back to the
+    plain ``db_path`` open for the DuckDB backend.
+
     Returns (model_full_name, ModelResult).
     """
-    conn = duckdb.connect(db_path)
+    if db_config is not None:
+        from havn.engine.database import open_warehouse
+        conn = open_warehouse(db_config, project_dir)
+    else:
+        conn = duckdb.connect(db_path)
     try:
         ensure_meta_table(conn)
         model.upstream_hash = _compute_upstream_hash(model, model_map)

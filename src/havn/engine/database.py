@@ -1,10 +1,53 @@
-"""DuckDB connection management."""
+"""DuckDB connection management.
+
+Two entry points into the warehouse:
+
+- :func:`open_warehouse` takes a ``DatabaseConfig`` + ``project_dir`` and
+  returns a connection via the backend abstraction (DuckDB or DuckLake).
+  This is the standard path for CLI commands and server dependencies.
+
+- :func:`connect` opens a specific ``.duckdb`` file directly
+  (no backend abstraction). Use this when you need to open a path that
+  isn't the configured warehouse — PR worktree warehouses, ad-hoc
+  migration destinations, test helpers.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import duckdb
+
+
+def open_warehouse(
+    config,
+    project_dir: str | Path | None = None,
+    *,
+    read_only: bool = False,
+) -> duckdb.DuckDBPyConnection:
+    """Open a connection to the configured warehouse via the backend factory.
+
+    Args:
+        config: ProjectConfig or DatabaseConfig.
+        project_dir: Used to locate macros/ and resolve relative paths.
+        read_only: Open in read-only mode.
+    """
+    from havn.config import DatabaseConfig, ProjectConfig
+    from havn.engine.backends import create_backend
+
+    if isinstance(config, ProjectConfig):
+        db_config = config.database
+        if project_dir is None:
+            project_dir = config.project_dir
+    elif isinstance(config, DatabaseConfig):
+        db_config = config
+    else:
+        raise TypeError(
+            f"open_warehouse expects ProjectConfig or DatabaseConfig, got {type(config).__name__}"
+        )
+
+    backend = create_backend(db_config, project_dir=project_dir)
+    return backend.connect(read_only=read_only)
 
 
 def connect(
@@ -14,31 +57,30 @@ def connect(
     threads: int | None = None,
     project_dir: str | Path | None = None,
 ) -> duckdb.DuckDBPyConnection:
-    """Open a DuckDB connection to the given path.
+    """Open a specific DuckDB file directly (no backend abstraction).
+
+    Use when the target isn't the configured warehouse — PR worktree
+    warehouses, migration destinations, test fixtures, backup verification.
 
     Args:
         db_path: Path to the DuckDB database file.
         read_only: Open in read-only mode.
-        memory_limit: Max memory DuckDB can use (e.g. "4GB", "75%", "512MB").
-                      Percentage values are resolved to a fraction of system RAM.
-        threads: Max number of DuckDB threads (default: all cores).
+        memory_limit: Max memory (e.g. "4GB", "75%", "512MB").
+        threads: Max DuckDB threads (default: half of CPU cores).
         project_dir: If provided, auto-register macros from ``project_dir/macros/``.
     """
     db_path = str(db_path)
     conn = duckdb.connect(db_path, read_only=read_only)
-    # Enable progress bar for long-running queries
     conn.execute("SET enable_progress_bar = true")
 
     if memory_limit:
         resolved = _resolve_memory_limit(memory_limit)
         conn.execute(f"SET memory_limit = '{resolved}'")
 
-    # CPU control: cap threads to configured value, or half of available cores
     import os
     max_threads = threads if (threads is not None and threads > 0) else max(1, os.cpu_count() // 2)
     conn.execute(f"SET threads = {max_threads}")
 
-    # Auto-register macros if a project directory is provided
     if project_dir is not None:
         from havn.engine.macros import register_macros
         register_macros(conn, Path(project_dir))
@@ -105,12 +147,40 @@ def ensure_schemas(conn: duckdb.DuckDBPyConnection, schemas: list[str]) -> None:
         conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
 
 
+def _is_ducklake_connection(conn: duckdb.DuckDBPyConnection) -> bool:
+    """True if this connection has a DuckLake catalog attached."""
+    try:
+        conn.execute("SELECT 1 FROM ducklake_snapshots('warehouse') LIMIT 1").fetchone()
+        return True
+    except Exception:
+        return False
+
+
+def _strip_pk(ddl: str, is_ducklake: bool) -> str:
+    """Remove PRIMARY KEY constraints from a DDL string when on DuckLake.
+
+    DuckLake doesn't support PK/UNIQUE constraints. havn doesn't rely on
+    enforcement (uuid defaults + INSERT OR REPLACE semantics), so stripping
+    them preserves correct behavior.
+    """
+    if not is_ducklake:
+        return ddl
+    import re as _re
+    # Remove " PRIMARY KEY" (with optional surrounding whitespace)
+    return _re.sub(r'\s+PRIMARY\s+KEY', '', ddl, flags=_re.IGNORECASE)
+
+
 def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     """Create the internal metadata tables for change tracking, profiling, and assertions."""
+    is_lake = _is_ducklake_connection(conn)
+
+    def _exec(ddl: str) -> None:
+        conn.execute(_strip_pk(ddl, is_lake))
+
     conn.execute("""
         CREATE SCHEMA IF NOT EXISTS _havn
     """)
-    conn.execute("""
+    _exec("""
         CREATE TABLE IF NOT EXISTS _havn.model_state (
             model_path   VARCHAR PRIMARY KEY,
             content_hash VARCHAR NOT NULL,
@@ -121,7 +191,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
             row_count    BIGINT DEFAULT 0
         )
     """)
-    conn.execute("""
+    _exec("""
         CREATE TABLE IF NOT EXISTS _havn.run_log (
             run_id       VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
             pipeline_run_id VARCHAR,
@@ -144,7 +214,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     except Exception:
         pass  # column already exists or ALTER not supported
     # Model profiling stats (auto-computed after each build)
-    conn.execute("""
+    _exec("""
         CREATE TABLE IF NOT EXISTS _havn.model_profiles (
             model_path       VARCHAR PRIMARY KEY,
             row_count        BIGINT DEFAULT 0,
@@ -155,7 +225,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
         )
     """)
     # Data quality assertion results
-    conn.execute("""
+    _exec("""
         CREATE TABLE IF NOT EXISTS _havn.assertion_results (
             id          VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
             model_path  VARCHAR NOT NULL,
@@ -166,7 +236,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
         )
     """)
     # Masking policies
-    conn.execute("""
+    _exec("""
         CREATE TABLE IF NOT EXISTS _havn.masking_policies (
             id               VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
             schema_name      VARCHAR NOT NULL,
@@ -180,24 +250,37 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
             created_at       TIMESTAMP DEFAULT current_timestamp
         )
     """)
-    # Audit log
-    try:
-        conn.execute("CREATE SEQUENCE IF NOT EXISTS _havn.audit_log_seq START 1")
-    except Exception:
-        pass  # sequence already exists
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS _havn.audit_log (
-            id INTEGER PRIMARY KEY DEFAULT nextval('_havn.audit_log_seq'),
-            "user" VARCHAR NOT NULL,
-            action VARCHAR NOT NULL,
-            resource VARCHAR,
-            detail VARCHAR,
-            ip_address VARCHAR,
-            "timestamp" TIMESTAMP DEFAULT current_timestamp
-        )
-    """)
+    # Audit log — DuckLake doesn't support sequences, so use uuid VARCHAR id there
+    if is_lake:
+        _exec("""
+            CREATE TABLE IF NOT EXISTS _havn.audit_log (
+                id VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
+                "user" VARCHAR NOT NULL,
+                action VARCHAR NOT NULL,
+                resource VARCHAR,
+                detail VARCHAR,
+                ip_address VARCHAR,
+                "timestamp" TIMESTAMP DEFAULT current_timestamp
+            )
+        """)
+    else:
+        try:
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS _havn.audit_log_seq START 1")
+        except Exception:
+            pass  # sequence already exists
+        _exec("""
+            CREATE TABLE IF NOT EXISTS _havn.audit_log (
+                id INTEGER PRIMARY KEY DEFAULT nextval('_havn.audit_log_seq'),
+                "user" VARCHAR NOT NULL,
+                action VARCHAR NOT NULL,
+                resource VARCHAR,
+                detail VARCHAR,
+                ip_address VARCHAR,
+                "timestamp" TIMESTAMP DEFAULT current_timestamp
+            )
+        """)
     # Slow query tracking
-    conn.execute("""
+    _exec("""
         CREATE TABLE IF NOT EXISTS _havn.slow_queries (
             id           VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
             query_text   VARCHAR NOT NULL,
@@ -207,7 +290,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
         )
     """)
     # Alert/notification log
-    conn.execute("""
+    _exec("""
         CREATE TABLE IF NOT EXISTS _havn.alert_log (
             id          VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
             alert_type  VARCHAR NOT NULL,
@@ -220,7 +303,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
         )
     """)
     # Profile history (append-only for anomaly detection baselines)
-    conn.execute("""
+    _exec("""
         CREATE TABLE IF NOT EXISTS _havn.profile_history (
             id              VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
             model_path      VARCHAR NOT NULL,
@@ -232,7 +315,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
         )
     """)
     # Anomaly detection log
-    conn.execute("""
+    _exec("""
         CREATE TABLE IF NOT EXISTS _havn.anomaly_log (
             id            VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
             model_name    VARCHAR NOT NULL,
@@ -247,7 +330,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
         )
     """)
     # Dashboard definitions
-    conn.execute("""
+    _exec("""
         CREATE TABLE IF NOT EXISTS _havn.dashboards (
             id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
             name         VARCHAR NOT NULL,
@@ -263,7 +346,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
         )
     """)
     # Dashboard widget instances
-    conn.execute("""
+    _exec("""
         CREATE TABLE IF NOT EXISTS _havn.dashboard_widgets (
             id            VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
             dashboard_id  VARCHAR NOT NULL,
@@ -280,7 +363,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
         )
     """)
     # Dashboard query result cache
-    conn.execute("""
+    _exec("""
         CREATE TABLE IF NOT EXISTS _havn.dashboard_cache (
             cache_key   VARCHAR PRIMARY KEY,
             result_json JSON NOT NULL,
@@ -290,7 +373,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
         )
     """)
     # Orchestration job runs
-    conn.execute("""
+    _exec("""
         CREATE TABLE IF NOT EXISTS _havn.job_runs (
             id              VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
             job_name        VARCHAR NOT NULL,
@@ -317,7 +400,7 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     except Exception:
         pass
     # Pull request build records
-    conn.execute("""
+    _exec("""
         CREATE TABLE IF NOT EXISTS _havn.pr_builds (
             id               VARCHAR PRIMARY KEY,
             pr_id            VARCHAR NOT NULL,
@@ -336,8 +419,9 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
 
 def ensure_circuit_state_table(conn: duckdb.DuckDBPyConnection) -> None:
     """Create the circuit breaker state table if it doesn't exist."""
+    is_lake = _is_ducklake_connection(conn)
     conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute("""
+    conn.execute(_strip_pk("""
         CREATE TABLE IF NOT EXISTS _havn.circuit_state (
             name            VARCHAR PRIMARY KEY,
             state           VARCHAR NOT NULL,
@@ -345,7 +429,7 @@ def ensure_circuit_state_table(conn: duckdb.DuckDBPyConnection) -> None:
             last_failure_at DOUBLE,
             opens_at        DOUBLE
         )
-    """)
+    """, is_lake))
 
 
 def log_run(

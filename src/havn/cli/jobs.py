@@ -8,7 +8,7 @@ from typing import Optional
 import typer
 from rich.table import Table
 
-from havn.cli import _load_config, _resolve_project, app, console
+from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, console
 
 jobs_app = typer.Typer(
     name="jobs",
@@ -26,7 +26,7 @@ def list_jobs(
     """List all orchestration jobs."""
     if ctx.invoked_subcommand is not None:
         return
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.orchestration import (
         discover_jobs,
         ensure_job_runs_table,
@@ -35,7 +35,6 @@ def list_jobs(
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir)
-    db_path = project_dir / config.database.path
     jobs = discover_jobs(project_dir)
     if not jobs:
         console.print("[dim]No orchestration jobs found. Create YAML files in orchestration/[/dim]")
@@ -43,8 +42,8 @@ def list_jobs(
 
     # Get last run status from DB
     last_runs: dict[str, dict] = {}
-    if db_path.exists():
-        conn = connect(db_path)
+    if _warehouse_exists(config, project_dir):
+        conn = open_warehouse(config, project_dir)
         try:
             ensure_meta_table(conn)
             ensure_job_runs_table(conn)
@@ -101,7 +100,7 @@ def preview(
     project_dir: Optional[Path] = typer.Option(None, "--project", "-p"),
 ) -> None:
     """Preview the resolved execution plan for a job."""
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.orchestration import _find_job, preview_plan
     from havn.engine.transform.discovery import build_dag, discover_models
 
@@ -115,9 +114,8 @@ def preview(
     models = discover_models(project_dir / "transform")
     dag = build_dag(models)
     conn = None
-    db_path = project_dir / config.database.path
-    if db_path.exists():
-        conn = connect(db_path)
+    if _warehouse_exists(config, project_dir):
+        conn = open_warehouse(config, project_dir)
         ensure_meta_table(conn)
     try:
         plan = preview_plan(
@@ -150,7 +148,7 @@ def run(
     project_dir: Optional[Path] = typer.Option(None, "--project", "-p"),
 ) -> None:
     """Trigger a job manually."""
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.orchestration import (
         _find_job,
         ensure_job_runs_table,
@@ -166,8 +164,7 @@ def run(
         console.print(f"[red]Job '{name}' not found[/red]")
         raise typer.Exit(1)
 
-    db_path = project_dir / config.database.path
-    conn = connect(db_path, project_dir=project_dir)
+    conn = open_warehouse(config, project_dir)
     ensure_meta_table(conn)
     ensure_job_runs_table(conn)
     try:
@@ -196,16 +193,15 @@ def history(
     project_dir: Optional[Path] = typer.Option(None, "--project", "-p"),
 ) -> None:
     """Show recent job runs."""
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.orchestration import ensure_job_runs_table
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir)
-    db_path = project_dir / config.database.path
-    if not db_path.exists():
+    if not _warehouse_exists(config, project_dir):
         console.print("[dim]No database found[/dim]")
         return
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     ensure_meta_table(conn)
     ensure_job_runs_table(conn)
     try:

@@ -128,8 +128,12 @@ def update_watermark(
     """Update the CDC state after a successful sync."""
     ensure_cdc_table(conn)
     conn.execute(
+        "DELETE FROM _havn.cdc_state WHERE connector_name = ? AND table_name = ?",
+        [connector_name, table_name],
+    )
+    conn.execute(
         """
-        INSERT OR REPLACE INTO _havn.cdc_state
+        INSERT INTO _havn.cdc_state
             (connector_name, table_name, cdc_mode, watermark_value, file_mtime, last_sync_at, rows_synced)
         VALUES (?, ?, ?, ?, ?, current_timestamp, ?)
         """,

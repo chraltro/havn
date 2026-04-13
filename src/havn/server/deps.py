@@ -14,7 +14,7 @@ from fastapi import Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from havn.config import load_project
-from havn.engine.database import connect, ensure_meta_table
+from havn.engine.database import ensure_meta_table
 from havn.engine.transform import build_dag, discover_models, run_transform
 
 logger = logging.getLogger("havn.server")
@@ -159,10 +159,10 @@ def _validate_identifier(value: str, label: str = "identifier") -> str:
 # ---------------------------------------------------------------------------
 
 
-def _require_db(db_path: Path) -> None:
-    """Raise 404 if the warehouse database doesn't exist yet."""
-    if not db_path.exists():
-        raise HTTPException(404, "Warehouse database not found. Run a pipeline first.")
+def _require_db(backend: "WarehouseBackend") -> None:
+    """Raise 404 if the warehouse hasn't been initialized yet."""
+    if not backend.exists():
+        raise HTTPException(404, "Warehouse not found. Run a pipeline first.")
 
 
 # ---------------------------------------------------------------------------
@@ -193,11 +193,36 @@ def _get_db_resource_limits() -> tuple[str | None, int | None]:
 
 import threading
 
+from havn.engine.backends import WarehouseBackend, create_backend
 from havn.engine.write_queue import WriteQueue, create_read_pool, ReadPool, SharedConnPool
 
+_backend: WarehouseBackend | None = None
 _write_queue: WriteQueue | None = None
 _read_pool: ReadPool | SharedConnPool | None = None
 _init_lock = threading.Lock()
+
+
+def _get_backend() -> WarehouseBackend:
+    """Return the active warehouse backend (singleton).
+
+    Resolution order:
+    1. ``app.state.backend_factory`` (set by havn-cloud's create_app call)
+    2. ``create_backend(config.database)`` from the loaded project.yml
+    """
+    global _backend
+    if _backend is not None:
+        return _backend
+    try:
+        from havn.server.app import app as _app
+        factory = getattr(_app.state, "backend_factory", None)
+    except Exception:
+        factory = None
+    project_dir = _get_project_dir()
+    if factory is not None:
+        _backend = factory(project_dir, _get_config())
+    else:
+        _backend = create_backend(_get_config().database, project_dir=project_dir)
+    return _backend
 
 
 def _get_shared_conn(*, require_exists: bool = False) -> duckdb.DuckDBPyConnection:
@@ -213,14 +238,10 @@ def _get_write_queue() -> WriteQueue:
     global _write_queue, _read_pool
     with _init_lock:
         if _write_queue is None or _read_pool is None:
-            db_path = _get_db_path()
+            backend = _get_backend()
             project_dir = _get_project_dir()
-            mem, threads = _get_db_resource_limits()
             if _write_queue is None:
-                _write_queue = WriteQueue(
-                    db_path, project_dir=project_dir,
-                    memory_limit=mem, threads=threads,
-                )
+                _write_queue = WriteQueue(backend)
                 from havn.engine.database import ensure_meta_table
                 ensure_meta_table(_write_queue.conn)
                 # Register user-defined macros from macros/ directory
@@ -235,9 +256,8 @@ def _get_write_queue() -> WriteQueue:
                     mark_stale_runs_failed(_write_queue.conn)
                 except Exception:
                     logger.debug("mark_stale_runs_failed skipped on startup")
-            # Initialize read pool (even if write queue already existed)
             if _read_pool is None:
-                _read_pool = create_read_pool(db_path, _write_queue.conn)
+                _read_pool = create_read_pool(backend, _write_queue.conn)
         return _write_queue
 
 
@@ -249,7 +269,7 @@ def _get_read_pool() -> ReadPool | SharedConnPool:
 
 def reset_shared_conn() -> None:
     """Close and reset connections (e.g. after DB file changes)."""
-    global _write_queue, _read_pool
+    global _backend, _write_queue, _read_pool
     with _init_lock:
         if _read_pool is not None:
             try:
@@ -263,12 +283,17 @@ def reset_shared_conn() -> None:
             except Exception:
                 pass
             _write_queue = None
+        if _backend is not None:
+            try:
+                _backend.close()
+            except Exception:
+                pass
+            _backend = None
 
 
 def get_db() -> Generator[duckdb.DuckDBPyConnection, None, None]:
     """FastAPI dependency: yields a cursor from the write connection."""
-    db_path = _get_db_path()
-    _require_db(db_path)
+    _require_db(_get_backend())
     wq = _get_write_queue()
     cursor = wq.cursor()
     try:
@@ -289,8 +314,7 @@ def get_db_autocreate() -> Generator[duckdb.DuckDBPyConnection, None, None]:
 
 def get_db_readonly() -> Generator[duckdb.DuckDBPyConnection, None, None]:
     """FastAPI dependency: yields a read cursor from the read pool."""
-    db_path = _get_db_path()
-    _require_db(db_path)
+    _require_db(_get_backend())
     pool = _get_read_pool()
     with pool.connection() as cursor:
         yield cursor
@@ -298,8 +322,7 @@ def get_db_readonly() -> Generator[duckdb.DuckDBPyConnection, None, None]:
 
 def get_db_readonly_optional() -> Generator[duckdb.DuckDBPyConnection | None, None, None]:
     """FastAPI dependency: yields a read cursor, or None if DB doesn't exist."""
-    db_path = _get_db_path()
-    if not db_path.exists():
+    if not _get_backend().exists():
         yield None
         return
     pool = _get_read_pool()
@@ -330,14 +353,16 @@ def _get_user(request: Request) -> dict | None:
         return None
 
     token = auth_header[7:]
-    db_path = _get_db_path()
-    conn = connect(db_path)
+    # Use the write queue's cursor so we don't try to open a second
+    # connection to the same DuckDB file with a different mode.
+    wq = _get_write_queue()
+    cursor = wq.cursor()
     try:
         from havn.engine.auth import validate_token
 
-        return validate_token(conn, token)
+        return validate_token(cursor, token)
     finally:
-        conn.close()
+        cursor.close()
 
 
 def _require_user(request: Request) -> dict:
@@ -361,8 +386,7 @@ def _authenticate_websocket(websocket) -> dict | None:
     if not token:
         return None
 
-    db_path = _get_db_path()
-    conn = connect(db_path)
+    conn = _get_backend().connect(read_only=True)
     try:
         from havn.engine.auth import validate_token
         return validate_token(conn, token)

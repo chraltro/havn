@@ -213,10 +213,9 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
 
     # SHOW MASKING POLICIES
     if re.match(r'^\s*SHOW\s+MASKING\s+POLIC', sql_stripped, re.IGNORECASE | re.DOTALL):
-        from havn.server.deps import _get_db_path
-        from havn.engine.database import connect
+        from havn.server.deps import _get_backend
         from havn.engine.masking import ensure_masking_table
-        conn_rw = connect(_get_db_path())
+        conn_rw = _get_backend().connect(read_only=False)
         try:
             ensure_masking_table(conn_rw)
             policies = list_policies(conn_rw)
@@ -239,10 +238,9 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
         if method not in ('hash', 'redact', 'null', 'partial'):
             return {"columns": ["error"], "rows": [["Invalid method. Use: hash, redact, null, partial"]], "row_count": 1, "truncated": False}
         exempted = [r.strip() for r in exempt_str.split(',')] if exempt_str else ['admin']
-        from havn.server.deps import _get_db_path
-        from havn.engine.database import connect
+        from havn.server.deps import _get_backend
         from havn.engine.masking import ensure_masking_table
-        conn_rw = connect(_get_db_path())
+        conn_rw = _get_backend().connect(read_only=False)
         try:
             ensure_masking_table(conn_rw)
             policy = create_policy(conn_rw, schema_name=schema, table_name=table, column_name=column, method=method, exempted_roles=exempted)
@@ -254,10 +252,9 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
     drop_match = re.match(r'^\s*DROP\s+MASKING\s+POLICY\s+([\w-]+)\s*$', sql_stripped, re.IGNORECASE | re.DOTALL)
     if drop_match:
         policy_id = drop_match.group(1)
-        from havn.server.deps import _get_db_path
-        from havn.engine.database import connect
+        from havn.server.deps import _get_backend
         from havn.engine.masking import ensure_masking_table
-        conn_rw = connect(_get_db_path())
+        conn_rw = _get_backend().connect(read_only=False)
         try:
             ensure_masking_table(conn_rw)
             deleted = delete_policy(conn_rw, policy_id)
@@ -363,9 +360,9 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
         # Log slow queries
         if duration_ms >= _SLOW_QUERY_THRESHOLD_MS:
             try:
-                from havn.server.deps import _get_db_path
-                from havn.engine.database import connect as _connect, ensure_meta_table
-                conn_rw = _connect(_get_db_path())
+                from havn.server.deps import _get_backend
+                from havn.engine.database import ensure_meta_table
+                conn_rw = _get_backend().connect(read_only=False)
                 try:
                     ensure_meta_table(conn_rw)
                     conn_rw.execute(

@@ -205,3 +205,31 @@ def serve_frontend(path: str = "") -> HTMLResponse:
         content="<h1>havn</h1><p>Frontend not built. Run <code>cd frontend && npm run build</code></p>",
         status_code=200,
     )
+
+
+# ---------------------------------------------------------------------------
+# Cloud hook: allow havn-cloud to inject a per-tenant backend factory.
+# OSS keeps using `uvicorn havn.server.app:app` — the module-level `app`
+# object is unchanged. Cloud calls create_app(backend_factory=...) after
+# import to set the factory, which deps._get_backend() consults first.
+# ---------------------------------------------------------------------------
+
+
+def create_app(backend_factory=None) -> FastAPI:
+    """Return the FastAPI app, optionally with a backend factory injected.
+
+    Args:
+        backend_factory: Optional callable ``(project_dir, config) -> WarehouseBackend``.
+            When provided, :func:`havn.server.deps._get_backend` uses it
+            instead of the ``project.yml``-driven default. Used by
+            havn-cloud for per-tenant backend resolution.
+    """
+    if backend_factory is not None:
+        app.state.backend_factory = backend_factory
+        # Ensure any cached singleton is rebuilt with the new factory
+        try:
+            from havn.server.deps import reset_shared_conn
+            reset_shared_conn()
+        except Exception:
+            pass
+    return app

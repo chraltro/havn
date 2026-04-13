@@ -13,7 +13,6 @@ from havn.server.deps import (
     _get_project_dir,
     _require_permission,
     build_dag,
-    connect,
 )
 
 router = APIRouter()
@@ -56,9 +55,8 @@ def _scan_ingest_targets(project_dir: Path) -> dict[str, list[str]]:
 
 def _scan_import_sources(project_dir: Path) -> dict[str, str]:
     """Query run_log for the most recent successful import per table."""
-    from havn.server.deps import _get_db_path
-    db_path = _get_db_path()
-    conn = connect(db_path)
+    from havn.server.deps import _get_backend
+    conn = _get_backend().connect(read_only=True)
     try:
         result = conn.execute(
             """
@@ -216,10 +214,10 @@ def get_orchestration_dag(request: Request) -> dict:
     # Fetch last_run info from _havn.model_state for status badges
     last_state: dict[str, dict] = {}
     try:
-        from havn.server.deps import _get_db_path
-        db_path = _get_db_path()
-        if db_path.exists():
-            conn = connect(db_path, read_only=True)
+        from havn.server.deps import _get_backend
+        backend = _get_backend()
+        if backend.exists():
+            conn = backend.connect(read_only=True)
             try:
                 rows = conn.execute(
                     "SELECT model_path, last_run_at, row_count, run_duration_ms "

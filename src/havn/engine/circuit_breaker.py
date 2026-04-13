@@ -210,8 +210,11 @@ class CircuitBreaker:
             for name, entry in self._circuits.items():
                 state = self._effective_state(entry)
                 conn.execute(
+                    "DELETE FROM _havn.circuit_state WHERE name = ?", [name]
+                )
+                conn.execute(
                     """
-                    INSERT OR REPLACE INTO _havn.circuit_state
+                    INSERT INTO _havn.circuit_state
                         (name, state, failure_count, last_failure_at, opens_at)
                     VALUES (?, ?, ?, ?, ?)
                     """,
