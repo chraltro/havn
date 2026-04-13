@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 import typer
 from rich.table import Table
 
-from havn.cli import _load_config, _resolve_project, app, console
+from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, console
 
 
 @app.command()
@@ -28,7 +28,7 @@ def sentinel(
       impacts    Show impact analysis for a diff (--diff required)
       history    Show schema history for a source (--source required)
     """
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
     from havn.engine.sentinel import (
         SentinelConfig,
         get_impacts_for_diff,
@@ -47,12 +47,11 @@ def sentinel(
         return
 
     if action == "check":
-        db_path = project_dir / config.database.path
-        if not db_path.exists():
+        if not _warehouse_exists(config, project_dir):
             console.print("[yellow]No warehouse database found. Run a pipeline first.[/yellow]")
             return
 
-        conn = connect(db_path)
+        conn = open_warehouse(config, project_dir)
         try:
             if source:
                 source_names = [source]

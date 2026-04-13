@@ -418,10 +418,10 @@ def sync_connector(
 ) -> dict[str, Any]:
     """Run the ingest script for a configured connector."""
     from havn.config import load_project
+    from havn.engine.database import open_warehouse
     from havn.engine.runner import run_script
 
     config = load_project(project_dir)
-    db_path = project_dir / config.database.path
 
     safe_name = _sanitize_name(connection_name)
     script_path = project_dir / "ingest" / f"connector_{safe_name}.py"
@@ -431,7 +431,7 @@ def sync_connector(
             "error": f"Ingest script not found: {script_path.name}",
         }
 
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         return run_script(conn, script_path, "ingest")
     finally:

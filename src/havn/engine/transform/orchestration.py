@@ -45,6 +45,7 @@ def run_transform(
     rewind_config: object | None = None,
     run_id: str | None = None,
     pipeline_run_id: str | None = None,
+    db_config: object | None = None,
 ) -> dict[str, str]:
     """Run the full transformation pipeline.
 
@@ -90,7 +91,7 @@ def run_transform(
         return _run_transform_parallel(
             conn, models, force, max_workers, db_path=db_path,
             project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
-            pipeline_run_id=pipeline_run_id,
+            pipeline_run_id=pipeline_run_id, db_config=db_config,
         )
     return _run_transform_sequential(
         conn, models, force,
@@ -226,6 +227,7 @@ def _run_transform_parallel(
     rewind_config: object | None = None,
     run_id: str | None = None,
     pipeline_run_id: str | None = None,
+    db_config: object | None = None,
 ) -> dict[str, str]:
     """Run models in parallel by DAG tiers.
 
@@ -241,16 +243,29 @@ def _run_transform_parallel(
     for model in ordered:
         model.upstream_hash = _compute_upstream_hash(model, model_map)
 
-    # Resolve database path explicitly
+    # DuckLake with a local file catalog cannot be attached twice within the
+    # same process — parallel workers would all try to attach the same file
+    # and collide. Fall back to sequential execution for that case.
+    if db_config is not None and getattr(db_config, "backend", None) == "ducklake":
+        catalog = getattr(db_config, "catalog", "") or ""
+        if not catalog.startswith("postgres:"):
+            console.print("[dim]DuckLake file catalog: running transforms sequentially[/dim]")
+            return _run_transform_sequential(
+                conn, models, force,
+                project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
+                pipeline_run_id=pipeline_run_id,
+            )
+
+    # Resolve database path explicitly (only used when db_config is None).
     db_path_str = db_path
-    if not db_path_str:
+    if db_config is None and not db_path_str:
         # Fall back to extracting from connection
         try:
             result = conn.execute("SELECT current_setting('duckdb_database_file')").fetchone()
             db_path_str = result[0] if result and result[0] else None
         except Exception as e:
             logger.debug("Could not extract db path from connection: %s", e)
-    if not db_path_str:
+    if db_config is None and not db_path_str:
         console.print("[yellow]Cannot determine database path, falling back to sequential[/yellow]")
         return _run_transform_sequential(
             conn, models, force,
@@ -339,7 +354,9 @@ def _run_transform_parallel(
             with ThreadPoolExecutor(max_workers=min(max_workers, len(tier))) as executor:
                 futures = {
                     executor.submit(
-                        _execute_single_model, db_path_str, model, force, model_map
+                        _execute_single_model,
+                        db_path_str, model, force, model_map,
+                        db_config, project_dir,
                     ): model
                     for model in tier
                 }

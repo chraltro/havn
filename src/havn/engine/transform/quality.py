@@ -167,13 +167,21 @@ def _save_profile(
     model: SQLModel,
     profile: ProfileResult,
 ) -> None:
-    """Save profile stats to the metadata table and append to history."""
+    """Save profile stats to the metadata table and append to history.
+
+    Uses DELETE+INSERT for the primary profile row so it works on both
+    DuckDB (PK-enforced) and DuckLake (no PK support).
+    """
     import json
     null_json = json.dumps(profile.null_percentages)
     distinct_json = json.dumps(profile.distinct_counts)
     conn.execute(
+        "DELETE FROM _havn.model_profiles WHERE model_path = ?",
+        [model.full_name],
+    )
+    conn.execute(
         """
-        INSERT OR REPLACE INTO _havn.model_profiles
+        INSERT INTO _havn.model_profiles
             (model_path, row_count, column_count, null_percentages, distinct_counts, profiled_at)
         VALUES (?, ?, ?, ?::JSON, ?::JSON, current_timestamp)
         """,

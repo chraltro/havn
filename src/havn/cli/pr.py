@@ -103,7 +103,7 @@ def show(
     project_dir: Optional[Path] = typer.Option(None, "--project", "-p"),
 ) -> None:
     """Show details of a pull request."""
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.pr import get_latest_build, get_pr
 
     project_dir = _resolve_project(project_dir)
@@ -125,9 +125,8 @@ def show(
         console.print(f"[red]Changes requested by:[/red] {', '.join(pr.change_requesters)}")
 
     # Latest build
-    db_path = project_dir / config.database.path
-    if db_path.exists():
-        conn = connect(db_path)
+    if _warehouse_exists(config, project_dir):
+        conn = open_warehouse(config, project_dir)
         try:
             ensure_meta_table(conn)
             build = get_latest_build(conn, pr.id)
@@ -217,13 +216,12 @@ def build(
     project_dir: Optional[Path] = typer.Option(None, "--project", "-p"),
 ) -> None:
     """Build a PR branch in an isolated worktree and diff against main."""
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.pr import build_pr
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir)
-    db_path = project_dir / config.database.path
-    conn = connect(db_path, project_dir=project_dir)
+    conn = open_warehouse(config, project_dir)
     ensure_meta_table(conn)
     try:
         console.print(f"[bold]Building PR {pr_id}...[/bold]")
@@ -263,7 +261,7 @@ def review(
 
     Pipe the output to your own agent: ``havn pr review <id> --ai | claude``
     """
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.pr import build_review_prompt, get_latest_build, get_pr
 
     project_dir = _resolve_project(project_dir)
@@ -272,11 +270,9 @@ def review(
     if pr is None:
         console.print(f"[red]PR '{pr_id}' not found[/red]")
         raise typer.Exit(1)
-
-    db_path = project_dir / config.database.path
     build = None
-    if db_path.exists():
-        conn = connect(db_path)
+    if _warehouse_exists(config, project_dir):
+        conn = open_warehouse(config, project_dir)
         try:
             ensure_meta_table(conn)
             build = get_latest_build(conn, pr_id)
@@ -298,13 +294,12 @@ def merge(
     project_dir: Optional[Path] = typer.Option(None, "--project", "-p"),
 ) -> None:
     """Merge a PR into its base branch."""
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.pr import merge_pr
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir)
-    db_path = project_dir / config.database.path
-    conn = connect(db_path, project_dir=project_dir)
+    conn = open_warehouse(config, project_dir)
     ensure_meta_table(conn)
     try:
         result = merge_pr(project_dir, pr_id, user, conn)

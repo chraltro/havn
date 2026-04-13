@@ -48,8 +48,11 @@ def _update_seed_state(
 ) -> None:
     """Update the model state for a seed after loading."""
     conn.execute(
+        "DELETE FROM _havn.model_state WHERE model_path = ?", [seed_name]
+    )
+    conn.execute(
         """
-        INSERT OR REPLACE INTO _havn.model_state
+        INSERT INTO _havn.model_state
             (model_path, content_hash, upstream_hash, materialized_as, last_run_at, run_duration_ms, row_count)
         VALUES (?, ?, '', 'seed', current_timestamp, ?, ?)
         """,

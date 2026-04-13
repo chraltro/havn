@@ -9,7 +9,7 @@ from typing import Annotated, Optional
 import typer
 from rich.table import Table
 
-from havn.cli import _load_config, _resolve_project, app, console
+from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, console
 
 logger = logging.getLogger("havn.cli")
 
@@ -21,7 +21,7 @@ def run(
 ) -> None:
     """Run a single ingest or export script (.py or .dpnb notebook)."""
     from havn.config import load_project
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
     from havn.engine.runner import run_script
 
     project_dir = _resolve_project(project_dir)
@@ -47,8 +47,7 @@ def run(
         script_type = "script"
     console.print(f"[bold]Running {script_type}:[/bold]")
 
-    db_path = project_dir / config.database.path
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         result = run_script(conn, script_path, script_type)
         if result["status"] == "error":
@@ -64,7 +63,7 @@ def ingest(
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
     """Run all ingest scripts (or specific ones) from ingest/ directory."""
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
     from havn.engine.runner import run_scripts_in_dir
 
     project_dir = _resolve_project(project_dir)
@@ -76,8 +75,7 @@ def ingest(
         raise typer.Exit(1)
 
     console.print("[bold]Ingest:[/bold]")
-    db_path = project_dir / config.database.path
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         results = run_scripts_in_dir(conn, ingest_dir, "ingest", targets)
         errors = sum(1 for r in results if r["status"] == "error")
@@ -96,7 +94,7 @@ def export(
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
     """Run all export scripts (or specific ones) from export/ directory."""
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
     from havn.engine.runner import run_scripts_in_dir
 
     project_dir = _resolve_project(project_dir)
@@ -108,8 +106,7 @@ def export(
         raise typer.Exit(1)
 
     console.print("[bold]Export:[/bold]")
-    db_path = project_dir / config.database.path
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         results = run_scripts_in_dir(conn, export_dir, "export", targets)
         errors = sum(1 for r in results if r["status"] == "error")
@@ -133,7 +130,7 @@ def seed(
     Seeds are change-detected: only modified CSVs are reloaded.
     Use --force to reload everything.
     """
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
     from havn.engine.seeds import run_seeds
 
     project_dir = _resolve_project(project_dir)
@@ -148,8 +145,7 @@ def seed(
     env_label = f" [dim](env={config.active_environment})[/dim]" if config.active_environment else ""
     console.print(f"[bold]Loading seeds{env_label}:[/bold]")
 
-    db_path = project_dir / config.database.path
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         results = run_seeds(conn, seeds_dir, schema=schema, force=force)
         if results:
@@ -178,7 +174,7 @@ def transform(
     Supports incremental models, data quality assertions, auto-profiling,
     and parallel execution of independent models.
     """
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
     from havn.engine.transform import run_transform
 
     project_dir = _resolve_project(project_dir)
@@ -189,8 +185,7 @@ def transform(
     mode = "parallel" if parallel else "sequential"
     console.print(f"[bold]Transform[/bold] [dim]({mode})[/dim]:")
 
-    db_path = project_dir / config.database.path
-    conn = connect(db_path, memory_limit=config.database.memory_limit, threads=config.database.threads)
+    conn = open_warehouse(config, project_dir)
 
     # Register Python SQL macros (macros/ directory) so they're available in transforms
     macros_dir = project_dir / "macros"
@@ -282,7 +277,8 @@ def transform(
     try:
         results = run_transform(
             conn, transform_dir, targets=targets, force=force,
-            parallel=parallel, max_workers=workers, db_path=str(db_path),
+            parallel=parallel, max_workers=workers,
+            db_config=config.database,
             project_dir=project_dir, rewind_config=config.rewind, run_id=run_id,
         )
         if not results:
@@ -348,7 +344,7 @@ def stream(
     """Run a full stream: ingest -> transform -> export as defined in project.yml."""
     import time as _time
 
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
     from havn.engine.runner import run_scripts_in_dir
     from havn.engine.transform import run_transform
 
@@ -369,8 +365,7 @@ def stream(
         console.print(f"  [dim]retries: {stream_config.retries}, delay: {stream_config.retry_delay}s[/dim]")
     console.print()
 
-    db_path = project_dir / config.database.path
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     has_error = False
     start = _time.perf_counter()
 
@@ -615,17 +610,15 @@ def cdc(
     """
     from havn.config import load_project
     from havn.engine.cdc import get_cdc_status, reset_watermark
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
-    db_path = project_dir / config.database.path
-
-    if not db_path.exists():
+    if not _warehouse_exists(config, project_dir):
         console.print("[yellow]No warehouse database found. Run a pipeline first.[/yellow]")
         raise typer.Exit(1)
 
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         if action == "status":
             entries = get_cdc_status(conn, connector)

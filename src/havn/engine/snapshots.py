@@ -677,6 +677,7 @@ def restore_with_cascade(
     model_name: str,
     transform_dir: Path,
     db_path: str | None = None,
+    db_config: object | None = None,
 ) -> dict:
     """Restore a snapshot and re-run downstream models.
 
@@ -714,6 +715,7 @@ def restore_with_cascade(
             targets=downstream,
             force=True,
             db_path=db_path,
+            db_config=db_config,
         )
 
         # Capture snapshots for rebuilt downstream models

@@ -127,12 +127,11 @@ def restore_endpoint(request: Request, req: RestoreRequest, conn: DbConn) -> dic
     project_dir = _get_project_dir()
     config = _get_config()
     transform_dir = project_dir / "transform"
-    db_path = project_dir / config.database.path
 
     if req.cascade:
         result = restore_with_cascade(
             project_dir, conn, req.run_id, req.model_name, transform_dir,
-            db_path=str(db_path),
+            db_config=config.database,
         )
     else:
         result = restore_snapshot(project_dir, conn, req.run_id, req.model_name)

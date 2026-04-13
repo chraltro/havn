@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 import typer
 from rich.table import Table
 
-from havn.cli import _resolve_project, app, console
+from havn.cli import _resolve_project, _warehouse_exists, app, console
 
 
 # --- serve ---
@@ -91,14 +91,13 @@ def snapshot_create(
 ) -> None:
     """Create a named snapshot of the current project and data state."""
     from havn.config import load_project
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.snapshot import create_snapshot
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
-    db_path = project_dir / config.database.path
 
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         ensure_meta_table(conn)
         result = create_snapshot(conn, project_dir, name)
@@ -114,18 +113,16 @@ def snapshot_list(
 ) -> None:
     """List all snapshots."""
     from havn.config import load_project
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.snapshot import list_snapshots
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
-    db_path = project_dir / config.database.path
-
-    if not db_path.exists():
+    if not _warehouse_exists(config, project_dir):
         console.print("[yellow]No warehouse database found.[/yellow]")
         return
 
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         ensure_meta_table(conn)
         snapshots = list_snapshots(conn)
@@ -159,18 +156,16 @@ def snapshot_delete(
 ) -> None:
     """Delete a snapshot."""
     from havn.config import load_project
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.snapshot import delete_snapshot
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
-    db_path = project_dir / config.database.path
-
-    if not db_path.exists():
+    if not _warehouse_exists(config, project_dir):
         console.print("[red]No warehouse database found.[/red]")
         raise typer.Exit(1)
 
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         ensure_meta_table(conn)
         if delete_snapshot(conn, name):
@@ -294,12 +289,11 @@ def users_list(
     """List all users."""
     from havn.config import load_project
     from havn.engine.auth import list_users
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
-    db_path = project_dir / config.database.path
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         users = list_users(conn)
         if not users:
@@ -334,12 +328,11 @@ def users_create(
     """Create a new user."""
     from havn.config import load_project
     from havn.engine.auth import create_user
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
-    db_path = project_dir / config.database.path
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         user = create_user(conn, username, password, role)
         console.print(f"[green]User '{user['username']}' created with role '{user['role']}'[/green]")
@@ -358,12 +351,11 @@ def users_delete(
     """Delete a user."""
     from havn.config import load_project
     from havn.engine.auth import delete_user
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
-    db_path = project_dir / config.database.path
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         if delete_user(conn, username):
             console.print(f"[green]User '{username}' deleted.[/green]")

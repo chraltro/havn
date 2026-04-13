@@ -34,7 +34,7 @@ def _get_huey(project_dir: Path) -> SqliteHuey:
 def _run_stream_task(project_dir_str: str, stream_name: str) -> dict:
     """Execute a stream. Called by Huey as a task."""
     from havn.config import load_project
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
     from havn.engine.runner import run_scripts_in_dir
     from havn.engine.transform import run_transform
 
@@ -44,8 +44,7 @@ def _run_stream_task(project_dir_str: str, stream_name: str) -> dict:
     if not stream_config:
         return {"error": f"Stream '{stream_name}' not found"}
 
-    db_path = project_dir / config.database.path
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     step_results = []
 
     try:
@@ -179,7 +178,7 @@ class SchedulerThread(threading.Thread):
         # Restore last-fire timestamps for interval schedules from the database
         # so that "every 2 weeks" doesn't re-fire immediately after restart.
         try:
-            from havn.engine.database import connect as _connect
+            from havn.engine.database import open_warehouse as _open_warehouse
             from havn.engine.orchestration import (
                 discover_jobs as _discover_jobs,
                 ensure_job_runs_table as _ensure_runs,
@@ -187,8 +186,7 @@ class SchedulerThread(threading.Thread):
             )
 
             config_init = load_project(self.project_dir)
-            db_path_init = self.project_dir / config_init.database.path
-            conn_init = _connect(db_path_init, project_dir=self.project_dir)
+            conn_init = _open_warehouse(config_init, self.project_dir)
             try:
                 _ensure_runs(conn_init)
                 for job in _discover_jobs(self.project_dir):
@@ -234,7 +232,7 @@ class SchedulerThread(threading.Thread):
 
                 # --- Orchestration jobs ---
                 try:
-                    from havn.engine.database import connect
+                    from havn.engine.database import open_warehouse
                     from havn.engine.database import ensure_meta_table as _emt
                     from havn.engine.orchestration import (
                         discover_jobs,
@@ -290,8 +288,7 @@ class SchedulerThread(threading.Thread):
                             )
                             jconn = None
                             try:
-                                db_path = self.project_dir / config.database.path
-                                jconn = connect(db_path, project_dir=self.project_dir)
+                                jconn = open_warehouse(config, self.project_dir)
                                 _emt(jconn)
                                 ensure_job_runs_table(jconn)
                                 models = discover_models(self.project_dir / "transform")
@@ -374,11 +371,11 @@ class FileWatcher(threading.Thread):
                     console.print("[bold yellow]Watcher:[/bold yellow] Running transform...")
                     try:
                         from havn.config import load_project
-                        from havn.engine.database import connect
+                        from havn.engine.database import open_warehouse
                         from havn.engine.transform import run_transform
 
                         config = load_project(project_dir)
-                        conn = connect(project_dir / config.database.path)
+                        conn = open_warehouse(config, project_dir)
                         try:
                             run_transform(conn, project_dir / "transform")
                         finally:

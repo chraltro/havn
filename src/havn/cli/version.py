@@ -33,7 +33,7 @@ def version(
       havn version cleanup --keep 5
     """
     from havn.config import load_project
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
     from havn.engine.versioning import (
         cleanup_old_versions,
         create_version,
@@ -45,13 +45,11 @@ def version(
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
-    db_path = project_dir / config.database.path
-
-    if not db_path.exists():
+    if not _warehouse_exists(config, project_dir):
         console.print("[yellow]No warehouse database found. Run a pipeline first.[/yellow]")
         raise typer.Exit(1)
 
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         if action == "create":
             result = create_version(conn, project_dir, description=description or "")

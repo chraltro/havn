@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from havn.engine.database import ensure_meta_table
 from havn.server.deps import (
     DbConn,
     DbConnReadOnly,
@@ -18,8 +19,6 @@ from havn.server.deps import (
     _require_permission,
     _set_active_env,
     invalidate_config_cache,
-    connect,
-    ensure_meta_table,
 )
 
 router = APIRouter()
@@ -422,13 +421,28 @@ def clear_sample_project(request: Request) -> dict:
     # Close shared DB connection before deleting the file
     reset_shared_conn()
 
-    # Delete warehouse database
-    db_path = project_dir / config.database.path
-    if db_path.exists():
-        db_path.unlink()
-    wal_path = Path(str(db_path) + ".wal")
-    if wal_path.exists():
-        wal_path.unlink()
+    # Delete warehouse (backend-aware)
+    if config.database.backend == "duckdb":
+        db_path = project_dir / config.database.path
+        if db_path.exists():
+            db_path.unlink()
+        wal_path = Path(str(db_path) + ".wal")
+        if wal_path.exists():
+            wal_path.unlink()
+    else:
+        catalog = config.database.catalog or ""
+        if catalog and not catalog.startswith(("postgres:", "s3://")):
+            cp = project_dir / catalog if not Path(catalog).is_absolute() else Path(catalog)
+            if cp.exists():
+                cp.unlink()
+            wp = Path(str(cp) + ".wal")
+            if wp.exists():
+                wp.unlink()
+        data_path = config.database.data_path or ""
+        if data_path and not data_path.startswith("s3://"):
+            dp = project_dir / data_path if not Path(data_path).is_absolute() else Path(data_path)
+            if dp.exists():
+                shutil.rmtree(dp)
 
     # Delete snapshot/rewind data
     for meta_dir in [".havn", "_snapshots", "output"]:
