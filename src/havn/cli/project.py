@@ -7,7 +7,7 @@ from typing import Annotated, Optional
 
 import typer
 
-from havn.cli import _load_config, _resolve_project, app, console
+from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, console
 
 
 @app.command()
@@ -15,12 +15,14 @@ def init(
     name: Annotated[str, typer.Argument(help="Project name")] = "my-project",
     directory: Annotated[Optional[Path], typer.Option("--dir", "-d", help="Target directory")] = None,
     empty: Annotated[bool, typer.Option("--empty", help="Create empty project without sample data")] = False,
+    backend: Annotated[str, typer.Option("--backend", help="Warehouse backend: duckdb (default) or ducklake")] = "duckdb",
 ) -> None:
     """Scaffold a new data platform project."""
     from havn.templates import (
         CLAUDE_MD_TEMPLATE,
         COPILOT_INSTRUCTIONS_TEMPLATE,
         CURSORRULES_TEMPLATE,
+        PROJECT_YML_DUCKLAKE_TEMPLATE,
         PROJECT_YML_EMPTY_TEMPLATE,
         PROJECT_YML_TEMPLATE,
         SAMPLE_BRONZE_SQL,
@@ -38,6 +40,10 @@ def init(
         SAMPLE_SILVER_DAILY_SQL,
         SAMPLE_SILVER_EVENTS_SQL,
     )
+
+    if backend not in ("duckdb", "ducklake"):
+        console.print(f"[red]Invalid backend: {backend!r}. Must be 'duckdb' or 'ducklake'.[/red]")
+        raise typer.Exit(code=1)
     from havn.engine.secrets import ENV_TEMPLATE
 
     target = directory or Path.cwd() / name
@@ -50,12 +56,22 @@ def init(
     for d in dirs:
         (target / d).mkdir(parents=True, exist_ok=True)
 
-    if empty:
-        # Empty project: config files only, no sample data
+    # Write project.yml based on backend + empty flags
+    if backend == "ducklake":
+        (target / "project.yml").write_text(
+            PROJECT_YML_DUCKLAKE_TEMPLATE.format(
+                name=name, sample="false" if empty else "true"
+            )
+        )
+        (target / ".havn").mkdir(exist_ok=True)
+        (target / ".havn" / "data").mkdir(exist_ok=True)
+    elif empty:
         (target / "project.yml").write_text(PROJECT_YML_EMPTY_TEMPLATE.format(name=name))
     else:
-        # Sample project: full earthquake analytics pipeline
         (target / "project.yml").write_text(PROJECT_YML_TEMPLATE.format(name=name))
+
+    # Sample data scaffolding (skipped for --empty, regardless of backend)
+    if not empty:
         (target / "ingest" / "earthquakes.dpnb").write_text(SAMPLE_INGEST_NOTEBOOK)
         (target / "transform" / "bronze" / "earthquakes.sql").write_text(SAMPLE_BRONZE_SQL)
         (target / "transform" / "silver" / "earthquake_events.sql").write_text(SAMPLE_SILVER_EVENTS_SQL)
@@ -68,14 +84,16 @@ def init(
         (target / "seeds" / "magnitude_scale.csv").write_text(SAMPLE_SEED_CSV)
         (target / "contracts" / "quality.yml").write_text(SAMPLE_CONTRACTS_YML)
         (target / "notebooks" / "explore.dpnb").write_text(SAMPLE_EXPLORE_NOTEBOOK)
-        # Starter orchestration jobs (replaces the old streams: stanza)
+        # Starter orchestration jobs
         (target / "orchestration" / "full-refresh.yml").write_text(SAMPLE_FULL_REFRESH_JOB)
         (target / "orchestration" / "incremental.yml").write_text(SAMPLE_INCREMENTAL_JOB)
 
     # Config files (both empty and sample projects)
     (target / ".env").write_text(ENV_TEMPLATE)
     (target / ".gitignore").write_text(
-        "warehouse.duckdb\nwarehouse.duckdb.wal\n__pycache__/\n*.pyc\n.venv/\n.env\noutput/\n_snapshots/\n"
+        "warehouse.duckdb\nwarehouse.duckdb.wal\n"
+        ".havn/catalog.ducklake\n.havn/catalog.ducklake.wal\n.havn/data/\n"
+        "__pycache__/\n*.pyc\n.venv/\n.env\noutput/\n_snapshots/\n"
         ".havn/pr-build/\n"
     )
     # .havn/ holds shareable PR state. .havn/prs/ travels with the repo (commit
@@ -221,7 +239,8 @@ def status(
 ) -> None:
     """Show project health: git info, warehouse stats, last run."""
     from havn.config import load_project
-    from havn.engine.database import connect
+    from havn.engine.backends import create_backend
+    from havn.engine.database import open_warehouse
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
@@ -250,14 +269,35 @@ def status(
     except Exception:
         pass
 
+    # Backend info
+    backend = create_backend(config.database, project_dir=project_dir)
+    st = backend.status()
+    if st["backend"] == "duckdb":
+        size_mb = st.get("size_bytes", 0) / (1024 * 1024)
+        suffix = f" ({size_mb:,.1f} MB)" if st.get("size_bytes") else ""
+        console.print(f"[bold]backend:[/bold] duckdb — {st.get('path', '?')}{suffix}")
+    else:
+        enc = "on" if st.get("encrypted") else "off"
+        reachable = "yes" if st.get("catalog_reachable") else "no"
+        snap = st.get("snapshot_count", 0)
+        console.print(
+            f"[bold]backend:[/bold] ducklake — "
+            f"catalog={st.get('catalog', '?')}, snapshots={snap}, "
+            f"encryption={enc}, reachable={reachable}"
+        )
+        if not st.get("healthy") and st.get("error"):
+            console.print(f"  [red]error:[/red] {st['error']}")
+
     # Warehouse stats
-    db_path = project_dir / config.database.path
-    if db_path.exists():
-        conn = connect(db_path, read_only=True)
+    if backend.exists():
+        conn = open_warehouse(config, project_dir, read_only=True)
         try:
             rows = conn.execute(
                 "SELECT table_schema, table_name FROM information_schema.tables "
-                "WHERE table_schema NOT IN ('information_schema', '_havn')"
+                "WHERE table_schema NOT IN ('information_schema', '_havn') "
+                "AND table_schema NOT LIKE 'pg_%' "
+                "AND table_schema NOT LIKE '__ducklake%' "
+                "AND table_name NOT LIKE 'ducklake_%'"
             ).fetchall()
             total_tables = len(rows)
             total_rows = 0
@@ -418,7 +458,7 @@ def context(
 ) -> None:
     """Generate a project summary to paste into any AI assistant (ChatGPT, Claude, etc.)."""
     from havn.config import load_project
-    from havn.engine.database import connect
+    from havn.engine.database import open_warehouse
     from havn.engine.transform import discover_models
 
     project_dir = _resolve_project(project_dir)
@@ -467,9 +507,8 @@ def context(
                 lines.append("")
 
     # Warehouse tables
-    db_path = project_dir / config.database.path
-    if db_path.exists():
-        conn = connect(db_path, read_only=True)
+    if _warehouse_exists(config, project_dir):
+        conn = open_warehouse(config, project_dir, read_only=True)
         try:
             rows = conn.execute(
                 """
@@ -553,12 +592,18 @@ def backup(
     from havn.config import load_project
 
     config = load_project(project_dir)
-    db_path = project_dir / config.database.path
-
-    if not db_path.exists():
+    if config.database.backend != "duckdb":
+        console.print(
+            f"[red]havn backup only supports the 'duckdb' backend "
+            f"(current: '{config.database.backend}'). "
+            f"For DuckLake, use `havn migrate --to duckdb` to produce a portable file.[/red]"
+        )
+        raise typer.Exit(1)
+    if not _warehouse_exists(config, project_dir):
         console.print("[red]No warehouse database found. Nothing to backup.[/red]")
         raise typer.Exit(1)
 
+    db_path = project_dir / config.database.path
     try:
         entry = create_backup(
             project_dir, db_path,
@@ -597,8 +642,14 @@ def restore(
     from havn.config import load_project
 
     config = load_project(project_dir)
-    db_path = project_dir / config.database.path
+    if config.database.backend != "duckdb":
+        console.print(
+            f"[red]havn restore only supports the 'duckdb' backend "
+            f"(current: '{config.database.backend}').[/red]"
+        )
+        raise typer.Exit(1)
 
+    db_path = project_dir / config.database.path
     if db_path.exists():
         console.print(f"[yellow]Overwriting existing database: {db_path}[/yellow]")
 
@@ -698,13 +749,31 @@ def clear(
         raise typer.Abort()
 
     # Delete warehouse database
-    db_path = project_dir / config.database.path
-    if db_path.exists():
-        db_path.unlink()
-        console.print(f"  Deleted {config.database.path}")
-    wal_path = Path(str(db_path) + ".wal")
-    if wal_path.exists():
-        wal_path.unlink()
+    if config.database.backend == "duckdb":
+        db_path = project_dir / config.database.path
+        if db_path.exists():
+            db_path.unlink()
+            console.print(f"  Deleted {config.database.path}")
+        wal_path = Path(str(db_path) + ".wal")
+        if wal_path.exists():
+            wal_path.unlink()
+    else:
+        # DuckLake: remove catalog and data_path (if local)
+        catalog = config.database.catalog or ""
+        if catalog and not catalog.startswith(("postgres:", "s3://")):
+            cp = project_dir / catalog if not Path(catalog).is_absolute() else Path(catalog)
+            if cp.exists():
+                cp.unlink()
+                console.print(f"  Deleted {catalog}")
+            wp = Path(str(cp) + ".wal")
+            if wp.exists():
+                wp.unlink()
+        data_path = config.database.data_path or ""
+        if data_path and not data_path.startswith("s3://"):
+            dp = project_dir / data_path if not Path(data_path).is_absolute() else Path(data_path)
+            if dp.exists():
+                shutil.rmtree(dp)
+                console.print(f"  Deleted {data_path}")
 
     # Delete snapshot/rewind data
     for meta_dir in [".havn", "_snapshots", "output"]:

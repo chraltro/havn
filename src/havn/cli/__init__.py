@@ -52,6 +52,15 @@ def _load_config(project_dir: Path, env: str | None = None):
     return load_project(project_dir, env=env or _active_env)
 
 
+def _warehouse_exists(config, project_dir: Path) -> bool:
+    """Return True if the configured warehouse has been initialized.
+
+    Backend-aware replacement for checking `db_path.exists()`.
+    """
+    from havn.engine.backends import create_backend
+    return create_backend(config.database, project_dir=project_dir).exists()
+
+
 # Import submodules so they register their commands on `app`.
 # Order doesn't matter for registration, but keep alphabetical for clarity.
 from havn.cli import admin  # noqa: E402, F401
@@ -60,6 +69,7 @@ from havn.cli import diff  # noqa: E402, F401
 from havn.cli import env  # noqa: E402, F401
 from havn.cli import jobs  # noqa: E402, F401
 from havn.cli import macros  # noqa: E402, F401
+from havn.cli import migrate  # noqa: E402, F401
 from havn.cli import models  # noqa: E402, F401
 from havn.cli import pipeline  # noqa: E402, F401
 from havn.cli import pr  # noqa: E402, F401

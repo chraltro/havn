@@ -25,7 +25,7 @@ from typing import Any, Generator
 
 import duckdb
 
-from havn.engine.database import connect
+from havn.engine.backends.base import WarehouseBackend
 
 logger = logging.getLogger("havn.server")
 
@@ -45,19 +45,12 @@ class WriteQueue:
 
     def __init__(
         self,
-        db_path: str | Path,
-        project_dir: str | Path | None = None,
-        memory_limit: str | None = None,
-        threads: int | None = None,
+        backend: WarehouseBackend,
         maxsize: int = 50,
     ):
+        self._backend = backend
         self._queue: queue.Queue = queue.Queue(maxsize=maxsize)
-        self._conn = connect(
-            db_path,
-            memory_limit=memory_limit,
-            threads=threads,
-            project_dir=project_dir,
-        )
+        self._conn = backend.connect(read_only=False)
         self._thread = threading.Thread(target=self._run, daemon=True, name="havn-write-queue")
         self._thread.start()
 
@@ -146,16 +139,15 @@ class ReadPool:
     """Pool of read-only DuckDB connections (Linux/Mac).
 
     DuckDB supports unlimited concurrent readers.  This pool keeps a
-    fixed number of read-only connections and lends them out via a
-    context manager.
+    fixed number of read-only connections (from the backend) and lends
+    them out via a context manager.
     """
 
-    def __init__(self, db_path: str | Path, pool_size: int = 4):
-        self._db_path = str(db_path)
+    def __init__(self, backend: WarehouseBackend, pool_size: int = 4):
+        self._backend = backend
         self._pool: queue.Queue = queue.Queue()
         for _ in range(pool_size):
-            conn = duckdb.connect(self._db_path, read_only=True)
-            self._pool.put(conn)
+            self._pool.put(backend.connect(read_only=True))
 
     @contextmanager
     def connection(self) -> Generator[duckdb.DuckDBPyConnection, None, None]:
@@ -197,16 +189,21 @@ class SharedConnPool:
 
 
 def create_read_pool(
-    db_path: str | Path,
+    backend: WarehouseBackend,
     shared_conn: duckdb.DuckDBPyConnection,
     pool_size: int = 4,
 ) -> ReadPool | SharedConnPool:
-    """Create the appropriate read pool for the current platform."""
-    if sys.platform == "win32":
-        logger.info("Windows: using shared connection for reads (single-connection limit)")
+    """Create the appropriate read pool for the current platform and backend.
+
+    The Windows single-writer-per-file constraint only applies to the DuckDB
+    file backend. DuckLake opens a fresh in-memory DuckDB per connection and
+    ATTACHes the catalog, so multi-connection reads work on every platform.
+    """
+    if sys.platform == "win32" and backend.name == "duckdb":
+        logger.info("Windows + duckdb backend: using shared connection for reads")
         return SharedConnPool(shared_conn)
     try:
-        pool = ReadPool(db_path, pool_size)
+        pool = ReadPool(backend, pool_size)
         logger.info("Read pool: %d read-only connections", pool_size)
         return pool
     except Exception as e:

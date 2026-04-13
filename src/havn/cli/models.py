@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 import typer
 from rich.table import Table
 
-from havn.cli import _resolve_project, app, console
+from havn.cli import _resolve_project, _warehouse_exists, app, console
 
 
 # --- validate ---
@@ -27,15 +27,13 @@ def validate(
     import json as json_mod
 
     from havn.config import load_project
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.seeds import discover_seeds
     from havn.engine.transform import discover_models, validate_models
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
     transform_dir = project_dir / "transform"
-    db_path = project_dir / config.database.path
-
     models = discover_models(transform_dir)
     if not models:
         console.print("[yellow]No models found in transform/[/yellow]")
@@ -63,8 +61,8 @@ def validate(
         landing_schemas.add(src.schema.lower())
 
     conn = None
-    if db_path.exists():
-        conn = connect(db_path)
+    if _warehouse_exists(config, project_dir):
+        conn = open_warehouse(config, project_dir)
         ensure_meta_table(conn)
 
     try:
@@ -225,19 +223,17 @@ def debug(
     Use this to interactively debug transform failures.
     """
     from havn.config import load_project
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.notebook import generate_debug_notebook, save_notebook
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
     transform_dir = project_dir / "transform"
-    db_path = project_dir / config.database.path
-
-    if not db_path.exists():
+    if not _warehouse_exists(config, project_dir):
         console.print("[yellow]No warehouse database found. Run a pipeline first.[/yellow]")
         raise typer.Exit(1)
 
-    conn = connect(db_path)
+    conn = open_warehouse(config, project_dir)
     try:
         ensure_meta_table(conn)
 
@@ -315,14 +311,12 @@ def impact(
     import json as json_mod
 
     from havn.config import load_project
-    from havn.engine.database import connect, ensure_meta_table
+    from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.transform import discover_models, impact_analysis
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
     transform_dir = project_dir / "transform"
-    db_path = project_dir / config.database.path
-
     models = discover_models(transform_dir)
     model_map = {m.full_name: m for m in models}
 
@@ -339,8 +333,8 @@ def impact(
             raise typer.Exit(1)
 
     conn = None
-    if db_path.exists():
-        conn = connect(db_path)
+    if _warehouse_exists(config, project_dir):
+        conn = open_warehouse(config, project_dir)
         ensure_meta_table(conn)
 
     try:

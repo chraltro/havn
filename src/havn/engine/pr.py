@@ -214,8 +214,9 @@ def ensure_pr_builds_table(conn: duckdb.DuckDBPyConnection) -> None:
 
 def _save_build_record(conn: duckdb.DuckDBPyConnection, record: dict) -> None:
     ensure_pr_builds_table(conn)
+    conn.execute("DELETE FROM _havn.pr_builds WHERE id = ?", [record["id"]])
     conn.execute(
-        "INSERT OR REPLACE INTO _havn.pr_builds "
+        "INSERT INTO _havn.pr_builds "
         "(id, pr_id, branch_head, status, started_at, finished_at, duration_ms, "
         " data_diff, lineage_impact, contract_results, error) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",

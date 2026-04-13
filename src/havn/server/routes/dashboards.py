@@ -847,9 +847,10 @@ def query_widget(
     if cache_ttl > 0:
         ck = _cache_key(widget_id, req.filters, req.parameters)
         try:
+            conn.execute("DELETE FROM _havn.dashboard_cache WHERE cache_key = ?", [ck])
             conn.execute(
                 """
-                INSERT OR REPLACE INTO _havn.dashboard_cache
+                INSERT INTO _havn.dashboard_cache
                     (cache_key, result_json, row_count, cached_at, expires_at)
                 VALUES (?, ?, ?, current_timestamp, current_timestamp + INTERVAL ? SECOND)
                 """,
@@ -909,9 +910,10 @@ def query_batch(
             if cache_ttl > 0:
                 ck = _cache_key(w_id, req.filters, req.parameters)
                 try:
+                    conn.execute("DELETE FROM _havn.dashboard_cache WHERE cache_key = ?", [ck])
                     conn.execute(
                         """
-                        INSERT OR REPLACE INTO _havn.dashboard_cache
+                        INSERT INTO _havn.dashboard_cache
                             (cache_key, result_json, row_count, cached_at, expires_at)
                         VALUES (?, ?, ?, current_timestamp, current_timestamp + INTERVAL ? SECOND)
                         """,
