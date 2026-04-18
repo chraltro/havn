@@ -115,11 +115,15 @@ class FlushWorker:
     def __init__(
         self,
         *,
-        connection_factory: Callable[[], duckdb.DuckDBPyConnection],
+        connection_factory: Callable[[], duckdb.DuckDBPyConnection] | None = None,
+        shared_conn: duckdb.DuckDBPyConnection | None = None,
         flush_interval: float = 15.0,
         batch_size: int = 500,
     ) -> None:
+        if connection_factory is None and shared_conn is None:
+            raise ValueError("one of connection_factory or shared_conn is required")
         self._factory = connection_factory
+        self._shared = shared_conn
         self._interval = flush_interval
         self._batch_size = batch_size
         self._stop = threading.Event()
@@ -155,7 +159,7 @@ class FlushWorker:
         from havn.engine.resource_manager import get_resource_manager
 
         manager = get_resource_manager()
-        conn = self._factory()
+        conn, owns = self._acquire_conn()
         try:
             WebhookStaging.ensure(conn)
 
@@ -179,10 +183,18 @@ class FlushWorker:
                 self.stats.rows_flushed += total
                 return total
         finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            if owns:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    def _acquire_conn(self) -> tuple[duckdb.DuckDBPyConnection, bool]:
+        """Return (conn, owns_it). When ``owns_it`` is True the caller must close it."""
+        if self._shared is not None:
+            return self._shared, False
+        assert self._factory is not None  # guarded in __init__
+        return self._factory(), True
 
     def _flush_source(self, conn: duckdb.DuckDBPyConnection, source: str) -> int:
         """Move one batch for a single source into ``landing.<source>``."""
@@ -230,7 +242,7 @@ class FlushWorker:
 
     def purge_flushed(self, older_than_seconds: int = 3600) -> int:
         """Delete flushed rows older than ``older_than_seconds`` (housekeeping)."""
-        conn = self._factory()
+        conn, owns = self._acquire_conn()
         try:
             WebhookStaging.ensure(conn)
             res = conn.execute(
@@ -246,7 +258,8 @@ class FlushWorker:
             except Exception:
                 return 0
         finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            if owns:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
