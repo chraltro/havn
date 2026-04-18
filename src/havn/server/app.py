@@ -33,15 +33,44 @@ ACTIVE_ENV: str | None = None  # Set by CLI --env flag
 # Create the FastAPI application
 # ---------------------------------------------------------------------------
 
+_maintenance = None
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    """Server lifecycle hooks — shuts down streaming workers on exit."""
+    """Server lifecycle hooks.
+
+    On startup, start the DuckLake maintenance scheduler if the configured
+    backend is DuckLake (no-op for DuckDB).
+
+    On shutdown, stop the streaming flush worker and the maintenance loop.
+    """
+    global _maintenance
+    try:
+        from havn.engine.streaming.maintenance import MaintenanceScheduler
+        from havn.server.deps import _get_backend
+
+        backend = _get_backend()
+        _maintenance = MaintenanceScheduler(
+            connection_factory=lambda: backend.connect(),
+            backend_name=backend.name,
+        )
+        _maintenance.start()
+    except Exception:
+        _maintenance = None
+
     yield
+
     try:
         from havn.server.routes.streaming import shutdown_flush_worker
         shutdown_flush_worker()
     except Exception:
         pass
+    if _maintenance is not None:
+        try:
+            _maintenance.stop()
+        except Exception:
+            pass
 
 
 app = FastAPI(title="havn", version="0.2.5", lifespan=_lifespan)

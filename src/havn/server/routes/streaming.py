@@ -19,7 +19,7 @@ from fastapi.responses import Response
 
 from havn.engine.streaming.webhook import FlushWorker, append_event
 from havn.engine.utils import validate_identifier
-from havn.server.deps import DbConn, _get_backend, _require_permission
+from havn.server.deps import DbConnAutoCreate, _get_backend, _require_permission
 
 router = APIRouter()
 
@@ -39,12 +39,13 @@ def _get_flush_worker() -> FlushWorker:
         return _worker
     with _worker_lock:
         if _worker is None:
-            backend = _get_backend()
+            # Share the write-queue's connection so we respect DuckDB's
+            # single-writer constraint (the backend-new-conn approach would
+            # fail for DuckDB-backed local files).
+            from havn.server.deps import _get_write_queue
 
-            def factory():
-                return backend.connect(read_only=False)
-
-            _worker = FlushWorker(connection_factory=factory)
+            wq = _get_write_queue()
+            _worker = FlushWorker(shared_conn=wq.conn)
             _worker.start()
     return _worker
 
@@ -67,7 +68,7 @@ def shutdown_flush_worker() -> None:
 async def ingest_webhook(
     source: str,
     request: Request,
-    conn: DbConn,
+    conn: DbConnAutoCreate,
 ) -> Response:
     """Accept a single webhook event into the staging table.
 
@@ -99,10 +100,12 @@ async def ingest_webhook(
 
 
 @router.get("/api/streaming/webhook/status")
-def webhook_status(request: Request, conn: DbConn) -> dict:
+def webhook_status(request: Request) -> dict:
     _require_permission(request, "read")
     from havn.engine.streaming.webhook import WebhookStaging
+    from havn.server.deps import _get_write_queue
 
+    conn = _get_write_queue().conn
     WebhookStaging.ensure(conn)
     backlog = WebhookStaging.backlog(conn)
     worker = _worker
