@@ -181,33 +181,50 @@ def execute_model(
     model: SQLModel,
 ) -> tuple[int, int]:
     """Execute a single model. Returns (duration_ms, row_count)."""
-    if model.materialized == "incremental":
-        return _execute_incremental(conn, model)
+    from havn.engine.observability import ROWS_PROCESSED, TRANSFORM_DURATION
+    from havn.engine.resource_manager import get_resource_manager
 
-    conn.execute(f"CREATE SCHEMA IF NOT EXISTS {model.schema}")
+    manager = get_resource_manager()
+    with manager.acquire_sync("transform", f"model:{model.full_name}", conn=conn):
+        manager_task_register_cancel(manager, conn)
 
-    start = time.perf_counter()
+        if model.materialized == "incremental":
+            duration_ms, row_count = _execute_incremental(conn, model)
+        else:
+            conn.execute(f"CREATE SCHEMA IF NOT EXISTS {model.schema}")
+            start = time.perf_counter()
+            _drop_conflicting(conn, model.schema, model.name, model.materialized)
 
-    # Drop any conflicting object of a different type before creating
-    _drop_conflicting(conn, model.schema, model.name, model.materialized)
+            if model.materialized == "view":
+                ddl = f"CREATE OR REPLACE VIEW {model.full_name} AS\n{model.query}"
+            elif model.materialized == "table":
+                ddl = f"CREATE OR REPLACE TABLE {model.full_name} AS\n{model.query}"
+            else:
+                raise ValueError(f"Unknown materialization: {model.materialized}")
 
-    if model.materialized == "view":
-        ddl = f"CREATE OR REPLACE VIEW {model.full_name} AS\n{model.query}"
-    elif model.materialized == "table":
-        ddl = f"CREATE OR REPLACE TABLE {model.full_name} AS\n{model.query}"
-    else:
-        raise ValueError(f"Unknown materialization: {model.materialized}")
+            conn.execute(ddl)
+            duration_ms = int((time.perf_counter() - start) * 1000)
 
-    conn.execute(ddl)
-    duration_ms = int((time.perf_counter() - start) * 1000)
+            row_count = 0
+            if model.materialized == "table":
+                result = conn.execute(f"SELECT count(*) FROM {model.full_name}").fetchone()
+                row_count = result[0] if result else 0
 
-    # Get row count for tables
-    row_count = 0
-    if model.materialized == "table":
-        result = conn.execute(f"SELECT count(*) FROM {model.full_name}").fetchone()
-        row_count = result[0] if result else 0
+        TRANSFORM_DURATION.labels(schema=model.schema, status="success").observe(
+            duration_ms / 1000.0
+        )
+        ROWS_PROCESSED.labels(category="transform").inc(row_count)
+        return duration_ms, row_count
 
-    return duration_ms, row_count
+
+def manager_task_register_cancel(manager, conn: duckdb.DuckDBPyConnection) -> None:
+    """Wire the current resource-manager task to ``conn.interrupt()`` for cancel."""
+    from havn.engine.resource_manager import current_task
+
+    task = current_task()
+    if task is None:
+        return
+    manager.register_cancel(task.task_id, conn.interrupt)
 
 
 def _execute_single_model(
