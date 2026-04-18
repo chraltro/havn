@@ -24,7 +24,7 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "duckdb>=1.5.1",
+    "duckdb>=1.5.2",          # DuckLake 1.0 requires DuckDB 1.5.2+
     "numpy>=1.24",
     "typer>=0.15.0",
     "pyyaml>=6.0",
@@ -36,6 +36,9 @@ dependencies = [
     "uvicorn[standard]>=0.34.0",
     "huey>=2.5",
     "sqlglot>=26.0",
+    "prometheus_client>=0.20",
+    "structlog>=24.1",
+    "pyarrow>=18",
 ]
 
 [project.optional-dependencies]

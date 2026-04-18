@@ -49,7 +49,12 @@ class DuckLakeBackend:
         return p.as_posix()
 
     def _eager_install(self) -> None:
-        """Pre-install the DuckLake extension so the first real connect() is fast."""
+        """Pre-install the DuckLake extension so the first real connect() is fast.
+
+        DuckLake 1.0 (released April 2026) ships as a core DuckDB extension,
+        not a community one — plain ``INSTALL ducklake`` resolves against the
+        core repo. INSTALL is idempotent and upgrades in place.
+        """
         if self._eager_install_done:
             return
         try:
