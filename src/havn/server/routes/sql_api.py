@@ -26,7 +26,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from havn.engine.resource_manager import get_resource_manager
-from havn.server.deps import _get_write_queue, _require_permission
+from havn.server.deps import _get_backend, _get_write_queue, _require_permission
 
 logger = logging.getLogger("havn.sql_api")
 router = APIRouter()

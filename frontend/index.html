@@ -145,6 +145,37 @@
         outline: 2px solid var(--havn-accent, #3ECFB4);
         outline-offset: 2px;
       }
+
+      /* ── Resource panel ── */
+      .resource-panel { padding: 16px 20px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
+      .resource-panel-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+      .resource-panel-header h2 { font-size: 18px; font-weight: 600; }
+      .resource-panel-summary { color: var(--havn-text-dim, #8A94A7); font-size: 13px; }
+      .resource-error { background: #3b1212; color: #ffb4b4; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+      .resource-capacity-bar { display: flex; flex-direction: column; gap: 4px; }
+      .resource-capacity-bar-inner { display: flex; width: 100%; height: 10px; border-radius: 5px; overflow: hidden; background: var(--havn-border-light, #263044); }
+      .resource-capacity-slice { height: 100%; }
+      .resource-capacity-label { font-size: 12px; color: var(--havn-text-dim, #8A94A7); }
+      .resource-category-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+      .resource-category-card { padding: 12px; border: 1px solid var(--havn-border-light, #263044); border-radius: 8px; display: flex; flex-direction: column; gap: 8px; }
+      .resource-category-head { display: flex; align-items: center; gap: 8px; }
+      .resource-category-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+      .resource-category-name { flex: 1; text-transform: capitalize; font-weight: 500; }
+      .resource-category-active { font-size: 12px; color: var(--havn-text-dim, #8A94A7); font-variant-numeric: tabular-nums; }
+      .resource-category-utilization { background: var(--havn-border-light, #263044); height: 4px; border-radius: 2px; overflow: hidden; }
+      .resource-category-utilization-bar { height: 100%; transition: width 0.2s ease; }
+      .resource-category-dials { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+      .resource-category-dials label { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--havn-text-dim, #8A94A7); }
+      .resource-category-dials input { width: 84px; padding: 3px 6px; border: 1px solid var(--havn-border-light, #263044); background: var(--havn-bg, #0B0E14); color: var(--havn-text, #D0D6E0); border-radius: 4px; font-variant-numeric: tabular-nums; }
+      .resource-category-actions { display: flex; gap: 6px; }
+      .resource-category-actions button { flex: 1; padding: 4px 8px; font-size: 12px; border-radius: 4px; border: 1px solid var(--havn-border-light, #263044); background: var(--havn-bg-raised, #141923); color: var(--havn-text, #D0D6E0); cursor: pointer; }
+      .resource-section h3 { font-size: 14px; font-weight: 600; margin-bottom: 6px; color: var(--havn-text-dim, #8A94A7); }
+      .resource-task-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      .resource-task-table th, .resource-task-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--havn-border-light, #263044); }
+      .resource-task-table th { color: var(--havn-text-dim, #8A94A7); font-weight: 500; }
+      .resource-cancel { padding: 2px 6px; font-size: 11px; border-radius: 3px; border: 1px solid #7a3b3b; background: transparent; color: #ffb4b4; cursor: pointer; }
+      .resource-cancel:hover { background: #3b1212; }
+      .resource-empty { font-size: 12px; color: var(--havn-text-dim, #8A94A7); padding: 8px; }
     </style>
   </head>
   <body>
