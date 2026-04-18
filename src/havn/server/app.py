@@ -9,9 +9,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+
+from havn.logging_config import configure_logging
+
+configure_logging()
 
 # ---------------------------------------------------------------------------
 # Global state — set by CLI before starting uvicorn.
@@ -27,7 +33,18 @@ ACTIVE_ENV: str | None = None  # Set by CLI --env flag
 # Create the FastAPI application
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="havn", version="0.2.5")
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Server lifecycle hooks — shuts down streaming workers on exit."""
+    yield
+    try:
+        from havn.server.routes.streaming import shutdown_flush_worker
+        shutdown_flush_worker()
+    except Exception:
+        pass
+
+
+app = FastAPI(title="havn", version="0.2.5", lifespan=_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -119,6 +136,11 @@ from havn.server.routes.dashboards import router as dashboards_router  # noqa: E
 from havn.server.routes.jobs import router as jobs_router  # noqa: E402
 from havn.server.routes.pr import router as pr_router  # noqa: E402
 from havn.server.routes.backup import router as backup_router  # noqa: E402
+from havn.server.routes.prometheus import router as prometheus_router  # noqa: E402
+from havn.server.routes.resources import router as resources_router  # noqa: E402
+from havn.server.routes.sql_api import router as sql_api_router  # noqa: E402
+from havn.server.routes.export import router as export_router  # noqa: E402
+from havn.server.routes.streaming import router as streaming_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(files_router)
@@ -146,6 +168,11 @@ app.include_router(dashboards_router)
 app.include_router(jobs_router)
 app.include_router(pr_router)
 app.include_router(backup_router)
+app.include_router(prometheus_router)
+app.include_router(resources_router)
+app.include_router(sql_api_router)
+app.include_router(export_router)
+app.include_router(streaming_router)
 
 # Register WebSocket endpoints (can't use APIRouter for WebSocket)
 register_websocket(app)

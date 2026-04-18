@@ -188,6 +188,8 @@ class ProjectConfig(BaseModel):
     active_environment: str | None = None
     sources: list[SourceConfig] = Field(default_factory=list)
     exposures: list[ExposureConfig] = Field(default_factory=list)
+    resources: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    streaming: dict[str, Any] = Field(default_factory=dict)
     project_dir: Path = Field(default_factory=Path.cwd)
     _raw: dict[str, Any] = PrivateAttr(default_factory=dict)
 
