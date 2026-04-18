@@ -28,7 +28,9 @@ jobs:
         run: mkdocs build --site-dir _site/docs
 
       - name: Copy landing page to root
-        run: cp landing/index.html _site/index.html
+        run: |
+          cp landing/index.html _site/index.html
+          cp -r landing/screenshots _site/screenshots
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
