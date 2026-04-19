@@ -9,12 +9,12 @@ you know what's actually running.
 
 Four categories, each with independent memory, thread, and concurrency budgets:
 
-| Category   | Covers                                               |
-|------------|------------------------------------------------------|
-| transform  | SQL model builds                                     |
-| query      | ad-hoc SQL (Query panel, dashboards, `/v1/sql`, Flight) |
-| streaming  | webhook flush, CDC consumers, API pollers            |
-| system     | sentinel, diff, quality, backup, compaction          |
+| Category   | Covers                                                                |
+|------------|-----------------------------------------------------------------------|
+| transform  | SQL model builds                                                      |
+| query      | ad-hoc SQL (Query panel, dashboards, `/v1/sql`, Flight), notebooks    |
+| streaming  | webhook flush, CDC consumers, API pollers, **ingest scripts**         |
+| system     | sentinel, diff, quality, backup, compaction, **export scripts**       |
 
 Budgets are set in `project.yml` under the optional `resources:` key:
 
