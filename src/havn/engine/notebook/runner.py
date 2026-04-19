@@ -21,7 +21,27 @@ def run_notebook(
 
     Handles code, sql, and ingest cell types. Markdown cells are skipped.
     Returns the notebook with updated outputs and per-cell timing.
+
+    Every notebook run is acquired against the ResourceManager under the
+    ``query`` category — notebooks are interactive exploration and share
+    the same budget as ad-hoc queries.
     """
+    from havn.engine.resource_manager import current_task, get_resource_manager
+
+    manager = get_resource_manager()
+    label = f"notebook:{notebook.get('name', 'untitled')}"
+    with manager.acquire_sync("query", label, conn=conn):
+        task = current_task()
+        if task is not None:
+            manager.register_cancel(task.task_id, conn.interrupt)
+        return _run_notebook_body(conn, notebook, project_dir)
+
+
+def _run_notebook_body(
+    conn: duckdb.DuckDBPyConnection,
+    notebook: dict,
+    project_dir: Path | None = None,
+) -> dict:
     namespace: dict[str, Any] = {}
     total_ms = 0
     cell_results: list[dict] = []
