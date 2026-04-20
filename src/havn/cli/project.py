@@ -2,12 +2,132 @@
 
 from __future__ import annotations
 
+import re
+import shutil
+import tarfile
+import tempfile
+import urllib.error
+import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Annotated, Optional
+from urllib.parse import urlparse
 
 import typer
 
 from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, console
+
+
+def _resolve_template_url(ref: str) -> str:
+    """Resolve a template reference to a downloadable archive URL.
+
+    Accepted forms:
+      * A direct URL to a .zip or .tar.gz archive.
+      * GitHub shorthand: owner/repo -> main branch tarball.
+      * GitHub shorthand with branch: owner/repo@branch.
+    """
+    parsed = urlparse(ref)
+    if parsed.scheme in ("http", "https", "file"):
+        return ref
+    # GitHub shorthand: owner/repo or owner/repo@branch
+    match = re.fullmatch(r"([\w.-]+)/([\w.-]+)(?:@([\w./-]+))?", ref)
+    if match:
+        owner, repo, branch = match.group(1), match.group(2), match.group(3) or "main"
+        return f"https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.tar.gz"
+    raise typer.BadParameter(
+        f"Could not interpret --from value {ref!r}. "
+        "Expected an http(s) URL to .zip/.tar.gz, or GitHub shorthand like owner/repo[@branch]."
+    )
+
+
+def _download(url: str, dest: Path) -> None:
+    """Download url to dest. Raises typer.Exit on network errors."""
+    console.print(f"[dim]fetching {url}[/dim]")
+    req = urllib.request.Request(url, headers={"User-Agent": "havn-init"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp, dest.open("wb") as out:
+            shutil.copyfileobj(resp, out)
+    except urllib.error.HTTPError as e:
+        console.print(f"[red]download failed: HTTP {e.code} {e.reason}[/red]")
+        raise typer.Exit(code=1) from e
+    except Exception as e:
+        console.print(f"[red]download failed: {e}[/red]")
+        raise typer.Exit(code=1) from e
+
+
+def _extract_archive(archive_path: Path, staging: Path) -> Path:
+    """Extract archive into staging and return the project root inside.
+
+    If the archive has a single top-level directory (as GitHub archives do),
+    return that directory. Otherwise return staging itself.
+    """
+    name = archive_path.name.lower()
+    if name.endswith(".zip"):
+        with zipfile.ZipFile(archive_path) as zf:
+            # Basic path-traversal defence.
+            for member in zf.namelist():
+                if member.startswith("/") or ".." in Path(member).parts:
+                    raise typer.Exit(code=1)
+            zf.extractall(staging)
+    elif name.endswith((".tar.gz", ".tgz", ".tar")):
+        with tarfile.open(archive_path) as tf:
+            for member in tf.getmembers():
+                mpath = Path(member.name)
+                if member.name.startswith("/") or ".." in mpath.parts:
+                    raise typer.Exit(code=1)
+            tf.extractall(staging)  # noqa: S202 - members validated above
+    else:
+        console.print(f"[red]Unsupported archive type: {archive_path.name}[/red]")
+        console.print("[red]Expected .zip, .tar, or .tar.gz[/red]")
+        raise typer.Exit(code=1)
+
+    entries = [p for p in staging.iterdir() if not p.name.startswith(".")]
+    if len(entries) == 1 and entries[0].is_dir():
+        return entries[0]
+    return staging
+
+
+def _init_from_remote(name: str, directory: Optional[Path], url: str) -> None:
+    """Create a project by extracting a remote archive into the target directory."""
+    archive_url = _resolve_template_url(url)
+    target = directory or Path.cwd() / name
+
+    if target.exists() and any(target.iterdir()):
+        console.print(f"[red]Target {target} is not empty. Refusing to overwrite.[/red]")
+        raise typer.Exit(code=1)
+    target.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        # Decide suffix from URL, default to .tar.gz for GitHub shorthand.
+        suffix = ".tar.gz"
+        parsed = urlparse(archive_url)
+        low = parsed.path.lower()
+        if low.endswith(".zip"):
+            suffix = ".zip"
+        elif low.endswith((".tar.gz", ".tgz")):
+            suffix = ".tar.gz"
+        elif low.endswith(".tar"):
+            suffix = ".tar"
+        archive_path = tmp_path / f"template{suffix}"
+        _download(archive_url, archive_path)
+
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        project_root = _extract_archive(archive_path, staging)
+
+        for item in project_root.iterdir():
+            dest = target / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest)
+            else:
+                shutil.copy2(item, dest)
+
+    console.print(f"[green]Project '{name}' created at {target} from {url}[/green]")
+    readme = target / "README.md"
+    if readme.exists():
+        console.print()
+        console.print(f"[dim]See {readme} for next steps.[/dim]")
 
 
 @app.command()
@@ -16,8 +136,21 @@ def init(
     directory: Annotated[Optional[Path], typer.Option("--dir", "-d", help="Target directory")] = None,
     empty: Annotated[bool, typer.Option("--empty", help="Create empty project without sample data")] = False,
     backend: Annotated[str, typer.Option("--backend", help="Warehouse backend: duckdb (default) or ducklake")] = "duckdb",
+    from_url: Annotated[Optional[str], typer.Option("--from", help="Fetch a remote template (.zip or .tar.gz URL, or owner/repo for GitHub)")] = None,
 ) -> None:
-    """Scaffold a new data platform project."""
+    """Scaffold a new data platform project.
+
+    By default, creates a local project from built-in templates. Pass --from to
+    bootstrap from a remote archive instead — useful for case studies, course
+    starters, or team-shared templates.
+
+        havn init fjordbank --from https://example.com/template.tar.gz
+        havn init my-proj   --from user/repo                  # GitHub shorthand
+    """
+    if from_url is not None:
+        _init_from_remote(name=name, directory=directory, url=from_url)
+        return
+
     from havn.templates import (
         CLAUDE_MD_TEMPLATE,
         COPILOT_INSTRUCTIONS_TEMPLATE,
