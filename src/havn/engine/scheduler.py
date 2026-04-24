@@ -328,12 +328,19 @@ class SchedulerThread(threading.Thread):
 
 
 class FileWatcher(threading.Thread):
-    """Watches transform/ and ingest/ for changes, triggers rebuilds."""
+    """Watches transform/, ingest/, and macros/ for changes, triggers rebuilds.
 
-    def __init__(self, project_dir: Path, on_change=None):
+    The ``on_macro_change`` callback is invoked (with *project_dir*) whenever
+    a ``.py`` or ``.sql`` file inside ``macros/`` is saved.  The server layer
+    wires this to ``reregister_macros_on_shared_conns`` so live connections
+    pick up edits without a restart.
+    """
+
+    def __init__(self, project_dir: Path, on_change=None, on_macro_change=None):
         super().__init__(daemon=True, name="havn-watcher")
         self.project_dir = project_dir
         self.on_change = on_change
+        self.on_macro_change = on_macro_change
         self._stop_event = threading.Event()
 
     def stop(self) -> None:
@@ -344,30 +351,39 @@ class FileWatcher(threading.Thread):
         from watchdog.observers import Observer
 
         project_dir = self.project_dir
+        on_macro_change = self.on_macro_change
+        macro_logger = logging.getLogger("havn.macros")
 
         class Handler(FileSystemEventHandler):
             def __init__(self):
                 self._debounce: dict[str, float] = {}
 
-            def on_modified(self, event):
+            def _debounced(self, src_path: str) -> bool:
+                """Return True if this event should be processed (not a duplicate)."""
+                now = time.time()
+                last = self._debounce.get(src_path, 0)
+                if now - last < 2:
+                    return False
+                self._debounce[src_path] = now
+                return True
+
+            def _handle(self, event) -> None:
                 if event.is_directory:
                     return
                 path = Path(event.src_path)
                 if path.suffix not in (".sql", ".py"):
                     return
 
-                # Debounce: ignore events within 2 seconds of the last
-                now = time.time()
-                last = self._debounce.get(event.src_path, 0)
-                if now - last < 2:
+                if not self._debounced(event.src_path):
                     return
-                self._debounce[event.src_path] = now
 
                 rel = path.relative_to(project_dir)
                 logger.info("File changed: %s", rel)
                 console.print(f"[bold yellow]Watcher:[/bold yellow] {rel} changed")
 
-                if str(rel).startswith("transform"):
+                rel_str = str(rel)
+
+                if rel_str.startswith("transform"):
                     console.print("[bold yellow]Watcher:[/bold yellow] Running transform...")
                     try:
                         from havn.config import load_project
@@ -384,10 +400,35 @@ class FileWatcher(threading.Thread):
                     except Exception as e:
                         console.print(f"[bold red]Watcher:[/bold red] Transform failed: {e}")
 
+                elif rel_str.startswith("macros"):
+                    macro_logger.info("Macro file changed: %s — reloading", rel)
+                    console.print("[bold yellow]Watcher:[/bold yellow] Reloading macros...")
+                    if on_macro_change is not None:
+                        try:
+                            on_macro_change(project_dir)
+                            console.print(
+                                "[bold green]Watcher:[/bold green] Macros reloaded"
+                            )
+                        except Exception as e:
+                            console.print(
+                                f"[bold red]Watcher:[/bold red] Macro reload failed: {e}"
+                            )
+
+            def on_modified(self, event):
+                self._handle(event)
+
+            def on_created(self, event):
+                # New files in macros/ should trigger a reload just like edits.
+                self._handle(event)
+
         observer = Observer()
         handler = Handler()
 
-        watch_dirs = [project_dir / "transform", project_dir / "ingest"]
+        watch_dirs = [
+            project_dir / "transform",
+            project_dir / "ingest",
+            project_dir / "macros",
+        ]
         for d in watch_dirs:
             if d.exists():
                 observer.schedule(handler, str(d), recursive=True)

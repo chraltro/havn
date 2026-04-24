@@ -368,6 +368,21 @@ def _build_table_macro_sql(name: str, params: list[dict[str, str]], schema: dict
 
     Parameter names are double-quoted to handle SQL reserved words.
     """
+    internal_name = f"_{name}_json"
+    return _build_table_macro_sql_versioned(name, internal_name, params, schema)
+
+
+def _build_table_macro_sql_versioned(
+    public_name: str,
+    internal_json_name: str,
+    params: list[dict[str, str]],
+    schema: dict[str, str],
+) -> str:
+    """Build the SQL TABLE MACRO that wraps a versioned internal JSON UDF.
+
+    Uses ``CREATE OR REPLACE MACRO`` so re-registering the public name with a
+    different internal UDF (hot-reload) never conflicts.
+    """
     # Double-quote param names so DuckDB reserved words (limit, order, …) work.
     quoted_params = [f'"{p["name"]}"' for p in params]
     param_list = ", ".join(quoted_params)
@@ -376,12 +391,93 @@ def _build_table_macro_sql(name: str, params: list[dict[str, str]], schema: dict
         f"(value->>'$.{col}')::{dtype} AS {col}"
         for col, dtype in schema.items()
     )
-    internal_call = f"_{name}_json({param_list})"
+    internal_call = f"{internal_json_name}({param_list})"
 
     return (
-        f"CREATE OR REPLACE MACRO {name}({param_list}) AS TABLE\n"
+        f"CREATE OR REPLACE MACRO {public_name}({param_list}) AS TABLE\n"
         f"SELECT {cast_exprs}\n"
         f"FROM json_each({internal_call})"
+    )
+
+
+def _force_reload_macro_modules(macros_dir: Path) -> None:
+    """Remove previously cached module entries for macros/ so files are re-executed.
+
+    Two layers of caching must be cleared:
+    1. ``sys.modules`` — Python's import cache; without eviction, a second call
+       to ``_load_module`` returns the exact same module object.
+    2. ``__pycache__`` bytecode — Python skips source re-compilation when the
+       ``.pyc`` mtime matches the ``.py`` mtime.  On Windows (and fast SSDs
+       elsewhere), two writes within the same second produce identical mtimes,
+       so the bytecode cache is never invalidated.  Removing ``__pycache__``
+       forces a fresh compile on the next import.
+    """
+    import importlib
+    import shutil
+
+    prefix = "havn_macros."
+    stale = [k for k in sys.modules if k.startswith(prefix)]
+    for key in stale:
+        del sys.modules[key]
+
+    pycache = macros_dir / "__pycache__"
+    if pycache.is_dir():
+        try:
+            shutil.rmtree(pycache)
+        except Exception as exc:
+            logger.debug("Could not remove macro __pycache__: %s", exc)
+
+    importlib.invalidate_caches()
+
+
+# ---------------------------------------------------------------------------
+# Per-connection reload counter
+# ---------------------------------------------------------------------------
+# DuckDB 1.x does not support replacing a Python UDF registered via
+# create_function even after remove_function (a write-write catalog conflict
+# is raised on the same connection).  The workaround is to give every
+# registered Python callable a versioned internal name
+# (e.g. _udf_mask_email_3) and redirect the public name via a SQL
+# CREATE OR REPLACE MACRO alias.  The counter advances on each call to
+# register_macros, ensuring each reload gets a fresh internal name that
+# does not conflict with any previously registered UDF on the same
+# connection object.
+
+# id(conn) → int  — tracks how many times macros have been registered on each conn
+_conn_reload_counters: dict[int, int] = {}
+
+
+def _next_reload_id(conn: duckdb.DuckDBPyConnection) -> int:
+    """Return and increment the reload counter for this connection."""
+    conn_id = id(conn)
+    n = _conn_reload_counters.get(conn_id, 0)
+    _conn_reload_counters[conn_id] = n + 1
+    return n
+
+
+def _build_scalar_macro_sql(
+    public_name: str,
+    internal_name: str,
+    params: list[dict[str, str]],
+    return_type: str,
+) -> str:
+    """Build a SQL MACRO that proxies a Python scalar UDF.
+
+    Using CREATE OR REPLACE MACRO as the public face means re-registration
+    is always safe even when the internal Python UDF name changes.
+
+    Parameters are declared without type annotations (untyped syntax) so
+    this works on both in-memory databases and older on-disk storage
+    versions that do not support typed macro parameters.
+    """
+    # Parameter names are double-quoted to handle SQL reserved words.
+    # No type annotation — untyped MACRO params work on all storage versions.
+    quoted_params = [f'"{p["name"]}"' for p in params]
+    param_list = ", ".join(quoted_params)
+    call_args = ", ".join(f'"{p["name"]}"' for p in params)
+    return (
+        f"CREATE OR REPLACE MACRO {public_name}({param_list}) AS "
+        f"{internal_name}({call_args})"
     )
 
 
@@ -391,11 +487,26 @@ def register_macros(
 ) -> int:
     """Discover and register all macros from ``project_dir/macros/``.
 
+    Idempotent: calling this function multiple times on the same connection is
+    safe and reflects the current state of the ``macros/`` directory.
+
+    For Python UDFs (``@macro`` and ``@table_macro``) we use a versioned
+    internal UDF name (e.g. ``_udf_mask_email_3``) and expose a stable public
+    name via ``CREATE OR REPLACE MACRO``.  This sidesteps a DuckDB limitation
+    where a Python UDF cannot be replaced on the same connection object even
+    after ``remove_function``.
+
     Returns the number of macros registered.
     """
     macros_dir = project_dir / "macros"
     if not macros_dir.is_dir():
         return 0
+
+    # Evict stale module cache so edited .py files are re-imported fresh.
+    _force_reload_macro_modules(macros_dir)
+
+    # Reload generation: used to construct unique internal UDF names.
+    gen = _next_reload_id(conn)
 
     count = 0
 
@@ -405,14 +516,21 @@ def register_macros(
     for info in scalar_macros:
         try:
             param_types = [p["type"] for p in info.params]
+            # Give the internal UDF a versioned name so it never collides with
+            # a previously registered UDF on the same connection.
+            internal_name = f"_udf_{info.name}_{gen}"
             conn.create_function(
-                info.name,
+                internal_name,
                 info.func,
                 param_types,
                 info.return_type,
             )
+            # Redirect the stable public name via a SQL MACRO alias.
+            conn.execute(
+                _build_scalar_macro_sql(info.name, internal_name, info.params, info.return_type)
+            )
             count += 1
-            logger.debug("Registered Python macro: %s", info.name)
+            logger.debug("Registered Python macro: %s (internal: %s)", info.name, internal_name)
         except Exception as exc:
             logger.warning("Failed to register macro '%s': %s", info.name, exc)
 
@@ -428,10 +546,10 @@ def register_macros(
                 )
                 continue
 
-            # Step 1: register the internal JSON scalar UDF
+            # Step 1: register the internal JSON scalar UDF with a versioned name.
             param_types = [p["type"] for p in info.params]
             json_udf = _make_json_udf(info.func, len(info.params))
-            internal_name = f"_{info.name}_json"
+            internal_name = f"_udf_{info.name}_{gen}_json"
             conn.create_function(
                 internal_name,
                 json_udf,
@@ -439,19 +557,30 @@ def register_macros(
                 "VARCHAR",
             )
 
-            # Step 2: register the SQL TABLE MACRO wrapper
-            macro_sql = _build_table_macro_sql(info.name, info.params, schema)
+            # Step 2: register the SQL TABLE MACRO wrapper (CREATE OR REPLACE is idempotent).
+            macro_sql = _build_table_macro_sql_versioned(info.name, internal_name, info.params, schema)
             conn.execute(macro_sql)
 
             count += 1
-            logger.debug("Registered table macro: %s", info.name)
+            logger.debug("Registered table macro: %s (internal: %s)", info.name, internal_name)
         except Exception as exc:
             logger.warning("Failed to register table macro '%s': %s", info.name, exc)
 
-    # SQL macros
+    # SQL macros — CREATE OR REPLACE handles idempotency natively.
+    import re as _re
+
     for entry in _discover_sql_macros(macros_dir):
         try:
-            conn.execute(entry["sql"])
+            sql = entry["sql"]
+            # Ensure idempotency: promote CREATE MACRO → CREATE OR REPLACE MACRO
+            # so re-registration after a file edit doesn't fail.
+            sql = _re.sub(
+                r"\bCREATE\s+MACRO\b",
+                "CREATE OR REPLACE MACRO",
+                sql,
+                flags=_re.IGNORECASE,
+            )
+            conn.execute(sql)
             count += 1
             logger.debug("Registered SQL macro from %s", entry["source_file"])
         except Exception as exc:

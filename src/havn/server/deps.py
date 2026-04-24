@@ -267,6 +267,39 @@ def _get_read_pool() -> ReadPool | SharedConnPool:
     return _read_pool  # type: ignore[return-value]
 
 
+def reregister_macros_on_shared_conns(project_dir: Path) -> None:
+    """Re-register all macros on the live write connection after a macros/ file change.
+
+    Called by the FileWatcher's macro-change callback so that edits to
+    ``macros/*.py`` or ``macros/*.sql`` take effect immediately without
+    restarting the server.  The operation is submitted through the WriteQueue
+    so it executes on the single write thread, avoiding races with in-flight
+    queries on the same connection.
+    """
+    global _write_queue
+    wq = _write_queue
+    if wq is None:
+        # Server not yet initialised — nothing to refresh.
+        return
+
+    from havn.engine.macros import register_macros
+
+    macro_logger = logging.getLogger("havn.macros")
+
+    def _reload(conn, project_dir: Path) -> int:
+        count = register_macros(conn, project_dir)
+        macro_logger.info(
+            "Hot-reloaded macros from %s (%d registered)", project_dir / "macros", count
+        )
+        return count
+
+    try:
+        future = wq.submit(_reload, project_dir, _queue_timeout=10.0)
+        future.result(timeout=15.0)
+    except Exception as exc:
+        macro_logger.warning("Macro hot-reload failed: %s", exc)
+
+
 def reset_shared_conn() -> None:
     """Close and reset connections (e.g. after DB file changes)."""
     global _backend, _write_queue, _read_pool
