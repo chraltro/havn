@@ -1,4 +1,4 @@
-"""Tests for the Prometheus endpoint and structlog wiring."""
+"""Tests for the Prometheus endpoint and logging setup."""
 
 from __future__ import annotations
 
@@ -52,8 +52,8 @@ def test_health_alias_returns_ok(client):
     assert r.json() == {"status": "ok"}
 
 
-def test_structlog_config_idempotent():
-    from havn.logging_config import configure_logging
+def test_setup_logging_idempotent():
+    from havn import setup_logging
 
-    configure_logging()
-    configure_logging()  # should not error on second call
+    setup_logging()
+    setup_logging()  # should not duplicate handlers on second call
