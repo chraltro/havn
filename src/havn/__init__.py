@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 
 __version__ = "0.2.5"
 
-# Re-export the @macro decorator for user-facing macros
-from havn.engine.macros import macro  # noqa: F401
+# Re-export decorators for user-facing macros
+from havn.engine.macros import macro, table_macro  # noqa: F401
 
 
 _TEXT_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"

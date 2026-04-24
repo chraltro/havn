@@ -36,14 +36,21 @@ def macros(
     table.add_column("Source")
     table.add_column("Description", max_width=50)
 
+    _KIND_LABELS = {"scalar": "Scalar", "table": "Table", "sql": "SQL"}
+    _KIND_STYLES = {"scalar": "green", "table": "magenta", "sql": "cyan"}
+
     for m in items:
         params_str = ", ".join(
             f"{p['name']}: {p['type']}" for p in m.get("params", [])
         ) if m.get("params") else ""
         source = Path(m.get("source_file", "")).name if m.get("source_file") else ""
+        kind = m.get("kind", "")
+        label = _KIND_LABELS.get(kind, kind)
+        style = _KIND_STYLES.get(kind, "")
+        kind_cell = f"[{style}]{label}[/{style}]" if style else label
         table.add_row(
             m["name"],
-            m.get("kind", ""),
+            kind_cell,
             params_str,
             m.get("return_type", ""),
             source,
