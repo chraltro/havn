@@ -1220,4 +1220,86 @@ export const api = {
       `/prs/${encodeURIComponent(id)}/lineage-impact`,
     ),
   getPrStateStatus: () => request<PrStateStatus>("/prs/state-status"),
+
+  // Resources
+  getResources: () => request<ResourceSnapshot>("/resources"),
+  updateResourceAllocation: (body: ResourceAllocationUpdate) =>
+    request<{ updated: string; snapshot: ResourceSnapshot }>("/resources/allocation", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  cancelResourceTask: (taskId: string) =>
+    request(`/resources/cancel/${encodeURIComponent(taskId)}`, { method: "POST" }),
+  streamResources: (onSnapshot: (snap: ResourceSnapshot) => void, signal?: AbortSignal) => {
+    const url = `${BASE}/resources/stream`;
+    const headers: Record<string, string> = {};
+    const token = authToken;
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const ctrl = new AbortController();
+    if (signal) signal.addEventListener("abort", () => ctrl.abort());
+    (async () => {
+      try {
+        const resp = await fetch(url, { headers, signal: ctrl.signal });
+        if (!resp.body) return;
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buf.indexOf("\n\n")) !== -1) {
+            const frame = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            const line = frame.startsWith("data: ") ? frame.slice(6) : frame;
+            try {
+              onSnapshot(JSON.parse(line));
+            } catch {
+              /* ignore malformed frame */
+            }
+          }
+        }
+      } catch {
+        /* aborted or disconnected */
+      }
+    })();
+    return () => ctrl.abort();
+  },
 };
+
+export interface ResourceCategory {
+  name: string;
+  memory_gb: number;
+  threads: number;
+  max_concurrent: number;
+  active: number;
+  utilization: number;
+}
+
+export interface ResourceTask {
+  task_id: string;
+  category: string;
+  label: string;
+  started_at: number;
+  finished_at: number | null;
+  status: string;
+  rows_processed: number;
+  duration_ms: number;
+  error: string | null;
+}
+
+export interface ResourceSnapshot {
+  categories: ResourceCategory[];
+  active: ResourceTask[];
+  recent: ResourceTask[];
+  total_memory_gb: number;
+  total_active: number;
+}
+
+export interface ResourceAllocationUpdate {
+  category: "transform" | "query" | "streaming" | "system";
+  memory_gb: number;
+  threads: number;
+  max_concurrent: number;
+}

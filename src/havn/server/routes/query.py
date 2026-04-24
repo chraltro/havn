@@ -327,17 +327,29 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
 
         query_timeout = get_timeout_for_role(user.get("role", "viewer"))
         t_start = time.monotonic()
-        thread = threading.Thread(target=_exec_query, daemon=True)
-        thread.start()
-        thread.join(timeout=query_timeout)
 
-        if thread.is_alive():
-            conn.interrupt()
-            raise HTTPException(
-                408,
-                f"Query exceeded {query_timeout}s timeout. "
-                f"Try adding filters or a LIMIT clause.",
-            )
+        # Acquire a resource-manager slot so the query shows up in the UI's
+        # active-task list and counts toward the `query` concurrency budget.
+        from havn.engine.resource_manager import current_task as _current_task
+        from havn.engine.resource_manager import get_resource_manager as _get_rm
+
+        _manager = _get_rm()
+        with _manager.acquire_sync("query", f"sql:{sql[:60]}", conn=conn):
+            _task = _current_task()
+            if _task is not None:
+                _manager.register_cancel(_task.task_id, conn.interrupt)
+
+            thread = threading.Thread(target=_exec_query, daemon=True)
+            thread.start()
+            thread.join(timeout=query_timeout)
+
+            if thread.is_alive():
+                conn.interrupt()
+                raise HTTPException(
+                    408,
+                    f"Query exceeded {query_timeout}s timeout. "
+                    f"Try adding filters or a LIMIT clause.",
+                )
         duration_ms = int((time.monotonic() - t_start) * 1000)
 
         if query_error:

@@ -67,6 +67,7 @@ from havn.cli import admin  # noqa: E402, F401
 from havn.cli import connectors  # noqa: E402, F401
 from havn.cli import diff  # noqa: E402, F401
 from havn.cli import env  # noqa: E402, F401
+from havn.cli.flight import app as flight_app  # noqa: E402
 from havn.cli import jobs  # noqa: E402, F401
 from havn.cli import macros  # noqa: E402, F401
 from havn.cli import migrate  # noqa: E402, F401
@@ -81,3 +82,5 @@ from havn.cli import rewind  # noqa: E402, F401
 from havn.cli import sentinel  # noqa: E402, F401
 from havn.cli import streaming  # noqa: E402, F401
 from havn.cli import version  # noqa: E402, F401
+
+app.add_typer(flight_app, name="flight")
