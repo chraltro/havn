@@ -15,9 +15,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
-from havn.logging_config import configure_logging
+from havn import setup_logging
 
-configure_logging()
+setup_logging()
 
 # ---------------------------------------------------------------------------
 # Global state — set by CLI before starting uvicorn.

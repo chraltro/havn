@@ -1,0 +1,10 @@
+Collecting prometheus_client
+  Downloading prometheus_client-0.25.0-py3-none-any.whl.metadata (2.1 kB)
+Collecting pyarrow
+  Downloading pyarrow-24.0.0-cp310-cp310-win_amd64.whl.metadata (3.0 kB)
+Downloading prometheus_client-0.25.0-py3-none-any.whl (64 kB)
+Downloading pyarrow-24.0.0-cp310-cp310-win_amd64.whl (27.3 MB)
+   ---------------------------------------- 27.3/27.3 MB 21.6 MB/s  0:00:01
+Installing collected packages: pyarrow, prometheus_client
+
+Successfully installed prometheus_client-0.25.0 pyarrow-24.0.0
