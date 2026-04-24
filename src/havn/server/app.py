@@ -119,6 +119,7 @@ from havn.server.routes.dashboards import router as dashboards_router  # noqa: E
 from havn.server.routes.jobs import router as jobs_router  # noqa: E402
 from havn.server.routes.pr import router as pr_router  # noqa: E402
 from havn.server.routes.backup import router as backup_router  # noqa: E402
+from havn.server.routes.streaming import router as streaming_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(files_router)
@@ -146,6 +147,7 @@ app.include_router(dashboards_router)
 app.include_router(jobs_router)
 app.include_router(pr_router)
 app.include_router(backup_router)
+app.include_router(streaming_router)
 
 # Register WebSocket endpoints (can't use APIRouter for WebSocket)
 register_websocket(app)

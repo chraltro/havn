@@ -31,6 +31,11 @@ class RESTAPIConnector(BaseConnector):
         ParamSpec("timeout", "Request timeout in seconds", required=False, param_type="integer", min_value=1, max_value=300, default=30, example="30"),
         ParamSpec("pagination_key", "Key for next-page URL in response", required=False, example="next"),
         ParamSpec("since_param", "Query param for incremental fetch (e.g. since, updated_after)", required=False, example="since"),
+        # --- Polling config (used by APIPollConsumer) ---
+        ParamSpec("poll_interval_seconds", "Seconds between scheduled polls", required=False, param_type="integer", min_value=1, default=60, example="60"),
+        ParamSpec("watermark_field", "Response field whose max value becomes the next poll watermark (enables incremental mode)", required=False, example="updated_at"),
+        ParamSpec("watermark_param", "Query param sent with the watermark value (defaults to watermark_field)", required=False, example="since"),
+        ParamSpec("max_pages_per_poll", "Maximum pages to fetch per poll cycle", required=False, param_type="integer", min_value=1, default=10, example="10"),
     ]
 
     def test_connection(self, config: dict[str, Any]) -> dict:
