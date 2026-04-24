@@ -437,3 +437,87 @@ def reset_cdc_state(
 
     reset_watermark(conn, connector_name)
     return {"status": "reset", "connector": connector_name}
+
+
+# --- API poll streaming endpoints ---
+
+
+@router.get("/api/streaming/pollers")
+def list_streaming_pollers(
+    request: Request, conn: DbConnReadOnly
+) -> list[dict]:
+    """List all API poll sources with their current CDC state."""
+    _require_permission(request, "read")
+    from havn.engine.cdc import get_cdc_status
+
+    entries = get_cdc_status(conn)
+    project_dir = _get_project_dir()
+    pidfile_dir = project_dir / ".havn" / "streaming"
+
+    result = []
+    for entry in entries:
+        connector = entry["connector"]
+        pid: int | None = None
+        running = False
+        import os
+
+        pidfile = pidfile_dir / f"{connector}.pid"
+        if pidfile.exists():
+            try:
+                pid = int(pidfile.read_text().strip())
+                os.kill(pid, 0)
+                running = True
+            except (OSError, ValueError):
+                running = False
+
+        result.append(
+            {
+                "connector": connector,
+                "cdc_mode": entry["cdc_mode"],
+                "watermark": entry["watermark"],
+                "last_poll_at": entry["last_sync_at"],
+                "rows_synced": entry["rows_synced"],
+                "status": "running" if running else "idle",
+                "pid": pid if running else None,
+            }
+        )
+    return result
+
+
+@router.post("/api/streaming/pollers/{connector_name}/start")
+def trigger_poll_once(
+    request: Request, connector_name: str, conn: DbConn
+) -> dict:
+    """Trigger a one-shot poll for *connector_name* and return the result."""
+    _require_permission(request, "execute")
+    _validate_identifier(connector_name, "connector name")
+
+    project_dir = _get_project_dir()
+    from havn.config import load_project
+    from havn.engine.streaming.api_poll import APIPollConsumer
+
+    config = load_project(project_dir)
+    connections = config.connections or {}
+    if connector_name not in connections:
+        raise HTTPException(404, f"Connector '{connector_name}' not found in project.yml")
+
+    raw = connections[connector_name]
+    # ConnectionConfig wraps params in .params; fall back to model_dump for any future shape
+    if hasattr(raw, "params"):
+        connector_cfg: dict = raw.params
+    elif hasattr(raw, "model_dump"):
+        connector_cfg = raw.model_dump()
+    else:
+        connector_cfg = dict(raw or {})
+
+    consumer = APIPollConsumer(connector_name, connector_cfg, project_dir)
+    result = consumer.poll_once()
+
+    return {
+        "connector": connector_name,
+        "rows_inserted": result.rows_inserted,
+        "new_watermark": result.new_watermark,
+        "duration_ms": result.duration_ms,
+        "error": result.error,
+        "status": "error" if result.error else "ok",
+    }
