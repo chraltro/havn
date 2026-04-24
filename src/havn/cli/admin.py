@@ -42,7 +42,12 @@ def serve(
     # Start optional background services
     threads = []
     if watch_files:
-        watcher = FileWatcher(project_dir)
+        from havn.server.deps import reregister_macros_on_shared_conns
+
+        watcher = FileWatcher(
+            project_dir,
+            on_macro_change=reregister_macros_on_shared_conns,
+        )
         watcher.start()
         threads.append(watcher)
         console.print("[bold]File watcher enabled[/bold]")
