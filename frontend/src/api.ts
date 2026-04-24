@@ -1303,3 +1303,52 @@ export interface ResourceAllocationUpdate {
   threads: number;
   max_concurrent: number;
 }
+
+// ---- Macro types ----
+
+export interface MacroParam {
+  name: string;
+  type: string;
+}
+
+export interface MacroInfo {
+  name: string;
+  kind: "scalar" | "table" | "sql";
+  params: MacroParam[];
+  return_type: string;
+  docstring: string;
+  source_file: string;
+}
+
+let _macrosCache: MacroInfo[] | null = null;
+let _macrosCacheTime = 0;
+const _MACROS_TTL_MS = 5 * 60 * 1000;
+
+export async function getMacros(): Promise<MacroInfo[]> {
+  const now = Date.now();
+  if (_macrosCache && now - _macrosCacheTime < _MACROS_TTL_MS) {
+    return _macrosCache;
+  }
+  try {
+    const macros = await request<MacroInfo[]>("/macros");
+    _macrosCache = macros;
+    _macrosCacheTime = now;
+    return macros;
+  } catch {
+    return _macrosCache || [];
+  }
+}
+
+export function invalidateMacrosCache(): void {
+  _macrosCache = null;
+  _macrosCacheTime = 0;
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("focus", () => {
+    const now = Date.now();
+    if (_macrosCacheTime > 0 && now - _macrosCacheTime > _MACROS_TTL_MS) {
+      _macrosCache = null;
+    }
+  });
+}
