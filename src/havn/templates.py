@@ -410,14 +410,17 @@ ORDER BY total_events DESC
 SAMPLE_MACRO_GEO = '''\
 """Geospatial and seismology helpers -- callable directly in SQL.
 
-Usage in SQL:
-    SELECT classify_magnitude(6.5)            -- returns 'Strong'
+Scalar macros return a single value per row:
+    SELECT classify_magnitude(6.5)            -- returns \'Strong\'
     SELECT haversine_km(35.6, -117.6, 0, 0)   -- returns distance in km
+
+Table macros return multiple rows and are called with FROM:
+    SELECT * FROM magnitude_scale(\'Moderate\')  -- returns scale rows
 """
 
 import math
 
-from havn import macro
+from havn import macro, table_macro
 
 
 @macro
@@ -451,6 +454,30 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         * math.sin(dlon / 2) ** 2
     )
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+# Table macros return rows and are called with FROM in SQL.
+# Each dict in the returned list is one row; keys are column names.
+# schema= declares the column types so DuckDB knows the output shape.
+@table_macro(schema={"class": "VARCHAR", "min_mag": "DOUBLE", "max_mag": "DOUBLE"})
+def magnitude_scale(filter_class: str) -> list:
+    """Return magnitude scale rows, optionally filtered by class name.
+
+    Usage in SQL:
+        SELECT * FROM magnitude_scale(\'all\')
+        SELECT * FROM magnitude_scale(\'Strong\')
+    """
+    rows = [
+        {"class": "Minor",    "min_mag": 2.5, "max_mag": 3.9},
+        {"class": "Light",    "min_mag": 4.0, "max_mag": 4.9},
+        {"class": "Moderate", "min_mag": 5.0, "max_mag": 5.9},
+        {"class": "Strong",   "min_mag": 6.0, "max_mag": 6.9},
+        {"class": "Major",    "min_mag": 7.0, "max_mag": 7.9},
+        {"class": "Great",    "min_mag": 8.0, "max_mag": 9.9},
+    ]
+    if filter_class and filter_class != "all":
+        rows = [r for r in rows if r["class"] == filter_class]
+    return rows
 '''
 
 # ---------------------------------------------------------------------------

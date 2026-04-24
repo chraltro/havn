@@ -174,10 +174,32 @@ def mask_email(email: str) -> str:
 SELECT customer_id, mask_email(email) AS email FROM bronze.customers
 ```
 
-- `@macro` decorator marks functions for registration
+- `@macro` decorator marks functions for registration as scalar UDFs
 - Type hints map to DuckDB types (str→VARCHAR, int→INTEGER, float→DOUBLE, etc.)
 - `.sql` files in `macros/` with `CREATE MACRO` also supported
 - `havn macros` lists all available macros
+
+Use `@table_macro` for functions that return multiple rows (called with `FROM` in SQL):
+
+```python
+# macros/utils.py
+from havn import table_macro
+
+@table_macro(schema={"id": "INTEGER", "name": "VARCHAR", "active": "BOOLEAN"})
+def active_users(status: str) -> list:
+    """Return users filtered by status. Called as: SELECT * FROM active_users('all')"""
+    rows = [{"id": 1, "name": "Alice", "active": True}, {"id": 2, "name": "Bob", "active": False}]
+    if status != "all":
+        rows = [r for r in rows if r["active"] == (status == "active")]
+    return rows
+```
+```sql
+SELECT * FROM active_users('active')
+```
+
+- `schema=` declares output columns and DuckDB types — required (or inferred from first row)
+- Each dict in the returned list is one row; keys are column names
+- No pyarrow required — uses DuckDB's native SQL TABLE MACRO + json_each internally
 
 ### Python Script Convention
 

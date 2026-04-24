@@ -299,7 +299,7 @@ class TestListMacros:
         items = list_macros(tmp_path)
         assert len(items) == 2
 
-        py_item = next(i for i in items if i["kind"] == "python")
+        py_item = next(i for i in items if i["kind"] == "scalar")
         assert py_item["name"] == "to_lower"
         assert py_item["return_type"] == "VARCHAR"
         assert py_item["docstring"] == "Lowercase a string."
@@ -443,3 +443,228 @@ class TestTypeMapping:
         assert abs(r3[0] - 4.0) < 1e-9
 
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# @table_macro decorator
+# ---------------------------------------------------------------------------
+
+
+class TestTableMacroDecorator:
+    def test_captures_metadata(self) -> None:
+        from havn.engine.macros import TableMacroInfo, table_macro
+
+        @table_macro(schema={"id": "INTEGER", "name": "VARCHAR"})
+        def my_rows(status: str) -> list:
+            return [{"id": 1, "name": "Alice"}]
+
+        info: TableMacroInfo = getattr(my_rows, "__havn_table_macro__")
+        assert info.name == "my_rows"
+        assert info.schema == {"id": "INTEGER", "name": "VARCHAR"}
+        assert len(info.params) == 1
+        assert info.params[0] == {"name": "status", "type": "VARCHAR"}
+
+    def test_function_still_callable(self) -> None:
+        from havn.engine.macros import table_macro
+
+        @table_macro(schema={"n": "INTEGER"})
+        def numbers(count: int) -> list:
+            return [{"n": i} for i in range(count)]
+
+        assert numbers(3) == [{"n": 0}, {"n": 1}, {"n": 2}]
+
+    def test_no_schema_infers_from_first_row(self) -> None:
+        from havn.engine.macros import TableMacroInfo, table_macro
+
+        @table_macro()
+        def auto_schema() -> list:
+            return [{"x": 1, "y": "hello", "z": 3.14}]
+
+        info: TableMacroInfo = getattr(auto_schema, "__havn_table_macro__")
+        # Schema is resolved at registration time; stored as empty until then
+        assert isinstance(info.schema, dict)
+
+
+# ---------------------------------------------------------------------------
+# @table_macro registration with DuckDB
+# ---------------------------------------------------------------------------
+
+
+class TestTableMacroRegistration:
+    def test_register_and_query(self, tmp_path: Path) -> None:
+        from havn.engine.macros import register_macros
+
+        macros_dir = tmp_path / "macros"
+        _write_file(
+            macros_dir / "rows.py",
+            "from havn.engine.macros import table_macro\n\n"
+            "@table_macro(schema={'id': 'INTEGER', 'name': 'VARCHAR', 'active': 'BOOLEAN'})\n"
+            "def active_users(status: str) -> list:\n"
+            "    if status == 'active':\n"
+            "        return [{'id': 1, 'name': 'Alice', 'active': True}]\n"
+            "    return [{'id': 1, 'name': 'Alice', 'active': True},\n"
+            "            {'id': 2, 'name': 'Bob', 'active': False}]\n",
+        )
+
+        conn = duckdb.connect(":memory:")
+        count = register_macros(conn, tmp_path)
+        assert count == 1
+
+        rows = conn.execute("SELECT * FROM active_users('active') ORDER BY id").fetchall()
+        assert rows == [(1, "Alice", True)]
+
+        rows_all = conn.execute("SELECT * FROM active_users('all') ORDER BY id").fetchall()
+        assert rows_all == [(1, "Alice", True), (2, "Bob", False)]
+
+        conn.close()
+
+    def test_multiple_arguments(self, tmp_path: Path) -> None:
+        from havn.engine.macros import register_macros
+
+        macros_dir = tmp_path / "macros"
+        _write_file(
+            macros_dir / "multi.py",
+            "from havn.engine.macros import table_macro\n\n"
+            "@table_macro(schema={'val': 'INTEGER'})\n"
+            "def range_rows(start: int, stop: int) -> list:\n"
+            "    return [{'val': i} for i in range(start, stop)]\n",
+        )
+
+        conn = duckdb.connect(":memory:")
+        register_macros(conn, tmp_path)
+
+        rows = conn.execute("SELECT val FROM range_rows(3, 7) ORDER BY val").fetchall()
+        assert rows == [(3,), (4,), (5,), (6,)]
+        conn.close()
+
+    def test_explicit_schema_parameter(self, tmp_path: Path) -> None:
+        from havn.engine.macros import register_macros
+
+        macros_dir = tmp_path / "macros"
+        _write_file(
+            macros_dir / "typed.py",
+            "from havn.engine.macros import table_macro\n\n"
+            "@table_macro(schema={'score': 'DOUBLE', 'label': 'VARCHAR'})\n"
+            "def scores(prefix: str) -> list:\n"
+            "    return [{'score': 9.5, 'label': prefix + '_A'},\n"
+            "            {'score': 7.0, 'label': prefix + '_B'}]\n",
+        )
+
+        conn = duckdb.connect(":memory:")
+        register_macros(conn, tmp_path)
+
+        rows = conn.execute("SELECT label, score FROM scores('test') ORDER BY score").fetchall()
+        assert len(rows) == 2
+        assert rows[0][0] == "test_B"
+        assert abs(rows[0][1] - 7.0) < 1e-9
+        conn.close()
+
+    def test_large_result_streams_correctly(self, tmp_path: Path) -> None:
+        from havn.engine.macros import register_macros
+
+        macros_dir = tmp_path / "macros"
+        _write_file(
+            macros_dir / "big.py",
+            "from havn.engine.macros import table_macro\n\n"
+            "@table_macro(schema={'n': 'INTEGER', 'squared': 'INTEGER'})\n"
+            "def big_table(limit: int) -> list:\n"
+            "    return [{'n': i, 'squared': i * i} for i in range(limit)]\n",
+        )
+
+        conn = duckdb.connect(":memory:")
+        register_macros(conn, tmp_path)
+
+        count = conn.execute("SELECT COUNT(*) FROM big_table(1001)").fetchone()[0]
+        assert count == 1001
+
+        total = conn.execute("SELECT SUM(n) FROM big_table(1001)").fetchone()[0]
+        assert total == sum(range(1001))
+        conn.close()
+
+    def test_empty_result(self, tmp_path: Path) -> None:
+        from havn.engine.macros import register_macros
+
+        macros_dir = tmp_path / "macros"
+        _write_file(
+            macros_dir / "empty.py",
+            "from havn.engine.macros import table_macro\n\n"
+            "@table_macro(schema={'id': 'INTEGER'})\n"
+            "def no_rows(x: str) -> list:\n"
+            "    return []\n",
+        )
+
+        conn = duckdb.connect(":memory:")
+        register_macros(conn, tmp_path)
+
+        rows = conn.execute("SELECT * FROM no_rows('anything')").fetchall()
+        assert rows == []
+        conn.close()
+
+    def test_scalar_and_table_macros_coexist(self, tmp_path: Path) -> None:
+        from havn.engine.macros import register_macros
+
+        macros_dir = tmp_path / "macros"
+        _write_file(
+            macros_dir / "mixed.py",
+            "from havn.engine.macros import macro, table_macro\n\n"
+            "@macro\n"
+            "def shout(s: str) -> str:\n"
+            "    return s.upper() + '!'\n\n"
+            "@table_macro(schema={'word': 'VARCHAR'})\n"
+            "def words(sentence: str) -> list:\n"
+            "    return [{'word': w} for w in sentence.split()]\n",
+        )
+
+        conn = duckdb.connect(":memory:")
+        count = register_macros(conn, tmp_path)
+        assert count == 2
+
+        r = conn.execute("SELECT shout('hello')").fetchone()
+        assert r[0] == "HELLO!"
+
+        rows = conn.execute("SELECT word FROM words('hello world foo') ORDER BY word").fetchall()
+        assert rows == [("foo",), ("hello",), ("world",)]
+        conn.close()
+
+    def test_missing_schema_skipped_with_warning(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        import logging
+        from havn.engine.macros import register_macros
+
+        macros_dir = tmp_path / "macros"
+        # No schema, no default args, non-trivial body — inference will fail
+        _write_file(
+            macros_dir / "noschema.py",
+            "from havn.engine.macros import table_macro\n\n"
+            "@table_macro()\n"
+            "def bad_macro(x: str) -> list:\n"
+            "    raise RuntimeError('cannot probe')\n",
+        )
+
+        conn = duckdb.connect(":memory:")
+        with caplog.at_level(logging.WARNING, logger="havn.macros"):
+            count = register_macros(conn, tmp_path)
+
+        assert count == 0
+        conn.close()
+
+    def test_list_macros_includes_table_kind(self, tmp_path: Path) -> None:
+        from havn.engine.macros import list_macros
+
+        macros_dir = tmp_path / "macros"
+        _write_file(
+            macros_dir / "tab.py",
+            "from havn.engine.macros import table_macro\n\n"
+            "@table_macro(schema={'id': 'INTEGER', 'val': 'VARCHAR'})\n"
+            "def my_table(x: str) -> list:\n"
+            '    """Returns rows."""\n'
+            "    return [{'id': 1, 'val': x}]\n",
+        )
+
+        items = list_macros(tmp_path)
+        assert len(items) == 1
+        item = items[0]
+        assert item["kind"] == "table"
+        assert item["name"] == "my_table"
+        assert item["return_type"] == "TABLE"
+        assert item["schema"] == {"id": "INTEGER", "val": "VARCHAR"}
+        assert item["docstring"] == "Returns rows."
