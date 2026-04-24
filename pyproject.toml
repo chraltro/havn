@@ -37,7 +37,6 @@ dependencies = [
     "huey>=2.5",
     "sqlglot>=26.0",
     "prometheus_client>=0.20",
-    "structlog>=24.1",
     "pyarrow>=18",
 ]
 
