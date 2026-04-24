@@ -32,6 +32,7 @@ import ModelNotebookView from "./ModelNotebookView";
 import NewModelDialog from "./NewModelDialog";
 import GitReviewsPanel from "./GitReviewsPanel";
 import OrchestrationPanel from "./OrchestrationPanel";
+import ResourcePanel from "./ResourcePanel";
 import AgentSidebar from "./AgentSidebar";
 import CommandPalette from "./CommandPalette";
 import FocusTrap from "./FocusTrap";
@@ -54,7 +55,7 @@ const SECTIONS = [
   { id: "Overview", label: "Overview", tabs: [] },
   { id: "Develop", label: "Develop", tabs: ["Editor", "Data Sources", "Orchestration", "Git"] },
   { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "DAG", "Dashboards"] },
-  { id: "Observe", label: "Observe", tabs: ["Quality", "Sentinel", "Diff", "Runs"] },
+  { id: "Observe", label: "Observe", tabs: ["Quality", "Sentinel", "Diff", "Runs", "Resources"] },
   { id: "Configure", label: "Configure", tabs: ["Masking", "Wiki", "Docs", "Settings"] },
 ];
 
@@ -1228,6 +1229,7 @@ function AppContent() {
             {activeTab === "Masking" && <ErrorBoundary name="Masking"><MaskingPanel showConfirm={showConfirm} /></ErrorBoundary>}
             {activeTab === "Wiki" && <ErrorBoundary name="Wiki"><WikiPanel /></ErrorBoundary>}
             {activeTab === "Runs" && <ErrorBoundary name="Runs"><HistoryPanel onOpenFile={openFile} /></ErrorBoundary>}
+            {activeTab === "Resources" && <ErrorBoundary name="Resources"><ResourcePanel /></ErrorBoundary>}
             {activeTab === "Settings" && <ErrorBoundary name="Settings"><SettingsPanel onShowGuide={showGuide} showConfirm={showConfirm} /></ErrorBoundary>}
           </div>
 

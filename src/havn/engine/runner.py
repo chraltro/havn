@@ -170,6 +170,14 @@ def run_script(
 ) -> dict:
     """Run a single script (.py or .dpnb).
 
+    Every script execution is acquired against the ResourceManager so it
+    shows up in the UI's Active Tasks list and can be cancelled. The
+    category is picked from ``script_type``:
+
+    - ``ingest`` → ``streaming`` (bringing data in)
+    - ``export`` → ``system``    (writing data out / side-effects)
+    - anything else → ``system``
+
     Args:
         conn: DuckDB connection
         script_path: Path to the .py or .dpnb file
@@ -181,6 +189,34 @@ def run_script(
     Returns:
         Dict with keys: script, status, duration_ms, log_output, error
     """
+    from havn.engine.resource_manager import current_task, get_resource_manager
+
+    category = "streaming" if script_type == "ingest" else "system"
+    manager = get_resource_manager()
+    label = f"{script_type}:{script_path.name}"
+    with manager.acquire_sync(category, label, conn=conn):
+        task = current_task()
+        if task is not None:
+            manager.register_cancel(task.task_id, conn.interrupt)
+        return _run_script_body(
+            conn,
+            script_path,
+            script_type=script_type,
+            timeout=timeout,
+            use_circuit_breaker=use_circuit_breaker,
+            pipeline_run_id=pipeline_run_id,
+        )
+
+
+def _run_script_body(
+    conn: duckdb.DuckDBPyConnection,
+    script_path: Path,
+    script_type: str = "ingest",
+    timeout: int = SCRIPT_TIMEOUT_SECONDS,
+    use_circuit_breaker: bool = True,
+    pipeline_run_id: str | None = None,
+) -> dict:
+    """Inner implementation — unchanged script-execution logic."""
     ensure_meta_table(conn)
 
     # --- Circuit breaker guard ---
