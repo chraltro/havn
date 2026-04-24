@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from "react";
 import MonacoEditor, { loader } from "@monaco-editor/react";
 import { useTheme } from "./ThemeProvider";
 import { COLOR_THEMES } from "./themes";
-import { api } from "./api";
+import { api, getMacros } from "./api";
 
 // ---------------------------------------------------------------------------
 // Custom Monaco themes derived from havn COLOR_THEMES
@@ -135,6 +135,31 @@ async function getColumnsCache(schema, table) {
     info = null;
   }
   return info;
+}
+
+// Cache for macro metadata
+let macrosCache = null;
+let macrosCacheTime = 0;
+
+async function getMacrosCache() {
+  const now = Date.now();
+  if (macrosCache && now - macrosCacheTime < 5 * 60 * 1000) return macrosCache;
+  try {
+    macrosCache = await getMacros();
+    macrosCacheTime = now;
+  } catch {
+    macrosCache = macrosCache || [];
+  }
+  return macrosCache;
+}
+
+function buildMacroSignature(macro) {
+  const paramStr = (macro.params || []).map((p) => `${p.name}: ${p.type}`).join(", ");
+  if (macro.kind === "table") {
+    return `${macro.name}(${paramStr}) -> TABLE`;
+  }
+  const ret = macro.return_type || "VARCHAR";
+  return `${macro.name}(${paramStr}) -> ${ret}`;
 }
 
 // Register SQL hover + completion providers once when Monaco loads
@@ -313,6 +338,37 @@ loader.init().then((monaco) => {
         return { suggestions };
       }
 
+      // 4) Macro completions — always offered when no other context matched
+      const macros = await getMacrosCache();
+      if (macros.length > 0) {
+        const wordMatch = textBefore.match(/(\w+)$/);
+        const partial = wordMatch ? wordMatch[1].toLowerCase() : "";
+        const suggestions = [];
+        for (const macro of macros) {
+          if (!macro.name.toLowerCase().startsWith(partial)) continue;
+          const sig = buildMacroSignature(macro);
+          const isTable = macro.kind === "table";
+          const kindLabel = isTable ? "[T] " : "[S] ";
+          suggestions.push({
+            label: macro.name,
+            kind: isTable
+              ? monaco.languages.CompletionItemKind.Method
+              : monaco.languages.CompletionItemKind.Function,
+            detail: kindLabel + sig,
+            documentation: { value: macro.docstring || sig },
+            insertText: `${macro.name}($0)`,
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            range: {
+              startLineNumber: position.lineNumber,
+              startColumn: position.column - partial.length,
+              endLineNumber: position.lineNumber,
+              endColumn: position.column,
+            },
+          });
+        }
+        if (suggestions.length > 0) return { suggestions };
+      }
+
       return { suggestions: [] };
     },
   });
@@ -323,6 +379,22 @@ loader.init().then((monaco) => {
       const line = model.getLineContent(position.lineNumber);
       const word = model.getWordAtPosition(position);
       if (!word) return null;
+
+      // Check if the hovered word is a known macro
+      const macros = await getMacrosCache();
+      const macroMatch = macros.find((m) => m.name === word.word);
+      if (macroMatch) {
+        const sig = buildMacroSignature(macroMatch);
+        const kindLabel = macroMatch.kind === "table" ? "table macro" : macroMatch.kind === "sql" ? "SQL macro" : "scalar macro";
+        const lines = [`**${sig}** *(${kindLabel})*`];
+        if (macroMatch.docstring) {
+          lines.push("", macroMatch.docstring);
+        }
+        return {
+          range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
+          contents: [{ value: lines.join("\n") }],
+        };
+      }
 
       // Detect schema.table pattern around cursor
       let schema = null;
