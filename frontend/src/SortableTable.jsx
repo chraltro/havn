@@ -78,6 +78,25 @@ function inferColumnType(rows, colIndex) {
   return TYPE_TEXT;
 }
 
+// Map a DB type string ("VARCHAR", "BIGINT", "TIMESTAMP", ...) to the
+// formatting category. The DB type is authoritative when supplied — without
+// this, a VARCHAR column of numeric-looking strings (IDs, phone numbers,
+// ZIP codes) gets thousands-separator formatting because the data sample
+// passes !isNaN(Number(s)).
+function dbTypeToCategory(dbType) {
+  if (!dbType) return null;
+  const t = String(dbType).toUpperCase().trim();
+  if (/^(BIGINT|INT8|INTEGER|INT4|INT|SIGNED|SMALLINT|INT2|SHORT|TINYINT|INT1|UBIGINT|UINTEGER|UINT|USMALLINT|UTINYINT|HUGEINT|UHUGEINT|FLOAT|FLOAT4|REAL|DOUBLE|FLOAT8)$/.test(t))
+    return TYPE_NUMBER;
+  if (/^DECIMAL|^NUMERIC/.test(t)) return TYPE_NUMBER;
+  if (/^BOOL(EAN)?$/.test(t)) return TYPE_BOOL;
+  if (/^TIMESTAMP|^DATETIME$|^DATE$|^TIME/.test(t)) return TYPE_DATE;
+  // Anything text-shaped (VARCHAR, TEXT, CHAR, STRING, UUID, ENUM) — and
+  // anything we don't recognize — is treated as text so we don't apply
+  // numeric formatting to it.
+  return TYPE_TEXT;
+}
+
 function inferTypeDisplay(rows, colIndex) {
   for (let i = 0; i < Math.min(rows.length, 20); i++) {
     const v = rows[i]?.[colIndex];
@@ -248,8 +267,11 @@ export default function SortableTable({
   }, [columns, rows, columnTypes]);
 
   const colTypes = useMemo(() => {
-    return columns.map((_, i) => inferColumnType(rows, i));
-  }, [columns, rows]);
+    return columns.map((_, i) => {
+      const fromDb = columnTypes && dbTypeToCategory(columnTypes[i]);
+      return fromDb || inferColumnType(rows, i);
+    });
+  }, [columns, rows, columnTypes]);
 
   /* ─── derived: summary row (sum for numeric, count for text) ─── */
   const summaryRow = useMemo(() => {
@@ -498,7 +520,17 @@ export default function SortableTable({
   }, [effectiveOrder, pinnedLeft, pinnedRight, columnWidths, columns]);
 
   const useVirtual = sortedRows.length > VIRTUAL_THRESHOLD && !groupTree;
-  const hasFixedWidths = columnWidths !== null;
+  // Virtualized rendering puts the header in one <table> and the body rows
+  // in a separate <table>. Browsers compute auto column widths from each
+  // table's own content, so the two tables drift apart and headers stop
+  // lining up over the data. Force tableLayout: fixed (with a default width
+  // when the user hasn't resized) for the virtual path so both tables share
+  // the same column geometry.
+  const hasFixedWidths = columnWidths !== null || useVirtual;
+  const fixedWidths = useMemo(
+    () => columnWidths || columns.map(() => 150),
+    [columnWidths, columns],
+  );
   const showSelectCol = selectable === true;
 
   /* ─── group toggle ─── */
@@ -539,8 +571,8 @@ export default function SortableTable({
       ...S.th,
       cursor: "pointer",
       userSelect: "none",
-      width: columnWidths ? columnWidths[ci] : undefined,
-      minWidth: columnWidths ? columnWidths[ci] : undefined,
+      width: hasFixedWidths ? fixedWidths[ci] : undefined,
+      minWidth: hasFixedWidths ? fixedWidths[ci] : undefined,
       position: pinInfo ? "sticky" : "sticky",
       top: 0,
       left: pinInfo?.side === "left" ? pinInfo.offset : undefined,
@@ -687,8 +719,8 @@ export default function SortableTable({
       color: condBg ? condBg : undefined,
       fontWeight: condBg ? 600 : undefined,
       transition: isCopied ? "background-color 0.5s" : undefined,
-      width: columnWidths ? columnWidths[ci] : undefined,
-      minWidth: columnWidths ? columnWidths[ci] : undefined,
+      width: hasFixedWidths ? fixedWidths[ci] : undefined,
+      minWidth: hasFixedWidths ? fixedWidths[ci] : undefined,
       position: pinInfo ? "sticky" : undefined,
       left: pinInfo?.side === "left" ? pinInfo.offset : undefined,
       right: pinInfo?.side === "right" ? pinInfo.offset : undefined,

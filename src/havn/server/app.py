@@ -48,11 +48,17 @@ async def _lifespan(app: FastAPI):
     global _maintenance
     try:
         from havn.engine.streaming.maintenance import MaintenanceScheduler
-        from havn.server.deps import _get_backend
+        from havn.engine.write_queue import cursor_for
+        from havn.server.deps import _get_backend, _get_shared_conn
 
         backend = _get_backend()
+        # Reuse the shared write connection: DuckLake with a local-file
+        # catalog rejects a second ATTACH from the same process, so a
+        # fresh backend.connect() inside the scheduler thread fails. The
+        # maintenance ops are catalog writes; running them on a cursor of
+        # the shared write conn is both correct and conflict-free.
         _maintenance = MaintenanceScheduler(
-            connection_factory=lambda: backend.connect(),
+            connection_factory=lambda: cursor_for(_get_shared_conn()),
             backend_name=backend.name,
         )
         _maintenance.start()
@@ -73,7 +79,7 @@ async def _lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="havn", version="0.2.5", lifespan=_lifespan)
+app = FastAPI(title="havn", version="0.2.6", lifespan=_lifespan)
 
 app.add_middleware(
     CORSMiddleware,

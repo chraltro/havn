@@ -56,15 +56,15 @@ _DANGEROUS_FUNCTIONS_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Block access to the internal metadata schema
-_INTERNAL_SCHEMA_RE = re.compile(r'\b_havn\b', re.IGNORECASE)
-
-
 def _validate_query_sql(sql: str) -> None:
     """Reject SQL that is not a safe read-only query.
 
-    Raises HTTPException(403) if the SQL contains forbidden statements,
-    dangerous file-access functions, or references to _havn.
+    Raises HTTPException(403) if the SQL contains forbidden statements
+    or dangerous file-access functions. Reads against the ``_havn``
+    metadata schema are allowed; the ``_FORBIDDEN_STATEMENT_RE`` already
+    blocks any DDL/DML against it, and exposing the introspection tables
+    as read-only is consistent with how Databricks/Snowflake show
+    ``information_schema``.
     """
     stripped = sql.strip().rstrip(";").strip()
 
@@ -78,12 +78,6 @@ def _validate_query_sql(sql: str) -> None:
         raise HTTPException(
             403,
             "File-access functions (read_csv, read_parquet, etc.) are not allowed through the query interface.",
-        )
-
-    if _INTERNAL_SCHEMA_RE.search(stripped):
-        raise HTTPException(
-            403,
-            "Access to _havn schema is not allowed through the query interface.",
         )
 
 
@@ -213,9 +207,10 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
 
     # SHOW MASKING POLICIES
     if re.match(r'^\s*SHOW\s+MASKING\s+POLIC', sql_stripped, re.IGNORECASE | re.DOTALL):
-        from havn.server.deps import _get_backend
         from havn.engine.masking import ensure_masking_table
-        conn_rw = _get_backend().connect(read_only=False)
+        from havn.engine.write_queue import cursor_for
+        from havn.server.deps import _get_shared_conn
+        conn_rw = cursor_for(_get_shared_conn())
         try:
             ensure_masking_table(conn_rw)
             policies = list_policies(conn_rw)
@@ -238,9 +233,10 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
         if method not in ('hash', 'redact', 'null', 'partial'):
             return {"columns": ["error"], "rows": [["Invalid method. Use: hash, redact, null, partial"]], "row_count": 1, "truncated": False}
         exempted = [r.strip() for r in exempt_str.split(',')] if exempt_str else ['admin']
-        from havn.server.deps import _get_backend
         from havn.engine.masking import ensure_masking_table
-        conn_rw = _get_backend().connect(read_only=False)
+        from havn.engine.write_queue import cursor_for
+        from havn.server.deps import _get_shared_conn
+        conn_rw = cursor_for(_get_shared_conn())
         try:
             ensure_masking_table(conn_rw)
             policy = create_policy(conn_rw, schema_name=schema, table_name=table, column_name=column, method=method, exempted_roles=exempted)
@@ -252,9 +248,10 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
     drop_match = re.match(r'^\s*DROP\s+MASKING\s+POLICY\s+([\w-]+)\s*$', sql_stripped, re.IGNORECASE | re.DOTALL)
     if drop_match:
         policy_id = drop_match.group(1)
-        from havn.server.deps import _get_backend
         from havn.engine.masking import ensure_masking_table
-        conn_rw = _get_backend().connect(read_only=False)
+        from havn.engine.write_queue import cursor_for
+        from havn.server.deps import _get_shared_conn
+        conn_rw = cursor_for(_get_shared_conn())
         try:
             ensure_masking_table(conn_rw)
             deleted = delete_policy(conn_rw, policy_id)
@@ -311,12 +308,14 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
 
                 result = conn.execute(wrapped)
                 columns = [desc[0] for desc in result.description]
+                column_types = [str(desc[1]) for desc in result.description]
                 if effective_limit is not None:
                     rows = result.fetchmany(effective_limit)
                 else:
                     rows = result.fetchall()
                 query_result["data"] = {
                     "columns": columns,
+                    "column_types": column_types,
                     "rows": [[_serialize(v) for v in row] for row in rows],
                     "truncated": effective_limit is not None and len(rows) == effective_limit,
                     "offset": req.offset,
@@ -372,9 +371,10 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
         # Log slow queries
         if duration_ms >= _SLOW_QUERY_THRESHOLD_MS:
             try:
-                from havn.server.deps import _get_backend
                 from havn.engine.database import ensure_meta_table
-                conn_rw = _get_backend().connect(read_only=False)
+                from havn.engine.write_queue import cursor_for
+                from havn.server.deps import _get_shared_conn
+                conn_rw = cursor_for(_get_shared_conn())
                 try:
                     ensure_meta_table(conn_rw)
                     conn_rw.execute(
@@ -401,29 +401,37 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
 def list_tables(
     request: Request, conn: DbConnReadOnly, schema: str | None = None
 ) -> list[dict]:
-    """List warehouse tables and views."""
+    """List warehouse tables and views.
+
+    Excludes ``information_schema`` and the ``_havn`` metadata schema so
+    users only see their own data and the backend's queryable system
+    tables (e.g. DuckLake's ``main.ducklake_*`` bookkeeping). Tables in
+    a non-default catalog (DuckLake's ``__ducklake_metadata_warehouse``)
+    are returned with the catalog prefixed onto the schema field, so
+    a SELECT generated from the click handler is correctly qualified
+    (``SELECT * FROM __ducklake_metadata_warehouse.main.ducklake_column``).
+    """
     _require_permission(request, "read")
+    # information_schema views don't list themselves in
+    # information_schema.tables (chicken-and-egg with the SQL spec), so we
+    # UNION in their rows from duckdb_views() to make them browseable.
+    base_sql = """
+        SELECT table_schema AS schema_label, table_name, table_type
+        FROM information_schema.tables
+        WHERE table_catalog = current_database()
+        UNION ALL
+        SELECT DISTINCT schema_name, view_name, 'VIEW'
+        FROM duckdb_views()
+        WHERE schema_name = 'information_schema'
+    """
     if schema:
         _validate_identifier(schema, "schema")
         rows = conn.execute(
-            """
-            SELECT table_schema, table_name, table_type
-            FROM information_schema.tables
-            WHERE table_schema NOT IN ('information_schema', '_havn')
-              AND table_schema = ?
-            ORDER BY table_schema, table_name
-            """,
+            f"SELECT * FROM ({base_sql}) WHERE schema_label = ? ORDER BY 1, 2",
             [schema],
         ).fetchall()
     else:
-        rows = conn.execute(
-            """
-            SELECT table_schema, table_name, table_type
-            FROM information_schema.tables
-            WHERE table_schema NOT IN ('information_schema', '_havn')
-            ORDER BY table_schema, table_name
-            """
-        ).fetchall()
+        rows = conn.execute(f"SELECT * FROM ({base_sql}) ORDER BY 1, 2").fetchall()
     return [{"schema": r[0], "name": r[1], "type": r[2]} for r in rows]
 
 
@@ -432,18 +440,46 @@ def describe_table(
     request: Request, schema: str, table: str, conn: DbConnReadOnly
 ) -> dict:
     """Get column info for a table."""
+    from havn.server.deps import _validate_schema_label
+
     _require_permission(request, "read")
-    _validate_identifier(schema, "schema")
+    catalog, schema_name = _validate_schema_label(schema)
     _validate_identifier(table, "table")
-    cols = conn.execute(
-        """
-        SELECT column_name, data_type, is_nullable
-        FROM information_schema.columns
-        WHERE table_schema = ? AND table_name = ?
-        ORDER BY ordinal_position
-        """,
-        [schema, table],
-    ).fetchall()
+    if catalog is None:
+        cols = conn.execute(
+            """
+            SELECT column_name, data_type, is_nullable
+            FROM information_schema.columns
+            WHERE table_catalog = current_database()
+              AND table_schema = ? AND table_name = ?
+            ORDER BY ordinal_position
+            """,
+            [schema_name, table],
+        ).fetchall()
+    else:
+        cols = conn.execute(
+            """
+            SELECT column_name, data_type, is_nullable
+            FROM information_schema.columns
+            WHERE table_catalog = ? AND table_schema = ? AND table_name = ?
+            ORDER BY ordinal_position
+            """,
+            [catalog, schema_name, table],
+        ).fetchall()
+    if not cols and schema_name == "information_schema":
+        # information_schema.columns doesn't describe its own views; fall
+        # back to duckdb_columns(). Don't filter by database_name — DuckDB
+        # reports info_schema under 'system' even when current_database()
+        # is something else (e.g. 'warehouse' on DuckLake).
+        cols = conn.execute(
+            """
+            SELECT column_name, data_type, CASE WHEN is_nullable THEN 'YES' ELSE 'NO' END
+            FROM duckdb_columns()
+            WHERE schema_name = ? AND table_name = ?
+            ORDER BY column_index
+            """,
+            [schema_name, table],
+        ).fetchall()
     return {
         "schema": schema,
         "name": table,
@@ -463,13 +499,18 @@ def sample_table(
     offset: int = 0,
 ) -> dict:
     """Get sample rows from a table with pagination."""
+    from havn.server.deps import _validate_schema_label
+
     user = _require_permission(request, "read")
-    _validate_identifier(schema, "schema")
+    catalog, schema_name = _validate_schema_label(schema)
     _validate_identifier(table, "table")
     limit = max(1, min(limit, 100_000))
     offset = max(0, offset)
     try:
-        quoted = f'"{schema}"."{table}"'
+        quoted = (
+            f'"{catalog}"."{schema_name}"."{table}"' if catalog
+            else f'"{schema_name}"."{table}"'
+        )
         result = conn.execute(f"SELECT * FROM {quoted} LIMIT {limit} OFFSET {offset}")
         columns = [desc[0] for desc in result.description]
         rows = [[_serialize(v) for v in row] for row in result.fetchall()]
@@ -492,17 +533,37 @@ def profile_table(
     request: Request, schema: str, table: str, conn: DbConnReadOnly
 ) -> dict:
     """Get column-level statistics for a table."""
+    from havn.server.deps import _validate_schema_label
+
     user = _require_permission(request, "read")
-    _validate_identifier(schema, "schema")
+    catalog, schema_name = _validate_schema_label(schema)
     _validate_identifier(table, "table")
     try:
-        quoted = f'"{schema}"."{table}"'
+        quoted = (
+            f'"{catalog}"."{schema_name}"."{table}"' if catalog
+            else f'"{schema_name}"."{table}"'
+        )
         row_count = conn.execute(f"SELECT COUNT(*) FROM {quoted}").fetchone()[0]
-        cols = conn.execute(
-            "SELECT column_name, data_type FROM information_schema.columns "
-            "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
-            [schema, table],
-        ).fetchall()
+        if catalog is None:
+            cols = conn.execute(
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_catalog = current_database() "
+                "  AND table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+                [schema_name, table],
+            ).fetchall()
+        else:
+            cols = conn.execute(
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_catalog = ? AND table_schema = ? AND table_name = ? "
+                "ORDER BY ordinal_position",
+                [catalog, schema_name, table],
+            ).fetchall()
+        if not cols and schema_name == "information_schema":
+            cols = conn.execute(
+                "SELECT column_name, data_type FROM duckdb_columns() "
+                "WHERE schema_name = ? AND table_name = ? ORDER BY column_index",
+                [schema_name, table],
+            ).fetchall()
 
         profiles = []
         for col_name, col_type in cols:
@@ -589,8 +650,12 @@ def get_autocomplete(request: Request, conn: DbConnReadOnly) -> dict:
         """
         SELECT table_schema, table_name
         FROM information_schema.tables
-        WHERE table_schema NOT IN ('information_schema', '_havn')
-        ORDER BY table_schema, table_name
+        WHERE table_catalog = current_database()
+        UNION ALL
+        SELECT DISTINCT schema_name, view_name
+        FROM duckdb_views()
+        WHERE schema_name = 'information_schema'
+        ORDER BY 1, 2
         """
     ).fetchall()
 
@@ -598,8 +663,12 @@ def get_autocomplete(request: Request, conn: DbConnReadOnly) -> dict:
         """
         SELECT table_schema, table_name, column_name, data_type
         FROM information_schema.columns
-        WHERE table_schema NOT IN ('information_schema', '_havn')
-        ORDER BY table_schema, table_name, ordinal_position
+        WHERE table_catalog = current_database()
+        UNION ALL
+        SELECT DISTINCT schema_name, table_name, column_name, data_type
+        FROM duckdb_columns()
+        WHERE schema_name = 'information_schema'
+        ORDER BY 1, 2
         """
     ).fetchall()
 

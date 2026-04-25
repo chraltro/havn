@@ -301,20 +301,41 @@ Run `havn transform` to build it.
 
 ## MemPalace (Project Memory)
 
-This repo has MemPalace configured -- a local, searchable memory system over the codebase. It's registered as an MCP server (`mempalace`) and provides tools for searching past context without re-reading files.
+This repo is indexed by MemPalace — 6,823 drawers across 7 rooms (`src`, `frontend`, `testing`, `documentation`, `landing`, `general`, `design`), wing `havn`. Registered as an MCP server (`mempalace`); tools auto-load at session start. Palace data lives in `~/.mempalace/` (outside the repo). The repo-local `mempalace.yaml` + `entities.json` are gitignored.
 
-**When to use it:** Use mempalace search as a first step when you need to find where something lives, understand how a feature works, or look up design decisions -- especially for broad "where/why" questions that span multiple files. Search with the most direct keyword from the question (e.g., if asked about masking, search "masking" -- don't over-elaborate the query).
+### Use it actively
 
-**MCP tools available:** Use the mempalace MCP tools (search, wake-up, etc.) when available. These are loaded at session start.
+**Before you Grep, Glob, or Read to figure out "where does X live?" or "how does Y work?" — search the palace first.** It is hybrid semantic + BM25 + cross-reference, built for exactly these queries and orders of magnitude cheaper than loading many files.
 
-**CLI fallback** (if MCP tools aren't loaded):
+1. **Session start:** call `mempalace_status` once to see the palace overview, then `mempalace_wake-up` when you need the ~800-token L0/L1 grounding bundle.
+2. **"Where is the X implementation?"** → `mempalace_search "X"` (keep the query short and literal — the retriever does the expansion). Add `wing: "havn"`, and `room: "src"` / `"frontend"` / `"testing"` when you know the area. The returned drawers contain the code verbatim; you usually don't need to Read the file afterwards.
+3. **"How does X interact with Y?"** → search for the concept, then follow `mempalace_traverse` / `mempalace_follow_tunnels` on the returned drawers to walk the cross-reference graph.
+4. **Design decisions, rationale, past incidents** → use `mempalace_kg_query` for structured facts; `mempalace_search` for prose (READMEs, `docs/`, `docs/internal/`).
+5. **Recording what you learn:** when you discover something non-obvious during a task (a gotcha, a non-intuitive dependency, a fix rationale), call `mempalace_kg_add` so the next session doesn't rediscover it. When a fact becomes wrong, `mempalace_kg_invalidate` the old one.
+
+### After non-trivial changes
+
+Re-mine so the palace reflects reality. It's incremental (SHA256-keyed, only re-chunks changed files):
 ```bash
-mempalace search "query"        # semantic search across all indexed files
-mempalace wake-up               # load core project context (~800 tokens)
-mempalace status                # show what's been indexed
+mempalace mine .
+```
+Do this after large refactors, new features, or whenever `git diff --stat` shows many files touched. Small edits can wait.
+
+### CLI fallback (MCP unavailable)
+
+```bash
+mempalace search "query"                     # semantic + BM25
+mempalace search "query" --wing havn         # scope to this repo
+mempalace wake-up                            # ~800-token grounding
+mempalace status                             # drawer/room counts
+mempalace mine .                             # re-index changed files
 ```
 
-**What's indexed:** 7,571 drawers across 8 rooms: engine, server, cli, wiki, frontend, landing, documentation, general. Re-mine after major changes with `mempalace mine .`
+### Guardrails
+
+- Search results are a starting point, not the final truth. **Verify against the current code** before recommending a function, flag, or file path — the palace can lag real-time edits by one mine cycle.
+- Keep queries short and use the repo's own vocabulary (e.g. `"masking rewriter"`, not `"SQL query rewriting for PII redaction"`). Over-paraphrased queries miss.
+- If the first query misses, try: (a) a shorter variant, (b) adding `room` scope, (c) switching to an exact symbol/filename string. Don't try five variants of the same paraphrase.
 
 ## Code Style
 

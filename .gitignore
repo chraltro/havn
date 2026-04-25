@@ -8,9 +8,11 @@ build/
 *.duckdb
 *.duckdb.wal
 my-project/
+my-proj/
 node_modules/
 frontend/dist/
 .pytest_cache/
+.benchmark-cache/
 .env
 
 # LLM/agent artifacts
@@ -38,3 +40,4 @@ skills-lock.json
 entities.json
 mempalace.yaml
 .mempalace/
+test-project/

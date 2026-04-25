@@ -377,13 +377,15 @@ def _build_table_macro_sql_versioned(
     internal_json_name: str,
     params: list[dict[str, str]],
     schema: dict[str, str],
+    temp: bool = False,
 ) -> str:
     """Build the SQL TABLE MACRO that wraps a versioned internal JSON UDF.
 
     Uses ``CREATE OR REPLACE MACRO`` so re-registering the public name with a
-    different internal UDF (hot-reload) never conflicts.
+    different internal UDF (hot-reload) never conflicts. When ``temp`` is
+    True, emits ``CREATE OR REPLACE TEMP MACRO`` — required on DuckLake,
+    which rejects persistent ``CREATE MACRO`` in its catalog.
     """
-    # Double-quote param names so DuckDB reserved words (limit, order, …) work.
     quoted_params = [f'"{p["name"]}"' for p in params]
     param_list = ", ".join(quoted_params)
 
@@ -393,8 +395,9 @@ def _build_table_macro_sql_versioned(
     )
     internal_call = f"{internal_json_name}({param_list})"
 
+    kind = "TEMP MACRO" if temp else "MACRO"
     return (
-        f"CREATE OR REPLACE MACRO {public_name}({param_list}) AS TABLE\n"
+        f"CREATE OR REPLACE {kind} {public_name}({param_list}) AS TABLE\n"
         f"SELECT {cast_exprs}\n"
         f"FROM json_each({internal_call})"
     )
@@ -455,28 +458,53 @@ def _next_reload_id(conn: duckdb.DuckDBPyConnection) -> int:
     return n
 
 
+# Connections (by id) that have already had macros registered.  We use this
+# to make register_macros() idempotent so multiple call sites during startup
+# don't fight DuckLake's "function already exists" catalog rule. Hot-reload
+# clears the entry for a conn so the next call goes through.
+_conn_macros_registered: set[int] = set()
+
+
+# Strong references to every Python function we have ever handed to
+# ``conn.create_function``.  DuckDB's UDF storage on the DuckLake backend
+# keeps only a C-level pointer to the Python callable; if the function
+# loses every Python ref (e.g. because we evicted its module from
+# ``sys.modules``), CPython is free to GC it and reuse its memory address
+# for another object.  When DuckDB later invokes the UDF, the C pointer
+# now points at a totally unrelated Python callable and the user gets a
+# bizarre traceback ("'float' has no attribute 'execute'", etc.).  Pinning
+# the functions here keeps every registered UDF alive for the life of the
+# process and eliminates that class of bug entirely.
+_pinned_udfs: list[Callable[..., Any]] = []
+
+
+def reset_macro_state() -> None:
+    """Forget per-connection registration state.  Called by hot-reload."""
+    _conn_macros_registered.clear()
+    _conn_reload_counters.clear()
+
+
 def _build_scalar_macro_sql(
     public_name: str,
     internal_name: str,
     params: list[dict[str, str]],
     return_type: str,
+    temp: bool = False,
 ) -> str:
     """Build a SQL MACRO that proxies a Python scalar UDF.
 
-    Using CREATE OR REPLACE MACRO as the public face means re-registration
-    is always safe even when the internal Python UDF name changes.
-
-    Parameters are declared without type annotations (untyped syntax) so
-    this works on both in-memory databases and older on-disk storage
-    versions that do not support typed macro parameters.
+    When ``temp`` is True, emits ``CREATE OR REPLACE TEMP MACRO`` so the
+    alias lives in the session-scoped ``temp`` catalog instead of the
+    default database. Required on DuckLake, which rejects persistent
+    CREATE MACRO in its catalog. TEMP macros resolve via the standard
+    DuckDB search path so callers do not need to qualify the name.
     """
-    # Parameter names are double-quoted to handle SQL reserved words.
-    # No type annotation — untyped MACRO params work on all storage versions.
     quoted_params = [f'"{p["name"]}"' for p in params]
     param_list = ", ".join(quoted_params)
     call_args = ", ".join(f'"{p["name"]}"' for p in params)
+    kind = "TEMP MACRO" if temp else "MACRO"
     return (
-        f"CREATE OR REPLACE MACRO {public_name}({param_list}) AS "
+        f"CREATE OR REPLACE {kind} {public_name}({param_list}) AS "
         f"{internal_name}({call_args})"
     )
 
@@ -484,28 +512,45 @@ def _build_scalar_macro_sql(
 def register_macros(
     conn: duckdb.DuckDBPyConnection,
     project_dir: Path,
+    *,
+    force_reload: bool = False,
 ) -> int:
     """Discover and register all macros from ``project_dir/macros/``.
 
-    Idempotent: calling this function multiple times on the same connection is
-    safe and reflects the current state of the ``macros/`` directory.
+    Idempotent **per connection**: a connection that has already had macros
+    registered is left alone, because re-registering the same UDF on the
+    same connection is either a no-op (DuckDB) or a hard catalog error
+    (DuckLake — see the hot-reload caveat in CHANGELOG). To pick up edits
+    to ``macros/*.py`` while a connection is alive, pass ``force_reload=True``;
+    this is what the macros file watcher does.
 
-    For Python UDFs (``@macro`` and ``@table_macro``) we use a versioned
-    internal UDF name (e.g. ``_udf_mask_email_3``) and expose a stable public
-    name via ``CREATE OR REPLACE MACRO``.  This sidesteps a DuckDB limitation
-    where a Python UDF cannot be replaced on the same connection object even
-    after ``remove_function``.
-
-    Returns the number of macros registered.
+    Returns the number of macros registered (0 on a re-entrant call).
     """
     macros_dir = project_dir / "macros"
     if not macros_dir.is_dir():
         return 0
 
-    # Evict stale module cache so edited .py files are re-imported fresh.
-    _force_reload_macro_modules(macros_dir)
+    # Skip re-registration on connections we've already done.  Without this
+    # the second call hits DuckLake's "function already exists" catalog rule
+    # and the second module reload makes the *first* registration's function
+    # objects GC-eligible — DuckDB's C pointer then dangles into reused
+    # memory and queries hit unrelated Python callables.
+    conn_id = id(conn)
+    if not force_reload and conn_id in _conn_macros_registered:
+        return 0
 
-    # Reload generation: used to construct unique internal UDF names.
+    # Module reload (and __pycache__ eviction) is destructive — only do it
+    # when the caller is explicitly asking for a fresh read of the macros/
+    # directory, e.g. on a file watcher event. Initial registration just
+    # imports normally.
+    if force_reload:
+        _force_reload_macro_modules(macros_dir)
+
+    from havn.engine.database import _is_ducklake_connection
+    is_lake = _is_ducklake_connection(conn)
+
+    # Reload generation: used to construct unique internal UDF names on the
+    # DuckDB-file backend (DuckLake takes the public name directly).
     gen = _next_reload_id(conn)
 
     count = 0
@@ -516,8 +561,19 @@ def register_macros(
     for info in scalar_macros:
         try:
             param_types = [p["type"] for p in info.params]
-            # Give the internal UDF a versioned name so it never collides with
-            # a previously registered UDF on the same connection.
+            if is_lake:
+                # Pin the function so CPython can't GC it even if its module
+                # gets evicted from sys.modules later — DuckDB on DuckLake
+                # holds only a C pointer to it, so we have to keep the
+                # Python object alive ourselves.
+                _pinned_udfs.append(info.func)
+                conn.create_function(info.name, info.func, param_types, info.return_type)
+                count += 1
+                logger.debug("Registered DuckLake UDF: %s", info.name)
+                continue
+
+            # DuckDB file backend: versioned internal + CREATE OR REPLACE MACRO alias.
+            _pinned_udfs.append(info.func)
             internal_name = f"_udf_{info.name}_{gen}"
             conn.create_function(
                 internal_name,
@@ -525,9 +581,11 @@ def register_macros(
                 param_types,
                 info.return_type,
             )
-            # Redirect the stable public name via a SQL MACRO alias.
             conn.execute(
-                _build_scalar_macro_sql(info.name, internal_name, info.params, info.return_type)
+                _build_scalar_macro_sql(
+                    info.name, internal_name, info.params, info.return_type,
+                    temp=False,
+                )
             )
             count += 1
             logger.debug("Registered Python macro: %s (internal: %s)", info.name, internal_name)
@@ -536,6 +594,12 @@ def register_macros(
 
     # Table-returning Python UDFs
     for info in table_macros:
+        if is_lake:
+            # @table_macro needs a CREATE MACRO ... AS TABLE wrapper that
+            # DuckLake's catalog cannot store. Skip silently; a query that
+            # actually calls the macro will get DuckDB's normal "function
+            # not found" error, which is the right place to surface this.
+            continue
         try:
             schema = _resolve_table_schema(info)
             if not schema:
@@ -549,6 +613,8 @@ def register_macros(
             # Step 1: register the internal JSON scalar UDF with a versioned name.
             param_types = [p["type"] for p in info.params]
             json_udf = _make_json_udf(info.func, len(info.params))
+            _pinned_udfs.append(json_udf)
+            _pinned_udfs.append(info.func)
             internal_name = f"_udf_{info.name}_{gen}_json"
             conn.create_function(
                 internal_name,
@@ -558,7 +624,9 @@ def register_macros(
             )
 
             # Step 2: register the SQL TABLE MACRO wrapper (CREATE OR REPLACE is idempotent).
-            macro_sql = _build_table_macro_sql_versioned(info.name, internal_name, info.params, schema)
+            macro_sql = _build_table_macro_sql_versioned(
+                info.name, internal_name, info.params, schema, temp=False,
+            )
             conn.execute(macro_sql)
 
             count += 1
@@ -572,14 +640,17 @@ def register_macros(
     for entry in _discover_sql_macros(macros_dir):
         try:
             sql = entry["sql"]
-            # Ensure idempotency: promote CREATE MACRO → CREATE OR REPLACE MACRO
-            # so re-registration after a file edit doesn't fail.
+            # Ensure idempotency: promote CREATE MACRO → CREATE OR REPLACE MACRO.
             sql = _re.sub(
                 r"\bCREATE\s+MACRO\b",
                 "CREATE OR REPLACE MACRO",
                 sql,
                 flags=_re.IGNORECASE,
             )
+            # SQL macros on DuckLake would need a TEMP MACRO that doesn't
+            # cross cursor boundaries — skip silently as with @table_macro.
+            if is_lake:
+                continue
             conn.execute(sql)
             count += 1
             logger.debug("Registered SQL macro from %s", entry["source_file"])
@@ -590,6 +661,10 @@ def register_macros(
                 exc,
             )
 
+    # Mark this connection as having had macros registered so subsequent
+    # callers (deps.py post-init, ReadPool slots) skip out instead of
+    # fighting the catalog.
+    _conn_macros_registered.add(conn_id)
     return count
 
 

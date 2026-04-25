@@ -55,7 +55,7 @@ const SECTIONS = [
   { id: "Overview", label: "Overview", tabs: [] },
   { id: "Develop", label: "Develop", tabs: ["Editor", "Data Sources", "Orchestration", "Git"] },
   { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "DAG", "Dashboards"] },
-  { id: "Observe", label: "Observe", tabs: ["Quality", "Sentinel", "Diff", "Runs", "Resources"] },
+  { id: "Observe", label: "Observe", tabs: ["Quality", "Sentinel", "Diff", "Runs"] },
   { id: "Configure", label: "Configure", tabs: ["Masking", "Wiki", "Docs", "Settings"] },
 ];
 
@@ -292,6 +292,22 @@ function groupBySchema(tables) {
   return schemas;
 }
 
+// Schemas that hold introspection / bookkeeping rather than user data.
+// They stay visible (so users can browse them) but are dimmed and start
+// collapsed: _havn (havn metadata), main (DuckDB default empty schema),
+// information_schema (SQL standard catalog), and any catalog name that
+// starts with __ (DuckLake's underlying metadata catalog).
+function isSystemSchema(name) {
+  if (!name) return false;
+  if (name === "_havn" || name === "main") return true;
+  if (name === "information_schema") return true;
+  if (name.startsWith("__")) return true;
+  if (name.includes(".")) {
+    return name.split(".").some(p => isSystemSchema(p));
+  }
+  return false;
+}
+
 function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
   const allSchemas = groupBySchema(tables);
   // Apply filter to table names
@@ -303,7 +319,7 @@ function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
   const schemaNames = Object.keys(schemas).sort(schemaCompare);
   const [expanded, setExpanded] = useState(() => {
     const m = {};
-    for (const s of schemaNames) m[s] = true;
+    for (const s of schemaNames) m[s] = !isSystemSchema(s);
     return m;
   });
   const activeTableRef = useRef(null);
@@ -312,7 +328,7 @@ function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
     setExpanded((prev) => {
       const next = { ...prev };
       for (const s of schemaNames) {
-        if (!(s in next)) next[s] = true;
+        if (!(s in next)) next[s] = !isSystemSchema(s);
       }
       return next;
     });
@@ -331,43 +347,47 @@ function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
 
   return (
     <div>
-      {schemaNames.map((schema) => (
-        <div key={schema}>
-          <div
-            style={stStyles.schemaRow}
-            onClick={() => setExpanded((prev) => ({ ...prev, [schema]: !prev[schema] }))}
-          >
-            <span style={{ ...stStyles.arrow, transform: expanded[schema] ? "rotate(0deg)" : "rotate(-90deg)" }}>
-              {"\u25BE"}
-            </span>
-            <span style={stStyles.schemaName}>{schema}</span>
-            <span style={stStyles.schemaCount}>{schemas[schema].length}</span>
+      {schemaNames.map((schema) => {
+        const sys = isSystemSchema(schema);
+        return (
+          <div key={schema} style={sys ? { opacity: 0.55 } : undefined}>
+            <div
+              style={stStyles.schemaRow}
+              onClick={() => setExpanded((prev) => ({ ...prev, [schema]: !prev[schema] }))}
+              title={sys ? "System schema (introspection)" : undefined}
+            >
+              <span style={{ ...stStyles.arrow, transform: expanded[schema] ? "rotate(0deg)" : "rotate(-90deg)" }}>
+                {"▾"}
+              </span>
+              <span style={{ ...stStyles.schemaName, fontStyle: sys ? "italic" : "normal" }}>{schema}</span>
+              <span style={stStyles.schemaCount}>{schemas[schema].length}</span>
+            </div>
+            {expanded[schema] && schemas[schema].map((t) => {
+              const key = `${t.schema}.${t.name}`;
+              const isActive = selectedTable === key;
+              return (
+                <div
+                  data-havn-file=""
+                  key={key}
+                  ref={isActive ? activeTableRef : undefined}
+                  style={{
+                    ...stStyles.tableRow,
+                    background: isActive ? "var(--havn-bg-secondary)" : "transparent",
+                    borderLeft: isActive ? "2px solid var(--havn-accent)" : "2px solid transparent",
+                  }}
+                  onClick={() => onSelectTable(t.schema, t.name)}
+                >
+                  <span style={{
+                    ...stStyles.typeIcon,
+                    color: t.type === "VIEW" ? "var(--havn-purple)" : "var(--havn-accent)",
+                  }}>{t.type === "VIEW" ? "V" : "T"}</span>
+                  <span style={isActive ? stStyles.tableNameActive : stStyles.tableName}>{t.name}</span>
+                </div>
+              );
+            })}
           </div>
-          {expanded[schema] && schemas[schema].map((t) => {
-            const key = `${t.schema}.${t.name}`;
-            const isActive = selectedTable === key;
-            return (
-              <div
-                data-havn-file=""
-                key={key}
-                ref={isActive ? activeTableRef : undefined}
-                style={{
-                  ...stStyles.tableRow,
-                  background: isActive ? "var(--havn-bg-secondary)" : "transparent",
-                  borderLeft: isActive ? "2px solid var(--havn-accent)" : "2px solid transparent",
-                }}
-                onClick={() => onSelectTable(t.schema, t.name)}
-              >
-                <span style={{
-                  ...stStyles.typeIcon,
-                  color: t.type === "VIEW" ? "var(--havn-purple)" : "var(--havn-accent)",
-                }}>{t.type === "VIEW" ? "V" : "T"}</span>
-                <span style={isActive ? stStyles.tableNameActive : stStyles.tableName}>{t.name}</span>
-              </div>
-            );
-          })}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

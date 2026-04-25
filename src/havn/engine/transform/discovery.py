@@ -167,18 +167,45 @@ def _update_state(
 ) -> None:
     """Update the model state after a successful run.
 
-    Uses DELETE+INSERT instead of INSERT OR REPLACE so it works on both
-    DuckDB (where model_path is PK) and DuckLake (no PK enforcement).
+    INSERT OR REPLACE on DuckDB is atomic against the model_path PK;
+    DuckLake strips the PK at table creation so we fall back to
+    DELETE-then-INSERT inside an explicit transaction.
     """
-    conn.execute(
-        "DELETE FROM _havn.model_state WHERE model_path = ?",
-        [model.full_name],
-    )
-    conn.execute(
-        """
-        INSERT INTO _havn.model_state
-            (model_path, content_hash, upstream_hash, materialized_as, last_run_at, run_duration_ms, row_count)
-        VALUES (?, ?, ?, ?, current_timestamp, ?, ?)
-        """,
-        [model.full_name, model.content_hash, model.upstream_hash, model.materialized, duration_ms, row_count],
-    )
+    from havn.engine.database import _is_ducklake_connection
+
+    params = [
+        model.full_name,
+        model.content_hash,
+        model.upstream_hash,
+        model.materialized,
+        duration_ms,
+        row_count,
+    ]
+    if _is_ducklake_connection(conn):
+        conn.execute("BEGIN TRANSACTION")
+        try:
+            conn.execute(
+                "DELETE FROM _havn.model_state WHERE model_path = ?",
+                [model.full_name],
+            )
+            conn.execute(
+                """
+                INSERT INTO _havn.model_state
+                    (model_path, content_hash, upstream_hash, materialized_as, last_run_at, run_duration_ms, row_count)
+                VALUES (?, ?, ?, ?, current_timestamp, ?, ?)
+                """,
+                params,
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    else:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO _havn.model_state
+                (model_path, content_hash, upstream_hash, materialized_as, last_run_at, run_duration_ms, row_count)
+            VALUES (?, ?, ?, ?, current_timestamp, ?, ?)
+            """,
+            params,
+        )

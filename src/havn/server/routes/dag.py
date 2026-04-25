@@ -55,10 +55,11 @@ def _scan_ingest_targets(project_dir: Path) -> dict[str, list[str]]:
 
 def _scan_import_sources(project_dir: Path) -> dict[str, str]:
     """Query run_log for the most recent successful import per table."""
-    from havn.server.deps import _get_backend
-    conn = _get_backend().connect(read_only=True)
+    from havn.engine.write_queue import cursor_for
+    from havn.server.deps import _get_shared_conn
+    cur = cursor_for(_get_shared_conn())
     try:
-        result = conn.execute(
+        result = cur.execute(
             """
             SELECT DISTINCT ON (target) target, log_output
             FROM _havn.run_log
@@ -72,7 +73,7 @@ def _scan_import_sources(project_dir: Path) -> dict[str, str]:
     except Exception:
         return {}
     finally:
-        conn.close()
+        cur.close()
 
 
 @router.get("/api/dag")
@@ -214,12 +215,12 @@ def get_orchestration_dag(request: Request) -> dict:
     # Fetch last_run info from _havn.model_state for status badges
     last_state: dict[str, dict] = {}
     try:
-        from havn.server.deps import _get_backend
-        backend = _get_backend()
-        if backend.exists():
-            conn = backend.connect(read_only=True)
+        from havn.engine.write_queue import cursor_for
+        from havn.server.deps import _get_backend, _get_shared_conn
+        if _get_backend().exists():
+            cur = cursor_for(_get_shared_conn())
             try:
-                rows = conn.execute(
+                rows = cur.execute(
                     "SELECT model_path, last_run_at, row_count, run_duration_ms "
                     "FROM _havn.model_state"
                 ).fetchall()
@@ -232,7 +233,7 @@ def get_orchestration_dag(request: Request) -> dict:
             except Exception:
                 pass
             finally:
-                conn.close()
+                cur.close()
     except Exception:
         pass
 
