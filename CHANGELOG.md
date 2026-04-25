@@ -2,6 +2,48 @@
 
 All notable changes to havn are documented in this file.
 
+## [0.2.7] — 2026-04-25
+
+### Fixed
+
+- **Macros work on read-only connections.** `havn query`, the read pool,
+  and any other read-only conn no longer log "Cannot execute statement
+  of type 'CREATE' … read-only" — `register_macros` now detects
+  read-only mode, registers the Python UDFs (which `create_function`
+  allows), and skips the `CREATE MACRO` aliases (which the writer has
+  already persisted to the catalog).
+- **`@table_macro` and SQL `CREATE MACRO` work on DuckLake.** The
+  previous skip was based on a wrong assumption that DuckLake rejects
+  persistent `CREATE MACRO`. Both paths are re-enabled; verified that
+  non-TEMP `CREATE OR REPLACE MACRO ... AS TABLE` is visible from
+  sibling cursors.
+- **Parallel-transform "already exists" warnings on DuckDB silenced.**
+  Sibling worker connections to the same on-disk DuckDB share the UDF
+  catalog; the second registration's "already exists" is now a debug
+  log, not a warning, since the function is callable either way.
+- **`havn version create` / `havn version list` crashed** with
+  `NameError: _warehouse_exists`. Missing import in `cli/version.py`.
+- **`havn snapshot create` failed on DuckLake** because the
+  `_havn.snapshots` DDL bypassed `_strip_pk`, then later `INSERT OR
+  REPLACE` rejected the missing PK. Routed DDL through `_strip_pk`
+  and switched to delete-then-insert.
+- **`havn version create` failed on DuckLake** for the same two
+  reasons (`_havn.version_history` DDL + `INSERT OR REPLACE`). Both
+  fixed; `_ensure_version_tables` no longer silently swallows the
+  underlying error.
+- **`havn version create` snapshotted DuckLake's internal catalog**
+  (every `__ducklake_metadata_warehouse.ducklake_*` table). Discovery
+  now filters on `table_catalog = current_database()`.
+- **Auth tables and `_havn.pr_builds`** routed through `_strip_pk` so
+  `--auth` and the PR review surface work against DuckLake.
+- **`havn tables` CLI** filtered out the DuckLake internal catalog
+  (matching the API endpoint behavior).
+
+### Docs
+
+- `CLAUDE.md` referenced `havn diff --all`; the actual flag is
+  `--full`.
+
 ## [0.2.6] — 2026-04-25
 
 ### Added

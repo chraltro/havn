@@ -19,8 +19,11 @@ logger = logging.getLogger("havn.snapshot")
 
 def _ensure_snapshot_table(conn: duckdb.DuckDBPyConnection) -> None:
     """Create the snapshots table if it doesn't exist."""
+    from havn.engine.database import _is_ducklake_connection, _strip_pk
+
+    is_lake = _is_ducklake_connection(conn)
     conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute("""
+    conn.execute(_strip_pk("""
         CREATE TABLE IF NOT EXISTS _havn.snapshots (
             name VARCHAR PRIMARY KEY,
             created_at TIMESTAMP DEFAULT now(),
@@ -28,7 +31,7 @@ def _ensure_snapshot_table(conn: duckdb.DuckDBPyConnection) -> None:
             table_signatures VARCHAR,
             file_manifest VARCHAR
         )
-    """)
+    """, is_lake))
 
 
 def _hash_file(path: Path) -> str:
@@ -125,9 +128,12 @@ def create_snapshot(
     signatures = _build_table_signatures(conn)
     project_hash = _compute_project_hash(manifest)
 
+    # ``INSERT OR REPLACE`` requires a PK, which DuckLake doesn't support;
+    # delete-then-insert works on both backends.
+    conn.execute("DELETE FROM _havn.snapshots WHERE name = ?", [name])
     conn.execute(
         """
-        INSERT OR REPLACE INTO _havn.snapshots
+        INSERT INTO _havn.snapshots
             (name, project_hash, table_signatures, file_manifest)
         VALUES (?, ?, ?, ?)
         """,

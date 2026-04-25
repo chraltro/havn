@@ -7,7 +7,7 @@ import logging
 import os
 from datetime import datetime, timezone
 
-__version__ = "0.2.6"
+__version__ = "0.2.7"
 
 # Re-export decorators for user-facing macros
 from havn.engine.macros import macro, table_macro  # noqa: F401

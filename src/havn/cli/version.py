@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 import typer
 from rich.table import Table
 
-from havn.cli import _resolve_project, app, console
+from havn.cli import _resolve_project, _warehouse_exists, app, console
 
 
 @app.command()
