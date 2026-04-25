@@ -36,9 +36,12 @@ logger = logging.getLogger("havn.versioning")
 
 def _ensure_version_tables(conn: duckdb.DuckDBPyConnection) -> None:
     """Create the version history metadata table (no-op on read-only connections)."""
+    from havn.engine.database import _is_ducklake_connection, _strip_pk
+
+    is_lake = _is_ducklake_connection(conn)
     try:
         conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-        conn.execute("""
+        conn.execute(_strip_pk("""
             CREATE TABLE IF NOT EXISTS _havn.version_history (
                 version_id      VARCHAR PRIMARY KEY,
                 created_at      TIMESTAMP DEFAULT current_timestamp,
@@ -46,7 +49,7 @@ def _ensure_version_tables(conn: duckdb.DuckDBPyConnection) -> None:
                 tables_snapshot JSON,
                 trigger         VARCHAR DEFAULT 'manual'
             )
-        """)
+        """, is_lake))
     except Exception:
         pass  # Read-only connection — table may already exist
 
@@ -143,10 +146,15 @@ def create_version(
     }
     (snap_dir / "_manifest.json").write_text(json.dumps(manifest, indent=2))
 
-    # Record in metadata
+    # Record in metadata. ``INSERT OR REPLACE`` requires a PK, which DuckLake
+    # doesn't support; delete-then-insert works on both backends.
+    conn.execute(
+        "DELETE FROM _havn.version_history WHERE version_id = ?",
+        [version_id],
+    )
     conn.execute(
         """
-        INSERT OR REPLACE INTO _havn.version_history
+        INSERT INTO _havn.version_history
             (version_id, description, tables_snapshot, trigger)
         VALUES (?, ?, ?::JSON, ?)
         """,
@@ -518,9 +526,13 @@ def _get_user_tables(
 ) -> list[tuple[str, str]]:
     """Get all user-created tables (excluding internal schemas)."""
     try:
+        # Filtering on table_catalog hides the DuckLake
+        # ``__ducklake_metadata_warehouse`` internal catalog so version
+        # snapshots don't try (and fail) to copy its bookkeeping tables.
         rows = conn.execute(
             "SELECT table_schema, table_name FROM information_schema.tables "
-            "WHERE table_schema NOT IN ('information_schema', '_havn', 'pg_catalog') "
+            "WHERE table_catalog = current_database() "
+            "AND table_schema NOT IN ('information_schema', '_havn', 'pg_catalog') "
             "AND table_type = 'BASE TABLE' "
             "ORDER BY table_schema, table_name"
         ).fetchall()

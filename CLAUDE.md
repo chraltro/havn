@@ -36,7 +36,7 @@ havn env use prod               # switch environment
 havn env list                   # show all environments
 havn diff gold.orders           # diff a single model
 havn diff                       # diff changed models + downstream
-havn diff --all                 # diff entire database
+havn diff --full                # diff entire database
 havn macros                     # list registered SQL macros
 havn backup                     # create verified backup
 havn backup --keep 10           # backup with retention

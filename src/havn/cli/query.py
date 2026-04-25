@@ -105,11 +105,15 @@ def tables(
 
     conn = open_warehouse(config, project_dir, read_only=True)
     try:
+        # ``table_catalog = current_database()`` filters out the
+        # DuckLake ``__ducklake_metadata_warehouse`` internal catalog,
+        # which would otherwise leak its bookkeeping tables here.
         if schema:
             sql = """
                 SELECT table_schema, table_name, table_type
                 FROM information_schema.tables
-                WHERE table_schema NOT IN ('information_schema', '_havn')
+                WHERE table_catalog = current_database()
+                  AND table_schema NOT IN ('information_schema', '_havn')
                   AND table_schema = ?
                 ORDER BY table_schema, table_name
             """
@@ -118,7 +122,8 @@ def tables(
             sql = """
                 SELECT table_schema, table_name, table_type
                 FROM information_schema.tables
-                WHERE table_schema NOT IN ('information_schema', '_havn')
+                WHERE table_catalog = current_database()
+                  AND table_schema NOT IN ('information_schema', '_havn')
                 ORDER BY table_schema, table_name
             """
             result = conn.execute(sql).fetchall()

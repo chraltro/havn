@@ -382,9 +382,8 @@ def _build_table_macro_sql_versioned(
     """Build the SQL TABLE MACRO that wraps a versioned internal JSON UDF.
 
     Uses ``CREATE OR REPLACE MACRO`` so re-registering the public name with a
-    different internal UDF (hot-reload) never conflicts. When ``temp`` is
-    True, emits ``CREATE OR REPLACE TEMP MACRO`` — required on DuckLake,
-    which rejects persistent ``CREATE MACRO`` in its catalog.
+    different internal UDF (hot-reload) never conflicts. ``temp=True`` emits
+    a TEMP MACRO (session-scoped, not catalog-stored).
     """
     quoted_params = [f'"{p["name"]}"' for p in params]
     param_list = ", ".join(quoted_params)
@@ -484,6 +483,27 @@ def reset_macro_state() -> None:
     _conn_reload_counters.clear()
 
 
+def _is_read_only_connection(conn: duckdb.DuckDBPyConnection) -> bool:
+    """Best-effort check for whether ``conn`` was opened read-only.
+
+    DuckDB doesn't expose a flag for it, so we probe with a non-TEMP
+    ``CREATE OR REPLACE MACRO`` against the default catalog — TEMP
+    objects live in the always-writable temp catalog and can't tell
+    us whether the persistent default is read-only.
+    """
+    try:
+        conn.execute("CREATE OR REPLACE MACRO __havn_ro_probe() AS 0")
+        try:
+            conn.execute("DROP MACRO IF EXISTS __havn_ro_probe")
+        except Exception:
+            pass
+        return False
+    except Exception as exc:
+        if "read-only" in str(exc).lower():
+            return True
+        return False
+
+
 def _build_scalar_macro_sql(
     public_name: str,
     internal_name: str,
@@ -549,6 +569,13 @@ def register_macros(
     from havn.engine.database import _is_ducklake_connection
     is_lake = _is_ducklake_connection(conn)
 
+    # Read-only connections (ad-hoc ``havn query``, read pool members) can't
+    # run ``CREATE MACRO`` to alias internal UDFs. ``create_function`` still
+    # works, so for the DuckDB backend we install the Python UDFs and let the
+    # public-name aliases come from the SQL MACRO already persisted in the
+    # file catalog by the writer.
+    is_read_only = _is_read_only_connection(conn)
+
     # Reload generation: used to construct unique internal UDF names on the
     # DuckDB-file backend (DuckLake takes the public name directly).
     gen = _next_reload_id(conn)
@@ -581,25 +608,32 @@ def register_macros(
                 param_types,
                 info.return_type,
             )
-            conn.execute(
-                _build_scalar_macro_sql(
-                    info.name, internal_name, info.params, info.return_type,
-                    temp=False,
+            if not is_read_only:
+                # Read-only conns inherit the public-name MACRO from the
+                # file catalog written by the writer; they only need the
+                # internal Python UDF re-registered for this conn.
+                conn.execute(
+                    _build_scalar_macro_sql(
+                        info.name, internal_name, info.params, info.return_type,
+                        temp=False,
+                    )
                 )
-            )
             count += 1
             logger.debug("Registered Python macro: %s (internal: %s)", info.name, internal_name)
         except Exception as exc:
-            logger.warning("Failed to register macro '%s': %s", info.name, exc)
+            # Sibling connections to the same DuckDB file share the UDF
+            # catalog, so a second registration sees "already exists". The
+            # function is still callable from this conn — silent debug only.
+            if "already exists" in str(exc):
+                logger.debug("Macro '%s' already registered (sibling conn)", info.name)
+            else:
+                logger.warning("Failed to register macro '%s': %s", info.name, exc)
 
-    # Table-returning Python UDFs
+    # Table-returning Python UDFs. DuckLake accepts persistent (non-TEMP)
+    # ``CREATE MACRO ... AS TABLE`` and the underlying JSON UDF registered
+    # on the parent connection propagates to cursors, so the same path works
+    # on both backends.
     for info in table_macros:
-        if is_lake:
-            # @table_macro needs a CREATE MACRO ... AS TABLE wrapper that
-            # DuckLake's catalog cannot store. Skip silently; a query that
-            # actually calls the macro will get DuckDB's normal "function
-            # not found" error, which is the right place to surface this.
-            continue
         try:
             schema = _resolve_table_schema(info)
             if not schema:
@@ -624,20 +658,31 @@ def register_macros(
             )
 
             # Step 2: register the SQL TABLE MACRO wrapper (CREATE OR REPLACE is idempotent).
-            macro_sql = _build_table_macro_sql_versioned(
-                info.name, internal_name, info.params, schema, temp=False,
-            )
-            conn.execute(macro_sql)
+            if not is_read_only:
+                macro_sql = _build_table_macro_sql_versioned(
+                    info.name, internal_name, info.params, schema, temp=False,
+                )
+                conn.execute(macro_sql)
 
             count += 1
             logger.debug("Registered table macro: %s (internal: %s)", info.name, internal_name)
         except Exception as exc:
-            logger.warning("Failed to register table macro '%s': %s", info.name, exc)
+            if "already exists" in str(exc):
+                logger.debug("Table macro '%s' already registered (sibling conn)", info.name)
+            else:
+                logger.warning("Failed to register table macro '%s': %s", info.name, exc)
 
     # SQL macros — CREATE OR REPLACE handles idempotency natively.
     import re as _re
 
-    for entry in _discover_sql_macros(macros_dir):
+    if is_read_only:
+        # SQL macros only exist as catalog entries, which are already in place
+        # from the writer's registration. Skip entirely on read-only conns.
+        sql_macro_iter = []
+    else:
+        sql_macro_iter = _discover_sql_macros(macros_dir)
+
+    for entry in sql_macro_iter:
         try:
             sql = entry["sql"]
             # Ensure idempotency: promote CREATE MACRO → CREATE OR REPLACE MACRO.
@@ -647,10 +692,6 @@ def register_macros(
                 sql,
                 flags=_re.IGNORECASE,
             )
-            # SQL macros on DuckLake would need a TEMP MACRO that doesn't
-            # cross cursor boundaries — skip silently as with @table_macro.
-            if is_lake:
-                continue
             conn.execute(sql)
             count += 1
             logger.debug("Registered SQL macro from %s", entry["source_file"])
