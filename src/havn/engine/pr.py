@@ -194,8 +194,11 @@ def _load_pr(project_dir: Path, pr_id: str) -> PullRequest | None:
 
 def ensure_pr_builds_table(conn: duckdb.DuckDBPyConnection) -> None:
     """Create _havn.pr_builds if missing. Safe to call repeatedly."""
+    from havn.engine.database import _is_ducklake_connection, _strip_pk
+
+    is_lake = _is_ducklake_connection(conn)
     conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute("""
+    conn.execute(_strip_pk("""
         CREATE TABLE IF NOT EXISTS _havn.pr_builds (
             id              VARCHAR PRIMARY KEY,
             pr_id           VARCHAR NOT NULL,
@@ -209,7 +212,7 @@ def ensure_pr_builds_table(conn: duckdb.DuckDBPyConnection) -> None:
             contract_results JSON,
             error           VARCHAR
         )
-    """)
+    """, is_lake))
 
 
 def _save_build_record(conn: duckdb.DuckDBPyConnection, record: dict) -> None:

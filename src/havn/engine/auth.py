@@ -48,8 +48,11 @@ def _verify_password(password: str, stored_hash: str, stored_salt: str) -> bool:
 
 def ensure_auth_tables(conn: duckdb.DuckDBPyConnection) -> None:
     """Create auth tables if they don't exist."""
+    from havn.engine.database import _is_ducklake_connection, _strip_pk
+
+    is_lake = _is_ducklake_connection(conn)
     conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute("""
+    conn.execute(_strip_pk("""
         CREATE TABLE IF NOT EXISTS _havn.users (
             username     VARCHAR PRIMARY KEY,
             password_hash VARCHAR NOT NULL,
@@ -59,15 +62,15 @@ def ensure_auth_tables(conn: duckdb.DuckDBPyConnection) -> None:
             created_at   TIMESTAMP DEFAULT current_timestamp,
             last_login   TIMESTAMP
         )
-    """)
-    conn.execute("""
+    """, is_lake))
+    conn.execute(_strip_pk("""
         CREATE TABLE IF NOT EXISTS _havn.tokens (
             token        VARCHAR PRIMARY KEY,
             username     VARCHAR NOT NULL,
             created_at   TIMESTAMP DEFAULT current_timestamp,
             expires_at   TIMESTAMP
         )
-    """)
+    """, is_lake))
 
 
 def create_user(
