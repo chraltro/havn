@@ -157,17 +157,34 @@ def _is_ducklake_connection(conn: duckdb.DuckDBPyConnection) -> bool:
 
 
 def _strip_pk(ddl: str, is_ducklake: bool) -> str:
-    """Remove PRIMARY KEY constraints from a DDL string when on DuckLake.
+    """Rewrite a DDL string for DuckLake compatibility.
 
-    DuckLake doesn't support PK/UNIQUE constraints. havn doesn't rely on
-    enforcement (uuid defaults + INSERT OR REPLACE semantics), so stripping
-    them preserves correct behavior.
+    DuckLake 1.0's actual rejections (verified empirically):
+    - PRIMARY KEY / UNIQUE / CHECK constraints
+    - CREATE SEQUENCE (and therefore ``DEFAULT nextval(...)``)
+
+    Function-call DEFAULTs (``current_timestamp``, ``gen_random_uuid()``,
+    ``now()``) and boolean DEFAULTs (``TRUE``/``FALSE``) are accepted.
+    Stripping these unnecessarily was breaking every INSERT site that
+    relied on the default — e.g. ``_havn.run_log.started_at`` ended up
+    NULL on DuckLake, which made the History panel look empty.
+
+    havn doesn't rely on PK/UNIQUE enforcement at the engine level; the
+    metadata writers use explicit DELETE+INSERT or unique-by-construction
+    keys.
     """
     if not is_ducklake:
         return ddl
     import re as _re
-    # Remove " PRIMARY KEY" (with optional surrounding whitespace)
-    return _re.sub(r'\s+PRIMARY\s+KEY', '', ddl, flags=_re.IGNORECASE)
+    # Remove PRIMARY KEY (inline column-level and trailing-clause forms).
+    ddl = _re.sub(r'\s+PRIMARY\s+KEY', '', ddl, flags=_re.IGNORECASE)
+    # Remove UNIQUE (inline). The table-level UNIQUE(x,y) form is rare in havn.
+    ddl = _re.sub(r'\s+UNIQUE\b', '', ddl, flags=_re.IGNORECASE)
+    # Remove CHECK (...) constraints (inline column-level).
+    ddl = _re.sub(r'\s+CHECK\s*\([^)]*\)', '', ddl, flags=_re.IGNORECASE)
+    # DuckLake doesn't support sequences, so nextval(...) defaults can't work.
+    ddl = _re.sub(r"\s+DEFAULT\s+nextval\([^)]*\)", "", ddl, flags=_re.IGNORECASE)
+    return ddl
 
 
 def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
@@ -443,12 +460,18 @@ def log_run(
     log_output: str | None = None,
     pipeline_run_id: str | None = None,
 ) -> None:
-    """Insert a run log entry."""
+    """Insert a run log entry.
+
+    Supplies ``run_id`` and ``started_at`` explicitly so DuckLake projects
+    created before the DDL was relaxed (which had the function-call defaults
+    stripped) still produce non-NULL timestamps and the History panel
+    populates correctly.
+    """
     conn.execute(
         """
         INSERT INTO _havn.run_log
-            (run_type, target, status, duration_ms, rows_affected, error, log_output, pipeline_run_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (run_id, started_at, run_type, target, status, duration_ms, rows_affected, error, log_output, pipeline_run_id)
+        VALUES (gen_random_uuid()::VARCHAR, current_timestamp, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [run_type, target, status, duration_ms, rows_affected, error, log_output, pipeline_run_id],
     )

@@ -726,7 +726,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
                 {results.truncated && <span style={st.resultsTruncated}>results capped</span>}
               </div>
               <div style={st.resultsBody}>
-                <SortableTable columns={results.columns} rows={results.rows} maskedColumns={maskingPolicies ? Object.entries(maskingPolicies).reduce((acc, [key, method]) => { const col = key.split(".").pop(); if (!acc[col]) acc[col] = method; return acc; }, {}) : undefined} />
+                <SortableTable columns={results.columns} rows={results.rows} columnTypes={results.column_types} maskedColumns={maskingPolicies ? Object.entries(maskingPolicies).reduce((acc, [key, method]) => { const col = key.split(".").pop(); if (!acc[col]) acc[col] = method; return acc; }, {}) : undefined} />
               </div>
             </div>
           )}

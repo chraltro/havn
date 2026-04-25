@@ -81,6 +81,7 @@ def create_flight_server(
 
     if backend_factory is None:
         from havn.server.deps import _get_backend
+        from havn.engine.write_queue import cursor_for
 
         def backend_factory():
             return _get_backend()
@@ -102,7 +103,7 @@ def create_flight_server(
                     task = current_task()
                     if task is not None:
                         manager.register_cancel(task.task_id, conn.interrupt)
-                    cur = conn.cursor()
+                    cur = cursor_for(conn)
                     try:
                         cur.execute(sql)
                         table = (

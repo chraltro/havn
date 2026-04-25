@@ -26,6 +26,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from havn.engine.resource_manager import get_resource_manager
+from havn.engine.write_queue import cursor_for
 from havn.server.deps import _get_backend, _get_write_queue, _require_permission
 
 logger = logging.getLogger("havn.sql_api")
@@ -106,7 +107,7 @@ def _execute_statement(state: StatementState) -> None:
 
         state.status = "running"
         try:
-            cur = conn.cursor()
+            cur = cursor_for(conn)
             try:
                 cur.execute(state.sql)
                 if cur.description:

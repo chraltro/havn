@@ -583,6 +583,7 @@ def execute_job(
     emit: Callable | None = None,
 ) -> JobResult:
     """Execute a job's plan step by step, logging to _havn.job_runs."""
+    from havn.engine.database import log_run
     from havn.engine.runner import run_script
     from havn.engine.transform.discovery import (
         _compute_upstream_hash,
@@ -692,7 +693,13 @@ def execute_job(
             try:
                 if step.type in ("ingest", "export"):
                     script_path = project_dir / step.target
-                    r = run_script(conn, script_path, step.type, use_circuit_breaker=False)
+                    r = run_script(
+                        conn,
+                        script_path,
+                        step.type,
+                        use_circuit_breaker=False,
+                        pipeline_run_id=run_id,
+                    )
                     step_result["status"] = r.get("status", "error")
                     step_result["duration_ms"] = r.get("duration_ms", 0)
                     step_result["rows_affected"] = r.get("rows_affected", 0)
@@ -706,9 +713,17 @@ def execute_job(
                         step_result["error"] = f"Model not found: {step.target}"
                         step_result["log_output"] = f"Model not found: {step.target}"
                         step_result["duration_ms"] = int((time.perf_counter() - step_start) * 1000)
+                        log_run(
+                            conn, "transform", step.target, "error",
+                            error=step_result["error"], pipeline_run_id=run_id,
+                        )
                     else:
                         duration_ms, row_count = execute_model(conn, model)
                         _update_state(conn, model, duration_ms, row_count)
+                        log_run(
+                            conn, "transform", model.full_name, "success",
+                            duration_ms, row_count, pipeline_run_id=run_id,
+                        )
                         step_result["status"] = "success"
                         step_result["duration_ms"] = duration_ms
                         step_result["rows_affected"] = row_count
@@ -720,6 +735,14 @@ def execute_job(
                 step_result["error"] = str(e)
                 step_result["log_output"] = str(e)
                 step_result["duration_ms"] = int((time.perf_counter() - step_start) * 1000)
+                if step.type == "transform":
+                    try:
+                        log_run(
+                            conn, "transform", step.target, "error",
+                            error=str(e), pipeline_run_id=run_id,
+                        )
+                    except Exception:
+                        pass
 
             # Handle retries for failed steps
             if step_result.get("status") == "error" and job.retry > 0:
@@ -737,6 +760,7 @@ def execute_job(
                                 project_dir / step.target,
                                 step.type,
                                 use_circuit_breaker=False,
+                                pipeline_run_id=run_id,
                             )
                             if r.get("status") == "success":
                                 step_result["status"] = "success"
@@ -748,6 +772,10 @@ def execute_job(
                         elif step.type == "transform" and step.target in model_map:
                             duration_ms, row_count = execute_model(conn, model_map[step.target])
                             _update_state(conn, model_map[step.target], duration_ms, row_count)
+                            log_run(
+                                conn, "transform", step.target, "success",
+                                duration_ms, row_count, pipeline_run_id=run_id,
+                            )
                             step_result["status"] = "success"
                             step_result["duration_ms"] = duration_ms
                             step_result["rows_affected"] = row_count

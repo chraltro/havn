@@ -350,8 +350,12 @@ def get_overview(request: Request, conn: DbConnReadOnlyOptional) -> dict:
                 """
                 SELECT table_schema, table_name, table_type
                 FROM information_schema.tables
-                WHERE table_schema NOT IN ('information_schema', '_havn')
-                ORDER BY table_schema, table_name
+                WHERE table_catalog = current_database()
+                UNION ALL
+                SELECT DISTINCT schema_name, view_name, 'VIEW'
+                FROM duckdb_views()
+                WHERE schema_name = 'information_schema'
+                ORDER BY 1, 2
                 """
             ).fetchall()
 

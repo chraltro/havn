@@ -49,7 +49,9 @@ async def export_as_duckdb(request: Request) -> StreamingResponse:
     out_path = tmp_dir / "warehouse.duckdb"
 
     with manager.acquire_sync("system", "export:duckdb"):
-        src = backend.connect(read_only=True)
+        from havn.engine.write_queue import cursor_for
+        from havn.server.deps import _get_shared_conn
+        src = cursor_for(_get_shared_conn())
         try:
             src.execute(f"ATTACH '{out_path.as_posix()}' AS plain (TYPE DUCKDB)")
             src.execute("COPY FROM DATABASE warehouse TO plain")

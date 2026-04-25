@@ -154,6 +154,33 @@ def _validate_identifier(value: str, label: str = "identifier") -> str:
         raise HTTPException(400, f"Invalid {label}: {value!r}")
 
 
+def _validate_schema_label(value: str) -> tuple[str | None, str]:
+    """Validate a schema label that may include a catalog prefix.
+
+    Accepts either a bare schema name (``bronze``) or a catalog-qualified
+    pair (``__ducklake_metadata_warehouse.main``). Each component must
+    pass the strict identifier check on its own. Returns
+    ``(catalog_or_none, schema)``.
+    """
+    from havn.engine.utils import validate_identifier
+
+    if "." in value:
+        catalog, schema = value.split(".", 1)
+        if "." in schema:
+            raise HTTPException(400, f"Invalid schema label: {value!r}")
+        try:
+            validate_identifier(catalog, "catalog")
+            validate_identifier(schema, "schema")
+        except ValueError:
+            raise HTTPException(400, f"Invalid schema label: {value!r}")
+        return catalog, schema
+    try:
+        validate_identifier(value, "schema")
+    except ValueError:
+        raise HTTPException(400, f"Invalid schema label: {value!r}")
+    return None, value
+
+
 # ---------------------------------------------------------------------------
 # Database helpers
 # ---------------------------------------------------------------------------
@@ -282,12 +309,13 @@ def reregister_macros_on_shared_conns(project_dir: Path) -> None:
         # Server not yet initialised — nothing to refresh.
         return
 
-    from havn.engine.macros import register_macros
+    from havn.engine.macros import register_macros, reset_macro_state
 
     macro_logger = logging.getLogger("havn.macros")
 
     def _reload(conn, project_dir: Path) -> int:
-        count = register_macros(conn, project_dir)
+        reset_macro_state()
+        count = register_macros(conn, project_dir, force_reload=True)
         macro_logger.info(
             "Hot-reloaded macros from %s (%d registered)", project_dir / "macros", count
         )
@@ -419,12 +447,13 @@ def _authenticate_websocket(websocket) -> dict | None:
     if not token:
         return None
 
-    conn = _get_backend().connect(read_only=True)
+    from havn.engine.write_queue import cursor_for
+    cur = cursor_for(_get_shared_conn())
     try:
         from havn.engine.auth import validate_token
-        return validate_token(conn, token)
+        return validate_token(cur, token)
     finally:
-        conn.close()
+        cur.close()
 
 
 def _require_permission(request: Request, permission: str) -> dict:

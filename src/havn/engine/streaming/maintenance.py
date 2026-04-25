@@ -123,6 +123,9 @@ class MaintenanceScheduler:
         except duckdb.Error as e:
             logger.debug("ducklake %s returned %s", op, e)
         finally:
+            # The factory may return a cursor on the shared write conn —
+            # closing those is fine and required to release the cursor; the
+            # underlying parent conn is owned by the WriteQueue and stays open.
             try:
                 conn.close()
             except Exception:

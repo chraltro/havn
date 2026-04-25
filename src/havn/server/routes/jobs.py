@@ -17,6 +17,7 @@ from havn.server.deps import (
     _require_permission,
     ensure_meta_table,
 )
+from havn.engine.write_queue import cursor_for
 
 logger = logging.getLogger("havn.server")
 router = APIRouter(tags=["jobs"])
@@ -318,7 +319,7 @@ def run_job(name: str, request: Request, conn: DbConn):
 
             cursor = None
             try:
-                cursor = _get_shared_conn().cursor()
+                cursor = cursor_for(_get_shared_conn())
                 execute_job(job, plan, cursor, project_dir, trigger="manual", emit=_emit)
             except Exception as e:
                 logger.error("Job '%s' failed: %s", name, e)
@@ -350,7 +351,7 @@ def _run_job_background(job, plan, project_dir, name):
 
         cursor = None
         try:
-            cursor = _get_shared_conn().cursor()
+            cursor = cursor_for(_get_shared_conn())
             execute_job(job, plan, cursor, project_dir, trigger="manual")
         except Exception as e:
             logger.error("Job '%s' failed: %s", name, e)
