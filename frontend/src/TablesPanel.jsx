@@ -44,7 +44,12 @@ export default function TablesPanel({ selectedTable, onQueryTable, tables, onSel
       setStats(null);
       return;
     }
-    const [schema, name] = selectedTable.split(".");
+    // Split on the LAST dot only: schemas in non-default catalogs come back
+    // as ``catalog.schema`` (e.g. ``__ducklake_metadata_warehouse.main``),
+    // and a naive split would slice off the catalog and lose the table.
+    const lastDot = selectedTable.lastIndexOf(".");
+    const schema = selectedTable.slice(0, lastDot);
+    const name = selectedTable.slice(lastDot + 1);
     setLoading(true);
     setError(null);
     setRowCount(null);
@@ -68,7 +73,9 @@ export default function TablesPanel({ selectedTable, onQueryTable, tables, onSel
 
   function handleColumnClick(colName) {
     if (!selectedTable) return;
-    const [schema, name] = selectedTable.split(".");
+    const lastDot = selectedTable.lastIndexOf(".");
+    const schema = selectedTable.slice(0, lastDot);
+    const name = selectedTable.slice(lastDot + 1);
     const newDir = sortCol === colName && sortDir === "ASC" ? "DESC" : "ASC";
     setSortCol(colName);
     setSortDir(newDir);
@@ -82,7 +89,9 @@ export default function TablesPanel({ selectedTable, onQueryTable, tables, onSel
   async function loadStats() {
     if (!selectedTable || statsLoading) return;
     setStatsLoading(true);
-    const [schema, name] = selectedTable.split(".");
+    const lastDot = selectedTable.lastIndexOf(".");
+    const schema = selectedTable.slice(0, lastDot);
+    const name = selectedTable.slice(lastDot + 1);
     const numericCols = columns.filter((c) =>
       /int|float|double|decimal|numeric|bigint|smallint|tinyint|real/i.test(c.type),
     );

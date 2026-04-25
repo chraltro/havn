@@ -17,6 +17,7 @@ from havn.server.deps import (
     ensure_meta_table,
     run_transform,
 )
+from havn.engine.write_queue import cursor_for
 
 logger = logging.getLogger("havn.server")
 
@@ -459,7 +460,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
         try:
             from havn.engine.orchestration import ensure_job_runs_table
             _jr_conn = _get_shared_conn()
-            _jr_cur = _jr_conn.cursor()
+            _jr_cur = cursor_for(_jr_conn)
             try:
                 ensure_job_runs_table(_jr_cur)
                 _jr_cur.execute(
@@ -494,7 +495,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
         # won't exist yet on a fresh database and will be created by ingest.
         has_ingest = bool(ingest_node_ids)
         if models and not has_ingest:
-            val_cur = conn.cursor()
+            val_cur = cursor_for(conn)
             try:
                 _val_errors = _vm(val_cur, models)
             finally:
@@ -508,7 +509,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
                 return
 
         # 6. Pre-create schemas
-        schema_cur = conn.cursor()
+        schema_cur = cursor_for(conn)
         for schema in ("landing", "bronze", "silver", "gold"):
             schema_cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
         schema_cur.close()
@@ -517,13 +518,22 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
         sorter = TopologicalSorter(dag_deps)
         sorter.prepare()
         _, _threads_cfg = _get_db_resource_limits()
-        max_workers = _threads_cfg or 4
+        # DuckLake's catalog cannot tolerate concurrent in-process writes —
+        # multiple threads each calling `conn.cursor().execute("CREATE TABLE ...")`
+        # against the same attached catalog corrupt its metadata. Force
+        # sequential execution on DuckLake; transforms still get full memory
+        # and threads via per-query SET memory_limit / SET threads.
+        from havn.server.deps import _get_backend
+        if _get_backend().name == "ducklake":
+            max_workers = 1
+        else:
+            max_workers = _threads_cfg or 4
         executor = ThreadPoolExecutor(max_workers=max_workers)
         active = 0
 
         def _exec_node(node_id):
             """Execute a single node on a thread-local cursor."""
-            local = conn.cursor()
+            local = cursor_for(conn)
             info = nodes[node_id]
             start_data = {"name": info["name"], "action": info["type"], "num": _node_number.get(node_id, 0)}
             if info["type"] == "transform":
@@ -668,7 +678,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
         # Audit
         try:
             from havn.engine.audit import log_audit
-            audit_cur = conn.cursor()
+            audit_cur = cursor_for(conn)
             log_audit(audit_cur, user=user.get("username", "anonymous"),
                       action="transform", resource=stream_name,
                       detail=f"stream completed: {status} in {duration_s}s")
@@ -698,7 +708,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
         try:
             from havn.engine.orchestration import ensure_job_runs_table
             _fin_conn = _get_shared_conn()
-            _fin_cur = _fin_conn.cursor()
+            _fin_cur = cursor_for(_fin_conn)
             try:
                 ensure_job_runs_table(_fin_cur)
                 status_val = "failure" if has_error else ("cancelled" if cancelled else "success")
@@ -829,7 +839,7 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
         try:
             from havn.engine.orchestration import ensure_job_runs_table
             _jr_conn = _get_shared_conn()
-            _jr_cur = _jr_conn.cursor()
+            _jr_cur = cursor_for(_jr_conn)
             try:
                 ensure_job_runs_table(_jr_cur)
                 _jr_cur.execute(
@@ -866,7 +876,7 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
         # Pre-build validation for transform models (skip if ingest is included)
         has_ingest = bool(ingest_node_ids)
         if models and not has_ingest:
-            val_cur = conn.cursor()
+            val_cur = cursor_for(conn)
             try:
                 _val_errors = _vm(val_cur, models)
             finally:
@@ -880,7 +890,7 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
                 return
 
         # Pre-create schemas
-        schema_cur = conn.cursor()
+        schema_cur = cursor_for(conn)
         for schema in ("landing", "bronze", "silver", "gold"):
             schema_cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
         schema_cur.close()
@@ -889,13 +899,22 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
         sorter = TopologicalSorter(dag_deps)
         sorter.prepare()
         _, _threads_cfg = _get_db_resource_limits()
-        max_workers = _threads_cfg or 4
+        # DuckLake's catalog cannot tolerate concurrent in-process writes —
+        # multiple threads each calling `conn.cursor().execute("CREATE TABLE ...")`
+        # against the same attached catalog corrupt its metadata. Force
+        # sequential execution on DuckLake; transforms still get full memory
+        # and threads via per-query SET memory_limit / SET threads.
+        from havn.server.deps import _get_backend
+        if _get_backend().name == "ducklake":
+            max_workers = 1
+        else:
+            max_workers = _threads_cfg or 4
         executor = ThreadPoolExecutor(max_workers=max_workers)
         active = 0
 
         def _exec_node(node_id):
             """Execute a single node on a thread-local cursor."""
-            local = conn.cursor()
+            local = cursor_for(conn)
             info = nodes[node_id]
             start_data = {"name": info["name"], "action": info["type"], "num": _node_number.get(node_id, 0)}
             if info["type"] == "transform":
@@ -1030,7 +1049,7 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
         # Audit
         try:
             from havn.engine.audit import log_audit
-            audit_cur = conn.cursor()
+            audit_cur = cursor_for(conn)
             log_audit(audit_cur, user=user.get("username", "anonymous"),
                       action="transform", resource=f"pipeline({step_label})",
                       detail=f"selective pipeline completed: {status} in {duration_s}s")
@@ -1060,7 +1079,7 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
         try:
             from havn.engine.orchestration import ensure_job_runs_table
             _fin_conn = _get_shared_conn()
-            _fin_cur = _fin_conn.cursor()
+            _fin_cur = cursor_for(_fin_conn)
             try:
                 ensure_job_runs_table(_fin_cur)
                 status_val = "failure" if has_error else ("cancelled" if cancelled else "success")
@@ -1108,7 +1127,7 @@ def start_pipeline(request: Request, req: PipelineStartRequest) -> dict:
         from havn.server.deps import _get_shared_conn
 
         shared = _get_shared_conn()
-        audit_cur = shared.cursor()
+        audit_cur = cursor_for(shared)
         client_ip = request.client.host if request.client else None
         log_audit(
             audit_cur,
@@ -1153,7 +1172,7 @@ def start_stream(request: Request, stream_name: str, force: bool = False) -> dic
         from havn.server.deps import _get_shared_conn
 
         shared = _get_shared_conn()
-        audit_cur = shared.cursor()
+        audit_cur = cursor_for(shared)
         client_ip = request.client.host if request.client else None
         log_audit(
             audit_cur,
@@ -1387,7 +1406,7 @@ async def run_stream_sse(
         from havn.server.deps import _get_shared_conn
 
         shared = _get_shared_conn()
-        audit_cur = shared.cursor()
+        audit_cur = cursor_for(shared)
         client_ip = request.client.host if request.client else None
         log_audit(
             audit_cur,

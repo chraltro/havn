@@ -99,6 +99,19 @@ class DuckLakeBackend:
             """
         )
 
+    def _ensure_dirs(self) -> None:
+        """Make sure the catalog's parent directory and the data path exist.
+
+        ATTACH will create a fresh catalog file on first use, but it won't
+        create the parent directory. For a local Postgres or S3 catalog
+        there's nothing to create; skip in that case.
+        """
+        if not self._catalog.startswith("postgres:"):
+            cat_path = Path(self._catalog)
+            cat_path.parent.mkdir(parents=True, exist_ok=True)
+        if not self._data_path.startswith("s3://"):
+            Path(self._data_path).mkdir(parents=True, exist_ok=True)
+
     def _attach(self, conn: duckdb.DuckDBPyConnection, read_only: bool) -> None:
         opts = [f"DATA_PATH '{self._data_path}'"]
         if self._config.metadata_schema:
@@ -107,6 +120,10 @@ class DuckLakeBackend:
             opts.append("ENCRYPTED")
         if read_only:
             opts.append("READ_ONLY")
+        # Auto-migrate older catalog versions (e.g. 0.3 created by a
+        # pre-1.0 DuckLake extension) so users don't have to re-init
+        # projects after the extension upgrades.
+        opts.append("AUTOMATIC_MIGRATION TRUE")
         opts_str = ", ".join(opts)
         conn.execute(f"ATTACH 'ducklake:{self._catalog}' AS warehouse ({opts_str})")
         conn.execute("USE warehouse")
@@ -124,9 +141,16 @@ class DuckLakeBackend:
 
     def connect(self, read_only: bool = False) -> duckdb.DuckDBPyConnection:
         self._eager_install()
+        self._ensure_dirs()
         conn = duckdb.connect(":memory:")
         self._load_extensions(conn)
         self._attach(conn, read_only)
+        # Tag the connection so cursor_for() knows to USE warehouse on
+        # cursors derived from it. DuckDB cursors do not inherit the
+        # parent's USE state, and havn has many call sites that take
+        # cursors off the shared write/read connections.
+        from havn.engine.write_queue import tag_default_catalog
+        tag_default_catalog(conn, "warehouse")
         self._apply_settings(conn)
         if self._project_dir is not None:
             from havn.engine.macros import register_macros

@@ -46,18 +46,42 @@ def _update_seed_state(
     row_count: int,
     duration_ms: int,
 ) -> None:
-    """Update the model state for a seed after loading."""
-    conn.execute(
-        "DELETE FROM _havn.model_state WHERE model_path = ?", [seed_name]
-    )
-    conn.execute(
-        """
-        INSERT INTO _havn.model_state
-            (model_path, content_hash, upstream_hash, materialized_as, last_run_at, run_duration_ms, row_count)
-        VALUES (?, ?, '', 'seed', current_timestamp, ?, ?)
-        """,
-        [seed_name, content_hash, duration_ms, row_count],
-    )
+    """Update the model state for a seed after loading.
+
+    INSERT OR REPLACE on DuckDB is atomic against the model_path PK;
+    DuckLake strips the PK at table creation so we fall back to
+    DELETE-then-INSERT inside an explicit transaction.
+    """
+    from havn.engine.database import _is_ducklake_connection
+
+    params = [seed_name, content_hash, duration_ms, row_count]
+    if _is_ducklake_connection(conn):
+        conn.execute("BEGIN TRANSACTION")
+        try:
+            conn.execute(
+                "DELETE FROM _havn.model_state WHERE model_path = ?", [seed_name]
+            )
+            conn.execute(
+                """
+                INSERT INTO _havn.model_state
+                    (model_path, content_hash, upstream_hash, materialized_as, last_run_at, run_duration_ms, row_count)
+                VALUES (?, ?, '', 'seed', current_timestamp, ?, ?)
+                """,
+                params,
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    else:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO _havn.model_state
+                (model_path, content_hash, upstream_hash, materialized_as, last_run_at, run_duration_ms, row_count)
+            VALUES (?, ?, '', 'seed', current_timestamp, ?, ?)
+            """,
+            params,
+        )
 
 
 def discover_seeds(seeds_dir: Path, schema: str = "seeds") -> list[dict]:
