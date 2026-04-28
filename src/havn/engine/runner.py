@@ -44,6 +44,9 @@ def _get_circuit_breaker():
 SCRIPT_TIMEOUT_SECONDS = 7200
 # Idle timeout: if no DuckDB activity AND no stdout for this long, assume stuck
 SCRIPT_IDLE_TIMEOUT_SECONDS = 120
+# Poll interval between activity checks while a script is running. Exposed as
+# a module-level constant so tests can shorten it.
+SCRIPT_POLL_INTERVAL_SECONDS = 5
 
 
 class ScriptTimeoutError(Exception):
@@ -323,6 +326,17 @@ def _run_script_body(
     # 2. Is DuckDB actively running a query? (via duckdb_queries())
     # 3. Is the script producing stdout output?
     # If none of these show activity for IDLE_TIMEOUT seconds, kill it.
+    #
+    # The duckdb_queries() probe MUST run on a separate connection. DuckDB
+    # connections are not thread-safe: probing on `conn` while the script
+    # thread is also using `conn` clobbers cursor state, so the script's
+    # next fetchone() returns None. cursor() gives us an independent
+    # connection over the same database.
+    try:
+        probe_conn = conn.cursor()
+    except Exception:
+        probe_conn = None
+
     idle_timeout = SCRIPT_IDLE_TIMEOUT_SECONDS
     last_activity = time.perf_counter()
     last_stdout_len = 0
@@ -330,7 +344,7 @@ def _run_script_body(
     idle_killed = False
 
     while thread.is_alive():
-        thread.join(timeout=5)  # check every 5 seconds
+        thread.join(timeout=SCRIPT_POLL_INTERVAL_SECONDS)
         if not thread.is_alive():
             break
 
@@ -345,16 +359,19 @@ def _run_script_body(
         # Check for activity
         has_activity = False
 
-        # 1. Check DuckDB for running queries
-        try:
-            running_queries = conn.execute(
-                "SELECT count(*) FROM duckdb_queries() WHERE success IS NULL"
-            ).fetchone()[0]
-            if running_queries > 0:
-                has_activity = True
-        except Exception:
-            # duckdb_queries() may not be available in all versions
-            has_activity = True  # assume active if we can't check
+        # 1. Check DuckDB for running queries (on a separate connection)
+        if probe_conn is not None:
+            try:
+                running_queries = probe_conn.execute(
+                    "SELECT count(*) FROM duckdb_queries() WHERE success IS NULL"
+                ).fetchone()[0]
+                if running_queries > 0:
+                    has_activity = True
+            except Exception:
+                # duckdb_queries() may not be available in all versions
+                has_activity = True  # assume active if we can't check
+        else:
+            has_activity = True
 
         # 2. Check for new stdout output
         current_stdout_len = len(stdout_capture.getvalue())
@@ -367,6 +384,12 @@ def _run_script_body(
         elif now - last_activity > idle_timeout:
             idle_killed = True
             break
+
+    if probe_conn is not None:
+        try:
+            probe_conn.close()
+        except Exception:
+            pass
 
     if thread.is_alive():
         duration_ms = int((time.perf_counter() - start) * 1000)

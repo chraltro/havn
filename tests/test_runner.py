@@ -181,3 +181,51 @@ def test_extract_row_count_bytes_only():
 
 def test_extract_row_count_empty():
     assert _extract_row_count("") == 0
+
+
+def test_run_script_long_running_does_not_corrupt_cursor(tmp_path, monkeypatch):
+    """Regression: long-running scripts must not have their result cursor
+    clobbered by the runner's idle-detection poll.
+
+    Originally the runner polled `duckdb_queries()` on the *same* connection
+    used by the script thread. DuckDB connections are not thread-safe; the
+    concurrent probe corrupted the script's cursor state, so chained
+    `db.execute(...).fetchone()` returned None and unpacking blew up with
+    "cannot unpack non-iterable NoneType object". Real failure surfaced via
+    the Nordvik case ingest on a ~20s Postgres CTAS.
+
+    To make the test deterministic and fast, we shorten the poll interval so
+    several polls fire during a ~1s script. With the bug present, at least one
+    of the chained fetches returns None.
+    """
+    from havn.engine import runner as runner_mod
+
+    monkeypatch.setattr(runner_mod, "SCRIPT_POLL_INTERVAL_SECONDS", 0.05)
+
+    db_path = tmp_path / "test.duckdb"
+    conn = duckdb.connect(str(db_path))
+    conn.execute("CREATE SCHEMA landing")
+
+    # 30 iterations of (CTAS, COUNT, sleep 50ms) ≈ 1.5s wall time, with the
+    # poll firing every 50ms. Many overlap windows; the bug reproduces ~always.
+    script = tmp_path / "long_ingest.py"
+    script.write_text(
+        "import time\n"
+        "for i in range(30):\n"
+        "    db.execute(f'CREATE OR REPLACE TABLE landing.t AS "
+        "SELECT range AS x FROM range(50000)')\n"
+        "    row = db.execute('SELECT COUNT(*) FROM landing.t').fetchone()\n"
+        "    assert row is not None, "
+        "f'iter {i}: fetchone returned None — runner clobbered the cursor'\n"
+        "    (n,) = row\n"
+        "    assert n == 50000, f'iter {i}: got {n} rows, expected 50000'\n"
+        "    time.sleep(0.05)\n"
+        "print('all iterations OK', flush=True)\n"
+    )
+
+    result = run_script(conn, script, "ingest", timeout=60)
+    assert result["status"] == "success", (
+        f"script failed: {result.get('error')!r}\nlog:\n{result.get('log_output')}"
+    )
+    assert "all iterations OK" in result["log_output"]
+    conn.close()
