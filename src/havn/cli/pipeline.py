@@ -18,6 +18,7 @@ logger = logging.getLogger("havn.cli")
 def run(
     script: Annotated[str, typer.Argument(help="Script path (e.g. ingest/customers.py)")],
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
+    force: Annotated[bool, typer.Option("--force", "-f", help="Re-run even if `# @havn: schedule=once` and a prior success exists")] = False,
 ) -> None:
     """Run a single ingest or export script (.py or .dpnb notebook)."""
     from havn.config import load_project
@@ -49,7 +50,7 @@ def run(
 
     conn = open_warehouse(config, project_dir)
     try:
-        result = run_script(conn, script_path, script_type)
+        result = run_script(conn, script_path, script_type, force=force)
         if result["status"] == "error":
             raise typer.Exit(1)
     finally:
@@ -61,6 +62,7 @@ def ingest(
     targets: Annotated[Optional[list[str]], typer.Argument(help="Specific scripts to run (without extension), or omit for all")] = None,
     env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use")] = None,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
+    force: Annotated[bool, typer.Option("--force", "-f", help="Re-run scripts marked `# @havn: schedule=once`")] = False,
 ) -> None:
     """Run all ingest scripts (or specific ones) from ingest/ directory."""
     from havn.engine.database import open_warehouse
@@ -77,7 +79,7 @@ def ingest(
     console.print("[bold]Ingest:[/bold]")
     conn = open_warehouse(config, project_dir)
     try:
-        results = run_scripts_in_dir(conn, ingest_dir, "ingest", targets)
+        results = run_scripts_in_dir(conn, ingest_dir, "ingest", targets, force=force)
         errors = sum(1 for r in results if r["status"] == "error")
         ok = len(results) - errors
         console.print(f"\n  {ok} succeeded, {errors} failed")
@@ -92,6 +94,7 @@ def export(
     targets: Annotated[Optional[list[str]], typer.Argument(help="Specific scripts to run (without extension), or omit for all")] = None,
     env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use")] = None,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
+    force: Annotated[bool, typer.Option("--force", "-f", help="Re-run scripts marked `# @havn: schedule=once`")] = False,
 ) -> None:
     """Run all export scripts (or specific ones) from export/ directory."""
     from havn.engine.database import open_warehouse
@@ -108,7 +111,7 @@ def export(
     console.print("[bold]Export:[/bold]")
     conn = open_warehouse(config, project_dir)
     try:
-        results = run_scripts_in_dir(conn, export_dir, "export", targets)
+        results = run_scripts_in_dir(conn, export_dir, "export", targets, force=force)
         errors = sum(1 for r in results if r["status"] == "error")
         ok = len(results) - errors
         console.print(f"\n  {ok} succeeded, {errors} failed")

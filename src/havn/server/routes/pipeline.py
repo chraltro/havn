@@ -29,6 +29,7 @@ router = APIRouter()
 
 class RunScriptRequest(BaseModel):
     script_path: str = Field(..., min_length=1, max_length=500)
+    force: bool = False
 
 
 class PipelineStartRequest(BaseModel):
@@ -85,7 +86,7 @@ def run_script_endpoint(
     if not script_path.exists():
         raise HTTPException(404, f"Script not found: {req.script_path}")
     script_type = "ingest" if "ingest" in req.script_path else "export"
-    result = run_script(conn, script_path, script_type)
+    result = run_script(conn, script_path, script_type, force=req.force)
     from havn.engine.secrets import mask_output
 
     if result.get("log_output"):
@@ -247,7 +248,7 @@ def _run_contracts_thread(project_dir):
 # --- Background thread: Script ---
 
 
-def _run_script_thread(script_path_str, project_dir):
+def _run_script_thread(script_path_str, project_dir, force=False):
     """Run a single script in background thread."""
     import time as _time
     from havn.server.deps import _get_shared_conn
@@ -260,7 +261,7 @@ def _run_script_thread(script_path_str, project_dir):
         conn = _get_shared_conn()
         script_path = project_dir / script_path_str
         script_type = "ingest" if "ingest" in script_path_str else "export"
-        result = run_script(conn, script_path, script_type)
+        result = run_script(conn, script_path, script_type, force=force)
 
         from havn.engine.secrets import mask_output
         log_output = result.get("log_output", "")
@@ -541,7 +542,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
             result_q.put(("__start__", start_data))
             try:
                 if info["type"] == "ingest":
-                    result = _run_script(local, info["path"], "ingest", pipeline_run_id=pipeline_run_id)
+                    result = _run_script(local, info["path"], "ingest", pipeline_run_id=pipeline_run_id, force=force)
                     result_q.put((node_id, {
                         "status": result["status"],
                         "duration_ms": result.get("duration_ms", 0),
@@ -570,7 +571,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
                         "row_count": row_count,
                     }))
                 elif info["type"] == "export":
-                    result = _run_script(local, info["path"], "export", pipeline_run_id=pipeline_run_id)
+                    result = _run_script(local, info["path"], "export", pipeline_run_id=pipeline_run_id, force=force)
                     result_q.put((node_id, {
                         "status": result["status"],
                         "duration_ms": result.get("duration_ms", 0),
@@ -922,7 +923,7 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
             result_q.put(("__start__", start_data))
             try:
                 if info["type"] == "ingest":
-                    result = _run_script(local, info["path"], "ingest", pipeline_run_id=pipeline_run_id)
+                    result = _run_script(local, info["path"], "ingest", pipeline_run_id=pipeline_run_id, force=force)
                     result_q.put((node_id, {
                         "status": result["status"],
                         "duration_ms": result.get("duration_ms", 0),
@@ -951,7 +952,7 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
                         "row_count": row_count,
                     }))
                 elif info["type"] == "export":
-                    result = _run_script(local, info["path"], "export", pipeline_run_id=pipeline_run_id)
+                    result = _run_script(local, info["path"], "export", pipeline_run_id=pipeline_run_id, force=force)
                     result_q.put((node_id, {
                         "status": result["status"],
                         "duration_ms": result.get("duration_ms", 0),
@@ -1252,7 +1253,7 @@ def start_script(request: Request, req: RunScriptRequest) -> dict:
         raise HTTPException(400, "Invalid script path")
     if not script_path.exists():
         raise HTTPException(404, f"Script not found: {req.script_path}")
-    return _start_operation("script", req.script_path, _run_script_thread, (req.script_path, project_dir))
+    return _start_operation("script", req.script_path, _run_script_thread, (req.script_path, project_dir, req.force))
 
 
 @router.post("/api/transform/start")

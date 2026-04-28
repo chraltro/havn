@@ -317,9 +317,14 @@ function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
     if (filtered.length > 0) schemas[schema] = filtered;
   }
   const schemaNames = Object.keys(schemas).sort(schemaCompare);
+  // System schemas (_havn, information_schema, main, __ducklake_*) always
+  // start collapsed and stay out of the `expanded` map until the user clicks
+  // them. User schemas start expanded. The click handler toggles either way.
   const [expanded, setExpanded] = useState(() => {
     const m = {};
-    for (const s of schemaNames) m[s] = !isSystemSchema(s);
+    for (const s of schemaNames) {
+      if (!isSystemSchema(s)) m[s] = true;
+    }
     return m;
   });
   const activeTableRef = useRef(null);
@@ -328,7 +333,9 @@ function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
     setExpanded((prev) => {
       const next = { ...prev };
       for (const s of schemaNames) {
-        if (!(s in next)) next[s] = !isSystemSchema(s);
+        if (!(s in next) && !isSystemSchema(s)) {
+          next[s] = true;
+        }
       }
       return next;
     });
@@ -681,6 +688,14 @@ function AppContent() {
         setModelNotebookName(`${parts[0]}.${parts[1]}`);
         return;
       }
+    }
+    // If the user is "opening" the file that's already in the editor (e.g.
+    // clicking back to it after viewing a table), just switch to the Editor
+    // tab. Don't prompt about unsaved changes and don't reload from disk —
+    // we'd lose the in-memory dirty buffer.
+    if (activeFile === path) {
+      setActiveTab("Editor");
+      return;
     }
     if (dirty && activeFile) {
       const ok = await showConfirm("Unsaved changes", "Discard unsaved changes and open another file?", "Discard", true);
