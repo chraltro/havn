@@ -53,6 +53,95 @@ class ScriptTimeoutError(Exception):
     """Raised when a script exceeds the execution timeout."""
 
 
+_PRAGMA_RE = None  # lazily compiled in _parse_pragma
+
+
+def _parse_pragma(source: str) -> dict[str, str]:
+    """Parse `# @havn: key=value [key=value ...]` directives from the top of a
+    script. Only the first 30 non-blank lines are scanned, and scanning stops
+    at the first non-comment, non-docstring line.
+
+    Returns a dict like ``{"schedule": "once"}``. Unknown keys are kept so the
+    caller can decide how to handle them (and so we don't error on typos).
+    """
+    global _PRAGMA_RE
+    if _PRAGMA_RE is None:
+        import re
+        # Match: optional leading whitespace, '#', whitespace, '@havn:', then
+        # the directive body. Body is "key=value" pairs separated by whitespace
+        # or commas.
+        _PRAGMA_RE = re.compile(r"^\s*#\s*@havn\s*:\s*(.+?)\s*$")
+
+    pragmas: dict[str, str] = {}
+    inside_docstring = False
+    docstring_quote: str | None = None
+
+    for i, line in enumerate(source.splitlines()):
+        if i > 30:
+            break
+        stripped = line.strip()
+
+        # Track triple-quoted module docstring so we don't try to parse pragmas
+        # from inside it (and so it doesn't end our scan early).
+        if not inside_docstring:
+            handled_docstring = False
+            for q in ('"""', "'''"):
+                if stripped.startswith(q):
+                    rest = stripped[3:]
+                    if q in rest:
+                        # Single-line docstring like '"""hello"""'
+                        handled_docstring = True
+                    else:
+                        inside_docstring = True
+                        docstring_quote = q
+                        handled_docstring = True
+                    break
+            if handled_docstring:
+                continue
+        else:
+            if docstring_quote and docstring_quote in stripped:
+                inside_docstring = False
+                docstring_quote = None
+            continue
+
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            m = _PRAGMA_RE.match(line)
+            if m:
+                body = m.group(1)
+                # Split on commas or whitespace
+                import re as _re
+                for part in _re.split(r"[,\s]+", body):
+                    if "=" not in part:
+                        continue
+                    k, _, v = part.partition("=")
+                    k = k.strip().lower()
+                    v = v.strip()
+                    if k:
+                        pragmas[k] = v
+            continue
+
+        # First non-comment, non-blank, non-docstring line: stop scanning.
+        # Pragmas only live at the top of the file.
+        break
+
+    return pragmas
+
+
+def _has_prior_success(conn: duckdb.DuckDBPyConnection, target: str) -> bool:
+    """True if `_havn.run_log` has a prior successful run for this target."""
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM _havn.run_log WHERE target = ? AND status = 'success' LIMIT 1",
+            [target],
+        ).fetchone()
+        return row is not None
+    except Exception:
+        # Table may not exist yet on first run, or backend may not support it.
+        return False
+
+
 def _has_run_function(source: str) -> bool:
     """Check if Python source defines a top-level run() function."""
     try:
@@ -170,6 +259,7 @@ def run_script(
     timeout: int = SCRIPT_TIMEOUT_SECONDS,
     use_circuit_breaker: bool = True,
     pipeline_run_id: str | None = None,
+    force: bool = False,
 ) -> dict:
     """Run a single script (.py or .dpnb).
 
@@ -181,6 +271,15 @@ def run_script(
     - ``export`` → ``system``    (writing data out / side-effects)
     - anything else → ``system``
 
+    Scripts may declare a top-of-file pragma to control re-run behavior::
+
+        # @havn: schedule=once
+
+    With ``schedule=once`` the script is skipped on subsequent runs unless
+    ``force=True`` is passed (e.g. via the ``--force`` CLI flag or the
+    "Force run" UI button). The check looks for any prior ``success`` row
+    in ``_havn.run_log`` for the same target filename.
+
     Args:
         conn: DuckDB connection
         script_path: Path to the .py or .dpnb file
@@ -188,6 +287,7 @@ def run_script(
         timeout: Maximum execution time in seconds
         use_circuit_breaker: If True, wrap execution with the default circuit breaker
         pipeline_run_id: Shared ID grouping all executions in a pipeline run
+        force: If True, bypass the ``schedule=once`` skip check.
 
     Returns:
         Dict with keys: script, status, duration_ms, log_output, error
@@ -208,6 +308,7 @@ def run_script(
             timeout=timeout,
             use_circuit_breaker=use_circuit_breaker,
             pipeline_run_id=pipeline_run_id,
+            force=force,
         )
 
 
@@ -218,6 +319,7 @@ def _run_script_body(
     timeout: int = SCRIPT_TIMEOUT_SECONDS,
     use_circuit_breaker: bool = True,
     pipeline_run_id: str | None = None,
+    force: bool = False,
 ) -> dict:
     """Inner implementation — unchanged script-execution logic."""
     ensure_meta_table(conn)
@@ -248,6 +350,34 @@ def _run_script_body(
 
     if not script_path.exists():
         raise FileNotFoundError(f"Script not found: {script_path}")
+
+    # --- Schedule pragma (e.g. `# @havn: schedule=once`) ---
+    # Read the file once and stash it so we can reuse it as the script body
+    # below (avoids a second disk read).
+    try:
+        _source_cache = script_path.read_text()
+    except Exception:
+        _source_cache = ""
+
+    pragmas = _parse_pragma(_source_cache)
+    schedule = pragmas.get("schedule", "always").lower()
+    if schedule == "once" and not force and _has_prior_success(conn, script_path.name):
+        msg = (
+            f"schedule=once and {script_path.name} has already succeeded. "
+            "Pass force=True (CLI: --force, UI: Force run) to re-run."
+        )
+        console.print(
+            f"  [yellow]skip[/yellow] [bold]{script_path.name}[/bold] "
+            "(schedule=once, already loaded)"
+        )
+        logger.info("Skipping %s: schedule=once and prior success exists", script_path.name)
+        return {
+            "script": script_path.name,
+            "status": "skipped",
+            "duration_ms": 0,
+            "log_output": msg,
+            "error": None,
+        }
 
     label = f"[bold]{script_path.name}[/bold]"
     console.print(f"  [blue]run [/blue] {label}")
@@ -283,8 +413,8 @@ def _run_script_body(
                 _get_circuit_breaker()._record_failure(script_path.name)
             return {"script": script_path.name, "status": "error", "duration_ms": duration_ms, "log_output": error_msg, "error": str(e)}
 
-    # .py scripts
-    source = script_path.read_text()
+    # .py scripts (reuse the source we already read for pragma parsing)
+    source = _source_cache or script_path.read_text()
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
     start = time.perf_counter()
@@ -467,6 +597,7 @@ def run_scripts_in_dir(
     script_type: str = "ingest",
     targets: list[str] | None = None,
     pipeline_run_id: str | None = None,
+    force: bool = False,
 ) -> list[dict]:
     """Run all scripts in a directory (or specific targets).
 
@@ -476,6 +607,7 @@ def run_scripts_in_dir(
         script_type: "ingest" or "export"
         targets: Specific script names (without extension), or None for all
         pipeline_run_id: Shared ID grouping all executions in a pipeline run
+        force: Bypass `schedule=once` skip in individual scripts.
 
     Returns:
         List of result dicts from run_script
@@ -500,7 +632,7 @@ def run_scripts_in_dir(
     for script in scripts:
         if script.name.startswith("_"):
             continue
-        result = run_script(conn, script, script_type, pipeline_run_id=pipeline_run_id)
+        result = run_script(conn, script, script_type, pipeline_run_id=pipeline_run_id, force=force)
         results.append(result)
         # Stop on error for ingest (data integrity)
         if script_type == "ingest" and result["status"] == "error":

@@ -97,6 +97,19 @@ function dbTypeToCategory(dbType) {
   return TYPE_TEXT;
 }
 
+// Columns whose values are numbers in the database but identifiers to a human:
+// surrogate keys, postal codes, phone-like numbers, product codes. They
+// should render as plain digits without thousand separators ("1234567" not
+// "1,234,567"). Triggered purely by name; the underlying type stays numeric
+// so sorting and aggregation still work.
+const _ID_LIKE_NAME_RE =
+  /(?:^|_)(id|ids|no|nr|num|number|code|zip|zipcode|postal|postcode|sku|isbn|ean|gtin|imei|ssn|tin|vat|cvr|orgnr|cprnr)(?:$|_)/i;
+
+export function isIdentifierLikeName(name) {
+  if (!name) return false;
+  return _ID_LIKE_NAME_RE.test(String(name));
+}
+
 function inferTypeDisplay(rows, colIndex) {
   for (let i = 0; i < Math.min(rows.length, 20); i++) {
     const v = rows[i]?.[colIndex];
@@ -267,9 +280,17 @@ export default function SortableTable({
   }, [columns, rows, columnTypes]);
 
   const colTypes = useMemo(() => {
-    return columns.map((_, i) => {
+    return columns.map((col, i) => {
       const fromDb = columnTypes && dbTypeToCategory(columnTypes[i]);
-      return fromDb || inferColumnType(rows, i);
+      const base = fromDb || inferColumnType(rows, i);
+      // Demote numeric columns whose name reads as an identifier (id, _no,
+      // _number, _code, postal, ...) to TEXT for display. The underlying
+      // value is still a number so sorting works, but formatCell will skip
+      // thousand separators and the cell aligns left like other identifiers.
+      if (base === TYPE_NUMBER && isIdentifierLikeName(col)) {
+        return TYPE_TEXT;
+      }
+      return base;
     });
   }, [columns, rows, columnTypes]);
 

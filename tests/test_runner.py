@@ -183,6 +183,113 @@ def test_extract_row_count_empty():
     assert _extract_row_count("") == 0
 
 
+# ---------------------------------------------------------------------------
+# Pragma parsing and schedule=once skip behavior
+# ---------------------------------------------------------------------------
+
+
+def test_parse_pragma_basic():
+    from havn.engine.runner import _parse_pragma
+    src = "# @havn: schedule=once\nimport os\n"
+    assert _parse_pragma(src) == {"schedule": "once"}
+
+
+def test_parse_pragma_multiple_keys():
+    from havn.engine.runner import _parse_pragma
+    src = "# @havn: schedule=once owner=data-team\nx = 1\n"
+    out = _parse_pragma(src)
+    assert out["schedule"] == "once"
+    assert out["owner"] == "data-team"
+
+
+def test_parse_pragma_skipped_after_first_code_line():
+    from havn.engine.runner import _parse_pragma
+    src = "import os\n# @havn: schedule=once\n"
+    # Pragma must be at the top; comments after code don't count.
+    assert _parse_pragma(src) == {}
+
+
+def test_parse_pragma_after_module_docstring():
+    from havn.engine.runner import _parse_pragma
+    src = '"""Module docstring."""\n# @havn: schedule=once\nimport os\n'
+    assert _parse_pragma(src) == {"schedule": "once"}
+
+
+def test_parse_pragma_inside_multiline_docstring_ignored():
+    from havn.engine.runner import _parse_pragma
+    src = '"""Hello\n# @havn: schedule=once\n"""\nimport os\n'
+    # The pragma sits inside the docstring, so it must not be parsed.
+    assert _parse_pragma(src) == {}
+
+
+def test_parse_pragma_no_directive():
+    from havn.engine.runner import _parse_pragma
+    assert _parse_pragma("import os\n") == {}
+
+
+def test_run_script_schedule_once_skips_after_first_success(tmp_path):
+    """Second run of a `schedule=once` script must be skipped, not re-executed."""
+    db_path = tmp_path / "test.duckdb"
+    conn = duckdb.connect(str(db_path))
+
+    script = tmp_path / "once_ingest.py"
+    # Each run appends a row to a sentinel table so we can count executions.
+    script.write_text(
+        "# @havn: schedule=once\n"
+        "db.execute('CREATE TABLE IF NOT EXISTS sentinel (n INT)')\n"
+        "db.execute('INSERT INTO sentinel VALUES (1)')\n"
+        "print('ran')\n"
+    )
+
+    # First run: executes normally.
+    r1 = run_script(conn, script, "ingest")
+    assert r1["status"] == "success"
+    assert conn.execute("SELECT COUNT(*) FROM sentinel").fetchone()[0] == 1
+
+    # Second run: skipped, no new rows.
+    r2 = run_script(conn, script, "ingest")
+    assert r2["status"] == "skipped"
+    assert "schedule=once" in r2["log_output"]
+    assert conn.execute("SELECT COUNT(*) FROM sentinel").fetchone()[0] == 1
+    conn.close()
+
+
+def test_run_script_schedule_once_force_overrides(tmp_path):
+    """`force=True` must re-run a `schedule=once` script even with prior success."""
+    db_path = tmp_path / "test.duckdb"
+    conn = duckdb.connect(str(db_path))
+
+    script = tmp_path / "once_ingest.py"
+    script.write_text(
+        "# @havn: schedule=once\n"
+        "db.execute('CREATE TABLE IF NOT EXISTS sentinel (n INT)')\n"
+        "db.execute('INSERT INTO sentinel VALUES (1)')\n"
+    )
+
+    run_script(conn, script, "ingest")
+    run_script(conn, script, "ingest", force=True)
+    # Two executions = two rows in sentinel.
+    assert conn.execute("SELECT COUNT(*) FROM sentinel").fetchone()[0] == 2
+    conn.close()
+
+
+def test_run_script_no_pragma_runs_every_time(tmp_path):
+    """Scripts without a schedule pragma keep the old behavior: run every time."""
+    db_path = tmp_path / "test.duckdb"
+    conn = duckdb.connect(str(db_path))
+
+    script = tmp_path / "always_ingest.py"
+    script.write_text(
+        "db.execute('CREATE TABLE IF NOT EXISTS sentinel (n INT)')\n"
+        "db.execute('INSERT INTO sentinel VALUES (1)')\n"
+    )
+
+    run_script(conn, script, "ingest")
+    run_script(conn, script, "ingest")
+    assert conn.execute("SELECT COUNT(*) FROM sentinel").fetchone()[0] == 2
+    conn.close()
+
+
 def test_run_script_long_running_does_not_corrupt_cursor(tmp_path, monkeypatch):
     """Regression: long-running scripts must not have their result cursor
     clobbered by the runner's idle-detection poll.
