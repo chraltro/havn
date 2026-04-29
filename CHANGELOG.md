@@ -2,6 +2,28 @@
 
 All notable changes to havn are documented in this file.
 
+## [0.2.14] - 2026-04-29
+
+Hotfix on top of 0.2.13. Two of yesterday's fixes were incomplete:
+
+### Fixed
+
+- **Failed transforms now actually reach `_havn.run_log` from the server
+  pipeline path.** 0.2.13 fixed the CLI/library code path (`engine/transform/
+  execution.py` and `orchestration.py`) but missed the parallel
+  `server/routes/pipeline.py` orchestrator that the UI uses. End-to-end
+  re-test confirmed: a deliberately broken bronze model now produces a
+  `status='error'` row in `_havn.run_log` with `pipeline_run_id` and the
+  full error message attached, instead of just a `_havn.job_runs.failure`
+  with empty `step_details`.
+- **`havn lint` now actually excludes the noisy layout rules.** SQLFluff's
+  `FluffConfig.from_kwargs(exclude_rules=...)` expects a list, not a
+  comma-separated string. 0.2.13 passed a string, so SQLFluff iterated
+  character by character and silently excluded nothing (LT01 / ST06 / LT05
+  still fired). Fix: pass the value as a Python list. End-to-end re-test
+  confirmed: an aligned-`AS` model now reports 1 real violation (`AM04
+  unknown number of result columns`) instead of 3 layout nags.
+
 ## [0.2.13] - 2026-04-29
 
 ### Fixed

@@ -13,11 +13,15 @@ console = Console()
 # These are the noisiest layout/style rules: they fire on every aligned
 # `AS` and on `SELECT *` ordering, burying real correctness violations.
 # Users who want them back can write a `.sqlfluff` next to project.yml.
-_DEFAULT_EXCLUDE_RULES = (
-    "layout.spacing,"            # LT01 -- single space before AS, etc.
-    "structure.column_order,"    # ST06 -- wildcards then targets
-    "layout.long_lines"          # LT05 -- max line length (already 120, still noisy in long CTE chains)
-)
+#
+# NB: SQLFluff's FluffConfig.from_kwargs expects exclude_rules as a list,
+# not a comma-separated string. Passing a string causes it to iterate
+# character by character and silently exclude nothing.
+_DEFAULT_EXCLUDE_RULES = [
+    "layout.spacing",          # LT01 -- single space before AS, etc.
+    "structure.column_order",  # ST06 -- wildcards then targets
+    "layout.long_lines",       # LT05 -- max line length (still noisy at 120)
+]
 
 
 def lint(

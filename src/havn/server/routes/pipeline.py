@@ -579,6 +579,16 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
                     }))
             except Exception as e:
                 logger.error("Node %s failed: %s", node_id, e, exc_info=True)
+                # Persist transform failures to _havn.run_log so they survive
+                # the OUTPUT panel scrolling away. Without this row, a query
+                # like `WHERE pipeline_run_id = ?` returns only the success
+                # rows and the failure looks like it never happened.
+                try:
+                    if info["type"] == "transform":
+                        _lr(local, "transform", info["model"].full_name, "error",
+                            error=str(e), pipeline_run_id=pipeline_run_id)
+                except Exception:
+                    pass
                 result_q.put((node_id, {"status": "error", "error": str(e)}))
             finally:
                 local.close()
@@ -960,6 +970,12 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
                     }))
             except Exception as e:
                 logger.error("Node %s failed: %s", node_id, e, exc_info=True)
+                try:
+                    if info["type"] == "transform":
+                        _lr(local, "transform", info["model"].full_name, "error",
+                            error=str(e), pipeline_run_id=pipeline_run_id)
+                except Exception:
+                    pass
                 result_q.put((node_id, {"status": "error", "error": str(e)}))
             finally:
                 local.close()
