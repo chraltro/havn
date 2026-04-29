@@ -2,6 +2,65 @@
 
 All notable changes to havn are documented in this file.
 
+## [0.2.16] - 2026-04-29
+
+Closing the remaining loose ends from the candidate-test pass: the
+history surface, lint experience, a flaky streaming test, lockfile
+recovery on SIGKILL, and the welcome tour.
+
+### Added
+
+- **`havn lint --style`**. The default `havn lint` now runs a
+  correctness-only rule set (ambiguity, references, unused CTEs,
+  NULL-equality, blocked words, control flow, cast type). Layout,
+  naming, and capitalisation rules are off by default and can be
+  re-enabled with `--style` for a one-off cleanup pass. A project-level
+  `.sqlfluff` overrides both. End-to-end against an aligned-`AS` SQL
+  block: 135 violations -> 1 (the one being a real `AM04` "unknown
+  number of result columns" issue, which is correctness).
+
+### Fixed
+
+- **Skipped transforms now appear in `_havn.run_log`** with
+  `status='skipped'` and the same `pipeline_run_id` as their siblings.
+  Previously a no-op pipeline run produced an empty `run_log` even
+  though `_havn.job_runs` reported `steps_skipped=12`. `havn history`
+  renders skipped rows in dim style so they don't crowd out the real
+  events.
+- **Stale `.havn/serve.json` lockfile is auto-cleaned**. `havn query`
+  now checks whether the recorded PID is still alive before HTTP-routing
+  and removes the lockfile if the server was SIGKILL'd or crashed.
+  Falls through cleanly to the direct DuckDB-open path. Cross-platform
+  (Windows uses `OpenProcess` + `GetExitCodeProcess`; POSIX uses
+  `os.kill(pid, 0)`).
+- **Webhook flush worker no longer races
+  `test_status_reports_backlog`**. The `FlushWorker` previously ran its
+  first drain immediately on start, which meant a `POST /api/ingest/
+  webhook/<source>` followed by `GET /api/streaming/webhook/status`
+  could observe an empty backlog if the worker drained between the two
+  calls. The worker now waits one `flush_interval` before its first
+  drain. Test suite is now deterministic (verified across 3 successive
+  full runs).
+- **First-time tour no longer pollutes the OUTPUT panel with a 404**.
+  When the "Exploring Data" step pre-fills a query and there are no
+  tables yet, it now seeds a friendly placeholder SQL with `run=false`
+  instead of auto-running and triggering a "Warehouse not found" 404.
+  In addition, `QueryPanel` suppresses the 404 from the OUTPUT log
+  entirely so it never reaches users; the inline error in the Query
+  panel still surfaces.
+- **`previewCurrentFile` now strips `@`-prefixed directives** as well
+  as legacy `--` comment headers so the preview pane renders successfully
+  for SQL files written in the canonical syntax.
+
+### Changed
+
+- **Welcome tour trimmed from 11 steps to 6**. The tour now covers
+  Welcome -> Navigation -> Project -> Transforms -> Explore -> Ready.
+  DAG, Quality, Connectors, Pipelines, and Warehouse layout are
+  discovered through the in-app hint system instead, which surfaces them
+  contextually when relevant. The "Writing Transforms" copy now
+  references `@config` and the auto-extracted dependency model.
+
 ## [0.2.15] - 2026-04-29
 
 Documentation sweep. The user-facing kit (templates emitted by `havn init`)

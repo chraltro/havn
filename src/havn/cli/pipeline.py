@@ -498,9 +498,16 @@ def _send_webhook(url: str, stream_name: str, status: str, duration_s: float) ->
 @app.command()
 def lint(
     fix: Annotated[bool, typer.Option("--fix", help="Auto-fix violations")] = False,
+    style: Annotated[bool, typer.Option("--style", help="Include layout/naming/capitalisation rules (off by default; correctness-only)")] = False,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
-    """Lint SQL files in the transform directory with SQLFluff."""
+    """Lint SQL files in the transform directory with SQLFluff.
+
+    By default, only correctness rules run (ambiguity, references, unused
+    CTEs, NULL-equality, etc.). Pass ``--style`` for the full SQLFluff rule
+    set including layout, naming, and capitalisation. A project-level
+    ``.sqlfluff`` file overrides both.
+    """
     from havn.config import load_project
     from havn.lint.linter import lint as run_lint
     from havn.lint.linter import print_violations
@@ -510,13 +517,15 @@ def lint(
     transform_dir = project_dir / "transform"
 
     action = "Fixing" if fix else "Linting"
-    console.print(f"[bold]{action} SQL files...[/bold]")
+    mode = "style+correctness" if style else "correctness-only"
+    console.print(f"[bold]{action} SQL files ({mode})...[/bold]")
 
     count, violations, fixed = run_lint(
         transform_dir,
         fix=fix,
         dialect=config.lint.dialect,
         rules=config.lint.rules or None,
+        style=style,
     )
 
     print_violations(violations)

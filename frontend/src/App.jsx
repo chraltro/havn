@@ -963,7 +963,17 @@ function AppContent() {
     let start = 0;
     for (const line of lines) {
       const s = line.trim();
-      if (s.startsWith("-- config:") || s.startsWith("-- depends_on:") || s === "") { start++; } else break;
+      // Strip both the canonical @-prefixed directives and the legacy
+      // SQL-comment form, plus any leading blank lines, so the preview
+      // sends only executable SQL to DuckDB.
+      const isDirective =
+        s.startsWith("@config") || s.startsWith("@depends_on") ||
+        s.startsWith("@description") || s.startsWith("@col") ||
+        s.startsWith("@assert") ||
+        s.startsWith("-- config:") || s.startsWith("-- depends_on:") ||
+        s.startsWith("-- description:") || s.startsWith("-- col:") ||
+        s.startsWith("-- assert:");
+      if (isDirective || s === "") { start++; } else break;
     }
     const sql = lines.slice(start).join("\n").trim();
     if (!sql) return;

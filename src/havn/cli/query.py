@@ -105,6 +105,52 @@ def _json_safe(v):
     return v
 
 
+def _pid_alive(pid: int) -> bool:
+    """Return True if the given PID names a live process, False otherwise.
+
+    Used to detect stale ``.havn/serve.json`` lockfiles when a `havn serve`
+    process was SIGKILL'd or crashed without running its finally-block
+    cleanup.
+    """
+    if pid <= 0:
+        return False
+    import os, sys
+    if sys.platform == "win32":
+        # On Windows, os.kill(pid, 0) raises OSError with errno EINVAL for
+        # signal 0; use the OpenProcess + GetExitCodeProcess Win32 dance via
+        # ctypes. STILL_ACTIVE is 259.
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+            if not handle:
+                return False
+            try:
+                exit_code = ctypes.c_ulong(0)
+                if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)) == 0:
+                    return False
+                return exit_code.value == STILL_ACTIVE
+            finally:
+                kernel32.CloseHandle(handle)
+        except Exception:
+            # If the introspection itself errors, assume alive (safer to
+            # attempt HTTP than to delete a possibly-valid lockfile).
+            return True
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            # Process exists but is owned by another user.
+            return True
+        except OSError:
+            return False
+
+
 def _try_route_via_server(project_dir: Path, sql: str, csv: bool, json_output: bool, limit: int) -> bool:
     """If a havn server is running for this project, run the query against it.
 
@@ -120,8 +166,21 @@ def _try_route_via_server(project_dir: Path, sql: str, csv: bool, json_output: b
         info = _json.loads(info_path.read_text())
         host = info.get("host", "127.0.0.1")
         port = int(info.get("port", 3000))
+        pid = info.get("pid")
     except Exception:
         return False
+
+    # Stale-lockfile detection: if the recorded PID is no longer alive, the
+    # server was SIGKILL'd or crashed. Remove the lockfile (so subsequent
+    # invocations don't pay the HTTP-attempt cost) and fall through to the
+    # direct DuckDB open path.
+    if pid is not None and not _pid_alive(int(pid)):
+        try:
+            info_path.unlink()
+        except Exception:
+            pass
+        return False
+
     try:
         import urllib.request
         import urllib.error
@@ -135,9 +194,14 @@ def _try_route_via_server(project_dir: Path, sql: str, csv: bool, json_output: b
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = _json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, ConnectionError, OSError):
-        # Server not actually running (stale lockfile). Caller will fall
-        # back to direct file open and either succeed or report the lock
-        # error itself.
+        # Connection refused even though the PID is alive. Could be a port
+        # mismatch (rare) or the server hasn't finished booting. Clean up
+        # the lockfile so we don't keep retrying the HTTP path on every
+        # subsequent CLI invocation, and fall through to the direct path.
+        try:
+            info_path.unlink()
+        except Exception:
+            pass
         return False
     except urllib.error.HTTPError as e:
         try:
@@ -279,7 +343,13 @@ def history(
         table.add_column("Error")
 
         for row in result:
-            status_style = "[green]" if row[2] == "success" else "[red]"
+            status = row[2]
+            if status == "success":
+                status_style = "[green]"
+            elif status == "skipped":
+                status_style = "[dim]"
+            else:
+                status_style = "[red]"
             dur = f"{row[4]}ms" if row[4] else ""
             rows = str(row[5]) if row[5] else ""
             error = (row[6][:60] + "...") if row[6] and len(row[6]) > 60 else (row[6] or "")
