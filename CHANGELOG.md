@@ -2,6 +2,29 @@
 
 All notable changes to havn are documented in this file.
 
+## [0.2.17] - 2026-04-29
+
+Two regressions caught by the post-publish end-to-end re-test of 0.2.16.
+
+### Fixed
+
+- **`havn history` and `havn tables` now route through a running server**.
+  0.2.13 added HTTP-routing for `havn query` so the warehouse-locked-by-server
+  case stops being a dead-end, but `tables` and `history` were left on the
+  direct DuckDB-open path. They now use the same sidecar-lockfile + HTTP
+  fallback chain as `query`. End-to-end re-test confirmed: a no-op rerun
+  produces a `havn history` output that includes both built and skipped
+  rows from the server-side `_havn.run_log`.
+- **`havn lint` no longer chokes on `@`-prefixed directives**. The linter
+  stripped only legacy `--`-prefixed directive lines before handing SQL to
+  SQLFluff, so canonical-syntax models produced 6 spurious `PRS`
+  (parsing) violations against `@config materialized=table, schema=...`
+  lines. Stripping now uses the engine's `_META_PREFIXES` set, which
+  recognises both forms. End-to-end re-test confirmed: 6 PRS violations
+  dropped to 4 real issues (AM04 unknown-result-columns from `SELECT *`,
+  RF04 keyword `month` as identifier, AM05 unqualified joins) instead of
+  being smothered by the parse failures.
+
 ## [0.2.16] - 2026-04-29
 
 Closing the remaining loose ends from the candidate-test pass: the

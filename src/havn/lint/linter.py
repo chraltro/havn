@@ -104,13 +104,16 @@ def lint(
     for sql_file in sql_files:
         sql = sql_file.read_text()
 
-        # Strip config comments before linting (they're not SQL)
-        # Count how many header lines to skip, then take the rest
+        # Strip directive lines before linting (they're not SQL). Recognises
+        # both the canonical @-prefixed form and the legacy SQL-comment form.
+        # Count how many header lines to skip, then take the rest -- so
+        # SQLFluff line numbers can be adjusted back via header_count.
+        from havn.engine.sql_analysis import _META_PREFIXES
         lines = sql.split("\n")
         header_count = 0
         for line in lines:
             stripped = line.strip()
-            if stripped.startswith("-- config:") or stripped.startswith("-- depends_on:") or stripped.startswith("-- assert:") or stripped == "":
+            if stripped == "" or any(stripped.startswith(p) for p in _META_PREFIXES):
                 header_count += 1
             else:
                 break
