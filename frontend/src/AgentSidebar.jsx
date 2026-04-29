@@ -13,10 +13,12 @@ const AGENTS = [
   {
     id: "codex", name: "Codex", install: "npm install -g @openai/codex",
     models: [
-      { id: "", label: "Default" },
-      { id: "gpt-5", label: "GPT-5" },
-      { id: "o3", label: "o3" },
-      { id: "o4-mini", label: "o4-mini" },
+      { id: "", label: "Default (GPT-5.5)" },
+      { id: "gpt-5.5", label: "GPT-5.5" },
+      { id: "gpt-5.4", label: "GPT-5.4" },
+      { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
+      { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
+      { id: "gpt-5.2", label: "GPT-5.2" },
     ],
   },
   {
