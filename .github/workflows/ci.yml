@@ -33,7 +33,12 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests
-        run: pytest tests/ -v
+        # -n auto = pytest-xdist parallelisation across all available
+        # GitHub-runner cores (typically 4). Slow tests are still
+        # @pytest.mark.slow-skipped here; nightly runs them with --runslow.
+        # If a test isn't parallel-safe, mark it @pytest.mark.serial or
+        # use a unique tmp_path / database fixture.
+        run: pytest tests/ -n auto
 
   lint:
     runs-on: ubuntu-latest
