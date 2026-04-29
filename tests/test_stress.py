@@ -6,6 +6,11 @@ from pathlib import Path
 import duckdb
 import pytest
 
+# All tests in this module are slow (million-row transforms, deep DAGs,
+# 30-second-sleeping subprocesses). Skipped by default — run via
+# `pytest --runslow` or the nightly workflow.
+pytestmark = pytest.mark.slow
+
 from havn.engine.database import ensure_meta_table
 from havn.engine.transform import (
     SQLModel,
