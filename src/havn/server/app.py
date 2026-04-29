@@ -79,7 +79,9 @@ async def _lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="havn", version="0.2.7", lifespan=_lifespan)
+from havn import __version__ as _havn_version
+
+app = FastAPI(title="havn", version=_havn_version, lifespan=_lifespan)
 
 app.add_middleware(
     CORSMiddleware,

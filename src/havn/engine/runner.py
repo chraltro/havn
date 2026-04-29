@@ -569,6 +569,8 @@ def _extract_row_count(output: str) -> int:
 
     Matches patterns like:
     - "Loaded 42 rows"
+    - "Loaded 1,234 rows"      (comma thousand-separators tolerated)
+    - "Loaded 1_234 rows"      (underscore thousand-separators tolerated)
     - "Exported 100 rows"
     - "42 rows"
     - "Got 15 earthquakes"
@@ -576,16 +578,21 @@ def _extract_row_count(output: str) -> int:
     Excludes byte counts (e.g. "Downloaded 1048576 bytes").
     """
     import re
-    # Look for patterns: "<number> rows/records/entries" or "Loaded/Exported/Inserted <number>"
-    # Exclude byte counts by requiring row-like units or specific verbs as whole words
+    # Number pattern: leading digit, then any mix of digits / commas / underscores.
+    # Lets us match "2,616,838" or "1_234_567" without splitting at the separator.
+    NUM = r"\d[\d,_]*"
     patterns = [
-        r"(?<!\w)(?:loaded|exported|inserted|imported|fetched|got|wrote)\s+(\d+)",
-        r"(\d+)\s+(?:rows?|records?|entries|earthquakes|items?)\b",
+        rf"(?<!\w)(?:loaded|exported|inserted|imported|fetched|got|wrote)\s+({NUM})",
+        rf"({NUM})\s+(?:rows?|records?|entries|earthquakes|items?)\b",
     ]
     total = 0
     for pattern in patterns:
         for match in re.finditer(pattern, output, re.IGNORECASE):
-            n = int(match.group(1))
+            raw = match.group(1).replace(",", "").replace("_", "")
+            try:
+                n = int(raw)
+            except ValueError:
+                continue
             if n > total:
                 total = n
     return total
