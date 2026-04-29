@@ -255,6 +255,10 @@ def _execute_single_model(
         changed = force or _has_changed(conn, model)
 
         if not changed:
+            try:
+                log_run(conn, "transform", model.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
+            except Exception:
+                pass
             return model.full_name, ModelResult(status="skipped")
 
         duration_ms, row_count = execute_model(conn, model)

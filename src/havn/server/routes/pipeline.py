@@ -552,6 +552,13 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
                 elif info["type"] == "transform":
                     m = info["model"]
                     if not force and not _hc(local, m):
+                        # Log the skip too, so `havn history` and external
+                        # readers see "12 steps, 12 skipped" instead of an
+                        # empty run_log for a no-op pipeline.
+                        try:
+                            _lr(local, "transform", m.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
+                        except Exception:
+                            pass
                         result_q.put((node_id, {"status": "skipped"}))
                         return
                     duration_ms, row_count = _em(local, m)
@@ -943,6 +950,13 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
                 elif info["type"] == "transform":
                     m = info["model"]
                     if not force and not _hc(local, m):
+                        # Log the skip too, so `havn history` and external
+                        # readers see "12 steps, 12 skipped" instead of an
+                        # empty run_log for a no-op pipeline.
+                        try:
+                            _lr(local, "transform", m.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
+                        except Exception:
+                            pass
                         result_q.put((node_id, {"status": "skipped"}))
                         return
                     duration_ms, row_count = _em(local, m)

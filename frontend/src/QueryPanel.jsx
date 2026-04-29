@@ -232,8 +232,17 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
             saveHistory(newHistory);
             addOutput("info", `Query: ${data.rows.length} row${data.rows.length !== 1 ? "s" : ""} (${data.columns.length} cols)${data.truncated ? " — results capped for display. Use Export CSV for full results." : ""}`);
           } catch (e) {
-            setError(e.message);
-            addOutput("error", `Query error: ${e.message}`);
+            // Suppress the "Warehouse not found" 404 in the OUTPUT panel:
+            // it's not actionable, the user hasn't run anything yet, and it
+            // misleads first-time viewers about the app's state. The Query
+            // panel itself still shows the inline error.
+            const msg = e.message || "";
+            const isEmptyWarehouse =
+              msg.includes("Warehouse not found") || msg.includes("warehouse not initialized");
+            setError(msg);
+            if (!isEmptyWarehouse) {
+              addOutput("error", `Query error: ${msg}`);
+            }
           } finally {
             setQueryRunning(false);
           }
@@ -280,8 +289,13 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
       saveHistory(newHistory);
       addOutput("info", `Query: ${data.rows.length} row${data.rows.length !== 1 ? "s" : ""} (${data.columns.length} cols)${data.truncated ? " — results capped for display. Use Export CSV for full results." : ""}`);
     } catch (e) {
-      setError(e.message);
-      addOutput("error", `Query error: ${e.message}`);
+      const msg = e.message || "";
+      const isEmptyWarehouse =
+        msg.includes("Warehouse not found") || msg.includes("warehouse not initialized");
+      setError(msg);
+      if (!isEmptyWarehouse) {
+        addOutput("error", `Query error: ${msg}`);
+      }
     } finally {
       setQueryRunning(false);
     }

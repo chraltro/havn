@@ -128,6 +128,10 @@ def _run_transform_sequential(
         if not changed:
             console.print(f"  [dim]skip[/dim]  {label}")
             results[model.full_name] = "skipped"
+            try:
+                log_run(conn, "transform", model.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
+            except Exception:
+                pass
             continue
 
         try:
@@ -298,6 +302,10 @@ def _run_transform_parallel(
             for model in tier:
                 console.print(f"  [dim]skip[/dim]  [bold]{model.full_name}[/bold] (upstream failure)")
                 results[model.full_name] = "skipped"
+                try:
+                    log_run(conn, "transform", model.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
+                except Exception:
+                    pass
             continue
 
         if len(tier) > 1:
@@ -312,6 +320,10 @@ def _run_transform_parallel(
             if not changed:
                 console.print(f"  [dim]skip[/dim]  {label}")
                 results[model.full_name] = "skipped"
+                try:
+                    log_run(conn, "transform", model.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
+                except Exception:
+                    pass
                 continue
 
             try:

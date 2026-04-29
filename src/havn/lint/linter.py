@@ -9,18 +9,42 @@ from rich.table import Table
 
 console = Console()
 
-# Default rules to exclude when there is no project-level .sqlfluff config.
-# These are the noisiest layout/style rules: they fire on every aligned
-# `AS` and on `SELECT *` ordering, burying real correctness violations.
-# Users who want them back can write a `.sqlfluff` next to project.yml.
+# `havn lint` separates correctness from style.
 #
-# NB: SQLFluff's FluffConfig.from_kwargs expects exclude_rules as a list,
-# not a comma-separated string. Passing a string causes it to iterate
-# character by character and silently exclude nothing.
-_DEFAULT_EXCLUDE_RULES = [
-    "layout.spacing",          # LT01 -- single space before AS, etc.
-    "structure.column_order",  # ST06 -- wildcards then targets
-    "layout.long_lines",       # LT05 -- max line length (still noisy at 120)
+# Default behaviour ("correctness mode") runs only the rules that catch real
+# bugs: ambiguity (AM*), references (RF*), select-list duplication (AL07),
+# unused CTEs (ST03), nested joins (ST01), and the handful of CV rules that
+# flag NULL-equality, blocked words, and broken control flow. Layout, naming,
+# and capitalisation rules are excluded so a 9-line SQL file with aligned
+# `AS` columns doesn't produce 130 violations.
+#
+# `--style` (or a project-level `.sqlfluff`) opts back into the full SQLFluff
+# rule set for a one-off spring clean.
+#
+# NB: SQLFluff's FluffConfig.from_kwargs expects ``rules`` and ``exclude_rules``
+# as Python lists (not comma-separated strings). Passing a string causes it
+# to iterate character by character and silently produce nonsense.
+_CORRECTNESS_RULES = [
+    # Ambiguity -- catches "can't tell what this means"
+    "AM01", "AM02", "AM03", "AM04", "AM05", "AM06", "AM07", "AM08", "AM09",
+    # References -- unqualified columns, missing references, etc.
+    "RF01", "RF02", "RF03", "RF04", "RF05", "RF06",
+    # Aliasing correctness (AL07 = duplicate aliases; rest are style)
+    "AL07",
+    # Structure correctness (avoid 02/05/06/07/09 -- those are style)
+    "ST01",  # nested joins
+    "ST03",  # unused CTEs
+    "ST04",  # nested CASE
+    "ST08",  # DISTINCT redundant parens
+    "ST10",  # constant join condition
+    "ST11",  # unused sources
+    "ST12",  # joins/set operators must be one-per-line keywords
+    # Convention correctness (avoid 01/02/03/04/06/07/10 -- those are style)
+    "CV05",  # NULL = NULL is wrong, use IS NULL
+    "CV08",  # PRIOR (Oracle-only, blocks portable SQL)
+    "CV09",  # blocked words
+    "CV11",  # cast type
+    "CV12",  # control flow correctness
 ]
 
 
@@ -29,6 +53,7 @@ def lint(
     fix: bool = False,
     dialect: str = "duckdb",
     rules: list[str] | None = None,
+    style: bool = False,
 ) -> tuple[int, list[dict], int]:
     """Lint SQL files in the transform directory.
 
@@ -36,7 +61,10 @@ def lint(
         transform_dir: Path to transform/ directory
         fix: Whether to auto-fix violations
         dialect: SQL dialect for SQLFluff
-        rules: Specific rules to check (None = all)
+        rules: Specific rules to check (None = correctness defaults; ignored
+            if a project ``.sqlfluff`` is present).
+        style: When True, run the full SQLFluff rule set (layout, naming,
+            capitalisation, etc.) instead of just the correctness subset.
 
     Returns:
         Tuple of (violation_count, violations_list, fixed_count)
@@ -62,8 +90,11 @@ def lint(
         config_kwargs: dict = {"dialect": dialect}
         if rules:
             config_kwargs["rules"] = rules
-        else:
-            config_kwargs["exclude_rules"] = _DEFAULT_EXCLUDE_RULES
+        elif not style:
+            # Default: correctness-only. Pass the rule allow-list so SQLFluff
+            # skips evaluating layout/naming/capitalisation rules entirely.
+            config_kwargs["rules"] = _CORRECTNESS_RULES
+        # else: style=True and no explicit rules -> use SQLFluff full default.
         config = FluffConfig.from_kwargs(**config_kwargs)
     linter = Linter(config=config)
 
@@ -119,6 +150,7 @@ def lint_file(
     dialect: str = "duckdb",
     rules: list[str] | None = None,
     content: str | None = None,
+    style: bool = False,
 ) -> tuple[int, list[dict], int, str]:
     """Lint (and optionally fix) a single SQL file.
 
@@ -141,8 +173,8 @@ def lint_file(
         config_kwargs: dict = {"dialect": dialect}
         if rules:
             config_kwargs["rules"] = rules
-        else:
-            config_kwargs["exclude_rules"] = _DEFAULT_EXCLUDE_RULES
+        elif not style:
+            config_kwargs["rules"] = _CORRECTNESS_RULES
         config = FluffConfig.from_kwargs(**config_kwargs)
     linter = Linter(config=config)
 
