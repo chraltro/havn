@@ -183,6 +183,22 @@ def test_extract_row_count_empty():
     assert _extract_row_count("") == 0
 
 
+def test_extract_row_count_with_thousand_separators():
+    """Row counts printed with comma thousand-separators must be preserved.
+
+    Regression: a script that printed 'loaded 2,616,838 rows' was being
+    summarised as '845 rows' because the regex stopped at the first comma.
+    """
+    assert _extract_row_count("loading landing.transactions ... 2,616,838 rows") == 2616838
+    assert _extract_row_count("Loaded 1_234_567 rows") == 1234567
+    # Mixed output: the largest match still wins
+    output = (
+        "  loading landing.customers ...\n    10,003 rows\n"
+        "  loading landing.transactions ...\n    2,616,838 rows\n"
+    )
+    assert _extract_row_count(output) == 2616838
+
+
 # ---------------------------------------------------------------------------
 # Pragma parsing and schedule=once skip behavior
 # ---------------------------------------------------------------------------

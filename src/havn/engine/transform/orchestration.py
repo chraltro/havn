@@ -243,6 +243,19 @@ def _run_transform_parallel(
     for model in ordered:
         model.upstream_hash = _compute_upstream_hash(model, model_map)
 
+    # Pre-create every target schema on the main connection BEFORE any
+    # parallel worker starts. Without this, two workers in the same tier
+    # racing on the same schema both run `CREATE SCHEMA IF NOT EXISTS bronze`
+    # and DuckDB raises "Catalog write-write conflict on create with bronze".
+    # `IF NOT EXISTS` is not enough — the conflict is on the catalog write
+    # itself, not on the existence check.
+    schemas_to_create = {m.schema for m in models if m.schema}
+    for schema in sorted(schemas_to_create):
+        try:
+            conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+        except Exception as e:
+            logger.debug("Pre-create schema %s failed: %s", schema, e)
+
     # DuckLake with a local file catalog cannot be attached twice within the
     # same process — parallel workers would all try to attach the same file
     # and collide. Fall back to sequential execution for that case.
