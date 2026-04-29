@@ -1159,7 +1159,7 @@
 <p>Source declarations are used during <code>havn check</code> validation:</p>
 <ol>
 <li>
-<p><strong>Dependency resolution</strong> -- Source tables are recognized as valid dependencies in <code>-- depends_on:</code> comments, preventing false "unknown table" warnings.</p>
+<p><strong>Dependency resolution</strong> -- Source tables are recognized as valid upstreams when auto-extracted from <code>FROM</code>/<code>JOIN</code> or declared via <code>@depends_on</code>, preventing false "unknown table" warnings.</p>
 </li>
 <li>
 <p><strong>Column validation</strong> -- If columns are declared in a source, havn validates that SQL models referencing those tables use valid column names.</p>

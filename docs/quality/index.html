@@ -1596,15 +1596,14 @@
 <h1 id="data-quality">Data Quality<a class="headerlink" href="#data-quality" title="Permanent link">&para;</a></h1>
 <p>havn provides a comprehensive data quality framework with three complementary systems: inline assertions in SQL models, automatic profiling, and freshness monitoring. For standalone quality rules, see <a href="contracts">Contracts</a>.</p>
 <h2 id="inline-assertions">Inline Assertions<a class="headerlink" href="#inline-assertions" title="Permanent link">&para;</a></h2>
-<p>Add <code>-- assert:</code> comments to SQL model files. Assertions are evaluated after each model builds during <code>havn transform</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="c1">-- config: materialized=table, schema=gold</span>
-<span class="c1">-- depends_on: silver.customers</span>
-<span class="c1">-- assert: row_count &gt; 0</span>
-<span class="c1">-- assert: unique(customer_id)</span>
-<span class="c1">-- assert: no_nulls(customer_id)</span>
-<span class="c1">-- assert: no_nulls(email)</span>
-<span class="c1">-- assert: accepted_values(status, [&#39;active&#39;, &#39;inactive&#39;, &#39;suspended&#39;])</span>
-<span class="c1">-- assert: &quot;lifetime_value &gt;= 0&quot;</span>
+<p>Add <code>@assert</code> directives to SQL model files. Assertions are evaluated after each model builds during <code>havn transform</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="k">table</span><span class="p">,</span><span class="w"> </span><span class="k">schema</span><span class="o">=</span><span class="n">gold</span>
+<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="k">row_count</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span>
+<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="k">unique</span><span class="p">(</span><span class="n">customer_id</span><span class="p">)</span>
+<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="n">no_nulls</span><span class="p">(</span><span class="n">customer_id</span><span class="p">)</span>
+<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="n">no_nulls</span><span class="p">(</span><span class="n">email</span><span class="p">)</span>
+<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="n">accepted_values</span><span class="p">(</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;active&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;inactive&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;suspended&#39;</span><span class="p">])</span>
+<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="ss">&quot;lifetime_value &gt;= 0&quot;</span>
 
 <span class="k">SELECT</span>
 <span class="w">    </span><span class="n">customer_id</span><span class="p">,</span>
@@ -1614,33 +1613,34 @@
 <span class="k">FROM</span><span class="w"> </span><span class="n">silver</span><span class="p">.</span><span class="n">customers</span>
 <span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span>
 </code></pre></div>
+<p>(Legacy <code>-- assert: ...</code> comment syntax still parses for back-compat.)</p>
 <h3 id="available-assertion-types">Available Assertion Types<a class="headerlink" href="#available-assertion-types" title="Permanent link">&para;</a></h3>
 <h4 id="row_count-n"><code>row_count &gt; N</code><a class="headerlink" href="#row_count-n" title="Permanent link">&para;</a></h4>
 <p>Checks that the table has more than N rows:</p>
-<div class="highlight"><pre><span></span><code><span class="c1">-- assert: row_count &gt; 0</span>
-<span class="c1">-- assert: row_count &gt; 100</span>
-<span class="c1">-- assert: row_count &gt;= 1000</span>
+<div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="k">row_count</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span>
+<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="k">row_count</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">100</span>
+<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="k">row_count</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">1000</span>
 </code></pre></div>
 <h4 id="uniquecolumn"><code>unique(column)</code><a class="headerlink" href="#uniquecolumn" title="Permanent link">&para;</a></h4>
 <p>Checks that a column contains no duplicate values:</p>
-<div class="highlight"><pre><span></span><code><span class="c1">-- assert: unique(customer_id)</span>
-<span class="c1">-- assert: unique(email)</span>
+<div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="k">unique</span><span class="p">(</span><span class="n">customer_id</span><span class="p">)</span>
+<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="k">unique</span><span class="p">(</span><span class="n">email</span><span class="p">)</span>
 </code></pre></div>
 <h4 id="no_nullscolumn"><code>no_nulls(column)</code><a class="headerlink" href="#no_nullscolumn" title="Permanent link">&para;</a></h4>
 <p>Checks that a column contains no NULL values:</p>
-<div class="highlight"><pre><span></span><code><span class="c1">-- assert: no_nulls(customer_id)</span>
-<span class="c1">-- assert: no_nulls(email)</span>
+<div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="n">no_nulls</span><span class="p">(</span><span class="n">customer_id</span><span class="p">)</span>
+<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="n">no_nulls</span><span class="p">(</span><span class="n">email</span><span class="p">)</span>
 </code></pre></div>
 <h4 id="accepted_valuescolumn-values"><code>accepted_values(column, [values])</code><a class="headerlink" href="#accepted_valuescolumn-values" title="Permanent link">&para;</a></h4>
 <p>Checks that all values in a column are within the allowed set:</p>
-<div class="highlight"><pre><span></span><code><span class="c1">-- assert: accepted_values(status, [&#39;active&#39;, &#39;inactive&#39;, &#39;suspended&#39;])</span>
-<span class="c1">-- assert: accepted_values(country_code, [&#39;US&#39;, &#39;CA&#39;, &#39;GB&#39;, &#39;DE&#39;])</span>
+<div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="n">accepted_values</span><span class="p">(</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;active&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;inactive&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;suspended&#39;</span><span class="p">])</span>
+<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="n">accepted_values</span><span class="p">(</span><span class="n">country_code</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;US&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;CA&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;GB&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;DE&#39;</span><span class="p">])</span>
 </code></pre></div>
 <h4 id="custom-sql-expressions">Custom SQL Expressions<a class="headerlink" href="#custom-sql-expressions" title="Permanent link">&para;</a></h4>
 <p>Any boolean SQL expression can be used as an assertion. Wrap complex expressions in quotes:</p>
-<div class="highlight"><pre><span></span><code><span class="c1">-- assert: &quot;AVG(amount) &gt; 0&quot;</span>
-<span class="c1">-- assert: &quot;MAX(created_at) &gt; CURRENT_DATE - INTERVAL &#39;7 days&#39;&quot;</span>
-<span class="c1">-- assert: &quot;COUNT(DISTINCT region) &gt; 1&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="ss">&quot;AVG(amount) &gt; 0&quot;</span>
+<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="ss">&quot;MAX(created_at) &gt; CURRENT_DATE - INTERVAL &#39;7 days&#39;&quot;</span>
+<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="ss">&quot;COUNT(DISTINCT region) &gt; 1&quot;</span>
 </code></pre></div>
 <p>Custom expressions are evaluated as <code>SELECT (&lt;expression&gt;) FROM &lt;table&gt;</code> and must return a single truthy value.</p>
 <h3 id="assertion-behavior">Assertion Behavior<a class="headerlink" href="#assertion-behavior" title="Permanent link">&para;</a></h3>
@@ -1654,10 +1654,10 @@
 <h3 id="assertion-debugging">Assertion Debugging<a class="headerlink" href="#assertion-debugging" title="Permanent link">&para;</a></h3>
 <p>When an assertion fails, havn provides diagnostic details to help you find the problem:</p>
 <ul>
-<li><strong><code>unique(col)</code> failure</strong> — shows top 10 duplicated values with counts</li>
-<li><strong><code>no_nulls(col)</code> failure</strong> — shows null count, percentage, and sample rows with NULLs</li>
-<li><strong><code>accepted_values(col, [...])</code> failure</strong> — shows unexpected values with counts</li>
-<li><strong><code>row_count</code> failure</strong> — shows actual count vs threshold</li>
+<li><strong><code>unique(col)</code> failure</strong> -- shows top 10 duplicated values with counts</li>
+<li><strong><code>no_nulls(col)</code> failure</strong> -- shows null count, percentage, and sample rows with NULLs</li>
+<li><strong><code>accepted_values(col, [...])</code> failure</strong> -- shows unexpected values with counts</li>
+<li><strong><code>row_count</code> failure</strong> -- shows actual count vs threshold</li>
 </ul>
 <p>To re-run assertions with full diagnostics on demand:</p>
 <div class="highlight"><pre><span></span><code>curl<span class="w"> </span>http://localhost:3000/api/quality/assertion-debug/gold.customer_summary
@@ -1736,7 +1736,7 @@ curl<span class="w"> </span>http://localhost:3000/api/profiles/gold.earthquake_s
 <p>This executes:</p>
 <ol>
 <li><strong>Model validation</strong> -- SQL syntax, dependency resolution, column references</li>
-<li><strong>Inline assertions</strong> -- <code>-- assert:</code> comments against live data</li>
+<li><strong>Inline assertions</strong> -- <code>@assert</code> directives against live data</li>
 <li><strong>YAML contracts</strong> -- Rules from <code>contracts/</code> directory</li>
 </ol>
 <h3 id="cicd-integration">CI/CD Integration<a class="headerlink" href="#cicd-integration" title="Permanent link">&para;</a></h3>

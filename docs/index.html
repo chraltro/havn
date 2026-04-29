@@ -1057,8 +1057,8 @@
   
 
 
-<h1 id="havn-data-in-safe-waters">havn — Data in safe waters<a class="headerlink" href="#havn-data-in-safe-waters" title="Permanent link">&para;</a></h1>
-<p>havn is a self-hosted data platform — a lightweight, Nordic alternative to Databricks and Snowflake. It uses <strong>DuckDB</strong> for OLAP analytics, <strong>plain SQL</strong> for transforms, and <strong>Python</strong> for ingest/export scripts. All data lives in a single <code>warehouse.duckdb</code> file. No data leaves your machine.</p>
+<h1 id="havn-data-in-safe-waters">havn -- Data in safe waters<a class="headerlink" href="#havn-data-in-safe-waters" title="Permanent link">&para;</a></h1>
+<p>havn is a self-hosted data platform -- a lightweight, Nordic alternative to Databricks and Snowflake. It uses <strong>DuckDB</strong> for OLAP analytics, <strong>plain SQL</strong> for transforms, and <strong>Python</strong> for ingest/export scripts. All data lives in a single <code>warehouse.duckdb</code> file. No data leaves your machine.</p>
 <h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>havn
 havn<span class="w"> </span>init<span class="w"> </span>my-project
@@ -1118,7 +1118,7 @@ havn<span class="w"> </span>serve
 </tr>
 <tr>
 <td><strong>Templating</strong></td>
-<td>None — plain SQL</td>
+<td>None -- plain SQL</td>
 <td>Jinja</td>
 <td>Jinja</td>
 <td>None</td>
@@ -1127,9 +1127,9 @@ havn<span class="w"> </span>serve
 </table>
 <h2 id="features">Features<a class="headerlink" href="#features" title="Permanent link">&para;</a></h2>
 <h3 id="transform-engine">Transform Engine<a class="headerlink" href="#transform-engine" title="Permanent link">&para;</a></h3>
-<p>Plain SQL with <code>-- config:</code> and <code>-- depends_on:</code> comments. Automatic DAG resolution with change detection via SHA256 hashing. No Jinja, no templating — just SQL.</p>
+<p>Plain SQL with <code>@config</code> directives. Dependencies are auto-extracted from <code>FROM</code> and <code>JOIN</code> clauses, so the DAG builds itself. SHA256 content hashing means only changed models rebuild. No Jinja, no templating, just SQL.</p>
 <h3 id="data-quality">Data Quality<a class="headerlink" href="#data-quality" title="Permanent link">&para;</a></h3>
-<p>Inline assertions (<code>-- assert: row_count &gt; 0, unique(id)</code>), YAML contracts, column profiling, and freshness monitoring.</p>
+<p>Inline assertions (<code>@assert row_count &gt; 0</code>, <code>@assert unique(id)</code>), YAML contracts, column profiling, and freshness monitoring.</p>
 <h3 id="connectors">Connectors<a class="headerlink" href="#connectors" title="Permanent link">&para;</a></h3>
 <p>Pre-built connectors for PostgreSQL, MySQL, Stripe, Shopify, Google Sheets, REST APIs, S3/GCS, CSV, and webhooks.</p>
 <h3 id="web-ui">Web UI<a class="headerlink" href="#web-ui" title="Permanent link">&para;</a></h3>
@@ -1152,10 +1152,10 @@ havn<span class="w"> </span>serve
    (APIs, DBs, files)                                    (reports, APIs)
 </code></pre></div>
 <ul>
-<li><strong>landing</strong> — Raw data ingested from external sources via Python scripts or notebooks</li>
-<li><strong>bronze</strong> — Light cleanup: column renaming, type casting, deduplication</li>
-<li><strong>silver</strong> — Business logic: joins, aggregations, calculations</li>
-<li><strong>gold</strong> — Consumption-ready tables for dashboards, APIs, and reports</li>
+<li><strong>landing</strong> -- Raw data ingested from external sources via Python scripts or notebooks</li>
+<li><strong>bronze</strong> -- Light cleanup: column renaming, type casting, deduplication</li>
+<li><strong>silver</strong> -- Business logic: joins, aggregations, calculations</li>
+<li><strong>gold</strong> -- Consumption-ready tables for dashboards, APIs, and reports</li>
 </ul>
 <h2 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h2>
 <table>

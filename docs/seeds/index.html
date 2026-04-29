@@ -1007,8 +1007,7 @@ great,Great,8.0,9.9,&quot;Can cause devastating damage near the epicenter&quot;
 <p>This makes repeated <code>havn seed</code> calls fast -- only changed CSVs are processed.</p>
 <h2 id="using-seeds-in-transforms">Using Seeds in Transforms<a class="headerlink" href="#using-seeds-in-transforms" title="Permanent link">&para;</a></h2>
 <p>Reference seed tables in your SQL models:</p>
-<div class="highlight"><pre><span></span><code><span class="c1">-- config: materialized=table, schema=silver</span>
-<span class="c1">-- depends_on: bronze.earthquakes, seeds.magnitude_scale</span>
+<div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="k">table</span><span class="p">,</span><span class="w"> </span><span class="k">schema</span><span class="o">=</span><span class="n">silver</span>
 
 <span class="k">SELECT</span>
 <span class="w">    </span><span class="n">e</span><span class="p">.</span><span class="n">earthquake_id</span><span class="p">,</span>
@@ -1019,7 +1018,7 @@ great,Great,8.0,9.9,&quot;Can cause devastating damage near the epicenter&quot;
 <span class="k">LEFT</span><span class="w"> </span><span class="k">JOIN</span><span class="w"> </span><span class="n">seeds</span><span class="p">.</span><span class="n">magnitude_scale</span><span class="w"> </span><span class="n">m</span>
 <span class="w">    </span><span class="k">ON</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">magnitude</span><span class="w"> </span><span class="k">BETWEEN</span><span class="w"> </span><span class="n">m</span><span class="p">.</span><span class="n">magnitude_min</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="n">m</span><span class="p">.</span><span class="n">magnitude_max</span>
 </code></pre></div>
-<p>Add seeds to your <code>-- depends_on:</code> comment so havn knows about the dependency and includes seeds in the DAG visualization.</p>
+<p>havn auto-detects <code>seeds.magnitude_scale</code> from the <code>LEFT JOIN</code> clause and includes it in the DAG. Add <code>@depends_on</code> only if you reference a seed through a function call or string interpolation that the parser can't see.</p>
 <h2 id="seed-status-in-the-dag">Seed Status in the DAG<a class="headerlink" href="#seed-status-in-the-dag" title="Permanent link">&para;</a></h2>
 <p>Seeds appear as special nodes in the DAG visualization (web UI). They are shown with a distinct icon to differentiate them from SQL models and ingest scripts.</p>
 <h2 id="empty-csvs">Empty CSVs<a class="headerlink" href="#empty-csvs" title="Permanent link">&para;</a></h2>
@@ -1053,7 +1052,7 @@ great,Great,8.0,9.9,&quot;Can cause devastating damage near the epicenter&quot;
 <p><strong>Version control seeds</strong> -- CSV seed files should be committed to git. They are part of your project definition.</p>
 </li>
 <li>
-<p><strong>Declare dependencies</strong> -- Always add seed tables to <code>-- depends_on:</code> in your SQL models for correct DAG ordering.</p>
+<p><strong>Reference seeds in SQL</strong> -- <code>FROM seeds.&lt;name&gt;</code> (or <code>JOIN seeds.&lt;name&gt;</code>) is enough; havn auto-detects the dependency for DAG ordering. Use <code>@depends_on</code> only if the seed reference isn't visible in plain SQL.</p>
 </li>
 </ol>
 <h2 id="related-pages">Related Pages<a class="headerlink" href="#related-pages" title="Permanent link">&para;</a></h2>

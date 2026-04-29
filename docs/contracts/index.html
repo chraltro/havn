@@ -1047,7 +1047,7 @@
 
 
 <h1 id="data-contracts">Data Contracts<a class="headerlink" href="#data-contracts" title="Permanent link">&para;</a></h1>
-<p>Data contracts are standalone YAML files that define data quality rules. They complement inline <code>-- assert:</code> comments in SQL models by providing reusable, centralized quality definitions with severity levels and historical tracking.</p>
+<p>Data contracts are standalone YAML files that define data quality rules. They complement inline <code>@assert</code> directives in SQL models by providing reusable, centralized quality definitions with severity levels and historical tracking.</p>
 <h2 id="contract-format">Contract Format<a class="headerlink" href="#contract-format" title="Permanent link">&para;</a></h2>
 <p>Contracts live in the <code>contracts/</code> directory as YAML files:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># contracts/orders.yml</span>
@@ -1121,7 +1121,7 @@
 </tbody>
 </table>
 <h2 id="assertion-types">Assertion Types<a class="headerlink" href="#assertion-types" title="Permanent link">&para;</a></h2>
-<p>Contracts support the same assertion expressions as inline <code>-- assert:</code> comments:</p>
+<p>Contracts support the same assertion expressions as inline <code>@assert</code> directives:</p>
 <h3 id="row_count-n"><code>row_count &gt; N</code><a class="headerlink" href="#row_count-n" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="nt">assertions</span><span class="p">:</span>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">row_count &gt; 0</span>
@@ -1280,7 +1280,7 @@ havn<span class="w"> </span>contracts<span class="w"> </span>gold.orders
 </code></pre></div>
 <p>This runs:
 1. SQL model validation
-2. Inline assertions (<code>-- assert:</code>)
+2. Inline assertions (<code>@assert</code>)
 3. YAML contracts from <code>contracts/</code></p>
 <p>All three must pass for <code>havn check</code> to exit with code 0.</p>
 <h2 id="contracts-vs-inline-assertions">Contracts vs Inline Assertions<a class="headerlink" href="#contracts-vs-inline-assertions" title="Permanent link">&para;</a></h2>

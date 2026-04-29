@@ -830,7 +830,7 @@
 
 
 <h1 id="python-sql-macros">Python SQL Macros<a class="headerlink" href="#python-sql-macros" title="Permanent link">&para;</a></h1>
-<p>havn lets you write Python functions that are callable directly in SQL. No Jinja templating — just Python functions registered as DuckDB UDFs. "Why template SQL when you have Python right there?"</p>
+<p>havn lets you write Python functions that are callable directly in SQL. No Jinja templating -- just Python functions registered as DuckDB UDFs. "Why template SQL when you have Python right there?"</p>
 <h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <p>Create a Python file in the <code>macros/</code> directory with <code>@macro</code>-decorated functions:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># macros/utils.py</span>
@@ -853,8 +853,7 @@
 </code></pre></div>
 <p>Use them in any SQL model:</p>
 <div class="highlight"><pre><span></span><code><span class="c1">-- transform/silver/customers.sql</span>
-<span class="c1">-- config: materialized=table, schema=silver</span>
-<span class="c1">-- depends_on: bronze.customers</span>
+<span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="k">table</span><span class="p">,</span><span class="w"> </span><span class="k">schema</span><span class="o">=</span><span class="n">silver</span>
 
 <span class="k">SELECT</span>
 <span class="w">    </span><span class="n">customer_id</span><span class="p">,</span>
@@ -919,7 +918,7 @@
 <span class="k">CREATE</span><span class="w"> </span><span class="n">MACRO</span><span class="w"> </span><span class="n">is_weekend</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span>
 <span class="w">    </span><span class="k">EXTRACT</span><span class="p">(</span><span class="n">DOW</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">d</span><span class="p">::</span><span class="nb">DATE</span><span class="p">)</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">6</span><span class="p">);</span>
 </code></pre></div>
-<p>SQL macros are executed directly on connection — they don't need the <code>@macro</code> decorator.</p>
+<p>SQL macros are executed directly on connection -- they don't need the <code>@macro</code> decorator.</p>
 <h2 id="listing-macros">Listing Macros<a class="headerlink" href="#listing-macros" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>macros
 </code></pre></div>
@@ -936,9 +935,9 @@
 </ul>
 <h2 id="related-pages">Related Pages<a class="headerlink" href="#related-pages" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="transforms">Transforms</a> — Using macros in SQL models</li>
-<li><a href="cli-reference">CLI Reference</a> — <code>havn macros</code> command</li>
-<li><a href="configuration">Configuration</a> — Project structure</li>
+<li><a href="transforms">Transforms</a> -- Using macros in SQL models</li>
+<li><a href="cli-reference">CLI Reference</a> -- <code>havn macros</code> command</li>
+<li><a href="configuration">Configuration</a> -- Project structure</li>
 </ul>
 
 
