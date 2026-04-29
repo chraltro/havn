@@ -139,13 +139,21 @@ def test_init_from_remote_copies_template(tmp_path, monkeypatch):
     archive = _make_tarball(tmp_path, top_dir="pkg-main")
 
     def fake_urlopen(req, timeout=60):  # noqa: ARG001
+        # shutil.copyfileobj calls read(N) in a loop until it gets b"", so
+        # serve the archive bytes once and then b"" -- otherwise the test
+        # hangs forever returning the full archive on every iteration.
+        archive_bytes = archive.read_bytes()
         class _Resp:
+            _served = False
             def __enter__(self_):
                 return self_
             def __exit__(self_, *a):
                 return False
             def read(self_, n=-1):
-                return archive.read_bytes()
+                if self_._served:
+                    return b""
+                self_._served = True
+                return archive_bytes
         return _Resp()
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)

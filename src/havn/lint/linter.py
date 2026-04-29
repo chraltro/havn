@@ -9,6 +9,16 @@ from rich.table import Table
 
 console = Console()
 
+# Default rules to exclude when there is no project-level .sqlfluff config.
+# These are the noisiest layout/style rules: they fire on every aligned
+# `AS` and on `SELECT *` ordering, burying real correctness violations.
+# Users who want them back can write a `.sqlfluff` next to project.yml.
+_DEFAULT_EXCLUDE_RULES = (
+    "layout.spacing,"            # LT01 -- single space before AS, etc.
+    "structure.column_order,"    # ST06 -- wildcards then targets
+    "layout.long_lines"          # LT05 -- max line length (already 120, still noisy in long CTE chains)
+)
+
 
 def lint(
     transform_dir: Path,
@@ -48,6 +58,8 @@ def lint(
         config_kwargs: dict = {"dialect": dialect}
         if rules:
             config_kwargs["rules"] = rules
+        else:
+            config_kwargs["exclude_rules"] = _DEFAULT_EXCLUDE_RULES
         config = FluffConfig.from_kwargs(**config_kwargs)
     linter = Linter(config=config)
 
@@ -125,6 +137,8 @@ def lint_file(
         config_kwargs: dict = {"dialect": dialect}
         if rules:
             config_kwargs["rules"] = rules
+        else:
+            config_kwargs["exclude_rules"] = _DEFAULT_EXCLUDE_RULES
         config = FluffConfig.from_kwargs(**config_kwargs)
     linter = Linter(config=config)
 

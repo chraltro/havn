@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { api } from './api';
+import { useAuth } from './AuthContext';
 import { schemaCompare } from './schemaOrder';
 
 const ROLES = ['admin', 'editor', 'viewer'];
@@ -14,10 +15,15 @@ const CATEGORY_COLORS = {
 const CATEGORY_ORDER = ['general', 'pii', 'financial', 'analytics'];
 const CATEGORY_LABELS = { general: 'General', pii: 'PII', financial: 'Financial', analytics: 'Analytics' };
 
-function emptyPolicy() {
+function emptyPolicy(authRequired) {
+  // When auth is disabled the local user is auto-admin, so the legacy default
+  // of exempted_roles=['admin'] makes new policies silently inert for the
+  // only user who exists. Default to no exemption in no-auth mode so the
+  // policy actually masks for the caller.
   return {
     schema_name: '', table_name: '', column_name: '', method: 'hash',
-    method_config: {}, condition_column: '', condition_value: '', exempted_roles: ['admin'],
+    method_config: {}, condition_column: '', condition_value: '',
+    exempted_roles: authRequired ? ['admin'] : [],
   };
 }
 
@@ -303,6 +309,7 @@ function PolicyFormRow({ initial, methods, onSave, onCancel, saving, colSpan }) 
 /* ------------------------------------------------------------------ */
 
 export default function MaskingPanel({ showConfirm }) {
+  const { authRequired } = useAuth();
   const [policies, setPolicies] = useState([]);
   const [methods, setMethods] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -410,7 +417,7 @@ export default function MaskingPanel({ showConfirm }) {
 
   // Build initial form data for the inline form
   const formInitial = useMemo(() => {
-    if (formMode === 'new') return emptyPolicy();
+    if (formMode === 'new') return emptyPolicy(authRequired);
     if (formMode != null) {
       const p = policies.find(pol => pol.id === formMode);
       if (p) return {
@@ -425,8 +432,8 @@ export default function MaskingPanel({ showConfirm }) {
         exempted_roles: p.exempted_roles || ['admin'],
       };
     }
-    return emptyPolicy();
-  }, [formMode, policies]);
+    return emptyPolicy(authRequired);
+  }, [formMode, policies, authRequired]);
 
   const COL_COUNT = 7;
 

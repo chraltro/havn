@@ -234,6 +234,7 @@ def _execute_single_model(
     model_map: dict[str, SQLModel],
     db_config: object | None = None,
     project_dir: object | None = None,
+    pipeline_run_id: str | None = None,
 ) -> tuple[str, ModelResult]:
     """Execute a single model in its own connection (for parallel execution).
 
@@ -258,7 +259,7 @@ def _execute_single_model(
 
         duration_ms, row_count = execute_model(conn, model)
         _update_state(conn, model, duration_ms, row_count)
-        log_run(conn, "transform", model.full_name, "success", duration_ms, row_count)
+        log_run(conn, "transform", model.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
 
         # Run assertions
         assertion_results: list[AssertionResult] = []
@@ -282,7 +283,7 @@ def _execute_single_model(
 
     except Exception as e:
         try:
-            log_run(conn, "transform", model.full_name, "error", error=str(e))
+            log_run(conn, "transform", model.full_name, "error", error=str(e), pipeline_run_id=pipeline_run_id)
         except Exception as e2:
             logger.debug("Failed to log run error: %s", e2)
         return model.full_name, ModelResult(status="error", error=str(e))

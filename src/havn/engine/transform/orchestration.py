@@ -369,7 +369,7 @@ def _run_transform_parallel(
                     executor.submit(
                         _execute_single_model,
                         db_path_str, model, force, model_map,
-                        db_config, project_dir,
+                        db_config, project_dir, pipeline_run_id,
                     ): model
                     for model in tier
                 }

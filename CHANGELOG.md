@@ -2,6 +2,72 @@
 
 All notable changes to havn are documented in this file.
 
+## [0.2.13] - 2026-04-29
+
+### Fixed
+
+- **`havn serve --port N` is now strict.** When `N` is busy and the user
+  passed `--port` explicitly, the server exits with code 2 and a clear
+  message instead of silently rebinding to a different port. Auto-port
+  selection still works when `--port` is omitted, but only as a neighbor
+  search of up to 10 ports with a loud yellow warning. Background: an
+  end-to-end test harness drove three concurrent servers expecting ports
+  3010/3011/3012 and silently landed on a stale leftover server because
+  havn rebinds without telling automation callers.
+- **`havn query` (and `havn tables`, `havn history`) now route through a
+  running `havn serve`.** When `havn serve` is up, the warehouse file is
+  process-locked by DuckDB and a separate `havn query` invocation used to
+  fail with "IO Error: Cannot open file ... already open in PID N". The
+  CLI now writes a sidecar `.havn/serve.json` on serve start, and the
+  query command checks that lockfile and forwards to the server's
+  `/api/query` endpoint when one is running. Falls back to the direct
+  DuckDB path with a clear error when no server is running.
+- **Failed transform steps now appear in `_havn.run_log` with their
+  `pipeline_run_id`.** Previously, when bronze layer models ran in a
+  parallel tier and one of them failed, the per-step error row was
+  written to `run_log` with `pipeline_run_id=NULL`, so a query like
+  `SELECT * FROM _havn.run_log WHERE pipeline_run_id=?` for a failed run
+  returned only the success rows -- making it look like the failure
+  vanished. The parallel-tier path now passes `pipeline_run_id` through to
+  `_execute_single_model` for both success and failure logs.
+- **Flight SQL server: `cursor_for` import was scoped to one branch.** The
+  import sat inside the `if backend_factory is None` branch, so callers
+  that injected their own backend (notably the test suite) hit a
+  `NameError: cannot access free variable 'cursor_for'` inside `do_get`.
+  Hoisted the import to the outer scope. `tests/test_flight.py` now
+  passes (was failing on main against pyarrow's flight client).
+- **OUTPUT panel duration formatter no longer rounds 6-second jobs to
+  `(0.0s)`.** When the SSE `model_end` event arrived before the
+  per-model `model_start` had set `nodeStartTimes[name]` (or when both
+  fired in the same animation frame), the wall-clock fallback returned
+  ~0ms and was preferred over the server-reported `duration_ms`. The
+  formatter now prefers the server-reported duration whenever present
+  and renders sub-second jobs as `(123ms)`, 1-10s as `(2.34s)`, longer
+  jobs as `(2.3s)`.
+- **Stale "Pipeline complete" hint clears on next run.** The hint host
+  now listens for a `havn_dismiss_completion_hints` window event, which
+  PipelineContext fires when `startAndConnect` begins a new run. The
+  toast reading "Pipeline complete. Use the Diff tab next time..." used
+  to linger on screen across a fresh run-in-progress, leading users to
+  think the new run had already finished.
+
+### Changed
+
+- **Masking policies created when auth is disabled default to
+  `exempted_roles=[]`** instead of `["admin"]`. In auth-disabled mode the
+  local user is auto-granted the admin role, so the legacy default made
+  every policy silently inert for the only user who exists. Both the
+  server route and the frontend dialog adopt the new default; existing
+  policies are untouched. To restore the old behaviour explicitly, pass
+  `exempted_roles=["admin"]` in the API or check the `admin` box in the
+  Masking dialog before saving.
+- **`havn lint` excludes the noisiest layout rules by default.**
+  `layout.spacing` (LT01 -- whitespace before AS), `structure.column_order`
+  (ST06 -- wildcards-then-targets), and `layout.long_lines` (LT05) are
+  excluded when no project-level `.sqlfluff` file is present, so lint
+  output prioritises correctness over style nags. Users who want the
+  full SQLFluff defaults can drop a `.sqlfluff` next to `project.yml`.
+
 ## [0.2.12] - 2026-04-29
 
 ### Fixed
