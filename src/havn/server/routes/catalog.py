@@ -396,10 +396,25 @@ def get_overview(request: Request, conn: DbConnReadOnlyOptional) -> dict:
                 ),
             )
             result["schemas"] = sorted_schemas
+            # Header counters represent USER data only — `_havn` is havn's
+            # own metadata and `information_schema` is the SQL standard
+            # introspection catalog. Including them produces "41 tables"
+            # on a fresh project where the user has 15 user tables, which
+            # is the kind of confusion the case-test pass surfaced.
+            def _is_user_schema(name: str) -> bool:
+                if not name:
+                    return False
+                if name in ("_havn", "information_schema", "main"):
+                    return False
+                if name.startswith("__"):
+                    return False
+                return True
+
+            user_schemas = [s for s in sorted_schemas if _is_user_schema(s["name"])]
             result["total_tables"] = sum(
-                s["tables"] + s["views"] for s in sorted_schemas
+                s["tables"] + s["views"] for s in user_schemas
             )
-            result["total_rows"] = sum(s["total_rows"] for s in sorted_schemas)
+            result["total_rows"] = sum(s["total_rows"] for s in user_schemas)
             result["has_data"] = result["total_tables"] > 0
         except Exception:
             pass

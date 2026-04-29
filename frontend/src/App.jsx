@@ -104,7 +104,11 @@ function pathToTab(pathname) {
 function PipelineMenu({ running, onRunPipeline, onLint, onContracts, onCancel }) {
   const [open, setOpen] = useState(false);
   const [selectedSteps, setSelectedSteps] = useState(["ingest", "transform", "export"]);
-  const [onlyChanged, setOnlyChanged] = useState(false);
+  // Default is "skip unchanged & honor schedule pragmas" — the regular
+  // Run click should be safe to press repeatedly (schedule=once scripts
+  // don't re-ingest, change-detected transforms don't rebuild). To force
+  // a full refresh, uncheck this in the dropdown.
+  const [onlyChanged, setOnlyChanged] = useState(true);
   const [autoFix, setAutoFix] = useState(true);
   const ref = useRef(null);
 
@@ -178,10 +182,12 @@ function PipelineMenu({ running, onRunPipeline, onLint, onContracts, onCancel })
               onChange={(e) => setOnlyChanged(e.target.checked)}
               style={{ margin: 0 }}
             />
-            <span style={{ fontSize: "12px", color: "var(--havn-text)" }}>Only changed</span>
+            <span style={{ fontSize: "12px", color: "var(--havn-text)" }}>Skip unchanged &amp; schedule=once</span>
           </label>
           <div style={pmStyles.hintText}>
-            Skip models that haven't changed since last build
+            Default. Skip transforms whose inputs haven't changed and skip
+            ingest scripts marked <code>{"# @havn: schedule=once"}</code>.
+            Uncheck to force a full refresh.
           </div>
 
           <button
