@@ -4,7 +4,7 @@ Schema Sentinel monitors external source tables for breaking changes and alerts 
 
 ## Overview
 
-When data arrives from external sources (Postgres, Snowflake, APIs, files), the schema can change without warning—columns get renamed, types change, or fields disappear entirely. These upstream changes propagate downstream and break your SQL models. Sentinel watches source schemas for changes, calculates which of your models are affected, and provides actionable fix suggestions.
+When data arrives from external sources (Postgres, Snowflake, APIs, files), the schema can change without warning--columns get renamed, types change, or fields disappear entirely. These upstream changes propagate downstream and break your SQL models. Sentinel watches source schemas for changes, calculates which of your models are affected, and provides actionable fix suggestions.
 
 ## UI Experience
 
@@ -142,7 +142,7 @@ sentinel:
 
 ### Source Declaration
 
-Sentinel automatically discovers sources by scanning your model SQL files for `-- depends_on:` comments. You can also explicitly list sources:
+Sentinel automatically discovers sources by scanning your model SQL files for upstream references (auto-extracted from `FROM`/`JOIN` or declared via `@depends_on`). You can also explicitly list sources:
 
 ```yaml
 sentinel:

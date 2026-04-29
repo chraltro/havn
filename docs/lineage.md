@@ -75,15 +75,30 @@ curl http://localhost:3000/api/lineage
 
 ## Table-Level Dependencies
 
-### `-- depends_on:` Declarations
+### Auto-Extracted from SQL
 
-Table-level dependencies are declared explicitly in SQL model headers:
+By default, havn parses your `FROM` and `JOIN` clauses with `sqlglot` and uses those references to build the DAG. The example model below depends on `bronze.customers` and `bronze.orders` automatically, no directive required:
 
 ```sql
--- depends_on: bronze.customers, bronze.orders
+@config materialized=table, schema=silver
+
+SELECT c.customer_id, COUNT(o.order_id) AS order_count
+FROM bronze.customers c
+LEFT JOIN bronze.orders o USING (customer_id)
+GROUP BY 1
 ```
 
-havn also auto-detects table references from SQL using AST parsing. Explicit declarations are recommended for clarity and are used for DAG ordering.
+### `@depends_on` Override
+
+When the parser can't see a reference (a model name passed through a function or built up in a string), declare it explicitly:
+
+```sql
+@depends_on bronze.customers, bronze.orders
+```
+
+When `@depends_on` is present, havn uses your list and skips auto-extraction.
+
+(Legacy `-- depends_on: ...` comment syntax still parses for back-compat.)
 
 ### DAG Visualization
 
@@ -238,7 +253,7 @@ Returns the SQL source, sample data rows, column lineage, upstream dependencies,
 
 ## Related Pages
 
-- [Transforms](transforms) -- SQL model format and `-- depends_on:`
+- [Transforms](transforms) -- SQL model format and `@depends_on` overrides
 - [Quality](quality) -- Using lineage for data quality
 - [Sources](sources) -- Sources in the DAG
 - [Seeds](seeds) -- Seeds in the DAG

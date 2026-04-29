@@ -87,8 +87,7 @@ This makes repeated `havn seed` calls fast -- only changed CSVs are processed.
 Reference seed tables in your SQL models:
 
 ```sql
--- config: materialized=table, schema=silver
--- depends_on: bronze.earthquakes, seeds.magnitude_scale
+@config materialized=table, schema=silver
 
 SELECT
     e.earthquake_id,
@@ -100,7 +99,7 @@ LEFT JOIN seeds.magnitude_scale m
     ON e.magnitude BETWEEN m.magnitude_min AND m.magnitude_max
 ```
 
-Add seeds to your `-- depends_on:` comment so havn knows about the dependency and includes seeds in the DAG visualization.
+havn auto-detects `seeds.magnitude_scale` from the `LEFT JOIN` clause and includes it in the DAG. Add `@depends_on` only if you reference a seed through a function call or string interpolation that the parser can't see.
 
 ## Seed Status in the DAG
 
@@ -146,7 +145,7 @@ curl -X POST http://localhost:3000/api/seeds \
 
 4. **Version control seeds** -- CSV seed files should be committed to git. They are part of your project definition.
 
-5. **Declare dependencies** -- Always add seed tables to `-- depends_on:` in your SQL models for correct DAG ordering.
+5. **Reference seeds in SQL** -- `FROM seeds.<name>` (or `JOIN seeds.<name>`) is enough; havn auto-detects the dependency for DAG ordering. Use `@depends_on` only if the seed reference isn't visible in plain SQL.
 
 ## Related Pages
 

@@ -117,12 +117,12 @@ curl http://localhost:3000/api/lineage
 
 ## Table-Level Dependencies
 
-### `-- depends_on:` Declarations
+### `@depends_on` Override
 
 Table-level dependencies are declared explicitly in SQL model headers:
 
 ```sql
--- depends_on: bronze.customers, bronze.orders
+@depends_on bronze.customers, bronze.orders
 ```
 
 havn also auto-detects table references from SQL using AST parsing. Explicit declarations are recommended for clarity and are used for DAG ordering.
@@ -279,7 +279,7 @@ curl http://localhost:3000/api/rewind/downstream/silver.customers
 
 ## Related Pages
 
-- [Transforms](transforms) -- SQL model format and `-- depends_on:`
+- [Transforms](transforms) -- SQL model format and `@depends_on` overrides
 - [Quality](quality) -- Using lineage for data quality
 - [Sources](sources) -- Sources in the DAG
 - [Seeds](seeds) -- Seeds in the DAG

@@ -20,7 +20,7 @@
 
 ---
 
-> **License notice:** havn is source-available under the [Business Source License 1.1](LICENSE). You can read, run, modify, and use it for any internal or commercial purpose — including in production at your company or at client sites. The one restriction is that you may not offer havn to third parties as a competing hosted or managed service. Each release automatically converts to Apache 2.0 four years after its release date (the current release converts on **2030-04-05**). See the [License FAQ](#license) below for details.
+> **License notice:** havn is source-available under the [Business Source License 1.1](LICENSE). You can read, run, modify, and use it for any internal or commercial purpose -- including in production at your company or at client sites. The one restriction is that you may not offer havn to third parties as a competing hosted or managed service. Each release automatically converts to Apache 2.0 four years after its release date (the current release converts on **2030-04-05**). See the [License FAQ](#license) below for details.
 
 **havn** (Danish/Norwegian for *harbour*) is a self-hosted data platform - a Nordic alternative to Databricks and Snowflake for teams that want analytics without the complexity, cost, or data leaving their infrastructure.
 
@@ -47,7 +47,7 @@ havn gives you the analytical power of a modern data stack in something you can 
 |---|---|
 | Cloud costs spiraling | **Runs locally.** DuckDB on your machine. $0/month. |
 | Data leaving your infrastructure | **Self-hosted.** Your data stays on your hardware. Full stop. |
-| Jinja-templated SQL nobody understands | **Plain SQL.** Config is a comment. Dependencies are a comment. SQL is just SQL. |
+| Jinja-templated SQL nobody understands | **Plain SQL.** A one-line `@config` directive, dependencies auto-derived from your `FROM` and `JOIN` clauses, no templating. SQL is just SQL. |
 | 30-minute onboarding | **30-second onboarding.** Install from source and `havn init` gives you a working pipeline with sample data. |
 | Separate tools for ingest, transform, orchestration, UI | **One tool does it all.** CLI, web UI, scheduler, connectors - included. |
 | LLMs can't write your DSL | **AI-native.** Plain SQL + simple conventions = LLMs write correct transforms on the first try. |
@@ -55,11 +55,10 @@ havn gives you the analytical power of a modern data stack in something you can 
 ## Features
 
 ### SQL Transform Engine
-Write plain SQL with comment-based config. havn resolves dependencies, builds a DAG, and executes in the right order - with change detection that only rebuilds what changed.
+Write plain SQL with a `@config` directive at the top. havn parses your `FROM`/`JOIN` references to build the DAG automatically (no `@depends_on` needed unless you want to override), runs models in topological order, and uses content-hash change detection so only what actually changed gets rebuilt.
 
 ```sql
--- config: materialized=table, schema=gold
--- depends_on: silver.customers, silver.orders
+@config materialized=table, schema=gold
 
 SELECT
     c.customer_id,
@@ -70,6 +69,8 @@ FROM silver.customers c
 LEFT JOIN silver.orders o ON c.customer_id = o.customer_id
 GROUP BY 1, 2
 ```
+
+havn picks up `silver.customers` and `silver.orders` as upstream models from the SQL itself. Add `@depends_on` only when you reference a dependency through a function or string that the parser can't see. Other directives: `@description`, `@assert <expr>` for data-quality assertions, `@col <name>: <doc>` for column-level docs.
 
 ### Web UI
 Full-featured browser interface with Monaco code editor, interactive SQL runner, DAG visualization, data table browser, chart builder, and pipeline monitoring. Dark and light themes included.
@@ -263,15 +264,15 @@ pytest tests/
 
 ## License
 
-havn is licensed under the [Business Source License 1.1](LICENSE). Each release automatically converts to the Apache License 2.0 four years after its release date — the current release converts on **2030-04-05**.
+havn is licensed under the [Business Source License 1.1](LICENSE). Each release automatically converts to the Apache License 2.0 four years after its release date -- the current release converts on **2030-04-05**.
 
 BSL 1.1 is a source-available license created by MariaDB and used by projects like HashiCorp Terraform/Vault, Sentry, and CockroachDB. It keeps the full source public while protecting against commercial resale as a competing hosted service.
 
 **FAQ**
 
-- **Can I use havn at my company for free?** Yes. Install it, run it, use it in production. There are no restrictions on internal use — no user tiers, no seat counts, no "contact sales".
+- **Can I use havn at my company for free?** Yes. Install it, run it, use it in production. There are no restrictions on internal use -- no user tiers, no seat counts, no "contact sales".
 - **Can I modify havn for my own needs?** Yes. Fork it, change it, run your modified version internally. The only thing you can't do is sell the modified version as a hosted service.
 - **Can my consultancy deploy havn at client sites?** Yes. Deploying and configuring havn for a client is a service, not hosting. The restriction is on offering havn itself as an ongoing hosted product.
 - **What exactly is forbidden?** Taking havn and offering it to third parties as a paid hosted or managed service that competes with the licensor's commercial offerings.
 - **When does it become fully open source?** Each release converts to Apache 2.0 four years after its release date. The current release converts on 2030-04-05.
-- **Can I contribute?** Yes — see [CONTRIBUTING.md](CONTRIBUTING.md). Contributions will require a Contributor License Agreement so they can be included in both the BSL core and any future commercial distribution.
+- **Can I contribute?** Yes -- see [CONTRIBUTING.md](CONTRIBUTING.md). Contributions will require a Contributor License Agreement so they can be included in both the BSL core and any future commercial distribution.

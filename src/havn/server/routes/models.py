@@ -351,10 +351,13 @@ def create_model_endpoint(request: Request, req: CreateModelRequest) -> dict:
 
     sql_content = (
         req.sql
-        or f"-- config: materialized={req.materialized}, schema={req.schema_name}\n\nSELECT 1 AS placeholder\n"
+        or f"@config materialized={req.materialized}, schema={req.schema_name}\n\nSELECT 1 AS placeholder\n"
     )
-    if not sql_content.startswith("-- config:"):
-        sql_content = f"-- config: materialized={req.materialized}, schema={req.schema_name}\n\n{sql_content}"
+    # Prepend @config only if the user-supplied SQL doesn't already have a
+    # config directive (either the new @config or the legacy "-- config:").
+    has_config = sql_content.lstrip().startswith("@config") or sql_content.startswith("-- config:")
+    if not has_config:
+        sql_content = f"@config materialized={req.materialized}, schema={req.schema_name}\n\n{sql_content}"
 
     model_path.write_text(sql_content)
 

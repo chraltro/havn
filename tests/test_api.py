@@ -331,7 +331,7 @@ def test_promote_to_model_endpoint(client, project):
     assert model_file.exists()
     content = model_file.read_text()
     assert "SELECT * FROM landing.data" in content
-    assert "-- config:" in content
+    assert "@config" in content
 
 
 def test_promote_to_model_conflict(client, project):
