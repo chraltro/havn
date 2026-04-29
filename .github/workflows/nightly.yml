@@ -38,4 +38,4 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run full test suite (incl. slow)
-        run: pytest tests/ -v --runslow
+        run: pytest tests/ -n auto --runslow
