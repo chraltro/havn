@@ -36,13 +36,21 @@ def _resolve_npm_wrapper(cmd_path: str) -> list[str] | None:
         return None
 
 
-async def spawn_cli(cmd: list[str], cwd: str | None = None) -> asyncio.subprocess.Process:
+async def spawn_cli(
+    cmd: list[str],
+    cwd: str | None = None,
+    stdin: int | None = None,
+) -> asyncio.subprocess.Process:
     """Spawn a CLI subprocess safely on all platforms.
 
     On Windows, npm-installed CLIs are .cmd wrappers that must run through
-    cmd.exe — but piping user input through cmd.exe is a command-injection
-    risk.  Instead we resolve the wrapper to its underlying node script and
+    cmd.exe, but piping user input through cmd.exe is a command-injection
+    risk. Instead we resolve the wrapper to its underlying node script and
     call node directly via create_subprocess_exec (no shell).
+
+    Pass `stdin=asyncio.subprocess.PIPE` if you need to write to the child's
+    stdin (e.g. to feed a long prompt that would otherwise overflow the
+    Windows ~32 KB CreateProcess argv limit).
     """
     if sys.platform == "win32":
         resolved = shutil.which(cmd[0])
@@ -59,6 +67,7 @@ async def spawn_cli(cmd: list[str], cwd: str | None = None) -> asyncio.subproces
 
     return await asyncio.create_subprocess_exec(
         *cmd,
+        stdin=stdin,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,

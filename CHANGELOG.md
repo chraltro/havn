@@ -2,6 +2,80 @@
 
 All notable changes to havn are documented in this file.
 
+## [0.2.12] - 2026-04-29
+
+### Fixed
+
+- **Codex agent sidebar overhaul.** The sidebar was effectively unusable
+  with OpenAI's `codex` CLI: a fresh "Hey" reproducibly returned
+  `The command line is too long.` on Windows because the ~16 KB system
+  prompt + wiki index were being passed as argv elements past the
+  `CreateProcess` 32 KB limit. The adapter also targeted flags that no
+  longer exist in current codex builds (`--approval-mode auto-edit`,
+  `--instructions`), so even a short message hit malformed-CLI errors.
+  - The prompt and project context are now piped through stdin via
+    `codex exec - --json`, which sidesteps the Windows argv limit
+    entirely.
+  - Switched to valid current flags: `--full-auto` for auto mode (now
+    upgraded to `--dangerously-bypass-approvals-and-sandbox` so Auto
+    actually allows file writes; codex 0.125's sandbox layer was
+    silently overriding `--full-auto` and `--sandbox workspace-write`
+    when the project wasn't pre-registered as trusted in
+    `~/.codex/config.toml`), `--sandbox read-only` for ask mode,
+    `--skip-git-repo-check`, `-m <model>`.
+  - `_parse_event` rewritten for codex 0.125's actual JSONL schema:
+    assistant text now arrives via `item.completed` /
+    `agent_message.text`, file edits via `item.completed` /
+    `file_change`, command runs via `command_execution`. The legacy
+    0.46 `agent.message.delta` / `agent.message` paths are kept for
+    back-compat. `thread.started` / `turn.started` /
+    `turn.completed` are correctly ignored.
+- **Codex sidebar now keeps conversation history across turns.**
+  `codex exec` is stateless, so each follow-up was starting a fresh
+  session with no memory of prior messages, so users would say "make
+  the change" and the agent would ask which change. The adapter now
+  captures the `thread_id` from the first turn's `thread.started`
+  event and routes follow-ups through `codex exec resume <id> -`,
+  which preserves the entire conversation. The system prompt is
+  injected only on turn 1 since the resumed session already has it
+  in history.
+- **Codex file edits trigger live editor reload.** The sidebar's
+  open-file refresh hook keys off `tool_use` chunks named `Edit` or
+  `Write` (Claude Code's tool names). Codex 0.125 emits its own
+  `file_change` items instead, so edits made by codex never
+  triggered a reload: the file would change on disk but the
+  Monaco editor kept showing the stale buffer until the user
+  manually reopened it. The adapter now translates each
+  `file_change` entry into an `Edit` or `Write` tool_use chunk
+  (depending on `kind`), so codex edits behave identically to
+  Claude Code edits in the UI.
+- **Authentication failures surface as actionable errors.** A logged
+  out codex previously emitted five `stream error: Failed to refresh
+  token: 401 Unauthorized; retrying N/5` lines and exited with code
+  0, leaving the user staring at retry spam. The adapter now detects
+  the 401 / Unauthorized / "refresh token" pattern and appends a
+  clear `Codex authentication failed (401 Unauthorized). Run
+  \`codex login\` in a terminal to sign in, then try again.` line
+  at the end of the stream.
+- **Benign codex stderr noise is filtered.** Codex 0.125 emits
+  `ERROR codex_core::session: failed to record rollout items:
+  thread X not found` to stderr after every successful turn, a
+  known internal recorder bug that doesn't affect the model reply.
+  The adapter previously fell through to "surface stderr if no
+  assistant text streamed" and showed this log as a fake error
+  message. A small allow-list now drops these lines while keeping
+  real errors.
+- **`spawn_cli` accepts an optional `stdin` parameter** so adapters
+  can pipe long inputs without losing the existing Windows
+  npm-wrapper-resolution path that avoids `cmd.exe`
+  command-injection risk.
+- **Codex model dropdown** now lists the actual ChatGPT-account
+  Codex model names (`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`,
+  `gpt-5.3-codex`, `gpt-5.2`) instead of the obsolete `gpt-5` /
+  `o3` / `o4-mini` entries which the API now rejects with
+  `400 Bad Request: The 'X' model is not supported when using
+  Codex with a ChatGPT account.`
+
 ## [0.2.7] — 2026-04-25
 
 ### Fixed
