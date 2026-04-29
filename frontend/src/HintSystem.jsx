@@ -117,6 +117,23 @@ export function HintProvider({ children }) {
     });
   }, []);
 
+  // Listen for "new run started" so we can clear the "Pipeline complete"
+  // hint left over from the previous run. PipelineContext dispatches this
+  // when startAndConnect fires.
+  useEffect(() => {
+    const handler = () => {
+      setHintState((prev) => {
+        if (!prev.pipelineJustCompleted) return prev;
+        return { ...prev, pipelineJustCompleted: false };
+      });
+      setActiveHintId((prev) =>
+        prev === 'first-pipeline-complete' ? null : prev
+      );
+    };
+    window.addEventListener('havn_dismiss_completion_hints', handler);
+    return () => window.removeEventListener('havn_dismiss_completion_hints', handler);
+  }, []);
+
   const resetHints = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(STALE_STORAGE_KEY);

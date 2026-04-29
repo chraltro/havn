@@ -37,7 +37,25 @@ def query(
         console.print("[yellow]No warehouse database found. Run a pipeline first.[/yellow]")
         raise typer.Exit(1)
 
-    conn = open_warehouse(config, project_dir, read_only=True)
+    # If a havn server is running against this project, the warehouse file
+    # is locked by that process (DuckDB acquires a process-level lock). Route
+    # the query through the server's HTTP API so users don't have to stop
+    # the server to drop into the CLI.
+    if _try_route_via_server(project_dir, sql, csv, json_output, limit):
+        return
+
+    try:
+        conn = open_warehouse(config, project_dir, read_only=True)
+    except Exception as e:
+        if "already open" in str(e) or "being used by another process" in str(e):
+            console.print(
+                "[red]Warehouse is locked by another process.[/red] "
+                "If [bold]havn serve[/bold] is running, this CLI should auto-route "
+                "through it; the lockfile at .havn/serve.json may be stale. "
+                "Stop the server and retry, or remove .havn/serve.json."
+            )
+            raise typer.Exit(1)
+        raise
     try:
         result = conn.execute(sql)
         if result.description is None:
@@ -85,6 +103,76 @@ def _json_safe(v):
     if isinstance(v, (datetime.date, datetime.datetime)):
         return str(v)
     return v
+
+
+def _try_route_via_server(project_dir: Path, sql: str, csv: bool, json_output: bool, limit: int) -> bool:
+    """If a havn server is running for this project, run the query against it.
+
+    Returns True if the request was handled (success or printed error), False
+    if no server is running and the caller should fall through to the direct
+    DuckDB path.
+    """
+    import json as _json
+    info_path = project_dir / ".havn" / "serve.json"
+    if not info_path.exists():
+        return False
+    try:
+        info = _json.loads(info_path.read_text())
+        host = info.get("host", "127.0.0.1")
+        port = int(info.get("port", 3000))
+    except Exception:
+        return False
+    try:
+        import urllib.request
+        import urllib.error
+        body = _json.dumps({"sql": sql}).encode("utf-8")
+        req = urllib.request.Request(
+            f"http://{host}:{port}/api/query",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, ConnectionError, OSError):
+        # Server not actually running (stale lockfile). Caller will fall
+        # back to direct file open and either succeed or report the lock
+        # error itself.
+        return False
+    except urllib.error.HTTPError as e:
+        try:
+            err_body = e.read().decode("utf-8")
+        except Exception:
+            err_body = str(e)
+        console.print(f"[red]Query error:[/red] {err_body}")
+        raise typer.Exit(1)
+
+    columns = data.get("columns", [])
+    rows = data.get("rows", [])
+    if limit > 0:
+        rows = rows[:limit]
+
+    if csv:
+        import io as _io
+        import csv as _csv
+        buf = _io.StringIO()
+        writer = _csv.writer(buf)
+        writer.writerow(columns)
+        for row in rows:
+            writer.writerow(row)
+        console.print(buf.getvalue().rstrip())
+    elif json_output:
+        result = [dict(zip(columns, row)) for row in rows]
+        console.print(_json.dumps(result, indent=2, default=str))
+    else:
+        table = Table(show_lines=len(columns) > 8)
+        for col in columns:
+            table.add_column(col, no_wrap=False, max_width=60)
+        for row in rows:
+            table.add_row(*[str(v) for v in row])
+        console.print(table)
+        console.print(f"[dim]{len(rows)} rows (via server at {host}:{port})[/dim]")
+    return True
 
 
 @app.command()
