@@ -2,6 +2,49 @@
 
 All notable changes to havn are documented in this file.
 
+## [0.2.15] - 2026-04-29
+
+Documentation sweep. The user-facing kit (templates emitted by `havn init`)
+already used the modern `@`-prefixed directive syntax, but README, docs/,
+the in-app wiki, and a few code paths still showed the legacy
+`-- config:` / `-- depends_on:` / `-- assert:` SQL-comment form. New
+contributors and AI assistants reading the docs were learning the wrong
+syntax for new code. No engine behaviour changes; both syntaxes still parse.
+
+### Changed
+
+- **README.md**: rewritten transform example to use `@config` and to call
+  out that dependencies are auto-extracted from `FROM`/`JOIN` clauses, so
+  `@depends_on` is optional.
+- **CLAUDE.md**: SQL transform conventions section updated; the example
+  block uses `@config` and the directive list documents `@config`,
+  `@depends_on` (with auto-extraction note), `@description`, `@col`,
+  `@assert`. Legacy syntax noted as still parsing for back-compat.
+- **docs/*.md** (mkdocs site): `transforms.md` rewritten end to end with
+  the new directive table including `unique_key`, `incremental_strategy`,
+  `incremental_filter`, `partition_by`. `quality.md`, `contracts.md`,
+  `index.md`, `lineage.md`, `macros.md`, `seeds.md`, `sources.md` updated
+  inline.
+- **src/havn/wiki/pages/*.md** (in-app wiki): same migration as docs/, plus
+  `sentinel.md` updated to mention auto-extraction.
+- **.github/copilot-instructions.md** and **PLATFORM_REPORT.md**: updated
+  to document the canonical `@`-prefixed form and auto-extracted
+  dependencies.
+- **internal_LIMITATIONS.md**: updated the hypothetical SQL-include design
+  example to use `@include` rather than the legacy comment form.
+- **`havn agent` system prompt** (`server/routes/agent.py`): the
+  conventions block the agent receives now uses `@config` / `@assert`,
+  documents auto-extraction, and notes that legacy SQL-comment syntax
+  still parses.
+- **New-model scaffold** (`server/routes/models.py`): the placeholder SQL
+  written by `POST /api/models` now uses `@config materialized=...,
+  schema=...`. The "already has config" check accepts both `@config` and
+  the legacy `-- config:` prefix so existing user templates aren't
+  double-prefixed.
+- **Notebook -> model promotion** (`engine/notebook/conversion.py`): the
+  generated `.sql` file now emits `@config`, `@depends_on`, `@description`
+  in canonical form. Tests updated accordingly.
+
 ## [0.2.14] - 2026-04-29
 
 Hotfix on top of 0.2.13. Two of yesterday's fixes were incomplete:
@@ -164,13 +207,13 @@ Hotfix on top of 0.2.13. Two of yesterday's fixes were incomplete:
   `400 Bad Request: The 'X' model is not supported when using
   Codex with a ChatGPT account.`
 
-## [0.2.7] — 2026-04-25
+## [0.2.7] -- 2026-04-25
 
 ### Fixed
 
 - **Macros work on read-only connections.** `havn query`, the read pool,
   and any other read-only conn no longer log "Cannot execute statement
-  of type 'CREATE' … read-only" — `register_macros` now detects
+  of type 'CREATE' … read-only" -- `register_macros` now detects
   read-only mode, registers the Python UDFs (which `create_function`
   allows), and skips the `CREATE MACRO` aliases (which the writer has
   already persisted to the catalog).
@@ -206,7 +249,7 @@ Hotfix on top of 0.2.13. Two of yesterday's fixes were incomplete:
 - `CLAUDE.md` referenced `havn diff --all`; the actual flag is
   `--full`.
 
-## [0.2.6] — 2026-04-25
+## [0.2.6] -- 2026-04-25
 
 ### Added
 
@@ -226,11 +269,11 @@ Hotfix on top of 0.2.13. Two of yesterday's fixes were incomplete:
   streaming, or Arrow IPC.
 - Embedded Arrow Flight SQL server (`flight.havn.{domain}:8815`) with Bearer
   auth. Launched with `havn flight` or the `--flight` flag on `havn serve`.
-- `POST /v1/export/duckdb` — single-file DuckDB export (works for both
+- `POST /v1/export/duckdb` -- single-file DuckDB export (works for both
   DuckDB and DuckLake backends).
 
 #### Streaming primitives
-- `POST /api/ingest/webhook/{source}` — staged webhook receiver. Background
+- `POST /api/ingest/webhook/{source}` -- staged webhook receiver. Background
   `FlushWorker` moves events from the staging table into `landing.<source>`
   every 15s (configurable).
 - Postgres logical-replication CDC consumer via vendored pypgoutput.
@@ -238,7 +281,7 @@ Hotfix on top of 0.2.13. Two of yesterday's fixes were incomplete:
 - Scheduled HTTP polling (`APIPollConsumer`) for REST sources without
   webhooks. High-watermark tracking in `_havn.cdc_state`. `havn poll`
   command group.
-- DuckLake `MaintenanceScheduler` — flush, merge small files, checkpoint,
+- DuckLake `MaintenanceScheduler` -- flush, merge small files, checkpoint,
   and snapshot expiration on a cron.
 
 #### Observability
@@ -246,13 +289,13 @@ Hotfix on top of 0.2.13. Two of yesterday's fixes were incomplete:
   transform duration, counters for queries/transforms/rows/streaming events,
   gauge for active tasks per category.
 - `GET /health` lightweight health probe (alias of `/api/health`).
-- Optional JSON log format via `HAVN_LOG_FORMAT=json` — one JSON object per
+- Optional JSON log format via `HAVN_LOG_FORMAT=json` -- one JSON object per
   record with ISO-8601 timestamps and structured context from `extra={…}`.
 
 #### Macros
 - `@table_macro` decorator for Python functions returning `list[dict]`,
   callable from SQL as `SELECT * FROM my_macro(arg)`. No pyarrow
-  requirement — DuckDB's native `json_each()` streams rows.
+  requirement -- DuckDB's native `json_each()` streams rows.
 - Macro hot-reload: editing a file in `macros/` while `havn serve` runs
   re-registers the UDF on the next query (debounced 2s).
 - Monaco editor autocomplete and hover for all registered macros.
@@ -309,5 +352,5 @@ Hotfix on top of 0.2.13. Two of yesterday's fixes were incomplete:
 ### Removed
 
 - **Resources tab** is hidden from the Observe section. It will return
-  once the panel is rebuilt — the current implementation can't scroll
+  once the panel is rebuilt -- the current implementation can't scroll
   and never registers as the active tab.

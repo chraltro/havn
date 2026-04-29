@@ -1,4 +1,4 @@
-# havn — Platform Summary Report
+# havn -- Platform Summary Report
 
 > **Date:** 2026-03-11
 > **Version:** 0.1.0
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-**havn** is a self-hosted, zero-cost data platform that consolidates the entire analytics stack — ingestion, transformation, quality, orchestration, collaboration, and serving — into a single tool backed by a single DuckDB file. No data leaves the machine. No cloud account required. No vendor lock-in.
+**havn** is a self-hosted, zero-cost data platform that consolidates the entire analytics stack -- ingestion, transformation, quality, orchestration, collaboration, and serving -- into a single tool backed by a single DuckDB file. No data leaves the machine. No cloud account required. No vendor lock-in.
 
 Where Databricks requires a cloud account, Spark cluster, and dozens of services, havn runs on a laptop with `pip install havn` and delivers 80% of the capability at 0% of the cost.
 
@@ -45,18 +45,18 @@ The core of havn. SQL files in `transform/` are automatically discovered, depend
 
 | Capability | Description |
 |---|---|
-| **DAG execution** | Builds a dependency graph from `-- depends_on:` comments; executes models in topological order |
+| **DAG execution** | Builds a dependency graph from auto-extracted `FROM`/`JOIN` references (overridable via `@depends_on`); executes models in topological order |
 | **Change detection** | SHA256 hash of normalized SQL; only rebuilds models whose SQL actually changed |
-| **Materializations** | `table` (default) or `view`; configured via `-- config: materialized=table` |
+| **Materializations** | `view` (default), `table`, `incremental`; configured via `@config materialized=table` |
 | **Incremental models** | Three strategies: `append`, `delete+insert` (default), `merge` (true upsert with matched updates) |
 | **Schema evolution** | Automatically adds new columns to existing tables during incremental runs |
-| **Inline assertions** | `-- assert: row_count > 0` comments run post-build and fail the pipeline on violation |
-| **Column documentation** | `-- column: name: description` comments parsed and surfaced in docs |
+| **Inline assertions** | `@assert row_count > 0` directives run post-build and fail the pipeline on violation |
+| **Column documentation** | `@col name: description` directives parsed and surfaced in docs |
 | **Profile statistics** | Auto-computes row counts, null percentages, distinct counts after each build |
 | **Freshness monitoring** | Configurable SLA thresholds; alerts when models go stale |
 | **Force rebuild** | `havn transform --force` ignores cache and rebuilds everything |
 | **Selective builds** | Build individual models or filtered subsets |
-| **No Jinja** | Plain SQL only — config via comments, no templating language to learn |
+| **No Jinja** | Plain SQL only -- config via comments, no templating language to learn |
 
 ### 2. Python Script Execution
 
@@ -90,7 +90,7 @@ Pluggable connectors for external data sources with auto-generated ingest script
 
 | Capability | Description |
 |---|---|
-| **File formats** | CSV, Parquet, JSON/JSONL, Excel — auto-inferred schema |
+| **File formats** | CSV, Parquet, JSON/JSONL, Excel -- auto-inferred schema |
 | **Database sources** | PostgreSQL, MySQL, SQLite via DuckDB extensions |
 | **Connector framework** | `BaseConnector` abstract class for custom sources |
 | **Auto-generation** | `setup_connector()` creates ingest scripts, updates project.yml, stores secrets |
@@ -116,7 +116,7 @@ Two complementary systems for ensuring data correctness.
 
 | Capability | Description |
 |---|---|
-| **Inline assertions** | `-- assert: expression` in SQL files; evaluated post-build |
+| **Inline assertions** | `@assert <expression>` directives in SQL files; evaluated post-build |
 | **YAML contracts** | Standalone contract files in `contracts/` for reusable quality rules |
 | **Assertion types** | `row_count`, `no_nulls`, `unique`, `accepted_values`, custom SQL expressions |
 | **Severity levels** | `error` (fails pipeline) or `warn` (logs warning, continues) |
@@ -317,7 +317,7 @@ FastAPI backend with 40+ endpoints covering every platform capability.
 ## Unique Selling Points
 
 ### 1. Single-File Warehouse
-The entire database — data, metadata, history, user accounts — lives in one `warehouse.duckdb` file. Copy it, back it up, version-control it, email it. No server, no cluster, no cloud.
+The entire database -- data, metadata, history, user accounts -- lives in one `warehouse.duckdb` file. Copy it, back it up, version-control it, email it. No server, no cluster, no cloud.
 
 ### 2. Zero Cost
 $0/month. Runs on a laptop. No cloud subscription, no per-query pricing, no data egress charges. Total cost of ownership is the hardware you already own.
@@ -326,13 +326,13 @@ $0/month. Runs on a laptop. No cloud subscription, no per-query pricing, no data
 All processing is local. No telemetry, no cloud sync, no third-party data access. Full data sovereignty by default.
 
 ### 4. Plain SQL, No Jinja
-Configuration via SQL comments (`-- config:`, `-- depends_on:`, `-- assert:`). No templating language to learn, no macro system to debug, no compile step. Every `.sql` file is valid SQL that runs directly in DuckDB.
+Configuration via top-of-file `@`-prefixed directives (`@config`, `@assert`, `@description`). Dependencies are auto-extracted from `FROM`/`JOIN` clauses, so most models don't even need `@depends_on`. No templating language to learn, no macro system to debug, no compile step. Strip the directive lines and the `.sql` file runs directly in any DuckDB client.
 
 ### 5. AI-Native Simplicity
-The comment-based convention system means LLMs can write correct havn SQL models on the first attempt. No proprietary DSL or macro system to hallucinate about.
+The directive-based convention system means LLMs can write correct havn SQL models on the first attempt. No proprietary DSL or macro system to hallucinate about.
 
 ### 6. Batteries Included
-Ingestion, transformation, quality, orchestration, serving, authentication, documentation, linting, versioning, CI/CD, collaboration — all in one `pip install`. No ecosystem of plugins to assemble.
+Ingestion, transformation, quality, orchestration, serving, authentication, documentation, linting, versioning, CI/CD, collaboration -- all in one `pip install`. No ecosystem of plugins to assemble.
 
 ### 7. DuckDB Performance
 Columnar OLAP engine that handles analytical queries at speeds rivaling cloud warehouses, on local hardware. Parquet, CSV, JSON native support. No ETL into a separate system.

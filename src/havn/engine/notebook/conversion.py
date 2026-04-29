@@ -56,16 +56,22 @@ def promote_sql_to_model(
     # Infer dependencies from the SQL
     refs = extract_table_refs(query)
 
-    # Build the model file content
+    # Build the model file content using the canonical @-prefixed directives.
+    # `refs` comes from extract_table_refs() which is the same logic the
+    # transform engine runs, so a model written from this path has the same
+    # auto-extracted dependencies the engine would compute. We still emit
+    # @depends_on explicitly because notebook-converted models often skip
+    # column qualification, making the SQL less self-explanatory than the
+    # explicit dep list.
     lines = []
     config_parts = [f"materialized={materialized}", f"schema={target_schema}"]
-    lines.append(f"-- config: {', '.join(config_parts)}")
+    lines.append(f"@config {', '.join(config_parts)}")
 
     if refs:
-        lines.append(f"-- depends_on: {', '.join(refs)}")
+        lines.append(f"@depends_on {', '.join(refs)}")
 
     if description:
-        lines.append(f"-- description: {description}")
+        lines.append(f"@description {description}")
 
     lines.append("")
     lines.append(query)

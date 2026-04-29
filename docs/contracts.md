@@ -1,6 +1,6 @@
 # Data Contracts
 
-Data contracts are standalone YAML files that define data quality rules. They complement inline `-- assert:` comments in SQL models by providing reusable, centralized quality definitions with severity levels and historical tracking.
+Data contracts are standalone YAML files that define data quality rules. They complement inline `@assert` directives in SQL models by providing reusable, centralized quality definitions with severity levels and historical tracking.
 
 ## Contract Format
 
@@ -42,7 +42,7 @@ Each YAML file can contain multiple contracts under the `contracts:` key.
 
 ## Assertion Types
 
-Contracts support the same assertion expressions as inline `-- assert:` comments:
+Contracts support the same assertion expressions as inline `@assert` directives:
 
 ### `row_count > N`
 
@@ -223,7 +223,7 @@ havn check
 
 This runs:
 1. SQL model validation
-2. Inline assertions (`-- assert:`)
+2. Inline assertions (`@assert`)
 3. YAML contracts from `contracts/`
 
 All three must pass for `havn check` to exit with code 0.

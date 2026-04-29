@@ -22,82 +22,110 @@ The folder name determines the default schema. A file at `transform/silver/dim_c
 
 ## SQL Model Format
 
-Every SQL model file starts with metadata comments followed by a SELECT statement:
+Every SQL model file starts with directive lines followed by a SELECT statement:
 
 ```sql
--- config: materialized=table, schema=silver
--- depends_on: bronze.customers, bronze.orders
--- description: Customer dimension with order counts
--- col: customer_id: Unique customer identifier
--- col: order_count: Total number of orders
--- assert: row_count > 0
--- assert: unique(customer_id)
--- assert: no_nulls(customer_id)
+@config materialized=table, schema=silver
+@description Customer dimension with order counts
+@col customer_id: Unique customer identifier
+@col order_count: Total number of orders
+@assert row_count > 0
+@assert unique(customer_id)
+@assert no_nulls(customer_id)
 
 SELECT
     c.customer_id,
     c.name,
     c.email,
-    COUNT(o.order_id) AS order_count,
+    COUNT(o.order_id)   AS order_count,
     SUM(o.total_amount) AS lifetime_value
 FROM bronze.customers c
 LEFT JOIN bronze.orders o ON c.customer_id = o.customer_id
 GROUP BY 1, 2, 3
 ```
 
-### Config Comments
+Notice there is no `@depends_on` line: havn parses the `FROM` and `JOIN` clauses with `sqlglot` and adds `bronze.customers` and `bronze.orders` to the DAG automatically. You only need `@depends_on` when the parser can't see a reference (e.g. a table name passed through a function or string-built dynamically).
 
-#### `-- config:`
+### Directives
 
-Sets materialization and schema:
+Every directive supports two forms -- bare and parenthesised:
 
 ```sql
--- config: materialized=table, schema=gold
+@config materialized=table, schema=gold
+@config(materialized=table, schema=gold)
 ```
 
-- `materialized` -- Either `table` (persisted) or `view` (computed on read). Default: `table`.
-- `schema` -- Override the schema derived from the folder name. Optional.
+Both parse identically. Pick whichever reads better in your editor; the bare form is canonical in the kit and templates.
 
-#### `-- depends_on:`
+#### `@config`
 
-Declares upstream dependencies for DAG ordering:
+Sets materialization, schema, and per-model engine settings:
 
 ```sql
--- depends_on: bronze.customers, bronze.orders
+@config materialized=table, schema=gold, unique_key=customer_id, incremental_strategy=delete+insert
 ```
 
-Dependencies are used to determine execution order. If omitted, havn auto-detects table references from the SQL using AST parsing (via sqlglot), but explicit declaration is recommended for clarity.
+| Key                     | Values                                  | Default                                       |
+|-------------------------|-----------------------------------------|-----------------------------------------------|
+| `materialized`          | `table`, `view`, `incremental`          | `view`                                        |
+| `schema`                | any valid schema name                   | folder name (e.g. `bronze` for `transform/bronze/`) |
+| `unique_key`            | column name                             | none (required for incremental merges)        |
+| `incremental_strategy`  | `delete+insert`, `merge`, `append`      | `delete+insert`                               |
+| `incremental_filter`    | SQL expression (e.g. `event_time >= ...`) | none                                        |
+| `partition_by`          | column name                             | none                                          |
 
-#### `-- description:`
+#### `@depends_on` (optional)
 
-Documents the model:
+Declares upstream dependencies explicitly. Auto-extraction handles most cases:
 
 ```sql
--- description: Customer dimension table with lifetime metrics
+@depends_on bronze.customers, bronze.orders
 ```
 
-#### `-- col:`
+Use this when a dependency isn't visible in plain SQL (e.g. a model name interpolated through a Python macro). When you write `@depends_on`, havn uses your list and skips auto-extraction.
 
-Documents individual columns:
+#### `@description`
+
+One-line model description, surfaces in the catalog and UI:
 
 ```sql
--- col: customer_id: Unique customer identifier
--- col: lifetime_value: Sum of all order amounts
+@description Customer dimension table with lifetime metrics
 ```
 
-#### `-- assert:`
+#### `@col`
 
-Defines data quality assertions evaluated after the model builds:
+Per-column documentation. Repeat one line per documented column:
 
 ```sql
--- assert: row_count > 0
--- assert: unique(customer_id)
--- assert: no_nulls(email)
--- assert: accepted_values(status, ['active', 'inactive'])
--- assert: "total_amount >= 0"
+@col customer_id: Unique customer identifier
+@col lifetime_value: Sum of all settled non-reversed order amounts
+```
+
+#### `@assert`
+
+Defines data-quality assertions evaluated after the model builds. Repeat one line per assertion:
+
+```sql
+@assert row_count > 0
+@assert unique(customer_id)
+@assert no_nulls(email)
+@assert accepted_values(status, ['active', 'inactive'])
+@assert "total_amount >= 0"
 ```
 
 See [Quality](quality) for the full assertion reference.
+
+### Legacy comment syntax (still supported)
+
+Older projects use SQL-comment-prefixed directives. They still parse correctly, so you can mix and match while migrating:
+
+```sql
+-- config: materialized=table, schema=silver
+-- depends_on: bronze.customers
+-- assert: row_count > 0
+```
+
+New code should use the `@`-prefixed form.
 
 ## Change Detection
 
@@ -106,14 +134,14 @@ havn uses SHA256 hashing to detect when a model's SQL has changed. On each `havn
 1. The SQL content is normalized (whitespace-insensitive)
 2. A SHA256 hash is computed from the normalized SQL
 3. The hash is compared against the stored hash in `_havn.model_state`
-4. If the hash matches and upstream models haven't changed, the model is **skipped**
-5. If the hash differs or any upstream dependency was rebuilt, the model is **rebuilt**
+4. If the hash matches **and** the combined hash of all transitive upstreams hasn't changed, the model is **skipped**
+5. Otherwise the model is **rebuilt**
 
-This means most `havn transform` runs only rebuild what has actually changed, making iterative development fast.
+Most `havn transform` runs only rebuild what has actually changed, making iterative development fast.
 
 ## DAG Ordering
 
-Models are automatically sorted in topological order based on their `-- depends_on:` declarations. This ensures upstream tables exist before downstream models try to read from them.
+Models are automatically sorted in topological order based on their dependencies (auto-extracted from SQL or declared via `@depends_on`). This ensures upstream tables exist before downstream models try to read from them.
 
 ```
 bronze.customers ──┐
@@ -167,32 +195,40 @@ Uses the database path and settings from the `prod` environment. See [Environmen
 
 ## Materialization
 
-### Table (Default)
+### View (Default)
 
 ```sql
--- config: materialized=table
+@config materialized=view
+```
+
+Creates a view using `CREATE OR REPLACE VIEW ... AS SELECT ...`. The query runs on read, so data is always current but queries may be slower for complex logic.
+
+### Table
+
+```sql
+@config materialized=table
 ```
 
 Creates a persistent table using `CREATE OR REPLACE TABLE ... AS SELECT ...`. Data is stored on disk and queries are fast.
 
-### View
+### Incremental
 
 ```sql
--- config: materialized=view
+@config materialized=incremental, unique_key=event_id, incremental_strategy=delete+insert
 ```
 
-Creates a view using `CREATE OR REPLACE VIEW ... AS SELECT ...`. The query runs on read, so data is always current but queries may be slower for complex logic.
+Builds the table incrementally: on first run, it materialises the full result; on subsequent runs, only new rows (filtered by `incremental_filter` if provided) are appended or merged. See `incremental_strategy` in the `@config` table above.
 
 ## Plain SQL -- No Templating
 
 havn uses plain SQL with no Jinja, no macros, and no templating language. This means:
 
-- SQL files work directly in any DuckDB client
+- SQL files work directly in any DuckDB client (just delete the `@config` line first)
 - No learning curve beyond standard SQL
 - Full DuckDB syntax support (window functions, CTEs, UNNEST, etc.)
 - Easy to test and debug
 
-If you need dynamic behavior, use Python ingest/export scripts or parameterize via environment variables in `project.yml`.
+If you need dynamic behavior, use Python ingest/export scripts or parameterize via environment variables in `project.yml`. For reusable scalar logic, register a Python macro and call it directly in SQL -- see [Macros](macros).
 
 ## Validation
 
@@ -204,7 +240,7 @@ havn check
 
 This validates:
 - SQL syntax (via sqlglot AST parsing)
-- `-- depends_on:` references exist in the DAG, seeds, or sources
+- Auto-extracted and explicit `@depends_on` references resolve to known models, seeds, or sources
 - Column references against known upstream table schemas
 - Inline assertions against live data (if warehouse exists)
 - YAML contracts from `contracts/`
