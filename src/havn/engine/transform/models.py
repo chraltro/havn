@@ -21,6 +21,8 @@ class AssertionResult:
     expression: str
     passed: bool
     detail: str = ""
+    severity: str = "error"  # "error" halts downstream; "warn" continues
+    owner: str = ""
 
 
 @dataclass
@@ -50,10 +52,17 @@ class SQLModel:
     content_hash: str = ""
     upstream_hash: str = ""
     assertions: list[str] = field(default_factory=list)
+    # (expression, severity) pairs parsed from @assert lines. Mirrors
+    # ``assertions`` in length/order so callers can index into either.
+    assertion_specs: list[tuple[str, str]] = field(default_factory=list)
     unique_key: str | None = None  # For incremental models
     incremental_strategy: str = "delete+insert"  # "delete+insert", "append", or "merge"
     incremental_filter: str | None = None  # e.g. "WHERE updated_at > (SELECT MAX(updated_at) FROM {this})"
     partition_by: str | None = None  # e.g. "event_date" — enables partition-based pruning
+    watermark: str | None = None  # @watermark column for incremental models — auto-generates incremental_filter
+    grain: list[str] = field(default_factory=list)  # @grain columns; auto-asserts uniqueness post-build
+    owner: str = ""  # @owner label for alert routing
+    source_freshness: list[dict] = field(default_factory=list)  # @source_freshness specs
 
     def __post_init__(self) -> None:
         self.content_hash = _hash_content(f"{self.materialized}:{self.query}")

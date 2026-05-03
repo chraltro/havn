@@ -28,7 +28,10 @@ _CORRECTNESS_RULES = [
     # Ambiguity -- catches "can't tell what this means"
     "AM01", "AM02", "AM03", "AM04", "AM05", "AM06", "AM07", "AM08", "AM09",
     # References -- unqualified columns, missing references, etc.
-    "RF01", "RF02", "RF03", "RF04", "RF05", "RF06",
+    # RF03 (unqualified reference in single-table SELECT) is intentionally
+    # omitted: it fires on idiomatic SQL where only one table is in scope and
+    # produced ~37 violations on a 12-model project in user testing.
+    "RF01", "RF02", "RF04", "RF05", "RF06",
     # Aliasing correctness (AL07 = duplicate aliases; rest are style)
     "AL07",
     # Structure correctness (avoid 02/05/06/07/09 -- those are style)

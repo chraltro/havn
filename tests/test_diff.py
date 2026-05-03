@@ -60,6 +60,50 @@ def test_diff_no_changes(tmp_path):
     conn.close()
 
 
+def test_diff_no_changes_aggregated_decimal(tmp_path):
+    """Re-running an aggregating model with the same content must report 0/0
+    even when the temp-rebuilt column type differs slightly from the
+    materialised one (e.g. SUM precision drift). Reproduces the
+    `gold.route_b_cfo_monthly` `+36/-36` regression."""
+    conn = _setup_db(tmp_path)
+    conn.execute(
+        "CREATE TABLE landing.txns AS "
+        "SELECT 'A' AS branch, 100.50::DOUBLE AS amount UNION ALL "
+        "SELECT 'A', 200.25 UNION ALL "
+        "SELECT 'B', 50.75 UNION ALL "
+        "SELECT 'B', 99.99"
+    )
+    model_sql = "SELECT branch, SUM(amount) AS total FROM landing.txns GROUP BY branch ORDER BY branch"
+    conn.execute(f"CREATE TABLE gold.metrics AS {model_sql}")
+
+    result = diff_model(conn, model_sql, "gold", "metrics")
+    assert result.added == 0, (result.added, result.sample_added)
+    assert result.removed == 0, (result.removed, result.sample_removed)
+    assert result.modified == 0
+    conn.close()
+
+
+def test_diff_no_changes_with_nulls(tmp_path):
+    """Identical content with NULL values must report 0/0 (NULL-safe hashing)."""
+    conn = _setup_db(tmp_path)
+    conn.execute(
+        "CREATE TABLE gold.metrics AS "
+        "SELECT 1 AS id, NULL::VARCHAR AS name UNION ALL "
+        "SELECT 2, 'alice' UNION ALL "
+        "SELECT 3, NULL"
+    )
+
+    result = diff_model(
+        conn,
+        "SELECT 1 AS id, NULL::VARCHAR AS name UNION ALL SELECT 2, 'alice' UNION ALL SELECT 3, NULL",
+        "gold",
+        "metrics",
+    )
+    assert result.added == 0
+    assert result.removed == 0
+    conn.close()
+
+
 def test_diff_added_rows(tmp_path):
     """Model with added rows."""
     conn = _setup_db(tmp_path)

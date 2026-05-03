@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from havn.server.deps import (
@@ -82,9 +82,14 @@ def list_models(request: Request) -> list[dict]:
 
 @router.post("/api/transform")
 def run_transform_endpoint(
-    request: Request, req: TransformRequest, conn: DbConn
+    request: Request,
+    conn: DbConn,
+    req: TransformRequest = Body(default_factory=TransformRequest),
 ) -> dict:
-    """Run the SQL transformation pipeline."""
+    """Run the SQL transformation pipeline.
+
+    Body is optional — POSTing with no body runs all models without --force.
+    """
     _require_permission(request, "execute")
     logger.info("Transform requested: targets=%s force=%s", req.targets, req.force)
     try:
@@ -233,6 +238,53 @@ def get_impact(
             raise HTTPException(404, f"Model '{model_name}' not found")
 
     return impact_analysis(models, model_name, column=column, conn=conn)
+
+
+# --- Explain ---
+
+
+@router.get("/api/models/{model_name:path}/explain")
+def get_explain(
+    request: Request,
+    model_name: str,
+    conn: DbConn,
+    analyze: bool = False,
+) -> dict:
+    """Return DuckDB's parsed query plan for a model's SQL.
+
+    With ``?analyze=true`` the query actually executes and per-node
+    timings are surfaced (so this is treated as ``execute`` permission).
+    """
+    _require_permission(request, "execute" if analyze else "read")
+    from havn.engine.explain import (
+        enrich_plan_dict,
+        explain_analyze_query,
+        explain_query,
+        plan_to_dict,
+    )
+    from havn.engine.transform import discover_models
+
+    transform_dir = _get_project_dir() / "transform"
+    models = discover_models(transform_dir)
+
+    target = next((m for m in models if m.full_name == model_name), None) or next(
+        (m for m in models if m.name == model_name), None
+    )
+    if target is None:
+        raise HTTPException(404, f"Model '{model_name}' not found")
+
+    if analyze:
+        plan, raw_text = explain_analyze_query(conn, target.query)
+    else:
+        plan, raw_text = explain_query(conn, target.query)
+
+    plan_dict = plan_to_dict(plan)
+    if analyze:
+        plan_dict = enrich_plan_dict(plan_dict)
+    plan_dict["_raw_text"] = raw_text
+    plan_dict["model"] = target.full_name
+    plan_dict["analyze"] = analyze
+    return plan_dict
 
 
 # --- Docs ---

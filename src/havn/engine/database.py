@@ -88,6 +88,29 @@ def connect(
     return conn
 
 
+def _progress_bar_enabled() -> bool:
+    """Decide whether DuckDB's progress bar is safe to enable.
+
+    DuckDB renders progress with carriage-return updates that flood non-TTY
+    stdout (CI logs, piped output) with thousands of lines. Honour an explicit
+    `HAVN_PROGRESS=1`/`HAVN_PROGRESS=0` override; otherwise enable only when
+    stdout is an interactive TTY and TERM is not 'dumb'.
+    """
+    import os
+    import sys
+
+    override = os.environ.get("HAVN_PROGRESS", "").strip().lower()
+    if override in ("1", "true", "yes", "on"):
+        return True
+    if override in ("0", "false", "no", "off"):
+        return False
+    if not sys.stdout.isatty():
+        return False
+    if os.environ.get("TERM", "").lower() in ("", "dumb"):
+        return False
+    return True
+
+
 def _resolve_memory_limit(limit: str) -> str:
     """Resolve a memory limit string. Supports percentage of system RAM."""
     limit = limit.strip()
@@ -250,6 +273,30 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
             passed      BOOLEAN NOT NULL,
             detail      VARCHAR,
             checked_at  TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
+    # Migrations: add severity + owner columns if missing.
+    try:
+        _exec("ALTER TABLE _havn.assertion_results ADD COLUMN IF NOT EXISTS severity VARCHAR DEFAULT 'error'")
+    except Exception:
+        pass
+    try:
+        _exec("ALTER TABLE _havn.assertion_results ADD COLUMN IF NOT EXISTS owner VARCHAR DEFAULT ''")
+    except Exception:
+        pass
+    # Source-freshness check results — populated by the @source_freshness pre-build hook.
+    _exec("""
+        CREATE TABLE IF NOT EXISTS _havn.source_freshness (
+            id              VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
+            model_path      VARCHAR NOT NULL,
+            source_table    VARCHAR NOT NULL,
+            on_column       VARCHAR,
+            max_age_seconds BIGINT NOT NULL,
+            age_seconds     DOUBLE,
+            is_stale        BOOLEAN NOT NULL,
+            severity        VARCHAR NOT NULL DEFAULT 'error',
+            error           VARCHAR,
+            checked_at      TIMESTAMP DEFAULT current_timestamp
         )
     """)
     # Masking policies

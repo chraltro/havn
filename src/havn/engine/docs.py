@@ -293,6 +293,14 @@ def generate_structured_docs(
                 table_info["depends_on"] = model.depends_on
                 table_info["materialized"] = model.materialized
                 table_info["sql"] = model.sql.strip()
+                # Surface the new directive metadata so the SPA can
+                # render grain / owner / source-freshness contracts
+                # alongside the column list.
+                table_info["grain"] = list(getattr(model, "grain", []) or [])
+                table_info["owner"] = getattr(model, "owner", "") or ""
+                table_info["source_freshness"] = list(
+                    getattr(model, "source_freshness", []) or []
+                )
 
             table_list.append(table_info)
 

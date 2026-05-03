@@ -2,6 +2,144 @@
 
 All notable changes to havn are documented in this file.
 
+## [0.2.18] - 2026-05-03
+
+A large release combining a feature roadmap (15 features across 5 phases)
+with a sweep of correctness fixes uncovered by a real-world test-run
+review (CTE scoping in lineage/check, diff non-determinism on aggregated
+decimals, progress bar floods on non-TTY, and several API edges).
+
+### Added
+
+- **`havn shell`**: psql-style multi-line REPL with readline history,
+  `\dt`/`\d`/`\dn`/`\df` slash commands, `\timing`, `\copy`, server-aware
+  routing through `havn serve`.
+- **`havn explain <model>`** with `--analyze`, `--json`, `--raw`. Surfaces
+  DuckDB's plan tree using the existing `engine/explain.py` primitives.
+  API counterpart at `GET /api/models/{name}/explain[?analyze=true]`.
+- **`havn diff --exit-nonzero-on-change`**: exit code 2 when models have
+  row/schema changes, for CI gating. Composes with `--format json`.
+- **`havn init` seeds `.sqlfluff`**: relaxed default config (excludes
+  RF03/AM05/ST06/LT05) so new projects don't drown in violations on
+  idiomatic SQL.
+- **Model directives**:
+  - `@grain <cols>`: synthesises a uniqueness assertion post-build.
+  - `@owner <label>`: propagates onto every assertion result for alert
+    routing.
+  - `@assert ..., severity=warn|error`: assertions can warn-only
+    (continue) or halt downstream models on failure.
+  - `@source_freshness <table>, max_age=24h, on=<col>, severity=`:
+    pre-build contract; stale sources skip the model and (for error
+    severity) cascade-skip downstream.
+  - `@watermark <col>`: one-line incremental sugar that synthesises the
+    `WHERE` clause; equivalent to writing the full `incremental_filter`
+    by hand.
+- **Downstream models are skipped** with status
+  `skipped_upstream_blocked` when an upstream errors or fails an
+  error-severity assertion.
+- **`havn freshness --sources`** with `--source-min-rows N`: surfaces
+  upstream row counts and max-on-column timestamps from each model's
+  `@source_freshness` contracts. Resolves "fresh model on top of
+  zero-row source". API counterpart accepts `?include_sources=true` and
+  `?source_min_rows=N`.
+- **Stdlib PII macros** (`havn.stdlib.pii`): `mask_email`, `mask_phone`,
+  `mask_fnr`, `mask_credit_card`, `mask_ip`, `hash_consistent`.
+  Auto-registered for every project, even those without a `macros/`
+  directory. User macros with the same name shadow stdlib (warning
+  logged). `havn macros` lists stdlib entries with origin tag.
+- **`policies.deny` in `project.yml`**: column-level deny-list
+  ("column X may not appear in schema gold"). Caught at compile time
+  by `havn check` AND enforced at build time by `havn transform`
+  (denied models marked `policy_denied` before any tier executes).
+- **`havn watch --route <glob>`**: filter watched paths and rebuild
+  only the matching model, not the whole DAG.
+- **Editor "Run on save" toggle**: persists in localStorage; saves
+  chain into `runSingleModel` for transform `.sql` or
+  `runCurrentScript` for `ingest/export .py`.
+- **TablesPanel structured docs**: per-column descriptions on hover
+  and inline rail; model-level grain / owner / description block above
+  the column list.
+
+### Fixed
+
+- **CTE scoping in `havn lineage`**: multi-source models with CTEs
+  mis-attributed columns because `_extract_sources` defaulted
+  unqualified columns to `depends_on[0]` and CTE references leaked
+  into the table alias map. Now builds a separate `cte_alias_map`,
+  threads it through, and resolves unqualified columns from the
+  per-SELECT FROM/JOIN scope (with information_schema as tiebreaker).
+- **CTE false positives in `havn check`**: false-positived on CTE
+  columns (e.g. `flows.inflow_nok` got looked up against
+  `silver.fact_transactions`) and on `b.*` star expansions (sqlglot
+  represents them as `Column(name="*", table=b)`). Now builds a CTE
+  name set + per-CTE column set, validates qualified CTE-column refs
+  against the CTE outputs, and short-circuits `name=="*"` tokens.
+- **`havn lineage` CLI now opens the warehouse** so `SELECT *` and
+  unqualified columns can resolve via `information_schema`.
+- **`havn diff` non-determinism**: reported +N/-N on identical content
+  because `EXCEPT` is type-sensitive (temp-rebuilt columns drift on
+  DECIMAL/DOUBLE precision from `SUM`s). Switched to MD5 hash of the
+  per-column VARCHAR projection with a presence-prefix NULL sentinel
+  (`V:` / `N`) that can't shape-collide with real data.
+- **DuckDB progress bar flood on non-TTY stdout**: `enable_progress_bar`
+  writes carriage-return updates that turn into thousands of newlines
+  when stdout isn't a TTY. Now gated on `sys.stdout.isatty()` / `TERM`
+  with a `HAVN_PROGRESS` env override.
+- **`POST /api/transform` with no body**: returned 422; body is now
+  optional via `Body(default_factory=...)`.
+- **Unknown `/api/*` GETs returned the SPA `index.html`** with status
+  200; the catch-all now 404s anything under `/api/`.
+- **`havn query` truncation** at the server-side 50k row cap was
+  silent; now surfaces a yellow warning to **stderr** (so CSV/JSON
+  piped output stays clean) when the response's `truncated` flag is
+  set.
+- **`havn lint` defaults dropped RF03**
+  (unqualified-reference-in-single-table) from the correctness rule
+  list; it fires on idiomatic SQL and produced ~37 violations on a
+  12-model project. Also pinned
+  `unqualified_single_table_references=allow` in the pyproject
+  sqlfluff config.
+- **`run_assertions` early-returned on empty list**, so a model with
+  only `@grain` (no `@assert`) never had its grain check run.
+  Removed the early return; grain now always evaluates.
+- **`havn check` caught `policy.deny` but `havn transform` built the
+  model anyway**. Hoisted deny evaluation into `_evaluate_deny_rules()`
+  called from `run_transform`; both sequential and parallel runners
+  now pre-mark denied models as `policy_denied` before any tier
+  executes.
+- **Parallel runner blocked every later tier on ANY previous-tier
+  failure**. Made blocking dependency-aware via `_is_blocked()`
+  walking the actual `model.depends_on` graph; siblings of
+  failed/denied models now build correctly.
+- **`check_freshness` with `include_sources`** crashed on
+  timestamp-with-timezone columns when pytz wasn't installed. Cast
+  `MAX(<col>)` to VARCHAR in SQL so the value never crosses the
+  DuckDB to Python boundary as a Python timestamp.
+- **`_parse_duration`** now warns and falls back to 24h on malformed
+  input (previously crashed with `ValueError` on `max_age=invalid`).
+- **`parse_assertion_specs`** strips unrecognized `severity=`
+  qualifiers (e.g. `severity=critical`) instead of leaving them in the
+  expression where they crash `_evaluate_assertion` as bad SQL.
+- **Shell statement detector rewritten** as a single forward pass:
+  `SELECT 1; -- trailing comment` now correctly recognised as
+  complete. Comment-swallowed semicolons and unterminated string
+  literals handled correctly.
+
+### Internal
+
+- New `_havn.source_freshness` table; `_havn.assertion_results`
+  migrated with `severity` + `owner` columns.
+- `SQLModel` gains `grain`, `owner`, `source_freshness`, `watermark`,
+  `assertion_specs`. `AssertionResult` gains `severity`, `owner`.
+- `generate_structured_docs` surfaces grain/owner/source_freshness per
+  model so the SPA can render them.
+- `register_macros()` always loads `havn.stdlib.*` (even with no user
+  `macros/` dir); user macros override on name collision.
+- ducklake-extension tests skip with a `requires_ducklake` marker
+  (probes once per session) when the extension can't be installed
+  from `extensions.duckdb.org`, instead of failing with HTTP 403
+  noise.
+
 ## [0.2.17] - 2026-04-29
 
 Two regressions caught by the post-publish end-to-end re-test of 0.2.16.

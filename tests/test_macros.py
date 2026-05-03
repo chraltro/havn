@@ -19,6 +19,36 @@ def _write_file(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def _stdlib_count() -> int:
+    """Count of macros bundled in havn.stdlib that get registered for free.
+
+    Used to keep tests resilient as the stdlib grows. Each addition only
+    needs the stdlib module — assertions that previously hard-coded the
+    user-only count are now ``stdlib_count + user_count``.
+    """
+    from havn.engine.macros import _discover_stdlib_macros
+
+    scalars, tables = _discover_stdlib_macros()
+    return len(scalars) + len(tables)
+
+
+@pytest.fixture(autouse=True)
+def _reset_macro_registry_between_tests():
+    """Clear the per-connection registration cache so ``id(conn)`` reuse
+    across tests doesn't make a fresh ``register_macros`` call short-circuit.
+
+    Before stdlib registration was added, tests with no ``macros/`` dir
+    returned early before touching the cache. Now stdlib registration
+    always touches the cache, so a recycled ``id(conn)`` from a previous
+    test would otherwise hit the cache and return 0.
+    """
+    from havn.engine.macros import reset_macro_state
+
+    reset_macro_state()
+    yield
+    reset_macro_state()
+
+
 # ---------------------------------------------------------------------------
 # @macro decorator
 # ---------------------------------------------------------------------------
@@ -189,7 +219,7 @@ class TestRegistration:
 
         conn = duckdb.connect(":memory:")
         count = register_macros(conn, tmp_path)
-        assert count == 1
+        assert count == 1 + _stdlib_count()
 
         result = conn.execute("SELECT shout('hello')").fetchone()
         assert result is not None
@@ -207,7 +237,7 @@ class TestRegistration:
 
         conn = duckdb.connect(":memory:")
         count = register_macros(conn, tmp_path)
-        assert count == 1
+        assert count == 1 + _stdlib_count()
 
         result = conn.execute("SELECT double_it(21)").fetchone()
         assert result is not None
@@ -232,7 +262,7 @@ class TestRegistration:
 
         conn = duckdb.connect(":memory:")
         count = register_macros(conn, tmp_path)
-        assert count == 2
+        assert count == 2 + _stdlib_count()
 
         r1 = conn.execute("SELECT py_add(3, 4)").fetchone()
         r2 = conn.execute("SELECT sql_add(3, 4)").fetchone()
@@ -245,7 +275,8 @@ class TestRegistration:
 
         conn = duckdb.connect(":memory:")
         count = register_macros(conn, tmp_path)
-        assert count == 0
+        # No user macros dir, but stdlib macros are still bundled.
+        assert count == _stdlib_count()
         conn.close()
 
     def test_bad_sql_macro_does_not_crash(self, tmp_path: Path) -> None:
@@ -257,7 +288,7 @@ class TestRegistration:
         conn = duckdb.connect(":memory:")
         # Should not raise
         count = register_macros(conn, tmp_path)
-        assert count == 0
+        assert count == _stdlib_count()
         conn.close()
 
     def test_bad_python_macro_does_not_crash(self, tmp_path: Path) -> None:
@@ -268,8 +299,9 @@ class TestRegistration:
 
         conn = duckdb.connect(":memory:")
         count = register_macros(conn, tmp_path)
-        # File loads fine but has no @macro decorated functions
-        assert count == 0
+        # File loads fine but has no @macro decorated functions; only
+        # stdlib counts.
+        assert count == _stdlib_count()
         conn.close()
 
 
@@ -296,7 +328,9 @@ class TestListMacros:
             "CREATE MACRO triple(x) AS x * 3;\n",
         )
 
-        items = list_macros(tmp_path)
+        # ``list_macros`` now also surfaces havn.stdlib entries; filter
+        # them out so this test only inspects the user-defined ones.
+        items = [i for i in list_macros(tmp_path) if not i.get("is_stdlib")]
         assert len(items) == 2
 
         py_item = next(i for i in items if i["kind"] == "scalar")
@@ -312,13 +346,14 @@ class TestListMacros:
         from havn.engine.macros import list_macros
 
         (tmp_path / "macros").mkdir()
-        items = list_macros(tmp_path)
+        # User-only view: stdlib entries are filtered out.
+        items = [i for i in list_macros(tmp_path) if not i.get("is_stdlib")]
         assert items == []
 
     def test_no_macros_dir(self, tmp_path: Path) -> None:
         from havn.engine.macros import list_macros
 
-        items = list_macros(tmp_path)
+        items = [i for i in list_macros(tmp_path) if not i.get("is_stdlib")]
         assert items == []
 
 
@@ -508,7 +543,7 @@ class TestTableMacroRegistration:
 
         conn = duckdb.connect(":memory:")
         count = register_macros(conn, tmp_path)
-        assert count == 1
+        assert count == 1 + _stdlib_count()
 
         rows = conn.execute("SELECT * FROM active_users('active') ORDER BY id").fetchall()
         assert rows == [(1, "Alice", True)]
@@ -617,7 +652,7 @@ class TestTableMacroRegistration:
 
         conn = duckdb.connect(":memory:")
         count = register_macros(conn, tmp_path)
-        assert count == 2
+        assert count == 2 + _stdlib_count()
 
         r = conn.execute("SELECT shout('hello')").fetchone()
         assert r[0] == "HELLO!"
@@ -644,7 +679,9 @@ class TestTableMacroRegistration:
         with caplog.at_level(logging.WARNING, logger="havn.macros"):
             count = register_macros(conn, tmp_path)
 
-        assert count == 0
+        # The user's table_macro is skipped (broken schema probe); only
+        # stdlib macros remain.
+        assert count == _stdlib_count()
         conn.close()
 
     def test_list_macros_includes_table_kind(self, tmp_path: Path) -> None:
@@ -660,7 +697,8 @@ class TestTableMacroRegistration:
             "    return [{'id': 1, 'val': x}]\n",
         )
 
-        items = list_macros(tmp_path)
+        # User-only view: filter out stdlib entries.
+        items = [i for i in list_macros(tmp_path) if not i.get("is_stdlib")]
         assert len(items) == 1
         item = items[0]
         assert item["kind"] == "table"

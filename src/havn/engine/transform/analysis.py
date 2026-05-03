@@ -35,6 +35,7 @@ def validate_models(
     known_tables: set[str] | None = None,
     source_columns: dict[str, set[str]] | None = None,
     landing_schemas: set[str] | None = None,
+    deny_rules: list | None = None,
 ) -> list[ValidationError]:
     """Validate all models without executing them.
 
@@ -104,8 +105,43 @@ def validate_models(
             ))
             continue
 
+        # CTEs look like exp.Table refs in the AST; collect their names so we
+        # can skip catalog/column lookups against them.
+        cte_names: set[str] = set()
+        cte_columns: dict[str, set[str]] = {}
+        for cte in parsed.find_all(exp.CTE):
+            cte_alias = (cte.alias or "").lower()
+            if not cte_alias:
+                continue
+            cte_names.add(cte_alias)
+            cols: set[str] = set()
+            inner = cte.this
+            if isinstance(inner, exp.Select):
+                star_seen = False
+                for proj in inner.expressions:
+                    if isinstance(proj, exp.Alias):
+                        cols.add(proj.alias.lower())
+                    elif isinstance(proj, exp.Column):
+                        if proj.name == "*" or isinstance(proj.this, exp.Star):
+                            star_seen = True
+                        elif proj.name:
+                            cols.add(proj.name.lower())
+                    elif isinstance(proj, exp.Star):
+                        star_seen = True
+                # If the CTE selects *, we cannot enumerate its columns
+                # statically — leave the column set empty (we'll skip
+                # validation rather than flag false positives).
+                if star_seen:
+                    cols = set()
+            cte_columns[cte_alias] = cols
+
+        def _is_cte_ref(table: exp.Table) -> bool:
+            return (table.name or "").lower() in cte_names and not (table.db or "")
+
         # 2. Check referenced tables exist
         for table in parsed.find_all(exp.Table):
+            if _is_cte_ref(table):
+                continue
             db_name = table.db or ""
             table_name = table.name or ""
             if db_name and table_name:
@@ -119,9 +155,18 @@ def validate_models(
                     ))
 
         # 3. Check column references
-        # Build alias map for this model
+        # Build alias map for this model (excluding CTE references)
         alias_map: dict[str, str] = {}
+        # Aliases that point to CTEs: e.g. `FROM flows f` -> {"f": "flows"}.
+        cte_alias_map: dict[str, str] = {}
         for table in parsed.find_all(exp.Table):
+            if _is_cte_ref(table):
+                cte_name = (table.name or "").lower()
+                cte_alias_map[cte_name] = cte_name
+                alias = (table.alias or "").lower()
+                if alias:
+                    cte_alias_map[alias] = cte_name
+                continue
             db_name = table.db or ""
             table_name = table.name or ""
             alias = table.alias or ""
@@ -135,7 +180,26 @@ def validate_models(
             col_name = col.name.lower() if col.name else ""
             table_ref = col.table.lower() if col.table else ""
 
+            # Skip "*" tokens — sqlglot represents `b.*` as Column(name="*", table="b").
+            if col_name == "*":
+                continue
+
             if table_ref and col_name:
+                # CTE-qualified (or aliased CTE-qualified) column.
+                cte_target = cte_alias_map.get(table_ref)
+                if cte_target:
+                    cte_cols = cte_columns.get(cte_target, set())
+                    # Only error if we have any CTE outputs recorded and the
+                    # column genuinely isn't there. If we couldn't infer the
+                    # CTE's columns (e.g. SELECT * inside the CTE), skip.
+                    if cte_cols and col_name not in cte_cols:
+                        errors.append(ValidationError(
+                            model=model.full_name,
+                            severity="error",
+                            message=f"Column '{col_name}' not found in CTE '{cte_target}'",
+                        ))
+                    continue
+
                 resolved_table = alias_map.get(table_ref, table_ref)
                 if resolved_table in column_catalog:
                     if col_name not in column_catalog[resolved_table]:
@@ -145,7 +209,7 @@ def validate_models(
                             message=f"Column '{col_name}' not found in table '{resolved_table}'",
                         ))
             elif col_name and not table_ref:
-                # Unqualified column — check for ambiguity
+                # Unqualified column — check for ambiguity across upstream sources.
                 found_in: list[str] = []
                 for dep in model.depends_on:
                     if dep in column_catalog and col_name in column_catalog[dep]:
@@ -195,6 +259,37 @@ def validate_models(
                     "transforms must not overwrite raw data"
                 ),
             ))
+
+    # 7. Deny-list policies: refuse models in forbidden schemas that
+    #    reference forbidden columns. Catches PII leaks at compile time.
+    if deny_rules:
+        for model in models:
+            try:
+                parsed = sqlglot.parse_one(model.query, read="duckdb")
+            except sqlglot.errors.ParseError:
+                continue  # Already reported above
+            schema_lower = model.schema.lower()
+            referenced_columns: set[str] = set()
+            for col in parsed.find_all(exp.Column):
+                if col.name:
+                    referenced_columns.add(col.name.lower())
+            for rule in deny_rules:
+                forbidden_schemas = {s.lower() for s in (rule.forbid_in_schemas or [])}
+                if schema_lower not in forbidden_schemas:
+                    continue
+                col = (rule.column or "").lower()
+                if not col:
+                    continue
+                if col in referenced_columns:
+                    reason = f"  ({rule.reason})" if rule.reason else ""
+                    errors.append(ValidationError(
+                        model=model.full_name,
+                        severity="error",
+                        message=(
+                            f"Policy violation: column '{rule.column}' is forbidden "
+                            f"in schema '{model.schema}'.{reason}"
+                        ),
+                    ))
 
     return errors
 
@@ -281,10 +376,19 @@ def impact_analysis(
 def check_freshness(
     conn: duckdb.DuckDBPyConnection,
     max_age_hours: float = 24.0,
+    *,
+    include_sources: bool = False,
+    source_min_rows: int = 0,
+    transform_dir = None,
 ) -> list[dict]:
     """Check freshness of all models. Returns stale models.
 
-    A model is stale if it hasn't been run within max_age_hours.
+    A model is stale if it hasn't been run within ``max_age_hours``.
+    When ``include_sources=True`` the source-side row counts and
+    max-on-column timestamps from each model's ``@source_freshness``
+    contracts are joined into the result. ``source_min_rows > 0``
+    additionally flips a model to stale if any source has fewer than
+    that many rows (the "0 rows ≠ fresh" guarantee).
     """
     try:
         rows = conn.execute(
@@ -299,14 +403,72 @@ def check_freshness(
         logger.warning("Failed to check freshness: %s", e)
         return []
 
+    # Build a model_path -> source_specs lookup if sources are requested.
+    source_specs_by_model: dict[str, list[dict]] = {}
+    if include_sources and transform_dir is not None:
+        try:
+            from .discovery import discover_models
+
+            for m in discover_models(transform_dir):
+                if m.source_freshness:
+                    source_specs_by_model[m.full_name] = m.source_freshness
+        except Exception as e:
+            logger.debug("Couldn't load model source specs: %s", e)
+
     results = []
     for model_path, last_run, duration_ms, row_count, hours_since in rows:
-        results.append({
+        entry: dict = {
             "model": model_path,
             "last_run_at": str(last_run) if last_run else None,
             "hours_since_run": round(hours_since, 1) if hours_since is not None else None,
             "is_stale": hours_since is not None and hours_since > max_age_hours,
             "row_count": row_count,
-        })
+        }
+        if include_sources:
+            specs = source_specs_by_model.get(model_path, [])
+            sources_out: list[dict] = []
+            for spec in specs:
+                src = {
+                    "table": spec["table"],
+                    "on": spec.get("on"),
+                    "row_count": None,
+                    "max_loaded_at": None,
+                    "age_seconds": None,
+                    "is_stale": False,
+                    "error": None,
+                }
+                try:
+                    cnt = conn.execute(f"SELECT COUNT(*) FROM {spec['table']}").fetchone()
+                    src["row_count"] = int(cnt[0]) if cnt else 0
+                    if spec.get("on"):
+                        on = spec["on"]
+                        # Cast MAX() to VARCHAR in SQL: returning a bare
+                        # TIMESTAMP/TIMESTAMPTZ across the DuckDB→Python
+                        # boundary needs pytz on some installs and crashes
+                        # if it's missing. The string form is enough for
+                        # human-readable surfacing; age comes from EXTRACT.
+                        row = conn.execute(
+                            f"SELECT CAST(MAX({on}) AS VARCHAR), "
+                            f"EXTRACT(EPOCH FROM (current_timestamp - MAX({on}))) "
+                            f"FROM {spec['table']}"
+                        ).fetchone()
+                        if row and row[0] is not None:
+                            src["max_loaded_at"] = row[0]
+                            src["age_seconds"] = float(row[1]) if row[1] is not None else None
+                    max_age = int(spec.get("max_age_seconds") or 0)
+                    if src["age_seconds"] is not None and max_age > 0:
+                        src["is_stale"] = src["age_seconds"] > max_age
+                    if source_min_rows > 0 and (src["row_count"] or 0) < source_min_rows:
+                        src["is_stale"] = True
+                except Exception as e:
+                    src["error"] = str(e)
+                    src["is_stale"] = True
+                sources_out.append(src)
+                # Roll up into the model's overall freshness verdict so
+                # CI / alerts can read a single is_stale flag.
+                if src["is_stale"]:
+                    entry["is_stale"] = True
+            entry["sources"] = sources_out
+        results.append(entry)
 
     return results

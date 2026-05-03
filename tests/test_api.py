@@ -92,6 +92,29 @@ def test_run_query_empty_rejected(client):
     assert resp.status_code == 422  # pydantic min_length=1
 
 
+def test_transform_accepts_empty_body(client):
+    """POST /api/transform with no body must run all models, not 422."""
+    resp = client.post("/api/transform")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert "results" in data
+
+
+def test_transform_accepts_empty_json(client):
+    """POST /api/transform with empty {} body must run all models."""
+    resp = client.post("/api/transform", json={})
+    assert resp.status_code == 200, resp.text
+
+
+def test_unknown_api_endpoint_returns_404(client):
+    """Unknown /api/* paths must 404, not be masked by the SPA shell."""
+    resp = client.get("/api/does-not-exist")
+    assert resp.status_code == 404
+    # And the body must not be the SPA index.html.
+    assert "<!doctype" not in resp.text.lower()
+    assert "<html" not in resp.text.lower()
+
+
 def test_list_tables(client):
     resp = client.get("/api/tables")
     assert resp.status_code == 200

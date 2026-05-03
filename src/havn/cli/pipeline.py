@@ -287,13 +287,19 @@ def transform(
         if not results:
             return
         built = sum(1 for s in results.values() if s == "built")
-        skipped = sum(1 for s in results.values() if s == "skipped")
+        skipped = sum(1 for s in results.values() if s == "skipped" or str(s).startswith("skipped_"))
         errors = sum(1 for s in results.values() if s == "error")
         assertions_failed = sum(1 for s in results.values() if s == "assertion_failed")
+        policy_denied = sum(1 for s in results.values() if s == "policy_denied")
+        source_stale = sum(1 for s in results.values() if s == "source_stale")
         console.print()
         parts = [f"{built} built", f"{skipped} skipped", f"{errors} errors"]
         if assertions_failed:
             parts.append(f"{assertions_failed} assertion failures")
+        if policy_denied:
+            parts.append(f"{policy_denied} policy denials")
+        if source_stale:
+            parts.append(f"{source_stale} source-stale skips")
         console.print(f"  {', '.join(parts)}")
 
         # Finish the Pipeline Rewind run
@@ -547,16 +553,27 @@ def lint(
 
 @app.command()
 def watch(
+    route: Annotated[Optional[list[str]], typer.Option("--route", help="Glob to filter watched files; only matching paths trigger a rebuild, and only that model is rebuilt. Repeatable.")] = None,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
-    """Watch for file changes and auto-rebuild transforms."""
+    """Watch for file changes and auto-rebuild transforms.
+
+    By default, edits to any file under ``transform/`` rebuild the full
+    DAG. ``--route 'transform/gold/route_b_*.sql'`` (repeatable) narrows
+    the watcher: only matching paths trigger a rebuild, and only the
+    matching model is rebuilt — useful when iterating on one model
+    without paying for the full pipeline on every save.
+    """
     from havn.engine.scheduler import FileWatcher
 
     project_dir = _resolve_project(project_dir)
     console.print("[bold]Watching for changes...[/bold] (Ctrl+C to stop)")
     console.print(f"  transform/  -> auto-rebuild SQL models")
+    if route:
+        for r in route:
+            console.print(f"  route filter: {r}")
 
-    watcher = FileWatcher(project_dir)
+    watcher = FileWatcher(project_dir, route_globs=list(route) if route else None)
     watcher.start()
 
     try:

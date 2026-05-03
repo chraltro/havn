@@ -158,6 +158,7 @@ def init(
         PROJECT_YML_DUCKLAKE_TEMPLATE,
         PROJECT_YML_EMPTY_TEMPLATE,
         PROJECT_YML_TEMPLATE,
+        SQLFLUFF_TEMPLATE,
         SAMPLE_BRONZE_SQL,
         SAMPLE_CONTRACTS_YML,
         SAMPLE_EXPLORE_NOTEBOOK,
@@ -247,6 +248,10 @@ def init(
     (havn_dir / "prs" / ".gitkeep").write_text("")
     (target / "CLAUDE.md").write_text(CLAUDE_MD_TEMPLATE.format(name=name))
     (target / ".cursorrules").write_text(CURSORRULES_TEMPLATE)
+    # Seed a relaxed sqlfluff config so `havn lint` doesn't bury new
+    # projects under RF03/AM05 violations on idiomatic SQL. The linter
+    # auto-detects this file at lint time.
+    (target / ".sqlfluff").write_text(SQLFLUFF_TEMPLATE)
     (target / ".github").mkdir(parents=True, exist_ok=True)
     (target / ".github" / "copilot-instructions.md").write_text(COPILOT_INSTRUCTIONS_TEMPLATE)
 

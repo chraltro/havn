@@ -178,6 +178,8 @@ class TestParallelExecution:
 
         results = run_transform(db, transform_dir, force=True, parallel=False)
         assert results["bronze.bad"] == "error"
-        # Downstream should still be attempted (sequential doesn't auto-block),
-        # but it should also error because the source doesn't exist
-        assert results.get("silver.downstream") in ("error", "skipped")
+        # When upstream errors, downstream is now skipped with a
+        # specific "upstream blocked" status — the runner refuses to
+        # build models that depend on a failed upstream so bad data
+        # can't cascade.
+        assert results.get("silver.downstream") in ("error", "skipped", "skipped_upstream_blocked")
