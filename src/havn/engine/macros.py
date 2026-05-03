@@ -249,6 +249,51 @@ def _discover_python_macros(macros_dir: Path) -> list[MacroInfo]:
     return scalars
 
 
+def _discover_stdlib_macros() -> tuple[list[MacroInfo], list[TableMacroInfo]]:
+    """Discover macros bundled with havn under ``havn.stdlib.*``.
+
+    Each submodule of ``havn.stdlib`` is imported and walked for
+    ``@macro`` / ``@table_macro``-decorated functions. Modules whose
+    name starts with ``_`` are skipped. Discovery failures are logged
+    but never abort registration — a broken stdlib module shouldn't
+    prevent user macros from loading.
+    """
+    import importlib
+    import pkgutil
+
+    scalars: list[MacroInfo] = []
+    tables: list[TableMacroInfo] = []
+
+    try:
+        import havn.stdlib as stdlib_pkg
+    except Exception as exc:  # pragma: no cover — package always present
+        logger.debug("havn.stdlib unavailable: %s", exc)
+        return scalars, tables
+
+    for mod_info in pkgutil.iter_modules(stdlib_pkg.__path__):
+        if mod_info.name.startswith("_"):
+            continue
+        full = f"havn.stdlib.{mod_info.name}"
+        try:
+            mod = importlib.import_module(full)
+        except Exception as exc:
+            logger.warning("Failed to import havn stdlib module %s: %s", full, exc)
+            continue
+
+        for attr_name in dir(mod):
+            obj = getattr(mod, attr_name)
+            scalar_info: MacroInfo | None = getattr(obj, _MACRO_ATTR, None)
+            if scalar_info is not None:
+                scalar_info.source_file = f"<havn.stdlib.{mod_info.name}>"
+                scalars.append(scalar_info)
+            table_info: TableMacroInfo | None = getattr(obj, _TABLE_MACRO_ATTR, None)
+            if table_info is not None:
+                table_info.source_file = f"<havn.stdlib.{mod_info.name}>"
+                tables.append(table_info)
+
+    return scalars, tables
+
+
 def _discover_table_macros(macros_dir: Path) -> list[TableMacroInfo]:
     """Import all ``.py`` files in *macros_dir* and collect @table_macro functions."""
     _, tables = _discover_all_python_macros(macros_dir)
@@ -545,9 +590,16 @@ def register_macros(
     this is what the macros file watcher does.
 
     Returns the number of macros registered (0 on a re-entrant call).
+    Stdlib macros (``havn.stdlib.*``) are registered first; user macros
+    in ``project_dir/macros/`` with the same name override them.
     """
     macros_dir = project_dir / "macros"
-    if not macros_dir.is_dir():
+    has_user_macros = macros_dir.is_dir()
+    # Even projects without a ``macros/`` directory still get the stdlib,
+    # so don't bail here unless we have neither stdlib nor user macros to
+    # register. Stdlib discovery is cheap.
+    stdlib_scalars, stdlib_tables = _discover_stdlib_macros()
+    if not has_user_macros and not stdlib_scalars and not stdlib_tables:
         return 0
 
     # Skip re-registration on connections we've already done.  Without this
@@ -582,7 +634,33 @@ def register_macros(
 
     count = 0
 
-    scalar_macros, table_macros = _discover_all_python_macros(macros_dir)
+    user_scalars, user_tables = (
+        _discover_all_python_macros(macros_dir) if has_user_macros else ([], [])
+    )
+
+    # Concatenate stdlib first, then user. If a name appears in both,
+    # the user's entry wins because dict insertion order keeps the LAST
+    # write — but we also log it so silent shadowing is debuggable.
+    user_scalar_names = {s.name for s in user_scalars}
+    user_table_names = {t.name for t in user_tables}
+    for s in stdlib_scalars:
+        if s.name in user_scalar_names:
+            logger.warning(
+                "User macro '%s' shadows havn.stdlib macro of the same name", s.name
+            )
+    for t in stdlib_tables:
+        if t.name in user_table_names:
+            logger.warning(
+                "User table_macro '%s' shadows havn.stdlib macro of the same name", t.name
+            )
+
+    # Filter stdlib entries that the user overrides so we don't register
+    # twice and trip DuckDB's "function already exists".
+    stdlib_scalars_kept = [s for s in stdlib_scalars if s.name not in user_scalar_names]
+    stdlib_tables_kept = [t for t in stdlib_tables if t.name not in user_table_names]
+
+    scalar_macros = stdlib_scalars_kept + user_scalars
+    table_macros = stdlib_tables_kept + user_tables
 
     # Scalar Python UDFs
     for info in scalar_macros:
@@ -720,17 +798,26 @@ def _duckdb_type(type_str: str) -> str:
 
 
 def list_macros(project_dir: Path) -> list[dict[str, Any]]:
-    """Return metadata for all discovered macros (Python + SQL).
+    """Return metadata for all discovered macros (stdlib + user Python + SQL).
 
-    Each dict has keys: name, params, return_type, docstring, source_file, kind.
-    ``kind`` is one of: ``"scalar"``, ``"table"``, ``"sql"``.
+    Each dict has keys: name, params, return_type, docstring, source_file,
+    kind, is_stdlib. ``kind`` is one of: ``"scalar"``, ``"table"``,
+    ``"sql"``. Stdlib entries shadowed by a user macro of the same name
+    are filtered out (matching the registration override behavior).
     """
     macros_dir = project_dir / "macros"
     results: list[dict[str, Any]] = []
 
-    scalar_macros, table_macros = _discover_all_python_macros(macros_dir)
+    user_scalar_macros, user_table_macros = _discover_all_python_macros(macros_dir)
+    stdlib_scalar_macros, stdlib_table_macros = _discover_stdlib_macros()
 
-    for info in scalar_macros:
+    user_scalar_names = {m.name for m in user_scalar_macros}
+    user_table_names = {m.name for m in user_table_macros}
+
+    # Stdlib first, then user — same precedence the registrar uses.
+    for info in stdlib_scalar_macros:
+        if info.name in user_scalar_names:
+            continue
         results.append({
             "name": info.name,
             "params": info.params,
@@ -738,9 +825,22 @@ def list_macros(project_dir: Path) -> list[dict[str, Any]]:
             "docstring": info.docstring,
             "source_file": info.source_file,
             "kind": "scalar",
+            "is_stdlib": True,
+        })
+    for info in user_scalar_macros:
+        results.append({
+            "name": info.name,
+            "params": info.params,
+            "return_type": info.return_type,
+            "docstring": info.docstring,
+            "source_file": info.source_file,
+            "kind": "scalar",
+            "is_stdlib": False,
         })
 
-    for info in table_macros:
+    for info in stdlib_table_macros:
+        if info.name in user_table_names:
+            continue
         results.append({
             "name": info.name,
             "params": info.params,
@@ -749,6 +849,18 @@ def list_macros(project_dir: Path) -> list[dict[str, Any]]:
             "docstring": info.docstring,
             "source_file": info.source_file,
             "kind": "table",
+            "is_stdlib": True,
+        })
+    for info in user_table_macros:
+        results.append({
+            "name": info.name,
+            "params": info.params,
+            "return_type": "TABLE",
+            "schema": info.schema,
+            "docstring": info.docstring,
+            "source_file": info.source_file,
+            "kind": "table",
+            "is_stdlib": False,
         })
 
     # SQL macros — parse names from CREATE MACRO statements

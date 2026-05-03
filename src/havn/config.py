@@ -170,6 +170,27 @@ class SentinelConfig(BaseModel):
     select_star_warning: bool = True
 
 
+class DenyRule(BaseModel):
+    """A single column-level deny rule.
+
+    Models in any of ``forbid_in_schemas`` may not reference ``column``.
+    Caught at compile time by ``havn check`` / ``havn transform`` and
+    again at runtime by the masking rewriter for ad-hoc queries.
+    """
+    model_config = ConfigDict(extra="ignore")
+
+    column: str
+    forbid_in_schemas: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
+class PoliciesConfig(BaseModel):
+    """Project-level policy framework, declared under ``policies:`` in ``project.yml``."""
+    model_config = ConfigDict(extra="ignore")
+
+    deny: list[DenyRule] = Field(default_factory=list)
+
+
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(extra="ignore", arbitrary_types_allowed=True)
 
@@ -184,6 +205,7 @@ class ProjectConfig(BaseModel):
     quality: QualityConfig = Field(default_factory=QualityConfig)
     rewind: RewindConfig = Field(default_factory=RewindConfig)
     sentinel: SentinelConfig = Field(default_factory=SentinelConfig)
+    policies: PoliciesConfig = Field(default_factory=PoliciesConfig)
     environments: dict[str, EnvironmentConfig] = Field(default_factory=dict)
     active_environment: str | None = None
     sources: list[SourceConfig] = Field(default_factory=list)
@@ -344,6 +366,19 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
         select_star_warning=sentinel_raw.get("select_star_warning", True),
     )
 
+    # Policies (deny-list etc.)
+    policies_raw = raw.get("policies", {}) or {}
+    deny_rules = []
+    for rule_raw in policies_raw.get("deny", []) or []:
+        if not isinstance(rule_raw, dict):
+            continue
+        deny_rules.append(DenyRule(
+            column=str(rule_raw.get("column", "")),
+            forbid_in_schemas=list(rule_raw.get("forbid_in_schemas", []) or []),
+            reason=str(rule_raw.get("reason", "")),
+        ))
+    policies = PoliciesConfig(deny=deny_rules)
+
     # Quality (anomaly detection)
     quality_raw = raw.get("quality", {})
     anomaly_raw = quality_raw.get("anomaly_detection", {})
@@ -415,6 +450,7 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
         quality=quality,
         rewind=rewind,
         sentinel=sentinel,
+        policies=policies,
         environments=environments,
         active_environment=active_env if active_env and active_env in environments else None,
         sources=sources,

@@ -88,6 +88,99 @@ class TestValidation:
         col_errors = [e for e in errors if "not found" in e.message.lower()]
         assert len(col_errors) >= 1
 
+    def test_validate_no_false_positive_on_cte_columns(self, db, transform_dir):
+        """CTE-internal columns must not be looked up against source tables."""
+        db.execute("CREATE TABLE landing.txns AS SELECT 1 AS account_id, 100.0 AS value_nok")
+        (transform_dir / "silver" / "flows.sql").write_text(textwrap.dedent("""\
+            -- config: materialized=table, schema=silver
+            -- depends_on: landing.txns
+
+            WITH flows AS (
+                SELECT account_id, SUM(value_nok) AS inflow_nok
+                FROM landing.txns
+                GROUP BY 1
+            )
+            SELECT f.account_id, f.inflow_nok FROM flows f
+        """))
+        models = discover_models(transform_dir)
+        errors = validate_models(db, models)
+        # No "Column 'inflow_nok' not found" errors should fire — it is a CTE column.
+        bad = [e for e in errors if "inflow_nok" in e.message and "not found" in e.message.lower()]
+        assert bad == [], bad
+
+    def test_validate_no_false_positive_on_star_alias(self, db, transform_dir):
+        """`SELECT b.*` must not be flagged as a missing '*' column."""
+        db.execute("CREATE TABLE landing.events AS SELECT 1 AS id, 'x' AS kind")
+        (transform_dir / "bronze" / "passthrough.sql").write_text(textwrap.dedent("""\
+            -- config: materialized=view, schema=bronze
+            -- depends_on: landing.events
+
+            SELECT b.* FROM landing.events b
+        """))
+        models = discover_models(transform_dir)
+        errors = validate_models(db, models)
+        bad = [e for e in errors if "'*'" in e.message]
+        assert bad == [], bad
+
+    def test_validate_cte_column_typo_still_caught(self, db, transform_dir):
+        """When a CTE's columns are inferable, referencing a missing one errors."""
+        db.execute("CREATE TABLE landing.txns AS SELECT 1 AS account_id, 100.0 AS value_nok")
+        (transform_dir / "silver" / "flows_typo.sql").write_text(textwrap.dedent("""\
+            -- config: materialized=table, schema=silver
+            -- depends_on: landing.txns
+
+            WITH flows AS (
+                SELECT account_id, SUM(value_nok) AS inflow_nok
+                FROM landing.txns
+                GROUP BY 1
+            )
+            SELECT f.account_id, f.inflowww_nok FROM flows f
+        """))
+        models = discover_models(transform_dir)
+        errors = validate_models(db, models)
+        bad = [
+            e for e in errors
+            if "inflowww_nok" in e.message and "not found" in e.message.lower()
+        ]
+        assert len(bad) >= 1, errors
+
+    def test_validate_select_star_in_cte_not_falsely_flagged(self, db, transform_dir):
+        """A CTE with `SELECT *` exposes columns we can't enumerate; downstream
+        column refs against that CTE must not error."""
+        db.execute("CREATE TABLE landing.events AS SELECT 1 AS id, 'x' AS kind")
+        (transform_dir / "silver" / "passthrough.sql").write_text(textwrap.dedent("""\
+            -- config: materialized=table, schema=silver
+            -- depends_on: landing.events
+
+            WITH all_events AS (
+                SELECT * FROM landing.events
+            )
+            SELECT a.id, a.kind, a.something_we_cant_verify FROM all_events a
+        """))
+        models = discover_models(transform_dir)
+        errors = validate_models(db, models)
+        # We don't know the CTE's column list (SELECT *), so we must not
+        # falsely flag any downstream column ref as missing.
+        bad = [e for e in errors if "not found" in e.message.lower()]
+        assert bad == [], bad
+
+    def test_validate_recursive_cte_does_not_loop(self, db, transform_dir):
+        """A WITH RECURSIVE CTE must not crash or infinite-loop the validator."""
+        (transform_dir / "silver" / "recursive.sql").write_text(textwrap.dedent("""\
+            -- config: materialized=table, schema=silver
+
+            WITH RECURSIVE counter(n) AS (
+                SELECT 1
+                UNION ALL
+                SELECT n + 1 FROM counter WHERE n < 5
+            )
+            SELECT n FROM counter
+        """))
+        models = discover_models(transform_dir)
+        # Just verify it doesn't blow up; the result may be empty or have
+        # warnings but the validator itself must terminate.
+        validate_models(db, models)
+
     def test_validate_model_references_other_model(self, db, transform_dir):
         """Referencing another model (not yet built) should not error."""
         (transform_dir / "bronze" / "a.sql").write_text(textwrap.dedent("""\

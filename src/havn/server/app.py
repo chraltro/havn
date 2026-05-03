@@ -244,11 +244,17 @@ _RESERVED_PATHS = {"docs", "redoc", "openapi.json"}
 @app.get("/", response_class=HTMLResponse)
 @app.get("/{path:path}", response_class=HTMLResponse)
 def serve_frontend(path: str = "") -> HTMLResponse:
-    """Serve the frontend SPA (skips /docs, /redoc, /openapi.json)."""
+    """Serve the frontend SPA (skips /docs, /redoc, /openapi.json, /api/*)."""
     from fastapi import HTTPException
 
     if path in _RESERVED_PATHS:
         raise HTTPException(404, "Not found")
+
+    # Unknown /api/* paths must 404, not be masked by the SPA shell. Returning
+    # index.html for an API miss makes API debugging miserable (looks like a
+    # successful 200 with HTML body).
+    if path == "api" or path.startswith("api/"):
+        raise HTTPException(404, "API endpoint not found")
 
     file_path = _FRONTEND_DIR / path
     if file_path.is_file():

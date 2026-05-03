@@ -477,6 +477,15 @@ function AppContent() {
   const [preview, setPreview] = useState(null);
   const [previewError, setPreviewError] = useState(null);
   const [previewRunning, setPreviewRunning] = useState(false);
+  // "Run on save" toggle, persisted in localStorage so it survives reloads.
+  // When on, saving a transform .sql file triggers `havn transform --target <model>`;
+  // saving a script under ingest/ or export/ triggers `havn run <path>`.
+  const [runOnSave, setRunOnSave] = useState(() => {
+    try { return localStorage.getItem("havn.runOnSave") === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("havn.runOnSave", runOnSave ? "1" : "0"); } catch {}
+  }, [runOnSave]);
   const [previewHeight, onPreviewResize, onPreviewResizeStart] = useResizable("havn_editor_preview_height", 200, 80, 600);
 
   // Tab/UI state - initialize from URL
@@ -834,6 +843,16 @@ function AppContent() {
       setDirty(false);
       addOutput("info", `Saved ${activeFile}`);
       setHintTrigger("firstFileEdited", true);
+      // Run on save: rebuild this single model / re-run this single
+      // script after a successful save, if the toggle is on.
+      if (runOnSave && !running) {
+        if (activeFile.includes("transform/") && activeFile.endsWith(".sql")) {
+          const modelName = activeFile.replace(/^transform\//, "").replace(/\.sql$/, "").replace(/\//g, ".");
+          runSingleModel(modelName).catch(e => addOutput("error", `Run on save failed: ${e.message}`));
+        } else if ((activeFile.startsWith("ingest/") || activeFile.startsWith("export/")) && activeFile.endsWith(".py")) {
+          runCurrentScript(activeFile).catch(e => addOutput("error", `Run on save failed: ${e.message}`));
+        }
+      }
     } catch (e) {
       addOutput("error", `Failed to save: ${e.message}`);
     }
@@ -1177,6 +1196,14 @@ function AppContent() {
                   <button onClick={saveFile} disabled={!dirty} style={styles.btn}>
                     Save
                   </button>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, opacity: 0.8, cursor: "pointer" }} title="Re-run this model/script automatically after save">
+                    <input
+                      type="checkbox"
+                      checked={runOnSave}
+                      onChange={(e) => setRunOnSave(e.target.checked)}
+                    />
+                    Run on save
+                  </label>
                   {isTransformFile && (
                     <button onClick={handleRunSingleModel} disabled={running} style={styles.btn} title="Run just this model">
                       Run Model

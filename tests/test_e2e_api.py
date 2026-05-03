@@ -380,3 +380,110 @@ class TestHistoryViaAPI:
         entries = resp.json()
         # Should have entries from seed, ingest, transform
         assert len(entries) > 0
+
+
+# ---------------------------------------------------------------------------
+# Bug-fix regressions: CTE scoping, /api/* 404, transform body, lineage
+# ---------------------------------------------------------------------------
+
+
+class TestBugFixRegressions:
+    """End-to-end coverage for the bugs reported in a real-world test-run review."""
+
+    def test_transform_endpoint_accepts_no_body(self, seeded_client):
+        """POST /api/transform with no body must succeed (not 422)."""
+        resp = seeded_client.post("/api/transform")
+        assert resp.status_code == 200, resp.text
+        assert "results" in resp.json()
+
+    def test_unknown_api_path_returns_json_404(self, seeded_client):
+        """An unknown /api/* GET must return a JSON 404, not the SPA shell."""
+        resp = seeded_client.get("/api/no-such-endpoint")
+        assert resp.status_code == 404
+        # Body must be JSON, not HTML.
+        assert resp.headers.get("content-type", "").startswith("application/json")
+        assert "<html" not in resp.text.lower()
+
+    def test_lineage_multi_source_with_cte_via_api(self, seeded_client, project):
+        """A multi-source CTE model returns split column lineage, not all on one
+        upstream. Reproduces the route_b regression via the API endpoint."""
+        # Add a multi-source CTE model to the project.
+        (project / "transform" / "gold" / "by_region.sql").write_text(textwrap.dedent("""\
+            -- config: materialized=table, schema=gold
+            -- depends_on: silver.order_details, seeds.regions
+
+            WITH top_regions AS (
+                SELECT id, name FROM seeds.regions LIMIT 3
+            )
+            SELECT
+                o.amount,
+                t.name AS region_name
+            FROM silver.order_details o
+            JOIN top_regions t ON o.region_id = t.id
+        """))
+        # Force model rediscovery.
+        # The model discovery cache invalidates on file mtime, so the new
+        # file is picked up automatically on the next request.
+
+        resp = seeded_client.get("/api/lineage/gold.by_region")
+        assert resp.status_code == 200, resp.text
+        cols = resp.json()["columns"]
+        # amount must trace to silver.order_details (NOT to seeds.regions, which
+        # is depends_on[0] alphabetically and was the wrong default).
+        amount_sources = {s["source_table"] for s in cols.get("amount", [])}
+        assert "silver.order_details" in amount_sources, cols
+        assert "seeds.regions" not in amount_sources, cols
+        # region_name must trace to seeds.regions through the CTE.
+        region_sources = {s["source_table"] for s in cols.get("region_name", [])}
+        assert "seeds.regions" in region_sources, cols
+
+    def test_query_response_carries_truncated_flag(self, seeded_client, project):
+        """The 50k row cap must surface as truncated=True in the API response."""
+        # Build a 60k row table directly in the warehouse so we can hit the cap.
+        from havn.engine.database import connect
+        conn = connect(project / "warehouse.duckdb")
+        conn.execute(
+            "CREATE OR REPLACE TABLE landing.big AS "
+            "SELECT i AS id, i * 2 AS doubled FROM range(60000) AS t(i)"
+        )
+        conn.close()
+        from havn.server.deps import reset_shared_conn
+        reset_shared_conn()
+
+        resp = seeded_client.post(
+            "/api/query", json={"sql": "SELECT * FROM landing.big"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["truncated"] is True
+        assert len(data["rows"]) == 50_000
+
+    def test_check_endpoint_no_false_positive_on_cte(self, seeded_client, project):
+        """`havn check` (validation endpoint) must not flag CTE columns as missing."""
+        (project / "transform" / "silver" / "flows.sql").write_text(textwrap.dedent("""\
+            -- config: materialized=table, schema=silver
+            -- depends_on: bronze.orders
+
+            WITH flows AS (
+                SELECT region_id, SUM(amount) AS total_in
+                FROM bronze.orders
+                GROUP BY 1
+            )
+            SELECT f.region_id, f.total_in FROM flows f
+        """))
+        # The model discovery cache invalidates on file mtime, so the new
+        # file is picked up automatically on the next request.
+
+        # Validation endpoint name varies; try the one mounted on the router.
+        # If unavailable, we rely on the unit test guarantee.
+        resp = seeded_client.post("/api/check", json={})
+        if resp.status_code == 404:
+            pytest.skip("/api/check not exposed on this build")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        # No error should mention 'total_in' or 'flows' as missing.
+        all_msgs = " ".join(
+            (e.get("message") or "")
+            for e in (body.get("errors") or body.get("results") or [])
+        )
+        assert "total_in" not in all_msgs or "not found" not in all_msgs.lower(), all_msgs

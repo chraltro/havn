@@ -151,11 +151,11 @@ def _pid_alive(pid: int) -> bool:
             return False
 
 
-def _fetch_via_server(project_dir: Path, sql: str) -> tuple[list, list, str] | None:
+def _fetch_via_server(project_dir: Path, sql: str) -> tuple[list, list, str, bool] | None:
     """Try to run ``sql`` against a running ``havn serve`` for this project.
 
-    Returns ``(columns, rows, server_label)`` on success, ``None`` if no
-    server is running (caller should fall back to direct file open). Raises
+    Returns ``(columns, rows, server_label, truncated)`` on success, ``None`` if
+    no server is running (caller should fall back to direct file open). Raises
     ``typer.Exit`` on a server-side query error so the caller doesn't try
     to retry via the direct path.
 
@@ -208,7 +208,12 @@ def _fetch_via_server(project_dir: Path, sql: str) -> tuple[list, list, str] | N
         console.print(f"[red]Query error:[/red] {err_body}")
         raise typer.Exit(1)
 
-    return data.get("columns", []), data.get("rows", []), f"{host}:{port}"
+    return (
+        data.get("columns", []),
+        data.get("rows", []),
+        f"{host}:{port}",
+        bool(data.get("truncated", False)),
+    )
 
 
 def _try_route_via_server(project_dir: Path, sql: str, csv: bool, json_output: bool, limit: int) -> bool:
@@ -216,8 +221,11 @@ def _try_route_via_server(project_dir: Path, sql: str, csv: bool, json_output: b
     fetched = _fetch_via_server(project_dir, sql)
     if fetched is None:
         return False
-    columns, rows, server_label = fetched
+    columns, rows, server_label, truncated = fetched
+    server_returned = len(rows)
     import json as _json
+    from rich.console import Console
+    err_console = Console(stderr=True)
     if limit > 0:
         rows = rows[:limit]
 
@@ -241,6 +249,13 @@ def _try_route_via_server(project_dir: Path, sql: str, csv: bool, json_output: b
             table.add_row(*[str(v) for v in row])
         console.print(table)
         console.print(f"[dim]{len(rows)} rows (via server at {server_label})[/dim]")
+    if truncated:
+        # Always to stderr — must not contaminate CSV/JSON output piped to a file.
+        err_console.print(
+            f"[yellow]warning:[/yellow] result truncated by server at "
+            f"{server_returned:,} rows. Re-run with the project's warehouse "
+            f"file directly (stop [bold]havn serve[/bold]) for full results."
+        )
     return True
 
 

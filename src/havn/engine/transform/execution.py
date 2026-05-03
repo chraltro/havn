@@ -47,11 +47,21 @@ def _execute_incremental(
         [model.schema, model.name],
     ).fetchone()[0] > 0
 
-    # Build the query, applying incremental_filter if this is not the first run
+    # Build the query, applying incremental_filter if this is not the first run.
+    # @watermark sugar: when watermark=col is set and incremental_filter is
+    # absent, synthesize ``WHERE col > (SELECT COALESCE(MAX(col), '1900-01-01') FROM {this})``
+    # so users don't have to write the full filter expression by hand.
     query = model.query
-    if exists and model.incremental_filter:
+    incremental_filter = model.incremental_filter
+    if model.watermark and not incremental_filter:
+        wm = model.watermark.strip()
+        validate_identifier(wm, "watermark column")
+        incremental_filter = (
+            f"WHERE {wm} > (SELECT COALESCE(MAX({wm}), '1900-01-01') FROM {{this}})"
+        )
+    if exists and incremental_filter:
         # Replace {this} with the target table name
-        filter_clause = model.incremental_filter.replace("{this}", model.full_name)
+        filter_clause = incremental_filter.replace("{this}", model.full_name)
         query = f"{query}\n{filter_clause}"
 
     strategy = model.incremental_strategy

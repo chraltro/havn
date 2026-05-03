@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 import typer
 from rich.table import Table
 
-from havn.cli import _resolve_project, _warehouse_exists, app, console
+from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, console
 
 
 # --- validate ---
@@ -386,9 +386,11 @@ def lineage(
     """Show column-level lineage for a model. Traces each output column back to its source."""
     import json as json_mod
 
+    from havn.engine.database import open_warehouse
     from havn.engine.transform import discover_models, extract_column_lineage
 
     project_dir = _resolve_project(project_dir)
+    config = _load_config(project_dir)
     transform_dir = project_dir / "transform"
     models = discover_models(transform_dir)
     model_map = {m.full_name: m for m in models}
@@ -406,7 +408,16 @@ def lineage(
                 console.print(f"[dim]Available: {', '.join(available)}[/dim]")
             raise typer.Exit(1)
 
-    lineage_map = extract_column_lineage(target)
+    # Open the warehouse (when present) so SELECT * and unqualified columns
+    # can resolve through information_schema.
+    conn = None
+    if _warehouse_exists(config, project_dir):
+        conn = open_warehouse(config, project_dir)
+    try:
+        lineage_map = extract_column_lineage(target, conn=conn)
+    finally:
+        if conn:
+            conn.close()
 
     if json_output:
         console.print(json_mod.dumps(lineage_map, indent=2))
@@ -419,3 +430,100 @@ def lineage(
             console.print(f"  [cyan]{out_col}[/cyan] <- {', '.join(source_strs)}")
         else:
             console.print(f"  [cyan]{out_col}[/cyan] <- [dim](computed)[/dim]")
+
+
+# --- explain ---
+
+
+@app.command()
+def explain(
+    model: Annotated[str, typer.Argument(help="Model name (e.g. silver.fact_transactions)")],
+    analyze: Annotated[bool, typer.Option("--analyze", "-a", help="Run EXPLAIN ANALYZE (executes the query)")] = False,
+    raw: Annotated[bool, typer.Option("--raw", help="Print DuckDB's raw EXPLAIN text instead of the parsed tree")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Output the parsed plan tree as JSON")] = False,
+    project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
+) -> None:
+    """Show DuckDB's query plan for a model's SQL.
+
+    With ``--analyze`` the query actually executes and node-level timings
+    are surfaced. Use this to find the hot join/scan when a transform is
+    slow without leaving havn.
+    """
+    import json as json_mod
+
+    from havn.config import load_project
+    from havn.engine.database import open_warehouse
+    from havn.engine.explain import (
+        enrich_plan_dict,
+        explain_analyze_query,
+        explain_query,
+        plan_to_dict,
+    )
+    from havn.engine.transform import discover_models
+
+    project_dir = _resolve_project(project_dir)
+    config = load_project(project_dir)
+    if not _warehouse_exists(config, project_dir):
+        console.print("[yellow]No warehouse database found. Run a pipeline first.[/yellow]")
+        raise typer.Exit(1)
+
+    transform_dir = project_dir / "transform"
+    models = discover_models(transform_dir)
+
+    target = next((m for m in models if m.full_name == model), None) or next(
+        (m for m in models if m.name == model), None
+    )
+    if target is None:
+        console.print(f"[red]Model '{model}' not found.[/red]")
+        if models:
+            console.print(f"[dim]Available: {', '.join(m.full_name for m in models)}[/dim]")
+        raise typer.Exit(1)
+
+    conn = open_warehouse(config, project_dir, read_only=not analyze)
+    try:
+        if analyze:
+            plan, text = explain_analyze_query(conn, target.query)
+        else:
+            plan, text = explain_query(conn, target.query)
+    finally:
+        conn.close()
+
+    if raw:
+        console.print(text)
+        return
+
+    plan_dict = plan_to_dict(plan)
+    if analyze:
+        plan_dict = enrich_plan_dict(plan_dict)
+
+    if json_output:
+        console.print(json_mod.dumps(plan_dict, indent=2))
+        return
+
+    from rich.tree import Tree
+
+    title = f"[bold]{'EXPLAIN ANALYZE' if analyze else 'EXPLAIN'} {target.full_name}[/bold]"
+    if analyze and "_total_time_ms" in plan_dict:
+        title += f"  [dim]({plan_dict['_total_time_ms']} ms total)[/dim]"
+    tree = Tree(title)
+    _render_plan(plan_dict, tree, analyze=analyze)
+    console.print(tree)
+
+
+def _render_plan(node: dict, parent, *, analyze: bool) -> None:
+    """Recursively render a plan node into a Rich Tree."""
+    parts = [f"[bold]{node.get('operator', '?')}[/bold]"]
+    if node.get("table"):
+        parts.append(f"[cyan]{node['table']}[/cyan]")
+    if node.get("estimated_rows") is not None:
+        parts.append(f"[dim]~{node['estimated_rows']:,} rows[/dim]")
+    if analyze and node.get("actual_rows") is not None:
+        parts.append(f"[green]{node['actual_rows']:,} actual[/green]")
+    if analyze and node.get("actual_time_ms") is not None:
+        pct = node.get("time_percentage")
+        pct_str = f" ({pct}%)" if pct is not None else ""
+        parts.append(f"[yellow]{node['actual_time_ms']:.2f} ms{pct_str}[/yellow]")
+    label = "  ".join(parts)
+    branch = parent.add(label)
+    for child in node.get("children", []):
+        _render_plan(child, branch, analyze=analyze)

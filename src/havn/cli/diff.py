@@ -20,6 +20,7 @@ def diff(
     full: Annotated[bool, typer.Option("--full", help="Show all changed rows, not just samples")] = False,
     against: Annotated[Optional[str], typer.Option("--against", help="Only diff models changed vs a git branch/ref")] = None,
     snapshot: Annotated[Optional[str], typer.Option("--snapshot", help="Compare current state against a snapshot")] = None,
+    exit_nonzero_on_change: Annotated[bool, typer.Option("--exit-nonzero-on-change", help="Exit with code 2 if any model has added/removed/modified rows or schema changes (for CI)")] = False,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
     """Show what would change if transforms are run now. Compares model SQL output against materialized tables."""
@@ -99,8 +100,28 @@ def diff(
             if (targets and len(targets) == 1) or (rows or full):
                 for r in results:
                     _print_diff_detail(r, show_rows=rows or full)
+
+        if exit_nonzero_on_change and _has_changes(results):
+            # Exit code 2 (distinct from 1 for engine errors) so CI can
+            # tell "diff has content" apart from "diff failed".
+            raise typer.Exit(2)
     finally:
         conn.close()
+
+
+def _has_changes(results) -> bool:
+    """Return True if any DiffResult shows row or schema changes."""
+    for r in results:
+        if r.error:
+            # Treat errors as changes — CI should investigate either way.
+            return True
+        if r.is_new:
+            return True
+        if (r.added or 0) + (r.removed or 0) + (r.modified or 0) > 0:
+            return True
+        if r.schema_changes:
+            return True
+    return False
 
 
 def _diff_result_to_dict(r) -> dict:

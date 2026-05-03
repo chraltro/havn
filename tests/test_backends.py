@@ -114,7 +114,63 @@ def test_duckdb_backend_applies_threads(tmp_path):
     c.close()
 
 
+def test_progress_bar_disabled_on_non_tty(tmp_path, monkeypatch):
+    """DuckDB's progress bar floods non-TTY stdout with carriage-return
+    updates. Make sure it's off when stdout isn't a TTY."""
+    import sys
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False, raising=False)
+    monkeypatch.delenv("HAVN_PROGRESS", raising=False)
+    b = DuckDBBackend(DatabaseConfig(path=str(tmp_path / "w.duckdb")))
+    c = b.connect()
+    row = c.execute("SELECT current_setting('enable_progress_bar')").fetchone()
+    assert str(row[0]).lower() in ("false", "0"), row
+    c.close()
+
+
+def test_progress_bar_env_override(tmp_path, monkeypatch):
+    """HAVN_PROGRESS=1 must force-enable even on a non-TTY (CI debugging)."""
+    import sys
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False, raising=False)
+    monkeypatch.setenv("HAVN_PROGRESS", "1")
+    b = DuckDBBackend(DatabaseConfig(path=str(tmp_path / "w.duckdb")))
+    c = b.connect()
+    row = c.execute("SELECT current_setting('enable_progress_bar')").fetchone()
+    assert str(row[0]).lower() in ("true", "1"), row
+    c.close()
+
+
 # --- DuckLake backend --------------------------------------------------------
+
+
+def _ducklake_available() -> bool:
+    """Probe whether the DuckDB `ducklake` extension can be installed/loaded.
+
+    INSTALL ducklake reaches out to extensions.duckdb.org. In sandboxed CI
+    environments where that host is firewalled, the call fails with HTTP 403.
+    We cache the result on the function object so the probe runs once per
+    test session.
+    """
+    cached = getattr(_ducklake_available, "_cached", None)
+    if cached is not None:
+        return cached
+    try:
+        c = duckdb.connect(":memory:")
+        try:
+            c.execute("INSTALL ducklake")
+            c.execute("LOAD ducklake")
+            result = True
+        finally:
+            c.close()
+    except Exception:
+        result = False
+    _ducklake_available._cached = result
+    return result
+
+
+requires_ducklake = pytest.mark.skipif(
+    not _ducklake_available(),
+    reason="ducklake extension not installable (network restricted or unsupported)",
+)
 
 
 def _lake_backend(tmp_path, **overrides):
@@ -128,6 +184,7 @@ def _lake_backend(tmp_path, **overrides):
     return DuckLakeBackend(cfg, project_dir=tmp_path)
 
 
+@requires_ducklake
 def test_ducklake_backend_connect_roundtrip(tmp_path):
     b = _lake_backend(tmp_path)
     c = b.connect()
@@ -139,6 +196,7 @@ def test_ducklake_backend_connect_roundtrip(tmp_path):
     c.close()
 
 
+@requires_ducklake
 def test_ducklake_backend_status_tracks_snapshots(tmp_path):
     b = _lake_backend(tmp_path)
     c = b.connect()
@@ -167,6 +225,7 @@ def test_ducklake_backend_status_unreachable_for_bad_catalog(tmp_path):
     assert "error" in st
 
 
+@requires_ducklake
 def test_ducklake_backend_time_travel(tmp_path):
     b = _lake_backend(tmp_path)
     c = b.connect()
@@ -187,6 +246,7 @@ def test_ducklake_backend_time_travel(tmp_path):
     c.close()
 
 
+@requires_ducklake
 def test_ducklake_backend_relative_paths_resolve_against_project_dir(tmp_path):
     (tmp_path / ".havn" / "data").mkdir(parents=True)
     b = DuckLakeBackend(
@@ -204,6 +264,7 @@ def test_ducklake_backend_relative_paths_resolve_against_project_dir(tmp_path):
     assert (tmp_path / ".havn" / "catalog.ducklake").exists()
 
 
+@requires_ducklake
 def test_ducklake_backend_read_only(tmp_path):
     b = _lake_backend(tmp_path)
     c = b.connect()

@@ -24,10 +24,11 @@ class DuckDBBackend:
         self._db_path = path
 
     def connect(self, read_only: bool = False) -> duckdb.DuckDBPyConnection:
-        from havn.engine.database import _resolve_memory_limit
+        from havn.engine.database import _progress_bar_enabled, _resolve_memory_limit
 
         conn = duckdb.connect(str(self._db_path), read_only=read_only)
-        conn.execute("SET enable_progress_bar = true")
+        progress = "true" if _progress_bar_enabled() else "false"
+        conn.execute(f"SET enable_progress_bar = {progress}")
 
         if self._config.memory_limit:
             resolved = _resolve_memory_limit(self._config.memory_limit)
