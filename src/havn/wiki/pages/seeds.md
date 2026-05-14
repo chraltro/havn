@@ -8,7 +8,7 @@ Seeds are CSV files that are loaded into DuckDB as reference tables. They provid
 
 1. Go to the **Develop** tab and click **DAG**
 2. Seeds appear as special nodes in the dependency graph with a distinct icon
-3. Seeds are linked to downstream models that reference them via `-- depends_on:`
+3. Seeds are linked to downstream models via auto-extracted `FROM`/`JOIN` references (or explicit `@depends_on`)
 4. This shows how reference data flows into your transforms
 
 ### Seeds in the File Tree
@@ -120,8 +120,8 @@ This makes repeated `havn seed` calls fast -- only changed CSVs are processed.
 Reference seed tables in your SQL models:
 
 ```sql
--- config: materialized=table, schema=silver
--- depends_on: bronze.earthquakes, seeds.magnitude_scale
+@config materialized=table, schema=silver
+@depends_on bronze.earthquakes, seeds.magnitude_scale
 
 SELECT
     e.earthquake_id,
@@ -133,7 +133,7 @@ LEFT JOIN seeds.magnitude_scale m
     ON e.magnitude BETWEEN m.magnitude_min AND m.magnitude_max
 ```
 
-Add seeds to your `-- depends_on:` comment so havn knows about the dependency and includes seeds in the DAG visualization.
+havn auto-detects seed references from your SQL `FROM`/`JOIN` clauses and includes them in the DAG. Use `@depends_on` only if a seed is referenced through a function or string the parser can't see.
 
 ## Empty CSVs
 
@@ -167,7 +167,7 @@ curl -X POST http://localhost:3000/api/seeds \
 
 4. **Version control seeds** -- CSV seed files should be committed to git. They are part of your project definition.
 
-5. **Declare dependencies** -- Always add seed tables to `-- depends_on:` in your SQL models for correct DAG ordering.
+5. **Reference seeds in SQL** -- `FROM seeds.<name>` is enough; havn auto-detects the dependency for DAG ordering. Use `@depends_on` only when the reference is hidden behind a function call or string interpolation.
 
 6. **Use seeds for test fixtures** -- In the `test` environment with `:memory:` databases, seeds provide consistent reference data for testing.
 

@@ -6,11 +6,25 @@ The Typer app and shared helpers live here; each module registers its commands.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Optional
 
 import typer
 from rich.console import Console
+
+# Force UTF-8 for stdout/stderr so non-ASCII data (Norwegian, German, Asian
+# scripts, emoji) renders correctly on Windows consoles where the default is
+# cp1252. This must run before Console() is instantiated, otherwise rich
+# captures the wrong encoding.
+if sys.platform == "win32":
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is not None and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, OSError):
+                pass
 
 def _version_callback(value: bool) -> None:
     if value:
@@ -77,6 +91,7 @@ from havn.cli import pr  # noqa: E402, F401
 from havn.cli import project  # noqa: E402, F401
 from havn.cli import quality  # noqa: E402, F401
 from havn.cli import query  # noqa: E402, F401
+from havn.cli import shell  # noqa: E402, F401
 from havn.cli import masking  # noqa: E402, F401
 from havn.cli import rewind  # noqa: E402, F401
 from havn.cli import sentinel  # noqa: E402, F401

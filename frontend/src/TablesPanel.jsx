@@ -14,6 +14,9 @@ export default function TablesPanel({ selectedTable, onQueryTable, tables, onSel
   const [stats, setStats] = useState(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [maskingPolicies, setMaskingPolicies] = useState({});
+  // schema.table -> { description, columns: { col_name -> description }, grain, owner }
+  const [docsMap, setDocsMap] = useState({});
+  const [showDocs, setShowDocs] = useState(true);
 
   // Load masking policies once on mount, build lookup map
   useEffect(() => {
@@ -23,6 +26,31 @@ export default function TablesPanel({ selectedTable, onQueryTable, tables, onSel
         map[`${p.schema_name}.${p.table_name}.${p.column_name}`] = p.method;
       }
       setMaskingPolicies(map);
+    }).catch(() => {});
+  }, []);
+
+  // Load structured docs once. Response shape: { schemas: [{name, tables: [...]}], lineage }
+  useEffect(() => {
+    api.getStructuredDocs().then(d => {
+      const map = {};
+      const schemas = (d && d.schemas) || [];
+      for (const s of schemas) {
+        for (const t of s.tables || []) {
+          const colMap = {};
+          for (const c of t.columns || []) {
+            if (c && c.description) colMap[c.name] = c.description;
+          }
+          const fullName = t.full_name || `${s.name}.${t.name}`;
+          map[fullName] = {
+            description: t.description || "",
+            columns: colMap,
+            grain: t.grain || [],
+            owner: t.owner || "",
+            source_freshness: t.source_freshness || [],
+          };
+        }
+      }
+      setDocsMap(map);
     }).catch(() => {});
   }, []);
   const setHintTrigger = useHintTriggerFn();
@@ -231,15 +259,42 @@ export default function TablesPanel({ selectedTable, onQueryTable, tables, onSel
           {stats && (
             <button onClick={() => setStats(null)} style={st.actionBtn}>Hide Stats</button>
           )}
+          {docsMap[selectedTable] && (docsMap[selectedTable].description || Object.keys(docsMap[selectedTable].columns || {}).length > 0) && (
+            <button onClick={() => setShowDocs(s => !s)} style={st.actionBtn}>
+              {showDocs ? "Hide Docs" : "Show Docs"}
+            </button>
+          )}
         </div>
       </div>
+      {showDocs && docsMap[selectedTable] && (docsMap[selectedTable].description || (docsMap[selectedTable].grain && docsMap[selectedTable].grain.length) || docsMap[selectedTable].owner) && (
+        <div style={{ padding: "8px 12px", background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius)", marginBottom: 12, fontSize: 12, color: "var(--havn-text-secondary)" }}>
+          {docsMap[selectedTable].description && <div style={{ marginBottom: 4 }}>{docsMap[selectedTable].description}</div>}
+          {(docsMap[selectedTable].grain || []).length > 0 && (
+            <div>
+              <span style={{ color: "var(--havn-text-dim)" }}>grain: </span>
+              <span style={{ fontFamily: "var(--havn-font-mono)" }}>{(docsMap[selectedTable].grain || []).join(", ")}</span>
+            </div>
+          )}
+          {docsMap[selectedTable].owner && (
+            <div>
+              <span style={{ color: "var(--havn-text-dim)" }}>owner: </span>
+              <span>{docsMap[selectedTable].owner}</span>
+            </div>
+          )}
+        </div>
+      )}
       <div style={st.columnsSection}>
         <div style={st.sectionLabel}>Columns</div>
         <div style={st.columnsBar} data-havn-hint="columns-bar">
           {columns.map((c) => {
             const maskKey = selectedTable ? `${selectedTable}.${c.name}` : '';
             const maskMethod = maskingPolicies[maskKey];
+            const colDocs = docsMap[selectedTable]?.columns?.[c.name] || "";
             const isActive = sortCol === c.name;
+            const titleParts = [];
+            if (colDocs) titleParts.push(colDocs);
+            if (maskMethod) titleParts.push(`Masked: ${maskMethod}`);
+            titleParts.push(`Sort by ${c.name}`);
             return (
               <button
                 key={c.name}
@@ -248,8 +303,9 @@ export default function TablesPanel({ selectedTable, onQueryTable, tables, onSel
                   ...st.colChip,
                   ...(isActive ? st.colChipActive : {}),
                 }}
-                title={maskMethod ? `Sort by ${c.name} (masked: ${maskMethod})` : `Sort by ${c.name}`}
+                title={titleParts.join(" \u2022 ")}
               >
+                {colDocs && <span title={colDocs} style={{ marginRight: 4, opacity: 0.6 }}>&#9432;</span>}
                 {maskMethod && <span style={st.maskIcon} title={`Masked: ${maskMethod}`}>&#x1F6E1;</span>}
                 <span style={st.colName}>{c.name}</span>
                 <span style={st.colType}>{c.type}</span>
@@ -258,6 +314,16 @@ export default function TablesPanel({ selectedTable, onQueryTable, tables, onSel
             );
           })}
         </div>
+        {showDocs && Object.keys(docsMap[selectedTable]?.columns || {}).length > 0 && (
+          <div style={{ marginTop: 8, fontSize: 11, color: "var(--havn-text-secondary)", display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 12, rowGap: 4 }}>
+            {columns.filter(c => docsMap[selectedTable]?.columns?.[c.name]).map(c => (
+              <React.Fragment key={c.name}>
+                <span style={{ fontFamily: "var(--havn-font-mono)", color: "var(--havn-text-dim)" }}>{c.name}</span>
+                <span>{docsMap[selectedTable].columns[c.name]}</span>
+              </React.Fragment>
+            ))}
+          </div>
+        )}
       </div>
       {stats && stats.length > 0 && (
         <div style={st.statsBar}>

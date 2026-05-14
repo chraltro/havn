@@ -51,114 +51,119 @@ The folder name determines the default schema. A file at `transform/silver/dim_c
 
 ## SQL Model Format
 
-Every SQL model file starts with metadata comments followed by a SELECT statement:
+Every SQL model file starts with `@`-prefixed directives followed by a SELECT statement:
 
 ```sql
--- config: materialized=table, schema=silver
--- depends_on: bronze.customers, bronze.orders
--- description: Customer dimension with order counts
--- col: customer_id: Unique customer identifier
--- col: order_count: Total number of orders
--- assert: row_count > 0
--- assert: unique(customer_id)
--- assert: no_nulls(customer_id)
+@config materialized=table, schema=silver
+@description Customer dimension with order counts
+@col customer_id: Unique customer identifier
+@col order_count: Total number of orders
+@assert row_count > 0
+@assert unique(customer_id)
+@assert no_nulls(customer_id)
 
 SELECT
     c.customer_id,
     c.name,
     c.email,
-    COUNT(o.order_id) AS order_count,
+    COUNT(o.order_id)   AS order_count,
     SUM(o.total_amount) AS lifetime_value
 FROM bronze.customers c
 LEFT JOIN bronze.orders o ON c.customer_id = o.customer_id
 GROUP BY 1, 2, 3
 ```
 
-### Config Comments
+There is no `@depends_on` line because havn parses the `FROM` and `JOIN` clauses with `sqlglot` and adds `bronze.customers` and `bronze.orders` to the DAG automatically.
 
-#### `-- config:`
+Each directive accepts both bare and parenthesised forms (`@config materialized=...` or `@config(materialized=...)`); the bare form is canonical. Legacy `-- config:` / `-- depends_on:` / `-- assert:` SQL-comment lines still parse for back-compat but new code should use the `@` form.
 
-Sets materialization and schema:
+### Directives
+
+#### `@config`
+
+Sets materialization, schema, and per-model engine settings:
 
 ```sql
--- config: materialized=table, schema=gold
+@config materialized=table, schema=gold, unique_key=customer_id, incremental_strategy=delete+insert
 ```
 
-| Option | Values | Default | Description |
-|--------|--------|---------|-------------|
-| `materialized` | `table`, `view`, `incremental` | `table` | How the model is stored |
-| `schema` | any valid name | folder name | Override the target schema |
+| Key                     | Values                                  | Default                                       |
+|-------------------------|-----------------------------------------|-----------------------------------------------|
+| `materialized`          | `table`, `view`, `incremental`          | `view`                                        |
+| `schema`                | any valid schema name                   | folder name                                   |
+| `unique_key`            | column name                             | none (required for incremental merges)        |
+| `incremental_strategy`  | `delete+insert`, `merge`, `append`      | `delete+insert`                               |
+| `incremental_filter`    | SQL expression                          | none                                          |
+| `partition_by`          | column name                             | none                                          |
 
-#### `-- depends_on:`
+#### `@depends_on` (optional)
 
-Declares upstream dependencies for DAG ordering:
+Declares upstream dependencies explicitly:
 
 ```sql
--- depends_on: bronze.customers, bronze.orders
+@depends_on bronze.customers, bronze.orders
 ```
 
-Dependencies are used to determine execution order. If omitted, havn auto-detects table references from the SQL using AST parsing (via sqlglot), but explicit declaration is recommended for clarity.
+Auto-extraction handles most cases, so use `@depends_on` only when a dependency is not visible in plain SQL (e.g. a model name passed through a Python macro or built up in a string). When `@depends_on` is present, havn uses your list and skips auto-extraction.
 
-#### `-- description:`
+#### `@description`
 
-Documents the model:
+One-line model description that surfaces in the catalog, Tables browser, and DAG hover tooltips:
 
 ```sql
--- description: Customer dimension table with lifetime metrics
+@description Customer dimension table with lifetime metrics
 ```
 
-Descriptions appear in the auto-generated documentation, the Tables browser, and the DAG hover tooltips.
+#### `@col`
 
-#### `-- col:`
-
-Documents individual columns:
+Per-column documentation. Repeat one line per documented column:
 
 ```sql
--- col: customer_id: Unique customer identifier
--- col: lifetime_value: Sum of all order amounts
+@col customer_id: Unique customer identifier
+@col lifetime_value: Sum of all settled non-reversed order amounts
 ```
 
 Column descriptions flow into the documentation generator and the Tables panel column view.
 
-#### `-- assert:`
+#### `@assert`
 
-Defines data quality assertions evaluated after the model builds:
+Defines data-quality assertions evaluated after the model builds. Repeat one line per assertion:
 
 ```sql
--- assert: row_count > 0
--- assert: unique(customer_id)
--- assert: no_nulls(email)
--- assert: accepted_values(status, ['active', 'inactive'])
--- assert: "total_amount >= 0"
+@assert row_count > 0
+@assert unique(customer_id)
+@assert no_nulls(email)
+@assert accepted_values(status, ['active', 'inactive'])
+@assert "total_amount >= 0"
 ```
 
 See [Quality](quality) for the full assertion reference.
 
 ## Materialization Types
 
-### Table (Default)
+### View (Default)
 
 ```sql
--- config: materialized=table
-```
-
-Creates a persistent table using `CREATE OR REPLACE TABLE ... AS SELECT ...`. Data is stored on disk and queries are fast.
-
-### View
-
-```sql
--- config: materialized=view
+@config materialized=view
 ```
 
 Creates a view using `CREATE OR REPLACE VIEW ... AS SELECT ...`. The query runs on read, so data is always current but queries may be slower for complex logic.
 
+### Table
+
+```sql
+@config materialized=table
+```
+
+Creates a persistent table using `CREATE OR REPLACE TABLE ... AS SELECT ...`. Data is stored on disk and queries are fast.
+
 ### Incremental
 
 ```sql
--- config: materialized=incremental
+@config materialized=incremental, unique_key=event_id, incremental_strategy=delete+insert
 ```
 
-Appends new rows to an existing table instead of replacing it. On first run, creates the table. On subsequent runs, inserts only new rows. Use this for large, append-heavy tables where a full rebuild would be too expensive.
+Builds the table incrementally: on first run, materialises the full result; on subsequent runs, only new rows (filtered by `incremental_filter` if provided) are appended or merged. Use this for large, append-heavy tables where a full rebuild would be too expensive.
 
 ## Change Detection
 
@@ -174,7 +179,7 @@ This means most `havn transform` runs only rebuild what has actually changed, ma
 
 ## DAG Ordering
 
-Models are automatically sorted in topological order based on their `-- depends_on:` declarations. This ensures upstream tables exist before downstream models try to read from them.
+Models are automatically sorted in topological order based on their dependencies (auto-extracted from SQL or declared via `@depends_on`). This ensures upstream tables exist before downstream models try to read from them.
 
 ```
 bronze.customers ---+
@@ -272,7 +277,7 @@ havn check
 
 This validates:
 - SQL syntax (via sqlglot AST parsing)
-- `-- depends_on:` references exist in the DAG, seeds, or sources
+- Auto-extracted and explicit `@depends_on` references exist in the DAG, seeds, or sources
 - Column references against known upstream table schemas
 - Inline assertions against live data (if warehouse exists)
 - YAML contracts from `contracts/`

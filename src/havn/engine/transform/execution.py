@@ -47,11 +47,21 @@ def _execute_incremental(
         [model.schema, model.name],
     ).fetchone()[0] > 0
 
-    # Build the query, applying incremental_filter if this is not the first run
+    # Build the query, applying incremental_filter if this is not the first run.
+    # @watermark sugar: when watermark=col is set and incremental_filter is
+    # absent, synthesize ``WHERE col > (SELECT COALESCE(MAX(col), '1900-01-01') FROM {this})``
+    # so users don't have to write the full filter expression by hand.
     query = model.query
-    if exists and model.incremental_filter:
+    incremental_filter = model.incremental_filter
+    if model.watermark and not incremental_filter:
+        wm = model.watermark.strip()
+        validate_identifier(wm, "watermark column")
+        incremental_filter = (
+            f"WHERE {wm} > (SELECT COALESCE(MAX({wm}), '1900-01-01') FROM {{this}})"
+        )
+    if exists and incremental_filter:
         # Replace {this} with the target table name
-        filter_clause = model.incremental_filter.replace("{this}", model.full_name)
+        filter_clause = incremental_filter.replace("{this}", model.full_name)
         query = f"{query}\n{filter_clause}"
 
     strategy = model.incremental_strategy
@@ -234,6 +244,7 @@ def _execute_single_model(
     model_map: dict[str, SQLModel],
     db_config: object | None = None,
     project_dir: object | None = None,
+    pipeline_run_id: str | None = None,
 ) -> tuple[str, ModelResult]:
     """Execute a single model in its own connection (for parallel execution).
 
@@ -254,11 +265,15 @@ def _execute_single_model(
         changed = force or _has_changed(conn, model)
 
         if not changed:
+            try:
+                log_run(conn, "transform", model.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
+            except Exception:
+                pass
             return model.full_name, ModelResult(status="skipped")
 
         duration_ms, row_count = execute_model(conn, model)
         _update_state(conn, model, duration_ms, row_count)
-        log_run(conn, "transform", model.full_name, "success", duration_ms, row_count)
+        log_run(conn, "transform", model.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
 
         # Run assertions
         assertion_results: list[AssertionResult] = []
@@ -282,7 +297,7 @@ def _execute_single_model(
 
     except Exception as e:
         try:
-            log_run(conn, "transform", model.full_name, "error", error=str(e))
+            log_run(conn, "transform", model.full_name, "error", error=str(e), pipeline_run_id=pipeline_run_id)
         except Exception as e2:
             logger.debug("Failed to log run error: %s", e2)
         return model.full_name, ModelResult(status="error", error=str(e))

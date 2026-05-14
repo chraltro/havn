@@ -336,11 +336,15 @@ class FileWatcher(threading.Thread):
     pick up edits without a restart.
     """
 
-    def __init__(self, project_dir: Path, on_change=None, on_macro_change=None):
+    def __init__(self, project_dir: Path, on_change=None, on_macro_change=None, route_globs: list[str] | None = None):
         super().__init__(daemon=True, name="havn-watcher")
         self.project_dir = project_dir
         self.on_change = on_change
         self.on_macro_change = on_macro_change
+        # When set, only transform-side changes whose relative path matches
+        # one of these globs trigger a rebuild — and only the matching
+        # model is rebuilt, not the whole DAG.
+        self.route_globs = route_globs or []
         self._stop_event = threading.Event()
 
     def stop(self) -> None:
@@ -352,6 +356,7 @@ class FileWatcher(threading.Thread):
 
         project_dir = self.project_dir
         on_macro_change = self.on_macro_change
+        route_globs = list(self.route_globs)
         macro_logger = logging.getLogger("havn.macros")
 
         class Handler(FileSystemEventHandler):
@@ -384,7 +389,29 @@ class FileWatcher(threading.Thread):
                 rel_str = str(rel)
 
                 if rel_str.startswith("transform"):
-                    console.print("[bold yellow]Watcher:[/bold yellow] Running transform...")
+                    # If route filters are configured, only react to
+                    # changes matching any of them. The matched file's
+                    # ``schema.name`` becomes the targeted rebuild list,
+                    # so a `--route gold/route_b_*.sql` watch on a
+                    # silver model edit does nothing.
+                    targets: list[str] | None = None
+                    if route_globs:
+                        import fnmatch
+                        rel_norm = rel_str.replace("\\", "/")
+                        if not any(fnmatch.fnmatchcase(rel_norm, g) for g in route_globs):
+                            return  # silently ignore — outside route
+                        # Derive schema.name from path: transform/<schema>/<name>.sql
+                        parts = path.parts
+                        try:
+                            tx_idx = parts.index("transform")
+                            schema = parts[tx_idx + 1]
+                            name = path.stem
+                            targets = [f"{schema}.{name}"]
+                        except (ValueError, IndexError):
+                            targets = None
+
+                    label = f"Running transform (target: {targets[0]})..." if targets else "Running transform..."
+                    console.print(f"[bold yellow]Watcher:[/bold yellow] {label}")
                     try:
                         from havn.config import load_project
                         from havn.engine.database import open_warehouse
@@ -393,7 +420,7 @@ class FileWatcher(threading.Thread):
                         config = load_project(project_dir)
                         conn = open_warehouse(config, project_dir)
                         try:
-                            run_transform(conn, project_dir / "transform")
+                            run_transform(conn, project_dir / "transform", targets=targets)
                         finally:
                             conn.close()
                         console.print("[bold green]Watcher:[/bold green] Transform completed")

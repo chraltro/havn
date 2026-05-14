@@ -129,9 +129,10 @@ class DuckLakeBackend:
         conn.execute("USE warehouse")
 
     def _apply_settings(self, conn: duckdb.DuckDBPyConnection) -> None:
-        from havn.engine.database import _resolve_memory_limit
+        from havn.engine.database import _progress_bar_enabled, _resolve_memory_limit
 
-        conn.execute("SET enable_progress_bar = true")
+        progress = "true" if _progress_bar_enabled() else "false"
+        conn.execute(f"SET enable_progress_bar = {progress}")
         if self._config.memory_limit:
             resolved = _resolve_memory_limit(self._config.memory_limit)
             conn.execute(f"SET memory_limit = '{resolved}'")

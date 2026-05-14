@@ -118,7 +118,7 @@ This sends a Slack or webhook notification for any stale sources (requires alert
 
 Source declarations are used during `havn check` validation:
 
-1. **Dependency resolution** -- Source tables are recognized as valid dependencies in `-- depends_on:` comments, preventing false "unknown table" warnings.
+1. **Dependency resolution** -- Source tables are recognized as valid upstreams when auto-extracted from `FROM`/`JOIN` or declared via `@depends_on`, preventing false "unknown table" warnings.
 
 2. **Column validation** -- If columns are declared in a source, havn validates that SQL models referencing those tables use valid column names.
 

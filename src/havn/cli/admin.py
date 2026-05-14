@@ -66,20 +66,63 @@ def serve(
     if env:
         console.print(f"[bold]Environment: {env}[/bold]")
 
-    # Find an available port if the requested one is in use
+    # Bind-or-fail when --port was explicit; otherwise try a few neighbors.
+    # Auto-incrementing past an explicit --port is a footgun for automation
+    # harnesses (the kit's playwright driver kept hitting a stale leftover
+    # server because havn silently moved off the requested port).
     import socket
+    import sys as _sys
+
+    explicit_port = any(arg == "--port" or arg.startswith("--port=") for arg in _sys.argv)
+
+    def _is_busy(p: int) -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            return s.connect_ex((host, p)) == 0
 
     original_port = port
-    for attempt in range(10):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex((host, port)) != 0:
-                break
+    if _is_busy(port):
+        if explicit_port:
+            console.print(
+                f"[red]Port {port} is already in use. "
+                f"Stop the other process or pick a different --port.[/red]"
+            )
+            raise typer.Exit(code=2)
+        for _ in range(10):
             port += 1
-    if port != original_port:
-        console.print(f"[yellow]Port {original_port} in use, using {port}[/yellow]")
+            if not _is_busy(port):
+                break
+        else:
+            console.print(
+                f"[red]No free port found in range {original_port}-{port}.[/red]"
+            )
+            raise typer.Exit(code=2)
+        console.print(
+            f"[yellow]Port {original_port} in use, using {port}. "
+            f"Pass --port {original_port} to fail fast instead.[/yellow]"
+        )
 
     console.print(f"[bold]Starting havn server at http://{host}:{port}[/bold]")
-    uvicorn.run(server_app.app, host=host, port=port)
+
+    # Sidecar lockfile so other CLI processes (havn query, havn tables, havn
+    # history) can detect a running server and route through HTTP rather
+    # than failing to open the warehouse (DuckDB's process-level lock blocks
+    # even read-only opens from outside).
+    serve_info = project_dir / ".havn" / "serve.json"
+    serve_info.parent.mkdir(parents=True, exist_ok=True)
+    import json as _json, os as _os
+    serve_info.write_text(_json.dumps({
+        "host": host,
+        "port": port,
+        "pid": _os.getpid(),
+        "auth": auth,
+    }))
+    try:
+        uvicorn.run(server_app.app, host=host, port=port)
+    finally:
+        try:
+            serve_info.unlink()
+        except Exception:
+            pass
 
 
 # --- snapshot ---

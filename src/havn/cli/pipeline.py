@@ -18,6 +18,7 @@ logger = logging.getLogger("havn.cli")
 def run(
     script: Annotated[str, typer.Argument(help="Script path (e.g. ingest/customers.py)")],
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
+    force: Annotated[bool, typer.Option("--force", "-f", help="Re-run even if `# @havn: schedule=once` and a prior success exists")] = False,
 ) -> None:
     """Run a single ingest or export script (.py or .dpnb notebook)."""
     from havn.config import load_project
@@ -49,7 +50,7 @@ def run(
 
     conn = open_warehouse(config, project_dir)
     try:
-        result = run_script(conn, script_path, script_type)
+        result = run_script(conn, script_path, script_type, force=force)
         if result["status"] == "error":
             raise typer.Exit(1)
     finally:
@@ -61,6 +62,7 @@ def ingest(
     targets: Annotated[Optional[list[str]], typer.Argument(help="Specific scripts to run (without extension), or omit for all")] = None,
     env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use")] = None,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
+    force: Annotated[bool, typer.Option("--force", "-f", help="Re-run scripts marked `# @havn: schedule=once`")] = False,
 ) -> None:
     """Run all ingest scripts (or specific ones) from ingest/ directory."""
     from havn.engine.database import open_warehouse
@@ -77,7 +79,7 @@ def ingest(
     console.print("[bold]Ingest:[/bold]")
     conn = open_warehouse(config, project_dir)
     try:
-        results = run_scripts_in_dir(conn, ingest_dir, "ingest", targets)
+        results = run_scripts_in_dir(conn, ingest_dir, "ingest", targets, force=force)
         errors = sum(1 for r in results if r["status"] == "error")
         ok = len(results) - errors
         console.print(f"\n  {ok} succeeded, {errors} failed")
@@ -92,6 +94,7 @@ def export(
     targets: Annotated[Optional[list[str]], typer.Argument(help="Specific scripts to run (without extension), or omit for all")] = None,
     env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use")] = None,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
+    force: Annotated[bool, typer.Option("--force", "-f", help="Re-run scripts marked `# @havn: schedule=once`")] = False,
 ) -> None:
     """Run all export scripts (or specific ones) from export/ directory."""
     from havn.engine.database import open_warehouse
@@ -108,7 +111,7 @@ def export(
     console.print("[bold]Export:[/bold]")
     conn = open_warehouse(config, project_dir)
     try:
-        results = run_scripts_in_dir(conn, export_dir, "export", targets)
+        results = run_scripts_in_dir(conn, export_dir, "export", targets, force=force)
         errors = sum(1 for r in results if r["status"] == "error")
         ok = len(results) - errors
         console.print(f"\n  {ok} succeeded, {errors} failed")
@@ -284,13 +287,19 @@ def transform(
         if not results:
             return
         built = sum(1 for s in results.values() if s == "built")
-        skipped = sum(1 for s in results.values() if s == "skipped")
+        skipped = sum(1 for s in results.values() if s == "skipped" or str(s).startswith("skipped_"))
         errors = sum(1 for s in results.values() if s == "error")
         assertions_failed = sum(1 for s in results.values() if s == "assertion_failed")
+        policy_denied = sum(1 for s in results.values() if s == "policy_denied")
+        source_stale = sum(1 for s in results.values() if s == "source_stale")
         console.print()
         parts = [f"{built} built", f"{skipped} skipped", f"{errors} errors"]
         if assertions_failed:
             parts.append(f"{assertions_failed} assertion failures")
+        if policy_denied:
+            parts.append(f"{policy_denied} policy denials")
+        if source_stale:
+            parts.append(f"{source_stale} source-stale skips")
         console.print(f"  {', '.join(parts)}")
 
         # Finish the Pipeline Rewind run
@@ -495,9 +504,16 @@ def _send_webhook(url: str, stream_name: str, status: str, duration_s: float) ->
 @app.command()
 def lint(
     fix: Annotated[bool, typer.Option("--fix", help="Auto-fix violations")] = False,
+    style: Annotated[bool, typer.Option("--style", help="Include layout/naming/capitalisation rules (off by default; correctness-only)")] = False,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
-    """Lint SQL files in the transform directory with SQLFluff."""
+    """Lint SQL files in the transform directory with SQLFluff.
+
+    By default, only correctness rules run (ambiguity, references, unused
+    CTEs, NULL-equality, etc.). Pass ``--style`` for the full SQLFluff rule
+    set including layout, naming, and capitalisation. A project-level
+    ``.sqlfluff`` file overrides both.
+    """
     from havn.config import load_project
     from havn.lint.linter import lint as run_lint
     from havn.lint.linter import print_violations
@@ -507,13 +523,15 @@ def lint(
     transform_dir = project_dir / "transform"
 
     action = "Fixing" if fix else "Linting"
-    console.print(f"[bold]{action} SQL files...[/bold]")
+    mode = "style+correctness" if style else "correctness-only"
+    console.print(f"[bold]{action} SQL files ({mode})...[/bold]")
 
     count, violations, fixed = run_lint(
         transform_dir,
         fix=fix,
         dialect=config.lint.dialect,
         rules=config.lint.rules or None,
+        style=style,
     )
 
     print_violations(violations)
@@ -535,16 +553,27 @@ def lint(
 
 @app.command()
 def watch(
+    route: Annotated[Optional[list[str]], typer.Option("--route", help="Glob to filter watched files; only matching paths trigger a rebuild, and only that model is rebuilt. Repeatable.")] = None,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
-    """Watch for file changes and auto-rebuild transforms."""
+    """Watch for file changes and auto-rebuild transforms.
+
+    By default, edits to any file under ``transform/`` rebuild the full
+    DAG. ``--route 'transform/gold/route_b_*.sql'`` (repeatable) narrows
+    the watcher: only matching paths trigger a rebuild, and only the
+    matching model is rebuilt — useful when iterating on one model
+    without paying for the full pipeline on every save.
+    """
     from havn.engine.scheduler import FileWatcher
 
     project_dir = _resolve_project(project_dir)
     console.print("[bold]Watching for changes...[/bold] (Ctrl+C to stop)")
     console.print(f"  transform/  -> auto-rebuild SQL models")
+    if route:
+        for r in route:
+            console.print(f"  route filter: {r}")
 
-    watcher = FileWatcher(project_dir)
+    watcher = FileWatcher(project_dir, route_globs=list(route) if route else None)
     watcher.start()
 
     try:

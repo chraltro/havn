@@ -65,9 +65,21 @@ def list_policies(request: Request, conn: DbConn) -> list[dict]:
 
 @router.post("/api/masking/policies")
 def create_policy(request: Request, req: PolicyCreate, conn: DbConn) -> dict:
-    """Create a new masking policy (admin-only)."""
+    """Create a new masking policy (admin-only).
+
+    When auth is disabled, the default of ``exempted_roles=["admin"]`` would
+    make the policy silently inert for the local user (who is admin in
+    no-auth mode). To prevent that footgun, when ``exempted_roles`` is not
+    provided AND auth is disabled, default to ``[]`` so the policy actually
+    masks for the caller.
+    """
     user = _require_permission(request, "write")
     from havn.engine.masking import create_policy as _create
+    from havn.server import app as _server_app
+
+    exempted = req.exempted_roles
+    if exempted is None and not getattr(_server_app, "AUTH_ENABLED", False):
+        exempted = []
 
     try:
         result = _create(
@@ -79,7 +91,7 @@ def create_policy(request: Request, req: PolicyCreate, conn: DbConn) -> dict:
             method_config=req.method_config,
             condition_column=req.condition_column,
             condition_value=req.condition_value,
-            exempted_roles=req.exempted_roles,
+            exempted_roles=exempted,
         )
         try:
             from havn.engine.audit import log_audit

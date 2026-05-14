@@ -1,4 +1,8 @@
-"""Tests for the DuckLake maintenance scheduler."""
+"""Tests for the DuckLake maintenance scheduler.
+
+The scheduler tests sleep waiting for tick events; they're marked slow
+so default CI stays fast. Run via `pytest --runslow` or nightly.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +13,8 @@ import duckdb
 import pytest
 
 from havn.engine.streaming.maintenance import MaintenanceConfig, MaintenanceScheduler
+
+pytestmark = pytest.mark.slow
 
 
 def test_scheduler_noop_on_duckdb_backend(tmp_path):

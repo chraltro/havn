@@ -62,7 +62,7 @@ The havn web interface is a React SPA (Single Page Application) built with Vite 
 ## Key Features
 
 ### Data Pipeline
-- **SQL Transforms** -- Plain SQL with `-- config:` and `-- depends_on:` comments; no Jinja or templating. Supports table, view, and incremental materializations. See [Transforms](transforms).
+- **SQL Transforms** -- Plain SQL with `@config` directives; dependencies are auto-extracted from `FROM`/`JOIN` clauses (override with `@depends_on`); no Jinja or templating. Supports table, view, and incremental materializations. See [Transforms](transforms).
 - **DAG Engine** -- Automatic dependency resolution and topological ordering with parallel execution and change detection via SHA256 hashing. See [Transforms](transforms).
 - **Streams** -- Multi-step pipelines (ingest, seed, transform, export) defined in `project.yml` with retries, webhook notifications, and real-time SSE streaming. See [Pipelines](pipelines).
 - **Orchestration Jobs** -- YAML-defined jobs with dbt-style selectors, multiple schedules (cron and interval), tags, and a visual DAG picker. See [Orchestration Jobs](orchestration-jobs).
@@ -75,7 +75,7 @@ The havn web interface is a React SPA (Single Page Application) built with Vite 
 - **Import Wizard** -- Upload CSV/Parquet files or import from external databases through the web UI. See [Connectors](connectors).
 
 ### Data Quality
-- **Inline Assertions** -- `-- assert:` comments in SQL files for row_count, no_nulls, unique, accepted_values, and custom expressions. See [Quality](quality).
+- **Inline Assertions** -- `@assert` directives in SQL files for row_count, no_nulls, unique, accepted_values, and custom expressions. See [Quality](quality).
 - **YAML Contracts** -- Standalone data quality rules in `contracts/` with severity levels and history tracking. See [Contracts](contracts).
 - **Profiling** -- Automatic column-level statistics: null percentages, distinct counts, min/max values.
 - **Freshness Monitoring** -- Detect stale models and sources against configured SLAs with alerting support.

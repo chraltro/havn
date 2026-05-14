@@ -10,6 +10,37 @@ import json
 
 
 # ---------------------------------------------------------------------------
+# .sqlfluff — opt-out of the rules that fire on idiomatic havn SQL by default
+# ---------------------------------------------------------------------------
+
+SQLFLUFF_TEMPLATE = """\
+# havn default sqlfluff config — relaxed rule set tuned to idiomatic
+# warehouse SQL. Tighten or relax as your team prefers.
+
+[sqlfluff]
+dialect = duckdb
+templater = raw
+max_line_length = 120
+
+# Rules excluded by default:
+#   RF03 — flags unqualified column refs in single-table SELECTs; defensible
+#          style choice in idiomatic dim/fact SQL. Re-enable for stricter
+#          codebases.
+#   AM05 — implicit join type. False-positives on idiomatic LEFT JOIN.
+#   ST06 — column ordering in CREATE TABLE; irrelevant here (every model
+#          is a SELECT).
+#   LT05 — line length, already covered by max_line_length above.
+exclude_rules = RF03, AM05, ST06, LT05
+
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = upper
+
+[sqlfluff:rules:capitalisation.identifiers]
+extended_capitalisation_policy = lower
+"""
+
+
+# ---------------------------------------------------------------------------
 # project.yml
 # ---------------------------------------------------------------------------
 

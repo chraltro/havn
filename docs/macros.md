@@ -1,6 +1,6 @@
 # Python SQL Macros
 
-havn lets you write Python functions that are callable directly in SQL. No Jinja templating — just Python functions registered as DuckDB UDFs. "Why template SQL when you have Python right there?"
+havn lets you write Python functions that are callable directly in SQL. No Jinja templating -- just Python functions registered as DuckDB UDFs. "Why template SQL when you have Python right there?"
 
 ## Quick Start
 
@@ -30,8 +30,7 @@ Use them in any SQL model:
 
 ```sql
 -- transform/silver/customers.sql
--- config: materialized=table, schema=silver
--- depends_on: bronze.customers
+@config materialized=table, schema=silver
 
 SELECT
     customer_id,
@@ -76,7 +75,7 @@ CREATE MACRO is_weekend(d) AS
     EXTRACT(DOW FROM d::DATE) IN (0, 6);
 ```
 
-SQL macros are executed directly on connection — they don't need the `@macro` decorator.
+SQL macros are executed directly on connection -- they don't need the `@macro` decorator.
 
 ## Listing Macros
 
@@ -101,6 +100,6 @@ curl http://localhost:3000/api/macros
 
 ## Related Pages
 
-- [Transforms](transforms) — Using macros in SQL models
-- [CLI Reference](cli-reference) — `havn macros` command
-- [Configuration](configuration) — Project structure
+- [Transforms](transforms) -- Using macros in SQL models
+- [CLI Reference](cli-reference) -- `havn macros` command
+- [Configuration](configuration) -- Project structure

@@ -20,7 +20,7 @@ havn provides a comprehensive data quality framework with four complementary sys
 - Timestamp of last evaluation
 - Failure detail (for failed assertions)
 
-**Contract Results** -- If YAML contracts are configured, their results appear here with a **Last Result** column showing PASS/FAIL/NOT RUN badges and a **Level** column displaying "must pass" or "warning". Click any contract row to expand and see per-rule PASS/FAIL details with messages (e.g., "5 duplicate(s) — 95 distinct out of 100 rows"). Toggle **Show Run History** to browse all historical contract evaluations. See [Contracts](contracts).
+**Contract Results** -- If YAML contracts are configured, their results appear here with a **Last Result** column showing PASS/FAIL/NOT RUN badges and a **Level** column displaying "must pass" or "warning". Click any contract row to expand and see per-rule PASS/FAIL details with messages (e.g., "5 duplicate(s) -- 95 distinct out of 100 rows"). Toggle **Show Run History** to browse all historical contract evaluations. See [Contracts](contracts).
 
 ### Tables Browser Profiling
 
@@ -36,17 +36,17 @@ Use the **Run menu** dropdown in the Develop tab:
 
 ## Inline Assertions
 
-Add `-- assert:` comments to SQL model files. Assertions are evaluated after each model builds during `havn transform`:
+Add `@assert` directives to SQL model files. Assertions are evaluated after each model builds during `havn transform`:
 
 ```sql
--- config: materialized=table, schema=gold
--- depends_on: silver.customers
--- assert: row_count > 0
--- assert: unique(customer_id)
--- assert: no_nulls(customer_id)
--- assert: no_nulls(email)
--- assert: accepted_values(status, ['active', 'inactive', 'suspended'])
--- assert: "lifetime_value >= 0"
+@config materialized=table, schema=gold
+@depends_on silver.customers
+@assert row_count > 0
+@assert unique(customer_id)
+@assert no_nulls(customer_id)
+@assert no_nulls(email)
+@assert accepted_values(status, ['active', 'inactive', 'suspended'])
+@assert "lifetime_value >= 0"
 
 SELECT
     customer_id,
@@ -64,9 +64,9 @@ GROUP BY 1, 2, 3
 Checks that the table has more than N rows:
 
 ```sql
--- assert: row_count > 0
--- assert: row_count > 100
--- assert: row_count >= 1000
+@assert row_count > 0
+@assert row_count > 100
+@assert row_count >= 1000
 ```
 
 #### `unique(column)`
@@ -74,8 +74,8 @@ Checks that the table has more than N rows:
 Checks that a column contains no duplicate values:
 
 ```sql
--- assert: unique(customer_id)
--- assert: unique(email)
+@assert unique(customer_id)
+@assert unique(email)
 ```
 
 #### `no_nulls(column)`
@@ -83,8 +83,8 @@ Checks that a column contains no duplicate values:
 Checks that a column contains no NULL values:
 
 ```sql
--- assert: no_nulls(customer_id)
--- assert: no_nulls(email)
+@assert no_nulls(customer_id)
+@assert no_nulls(email)
 ```
 
 #### `accepted_values(column, [values])`
@@ -92,8 +92,8 @@ Checks that a column contains no NULL values:
 Checks that all values in a column are within the allowed set:
 
 ```sql
--- assert: accepted_values(status, ['active', 'inactive', 'suspended'])
--- assert: accepted_values(country_code, ['US', 'CA', 'GB', 'DE'])
+@assert accepted_values(status, ['active', 'inactive', 'suspended'])
+@assert accepted_values(country_code, ['US', 'CA', 'GB', 'DE'])
 ```
 
 #### Custom SQL Expressions
@@ -101,9 +101,9 @@ Checks that all values in a column are within the allowed set:
 Any boolean SQL expression can be used as an assertion. Wrap complex expressions in quotes:
 
 ```sql
--- assert: "AVG(amount) > 0"
--- assert: "MAX(created_at) > CURRENT_DATE - INTERVAL '7 days'"
--- assert: "COUNT(DISTINCT region) > 1"
+@assert "AVG(amount) > 0"
+@assert "MAX(created_at) > CURRENT_DATE - INTERVAL '7 days'"
+@assert "COUNT(DISTINCT region) > 1"
 ```
 
 Custom expressions are evaluated as `SELECT (<expression>) FROM <table>` and must return a single truthy value.
@@ -233,7 +233,7 @@ havn check
 This executes:
 
 1. **Model validation** -- SQL syntax, dependency resolution, column references
-2. **Inline assertions** -- `-- assert:` comments against live data
+2. **Inline assertions** -- `@assert` directives against live data
 3. **YAML contracts** -- Rules from `contracts/` directory
 
 ### Target-Specific Checks

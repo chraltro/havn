@@ -40,14 +40,36 @@ class AnomalyConfigUpdate(BaseModel):
 
 @router.get("/api/freshness")
 def get_freshness(
-    request: Request, conn: DbConnReadOnly, max_hours: float = 24.0
+    request: Request,
+    conn: DbConnReadOnly,
+    max_hours: float = 24.0,
+    include_sources: bool = False,
+    source_min_rows: int = 0,
 ) -> list[dict]:
-    """Check model freshness: which models are stale?"""
+    """Check model freshness: which models are stale?
+
+    With ``include_sources=true`` the response also carries each model's
+    upstream row counts and source-freshness check results, computed
+    from the model's ``@source_freshness`` directives. ``source_min_rows``
+    flips a model to stale if any source has fewer than N rows — direct
+    fix for the "0 rows ≠ fresh" footgun.
+    """
     _require_permission(request, "read")
     from havn.engine.transform import check_freshness
 
     ensure_meta_table(conn)
-    return check_freshness(conn, max_age_hours=max_hours)
+    transform_dir = None
+    if include_sources:
+        from havn.server.routes.models import _get_project_dir
+
+        transform_dir = _get_project_dir() / "transform"
+    return check_freshness(
+        conn,
+        max_age_hours=max_hours,
+        include_sources=include_sources,
+        source_min_rows=source_min_rows,
+        transform_dir=transform_dir,
+    )
 
 
 # --- Model profiles ---

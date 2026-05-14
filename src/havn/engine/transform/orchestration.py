@@ -100,6 +100,59 @@ def run_transform(
     )
 
 
+def _evaluate_deny_rules(
+    models: list[SQLModel],
+    project_dir: Path | None,
+) -> dict[str, str]:
+    """Return a dict of ``{model_full_name: reason}`` for every model that
+    violates a project-level deny rule.
+
+    Loaded once per pipeline run. Failure to load the project config is
+    treated as "no rules" rather than aborting — denial is opt-in via
+    ``policies.deny`` and should never break a previously working build
+    that didn't declare any.
+    """
+    if project_dir is None:
+        return {}
+    try:
+        from havn.config import load_project
+        cfg = load_project(project_dir)
+    except Exception as e:
+        logger.debug("Could not load project config for deny rules: %s", e)
+        return {}
+    deny_rules = list(cfg.policies.deny) if cfg.policies and cfg.policies.deny else []
+    if not deny_rules:
+        return {}
+
+    import sqlglot
+    from sqlglot import exp as _exp
+
+    out: dict[str, str] = {}
+    for model in models:
+        try:
+            parsed = sqlglot.parse_one(model.query, read="duckdb")
+        except Exception:
+            continue  # parse errors surface elsewhere
+        schema_lower = model.schema.lower()
+        referenced: set[str] = set()
+        for col in parsed.find_all(_exp.Column):
+            if col.name:
+                referenced.add(col.name.lower())
+        for rule in deny_rules:
+            forbidden = {s.lower() for s in (rule.forbid_in_schemas or [])}
+            if schema_lower not in forbidden:
+                continue
+            col = (rule.column or "").lower()
+            if col and col in referenced:
+                reason = f" ({rule.reason})" if rule.reason else ""
+                out[model.full_name] = (
+                    f"column {rule.column!r} forbidden in schema "
+                    f"{model.schema!r}{reason}"
+                )
+                break
+    return out
+
+
 def _run_transform_sequential(
     conn: duckdb.DuckDBPyConnection,
     models: list[SQLModel],
@@ -120,15 +173,99 @@ def _run_transform_sequential(
         model.upstream_hash = _compute_upstream_hash(model, model_map)
 
     results: dict[str, str] = {}
+    # Track models that errored or had a severity=error assertion failure
+    # so we can skip their descendants (matches the contract documented for
+    # @severity).
+    blocked: set[str] = set()
+
+    # Apply project-level deny rules to seed the blocked set. Done here so
+    # the same logic runs whether we're sequential or parallel — and so
+    # forbidden models never get sent to a worker.
+    for full_name, reason in _evaluate_deny_rules(ordered, project_dir).items():
+        console.print(f"  [red]deny[/red]  [bold]{full_name}[/bold]: {reason}")
+        results[full_name] = "policy_denied"
+        blocked.add(full_name)
+        try:
+            log_run(
+                conn, "transform", full_name, "error",
+                0, 0,
+                error=f"policy_denied: {reason}",
+                pipeline_run_id=pipeline_run_id,
+            )
+        except Exception:
+            pass
 
     for model in ordered:
+        if model.full_name in results:
+            # Already handled (e.g. policy-denied above).
+            continue
         changed = force or _has_changed(conn, model)
         label = f"[bold]{model.full_name}[/bold] ({model.materialized})"
+
+        # If any upstream is blocked (error / failed-error-assertion / stale
+        # source), skip this model with a clear reason.
+        upstream_blocked = [d for d in model.depends_on if d in blocked]
+        if upstream_blocked:
+            console.print(
+                f"  [yellow]skip[/yellow]  {label}: upstream blocked "
+                f"({', '.join(upstream_blocked)})"
+            )
+            results[model.full_name] = "skipped_upstream_blocked"
+            blocked.add(model.full_name)
+            try:
+                log_run(
+                    conn, "transform", model.full_name, "skipped",
+                    0, 0,
+                    error=f"upstream blocked: {', '.join(upstream_blocked)}",
+                    pipeline_run_id=pipeline_run_id,
+                )
+            except Exception:
+                pass
+            continue
 
         if not changed:
             console.print(f"  [dim]skip[/dim]  {label}")
             results[model.full_name] = "skipped"
+            try:
+                log_run(conn, "transform", model.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
+            except Exception:
+                pass
             continue
+
+        # @source_freshness pre-check: bail out early if any error-severity
+        # source spec is stale. Warnings still execute.
+        if model.source_freshness:
+            from .quality import _save_source_freshness, check_source_freshness
+
+            sf_results = check_source_freshness(conn, model.source_freshness)
+            _save_source_freshness(conn, model, sf_results)
+            blocking = [
+                r for r in sf_results
+                if r["is_stale"] and r.get("severity", "error") == "error"
+            ]
+            for r in sf_results:
+                if r["is_stale"]:
+                    age = (
+                        f"{r['age_seconds']:.0f}s" if r.get("age_seconds") is not None else "n/a"
+                    )
+                    sev_color = "red" if r.get("severity", "error") == "error" else "yellow"
+                    console.print(
+                        f"         [{sev_color}]stale[/{sev_color}]  source: {r['table']} "
+                        f"(age={age}, max={r['max_age_seconds']}s)"
+                    )
+            if blocking:
+                results[model.full_name] = "source_stale"
+                blocked.add(model.full_name)
+                try:
+                    log_run(
+                        conn, "transform", model.full_name, "skipped",
+                        0, 0,
+                        error=f"source stale: {', '.join(b['table'] for b in blocking)}",
+                        pipeline_run_id=pipeline_run_id,
+                    )
+                except Exception:
+                    pass
+                continue
 
         try:
             duration_ms, row_count = execute_model(conn, model)
@@ -155,19 +292,29 @@ def _run_transform_sequential(
                 except Exception as snap_err:
                     logger.warning("Snapshot capture failed for %s: %s", model.full_name, snap_err)
 
-            # Run data quality assertions
-            if model.assertions:
+            # Run data quality assertions (and the synthesised @grain check
+            # if model.grain is set — both are evaluated by run_assertions).
+            if model.assertions or model.grain:
                 assertion_results = run_assertions(conn, model)
                 _save_assertions(conn, model, assertion_results)
                 for ar in assertion_results:
                     if ar.passed:
                         console.print(f"         [green]pass[/green]  assert: {ar.expression}")
                     else:
-                        console.print(f"         [red]FAIL[/red]  assert: {ar.expression} ({ar.detail})")
+                        sev = ar.severity or "error"
+                        sev_color = "red" if sev == "error" else "yellow"
+                        sev_label = "FAIL" if sev == "error" else "WARN"
+                        console.print(
+                            f"         [{sev_color}]{sev_label}[/{sev_color}]  "
+                            f"assert: {ar.expression} ({ar.detail})"
+                        )
 
-                failed = [ar for ar in assertion_results if not ar.passed]
-                if failed:
+                failed_error = [ar for ar in assertion_results if not ar.passed and (ar.severity or "error") == "error"]
+                if failed_error:
+                    # Severity=error assertions halt this model AND its
+                    # descendants — keeping bad data from cascading downstream.
                     results[model.full_name] = "assertion_failed"
+                    blocked.add(model.full_name)
                     continue
 
             # Auto-profile for tables
@@ -191,6 +338,7 @@ def _run_transform_sequential(
             log_run(conn, "transform", model.full_name, "error", error=str(e), pipeline_run_id=pipeline_run_id)
             console.print(f"  [red]fail[/red]  {label}: {e}")
             results[model.full_name] = "error"
+            blocked.add(model.full_name)
 
     # Run anomaly detection on collected profiles
     if _run_profiles:
@@ -243,6 +391,19 @@ def _run_transform_parallel(
     for model in ordered:
         model.upstream_hash = _compute_upstream_hash(model, model_map)
 
+    # Pre-create every target schema on the main connection BEFORE any
+    # parallel worker starts. Without this, two workers in the same tier
+    # racing on the same schema both run `CREATE SCHEMA IF NOT EXISTS bronze`
+    # and DuckDB raises "Catalog write-write conflict on create with bronze".
+    # `IF NOT EXISTS` is not enough — the conflict is on the catalog write
+    # itself, not on the existence check.
+    schemas_to_create = {m.schema for m in models if m.schema}
+    for schema in sorted(schemas_to_create):
+        try:
+            conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+        except Exception as e:
+            logger.debug("Pre-create schema %s failed: %s", schema, e)
+
     # DuckLake with a local file catalog cannot be attached twice within the
     # same process — parallel workers would all try to attach the same file
     # and collide. Fall back to sequential execution for that case.
@@ -276,15 +437,75 @@ def _run_transform_parallel(
     results: dict[str, str] = {}
     total_tiers = len(tiers)
 
+    # Apply deny rules in the parallel path too. We pre-populate ``results``
+    # with denied models so every tier-skip check below treats them as blocking.
+    deny_results = _evaluate_deny_rules(models, project_dir)
+    for full_name, reason in deny_results.items():
+        console.print(f"  [red]deny[/red]  [bold]{full_name}[/bold]: {reason}")
+        results[full_name] = "policy_denied"
+        try:
+            log_run(
+                conn, "transform", full_name, "error",
+                0, 0,
+                error=f"policy_denied: {reason}",
+                pipeline_run_id=pipeline_run_id,
+            )
+        except Exception:
+            pass
+
+    # Track which models have failed so we can block ONLY their actual
+    # descendants, not unrelated siblings. Pre-seed with policy denials
+    # since those were applied before any tier ran.
+    failed_models: set[str] = {
+        name for name, status in results.items()
+        if status in ("error", "assertion_failed", "policy_denied")
+    }
+
+    def _is_blocked(model: SQLModel) -> str | None:
+        """Return the upstream that blocks this model, or None."""
+        for dep in model.depends_on:
+            if dep in failed_models:
+                return dep
+            # Walk transitively in case a deeper ancestor failed.
+            if dep in model_map:
+                upstream_block = _is_blocked(model_map[dep])
+                if upstream_block:
+                    return upstream_block
+        return None
+
     for tier_idx, tier in enumerate(tiers, 1):
-        # Check if any previous tier had failures that should block this tier
-        has_blocking_failure = any(
-            s in ("error", "assertion_failed") for s in results.values()
-        )
-        if has_blocking_failure:
-            for model in tier:
-                console.print(f"  [dim]skip[/dim]  [bold]{model.full_name}[/bold] (upstream failure)")
-                results[model.full_name] = "skipped"
+        # Only skip models whose actual upstreams failed.
+        new_tier: list[SQLModel] = []
+        for model in tier:
+            if model.full_name in results:
+                continue  # already marked
+            blocker = _is_blocked(model)
+            if blocker is not None:
+                console.print(
+                    f"  [dim]skip[/dim]  [bold]{model.full_name}[/bold] "
+                    f"(upstream failure: {blocker})"
+                )
+                results[model.full_name] = "skipped_upstream_blocked"
+                failed_models.add(model.full_name)
+                try:
+                    log_run(
+                        conn, "transform", model.full_name, "skipped",
+                        0, 0,
+                        error=f"upstream blocked: {blocker}",
+                        pipeline_run_id=pipeline_run_id,
+                    )
+                except Exception:
+                    pass
+                continue
+            new_tier.append(model)
+        tier = new_tier
+        if not tier:
+            continue
+
+        # Filter denied models out of the tier before any work or
+        # parallel dispatch.
+        tier = [m for m in tier if m.full_name not in results]
+        if not tier:
             continue
 
         if len(tier) > 1:
@@ -299,6 +520,10 @@ def _run_transform_parallel(
             if not changed:
                 console.print(f"  [dim]skip[/dim]  {label}")
                 results[model.full_name] = "skipped"
+                try:
+                    log_run(conn, "transform", model.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
+                except Exception:
+                    pass
                 continue
 
             try:
@@ -306,15 +531,19 @@ def _run_transform_parallel(
                 _update_state(conn, model, duration_ms, row_count)
                 log_run(conn, "transform", model.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
 
-                # Assertions
-                if model.assertions:
+                # Assertions (and synthesised @grain check, if any)
+                if model.assertions or model.grain:
                     ar_results = run_assertions(conn, model)
                     _save_assertions(conn, model, ar_results)
-                    failed = [ar for ar in ar_results if not ar.passed]
-                    if failed:
-                        for ar in failed:
+                    failed_asserts = [
+                        ar for ar in ar_results
+                        if not ar.passed and (ar.severity or "error") == "error"
+                    ]
+                    if failed_asserts:
+                        for ar in failed_asserts:
                             console.print(f"         [red]FAIL[/red]  assert: {ar.expression} ({ar.detail})")
                         results[model.full_name] = "assertion_failed"
+                        failed_models.add(model.full_name)
                         continue
 
                 # Profile
@@ -347,6 +576,7 @@ def _run_transform_parallel(
                 log_run(conn, "transform", model.full_name, "error", error=str(e), pipeline_run_id=pipeline_run_id)
                 console.print(f"  [red]fail[/red]  {label}: {e}")
                 results[model.full_name] = "error"
+                failed_models.add(model.full_name)
         else:
             # Multiple models — run in parallel with separate connections
             # Collect ALL results from all futures before reporting
@@ -356,7 +586,7 @@ def _run_transform_parallel(
                     executor.submit(
                         _execute_single_model,
                         db_path_str, model, force, model_map,
-                        db_config, project_dir,
+                        db_config, project_dir, pipeline_run_id,
                     ): model
                     for model in tier
                 }
@@ -381,6 +611,8 @@ def _run_transform_parallel(
                     console.print(f"  [red]fail[/red]  {label}: {model_result.error}")
 
                 results[model_name] = model_result.status
+                if model_result.status in ("error", "assertion_failed"):
+                    failed_models.add(model_name)
 
                 # Capture snapshot for Pipeline Rewind (parallel tier)
                 if project_dir and run_id and model_result.status == "built":

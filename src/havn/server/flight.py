@@ -79,9 +79,13 @@ def create_flight_server(
     """
     pa, flight = _import_pyarrow()
 
+    # Hoisted from the `backend_factory is None` branch so that callers who
+    # inject their own factory (notably the test suite) still see `cursor_for`
+    # in the closure that ``do_get`` reads from.
+    from havn.engine.write_queue import cursor_for  # noqa: F401
+
     if backend_factory is None:
         from havn.server.deps import _get_backend
-        from havn.engine.write_queue import cursor_for
 
         def backend_factory():
             return _get_backend()

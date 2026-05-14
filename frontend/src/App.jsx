@@ -104,7 +104,11 @@ function pathToTab(pathname) {
 function PipelineMenu({ running, onRunPipeline, onLint, onContracts, onCancel }) {
   const [open, setOpen] = useState(false);
   const [selectedSteps, setSelectedSteps] = useState(["ingest", "transform", "export"]);
-  const [onlyChanged, setOnlyChanged] = useState(false);
+  // Default is "skip unchanged & honor schedule pragmas" — the regular
+  // Run click should be safe to press repeatedly (schedule=once scripts
+  // don't re-ingest, change-detected transforms don't rebuild). To force
+  // a full refresh, uncheck this in the dropdown.
+  const [onlyChanged, setOnlyChanged] = useState(true);
   const [autoFix, setAutoFix] = useState(true);
   const ref = useRef(null);
 
@@ -178,10 +182,12 @@ function PipelineMenu({ running, onRunPipeline, onLint, onContracts, onCancel })
               onChange={(e) => setOnlyChanged(e.target.checked)}
               style={{ margin: 0 }}
             />
-            <span style={{ fontSize: "12px", color: "var(--havn-text)" }}>Only changed</span>
+            <span style={{ fontSize: "12px", color: "var(--havn-text)" }}>Skip unchanged &amp; schedule=once</span>
           </label>
           <div style={pmStyles.hintText}>
-            Skip models that haven't changed since last build
+            Default. Skip transforms whose inputs haven't changed and skip
+            ingest scripts marked <code>{"# @havn: schedule=once"}</code>.
+            Uncheck to force a full refresh.
           </div>
 
           <button
@@ -317,9 +323,14 @@ function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
     if (filtered.length > 0) schemas[schema] = filtered;
   }
   const schemaNames = Object.keys(schemas).sort(schemaCompare);
+  // System schemas (_havn, information_schema, main, __ducklake_*) always
+  // start collapsed and stay out of the `expanded` map until the user clicks
+  // them. User schemas start expanded. The click handler toggles either way.
   const [expanded, setExpanded] = useState(() => {
     const m = {};
-    for (const s of schemaNames) m[s] = !isSystemSchema(s);
+    for (const s of schemaNames) {
+      if (!isSystemSchema(s)) m[s] = true;
+    }
     return m;
   });
   const activeTableRef = useRef(null);
@@ -328,7 +339,9 @@ function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
     setExpanded((prev) => {
       const next = { ...prev };
       for (const s of schemaNames) {
-        if (!(s in next)) next[s] = !isSystemSchema(s);
+        if (!(s in next) && !isSystemSchema(s)) {
+          next[s] = true;
+        }
       }
       return next;
     });
@@ -464,6 +477,15 @@ function AppContent() {
   const [preview, setPreview] = useState(null);
   const [previewError, setPreviewError] = useState(null);
   const [previewRunning, setPreviewRunning] = useState(false);
+  // "Run on save" toggle, persisted in localStorage so it survives reloads.
+  // When on, saving a transform .sql file triggers `havn transform --target <model>`;
+  // saving a script under ingest/ or export/ triggers `havn run <path>`.
+  const [runOnSave, setRunOnSave] = useState(() => {
+    try { return localStorage.getItem("havn.runOnSave") === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("havn.runOnSave", runOnSave ? "1" : "0"); } catch {}
+  }, [runOnSave]);
   const [previewHeight, onPreviewResize, onPreviewResizeStart] = useResizable("havn_editor_preview_height", 200, 80, 600);
 
   // Tab/UI state - initialize from URL
@@ -682,6 +704,14 @@ function AppContent() {
         return;
       }
     }
+    // If the user is "opening" the file that's already in the editor (e.g.
+    // clicking back to it after viewing a table), just switch to the Editor
+    // tab. Don't prompt about unsaved changes and don't reload from disk —
+    // we'd lose the in-memory dirty buffer.
+    if (activeFile === path) {
+      setActiveTab("Editor");
+      return;
+    }
     if (dirty && activeFile) {
       const ok = await showConfirm("Unsaved changes", "Discard unsaved changes and open another file?", "Discard", true);
       if (!ok) return;
@@ -813,6 +843,16 @@ function AppContent() {
       setDirty(false);
       addOutput("info", `Saved ${activeFile}`);
       setHintTrigger("firstFileEdited", true);
+      // Run on save: rebuild this single model / re-run this single
+      // script after a successful save, if the toggle is on.
+      if (runOnSave && !running) {
+        if (activeFile.includes("transform/") && activeFile.endsWith(".sql")) {
+          const modelName = activeFile.replace(/^transform\//, "").replace(/\.sql$/, "").replace(/\//g, ".");
+          runSingleModel(modelName).catch(e => addOutput("error", `Run on save failed: ${e.message}`));
+        } else if ((activeFile.startsWith("ingest/") || activeFile.startsWith("export/")) && activeFile.endsWith(".py")) {
+          runCurrentScript(activeFile).catch(e => addOutput("error", `Run on save failed: ${e.message}`));
+        }
+      }
     } catch (e) {
       addOutput("error", `Failed to save: ${e.message}`);
     }
@@ -942,7 +982,17 @@ function AppContent() {
     let start = 0;
     for (const line of lines) {
       const s = line.trim();
-      if (s.startsWith("-- config:") || s.startsWith("-- depends_on:") || s === "") { start++; } else break;
+      // Strip both the canonical @-prefixed directives and the legacy
+      // SQL-comment form, plus any leading blank lines, so the preview
+      // sends only executable SQL to DuckDB.
+      const isDirective =
+        s.startsWith("@config") || s.startsWith("@depends_on") ||
+        s.startsWith("@description") || s.startsWith("@col") ||
+        s.startsWith("@assert") ||
+        s.startsWith("-- config:") || s.startsWith("-- depends_on:") ||
+        s.startsWith("-- description:") || s.startsWith("-- col:") ||
+        s.startsWith("-- assert:");
+      if (isDirective || s === "") { start++; } else break;
     }
     const sql = lines.slice(start).join("\n").trim();
     if (!sql) return;
@@ -1146,6 +1196,14 @@ function AppContent() {
                   <button onClick={saveFile} disabled={!dirty} style={styles.btn}>
                     Save
                   </button>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, opacity: 0.8, cursor: "pointer" }} title="Re-run this model/script automatically after save">
+                    <input
+                      type="checkbox"
+                      checked={runOnSave}
+                      onChange={(e) => setRunOnSave(e.target.checked)}
+                    />
+                    Run on save
+                  </label>
                   {isTransformFile && (
                     <button onClick={handleRunSingleModel} disabled={running} style={styles.btn} title="Run just this model">
                       Run Model
