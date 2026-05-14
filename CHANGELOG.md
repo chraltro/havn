@@ -2,6 +2,142 @@
 
 All notable changes to havn are documented in this file.
 
+## [Unreleased]
+
+Comprehensive stability, security, and performance sweep across the whole
+codebase. No new user-facing features; every change strengthens existing
+ones. 1340 tests pass (up from 1300).
+
+### Security
+
+- Path traversal in `/api/files/*` switched from string-prefix to
+  `Path.is_relative_to`, closing the Windows sibling-directory bypass.
+- Webhook receive endpoint (`POST /api/webhook/{name}`) now requires
+  `HAVN_WEBHOOK_SECRET_<NAME>` or `HAVN_WEBHOOK_SECRET` (or explicit
+  `HAVN_WEBHOOK_OPEN=true`). Payload capped at 5 MB; table name
+  double-quoted.
+- Query validator rewritten: strips strings and comments before parsing,
+  walks CTE bodies via balanced-paren skipping, rejects file-access
+  functions (`read_csv`, `read_parquet`, `httpfs_*`) including
+  quoted-identifier variants, blocks multi-statement queries.
+- `CREATE/DROP MASKING POLICY` interception now requires write permission
+  (was reachable via the read-only query route).
+- Dashboard filter injection closed via strict ASCII identifier regex.
+- Snapshot capture / restore validates model names; all paths into SQL
+  go through a safe-quoter and pass `is_relative_to` checks before any
+  file write.
+- `create_version` rejects table refs containing path-traversal characters
+  before writing parquet.
+- Importer (`read_csv`, `ATTACH`, `CREATE TABLE ... FROM _import_src`)
+  validates every identifier and SQL-escapes every literal.
+- Notebook ingest cells switched to `is_relative_to` and SQL literal
+  escaping for filesystem paths.
+- `/metrics` accepts optional `HAVN_METRICS_TOKEN` bearer auth.
+
+### Stability
+
+- WriteQueue worker survives `concurrent.futures.InvalidStateError` so a
+  cancelled future cannot permanently stall the write path.
+- WeakKeyDictionary backs the per-connection default-catalog map, so
+  closed connections do not leak entries or produce wrong-catalog
+  routing after `id()` recycling.
+- Pipeline SSE `start_stream` race fixed: atomic check-and-set via a
+  single locked `_start_operation` call.
+- SSE event loop converted from a 300 ms busy poll to a
+  `threading.Condition` so listeners are pushed.
+- DuckDB extension installation runs once per process under a lock.
+- `os.cpu_count() or 2` everywhere it was previously assumed non-None.
+- Circuit breaker: time-windowed failure decay; exponential backoff
+  actually applied on repeated probe failures; manual `reset` clears
+  `_open_attempts` too.
+- Agents (Claude, Codex, Gemini): each `send_message` kills any prior
+  subprocess before spawning a new one, so a rapid second message no
+  longer leaks the first process.
+- Collaboration `SessionManager` got a re-entrant lock around every
+  mutation; HTTP and WebSocket callers can no longer race past
+  `_max_sessions`, double-evict, or corrupt `_connections`.
+- Snapshot metadata DB uses one long-lived connection per project
+  instead of open/close per helper call. Dead cached connections are
+  detected and replaced.
+- GC over expired snapshots is now O(N) (single GROUP BY) instead of
+  O(N^2).
+
+### Correctness
+
+- Unique-key column names are validated before being interpolated into
+  incremental `MERGE`/`DELETE+INSERT` SQL.
+- Incremental queries are wrapped in a subquery before appending
+  `WHERE`, so trailing `GROUP BY` / `ORDER BY` / `LIMIT` / `;` do not
+  produce malformed SQL.
+- `parse_depends` collects every `@depends_on` line, not just the first;
+  explicit + auto-extracted refs are unioned in discovery.
+- `row_count >= N` no longer parses as `>` followed by literal `= N`;
+  regex alternatives reordered longest-first.
+- Cron parser supports range+step (`0-29/5`) and comma-separated
+  patterns with steps.
+- `mask_partial` typing matches behavior (`str | None`) and accepts
+  `show_last=0` without producing wrong-length output.
+- Contracts `freshness < 5m` now means 5 minutes, matching every other
+  industry tool. `s` (seconds) unit added.
+- CDC `sync_table_high_watermark` reports rows actually inserted by the
+  current run, not the total target row count.
+- CDC `reset_watermark` returns the number of rows that were deleted.
+- Lint returns a 3-tuple in the empty-files early-out path (used to be a
+  2-tuple).
+
+### Performance
+
+- 30-second authenticated-token validation cache (`_cached_validate_token`)
+  drops repeated single-thread write-queue lookups; `invalidate_token_cache`
+  is called from user delete.
+- DuckLake `status()` cached for 5 seconds; hot endpoint no longer
+  triggers a Postgres round-trip per call.
+- Frontend bundle split via Vite `manualChunks`: Monaco, react-vendor,
+  icons, sql-formatter, dashboards, DAG, and notebooks. Main bundle
+  dropped from 1308 kB to 481 kB (gzip 341 kB to 115 kB).
+- TablesPanel guards against stale fetches via request-id ref.
+- AgentSidebar and PipelineContext sessionStorage writes are debounced
+  so per-chunk streaming does not serialize the whole log every paint.
+- `_pinned_udfs` is a bounded deque (10000 entries) so long-running
+  servers with many hot reloads do not accumulate dead closures.
+
+### Cleanups
+
+- Removed `image_prompts.md`, `havn-dashboard-rubric.md`,
+  `brand-preview.html`, and a stale benchmark result file.
+- `mkdocs.yml`, `pyproject.toml`, README, CONTRIBUTING, getting-started:
+  repo URL updated from `chraltro/db` to `chraltro/havn`.
+- `_dp_internal` references in `.claude/rules/*.md` replaced with
+  `_havn` (matches actual schema name).
+- PLATFORM_REPORT.md rewritten from scratch; v0.1.0 snapshot was four
+  releases out of date.
+- `docs/masking.md`: documents all 14 masking methods, uses correct CLI
+  command names (`havn mask add/list/remove`).
+- `docs/cli-reference.md`: adds entries for `shell`, `explain`, `rewind`,
+  `sentinel`, `pr`, `flight`, `streaming`, `migrate`.
+- `docs/api-reference.md`: documents the decoupled SSE stream API
+  (`/start` + `/events`) and the webhook auth headers.
+- `docs/configuration.md`: secrets CLI now correctly documented as
+  shipped (was marked "not yet available").
+- `CONTRIBUTING.md`: corrected the obsolete `cli.py` / `transform.py`
+  single-file references; CLI and engine are now packages.
+- Vitest scope: now includes only `src/**`, so Playwright e2e specs are
+  no longer collected as unit tests.
+- AgentSidebar test updated for the `model` field on start messages.
+- SortableTable global `tr:hover td` CSS rule scoped via class.
+- `_is_read_only_connection` probes via `duckdb_databases()` instead of
+  creating-then-dropping a real macro on the catalog.
+
+### Tests
+
+- `tests/test_sweep_fixes.py`: 37 regression tests covering query
+  validation, cron parsing edge cases, depends_on accumulation, circuit
+  breaker decay, webhook auth, path traversal, write queue cancelled-future
+  survival, unique_key validation, snapshot/versioning identifier
+  validation, mask_partial edge cases, and freshness unit semantics.
+- `tests/conftest.py`: `shared_project` and `shared_client` fixtures
+  available to all test files.
+
 ## [0.2.18] - 2026-05-03
 
 A large release combining a feature roadmap (15 features across 5 phases)

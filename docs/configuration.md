@@ -240,9 +240,12 @@ The `.env` file is included in `.gitignore` by default and should never be commi
 
 ### Managing Secrets
 
+Via the CLI:
+
 ```bash
-# Via the CLI (not yet available as a standalone command)
-# Secrets are managed through the web UI or by editing .env directly
+havn secrets list                   # show secret keys (values masked)
+havn secrets set DB_PASSWORD value  # set or update a secret
+havn secrets delete DB_PASSWORD     # delete a secret
 ```
 
 Via the API (when auth is enabled):

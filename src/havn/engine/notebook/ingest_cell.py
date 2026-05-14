@@ -66,44 +66,47 @@ def execute_ingest_cell(
         return _ingest_error(str(e), start)
 
     try:
-        conn.execute(f"CREATE SCHEMA IF NOT EXISTS {target_schema}")
-        full_table = f"{target_schema}.{target_table}"
+        conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{target_schema}"')
+        full_table = f'"{target_schema}"."{target_table}"'
+
+        def _esc(v: str) -> str:
+            return v.replace("'", "''")
 
         if source_type == "csv":
-            resolved = _resolve_path(source_path, project_dir)
+            resolved = _esc(_resolve_path(source_path, project_dir))
             conn.execute(
                 f"CREATE OR REPLACE TABLE {full_table} AS "
                 f"SELECT * FROM read_csv_auto('{resolved}')"
             )
         elif source_type == "parquet":
-            resolved = _resolve_path(source_path, project_dir)
+            resolved = _esc(_resolve_path(source_path, project_dir))
             conn.execute(
                 f"CREATE OR REPLACE TABLE {full_table} AS "
                 f"SELECT * FROM read_parquet('{resolved}')"
             )
         elif source_type == "json":
-            resolved = _resolve_path(source_path, project_dir)
+            resolved = _esc(_resolve_path(source_path, project_dir))
             conn.execute(
                 f"CREATE OR REPLACE TABLE {full_table} AS "
                 f"SELECT * FROM read_json_auto('{resolved}')"
             )
         elif source_type == "url":
-            # DuckDB's httpfs extension for remote files
             conn.execute("INSTALL httpfs; LOAD httpfs;")
+            safe_url = _esc(source_path)
             if source_path.endswith(".parquet"):
                 conn.execute(
                     f"CREATE OR REPLACE TABLE {full_table} AS "
-                    f"SELECT * FROM read_parquet('{source_path}')"
+                    f"SELECT * FROM read_parquet('{safe_url}')"
                 )
             elif source_path.endswith(".json"):
                 conn.execute(
                     f"CREATE OR REPLACE TABLE {full_table} AS "
-                    f"SELECT * FROM read_json_auto('{source_path}')"
+                    f"SELECT * FROM read_json_auto('{safe_url}')"
                 )
             else:
                 conn.execute(
                     f"CREATE OR REPLACE TABLE {full_table} AS "
-                    f"SELECT * FROM read_csv_auto('{source_path}')"
+                    f"SELECT * FROM read_csv_auto('{safe_url}')"
                 )
         elif source_type == "database":
             # Use connection from project.yml
@@ -127,7 +130,6 @@ def execute_ingest_cell(
         else:
             return _ingest_error(f"Unsupported source_type: {source_type}", start)
 
-        # Show preview of loaded data
         row_count = conn.execute(f"SELECT COUNT(*) FROM {full_table}").fetchone()[0]
         preview = conn.execute(f"SELECT * FROM {full_table} LIMIT 10")
         columns = [desc[0] for desc in preview.description]
@@ -135,7 +137,7 @@ def execute_ingest_cell(
 
         outputs.append({
             "type": "text",
-            "text": f"Loaded {row_count:,} rows into {full_table}",
+            "text": f"Loaded {row_count:,} rows into {target_schema}.{target_table}",
         })
         outputs.append({
             "type": "table",
@@ -171,14 +173,19 @@ def _ingest_error(msg: str, start: float) -> dict:
 def _resolve_path(source_path: str, project_dir: Path | None) -> str:
     """Resolve a relative path against the project directory.
 
-    Validates that the resolved path stays within the project directory
-    to prevent path traversal attacks.
+    Uses Path.is_relative_to so a sibling directory whose name shares a
+    prefix with the project root (e.g. C:\\proj-evil vs C:\\proj) cannot
+    sneak in.
     """
     p = Path(source_path)
     if not p.is_absolute() and project_dir:
         p = project_dir / p
     resolved = p.resolve()
-    # Prevent path traversal: resolved path must stay within project_dir
-    if project_dir and not str(resolved).startswith(str(project_dir.resolve())):
-        raise ValueError(f"Path traversal detected: {source_path!r} resolves outside project directory")
+    if project_dir:
+        try:
+            resolved.relative_to(project_dir.resolve())
+        except ValueError:
+            raise ValueError(
+                f"Path traversal detected: {source_path!r} resolves outside project directory"
+            )
     return str(resolved)

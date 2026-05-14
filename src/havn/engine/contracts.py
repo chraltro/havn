@@ -52,7 +52,7 @@ _PREVIOUS_RE = re.compile(
 
 # Regex for freshness assertions: freshness < 24h, freshness < 7d
 _FRESHNESS_RE = re.compile(
-    r"freshness\s*(<|<=|>|>=)\s*(\d+(?:\.\d+)?)\s*(h|d|m)"
+    r"freshness\s*(<=|>=|<|>)\s*(\d+(?:\.\d+)?)\s*(h|d|m|s)"
 )
 
 
@@ -192,11 +192,14 @@ def _evaluate_freshness(
     value = float(m.group(2))
     unit = m.group(3)
 
-    # Convert to hours
+    # Convert to hours. `m` means minutes (industry standard), not months.
+    # Use `d` for days.
     if unit == "d":
         threshold_hours = value * 24
     elif unit == "m":
-        threshold_hours = value * 60 * 24  # m = months (approx 30d)
+        threshold_hours = value / 60.0
+    elif unit == "s":
+        threshold_hours = value / 3600.0
     else:
         threshold_hours = value
 

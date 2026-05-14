@@ -1,6 +1,6 @@
 <p align="center">
   <br />
-  <img alt="havn" src="https://raw.githubusercontent.com/chraltro/db/main/.github/assets/logo-dark.svg" width="160">
+  <img alt="havn" src="https://raw.githubusercontent.com/chraltro/havn/main/.github/assets/logo-dark.svg" width="160">
   <br />
   <strong>Data in safe waters.</strong>
   <br />
@@ -14,7 +14,7 @@
   [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
   [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB.svg)](https://python.org)
   [![DuckDB](https://img.shields.io/badge/Powered%20by-DuckDB-FFF000.svg)](https://duckdb.org)
-  [![Tests](https://img.shields.io/github/actions/workflow/status/chraltro/db/ci.yml?label=tests)](https://github.com/chraltro/db/actions)
+  [![Tests](https://img.shields.io/github/actions/workflow/status/chraltro/havn/ci.yml?label=tests)](https://github.com/chraltro/havn/actions)
 
 </p>
 
@@ -27,13 +27,13 @@
 Your entire warehouse lives in a single DuckDB file. Transforms are plain SQL. Ingest and export scripts are Python. There's no Jinja, no compilation step, no profiles.yml, and no YAML spaghetti.
 
 ```
-git clone https://github.com/chraltro/db.git && cd db && pip install -e . && cd frontend && npm install && npm run build && cd .. && havn init my-project && cd my-project && havn jobs run full-refresh && havn serve
+git clone https://github.com/chraltro/havn.git && cd havn && pip install -e . && cd frontend && npm install && npm run build && cd .. && havn init my-project && cd my-project && havn jobs run full-refresh && havn serve
 ```
 
 <!-- Screenshot placeholder: replace with actual screenshot of havn web UI -->
 <!--
 <p align="center">
-  <img src="https://raw.githubusercontent.com/chraltro/db/main/.github/assets/screenshot.png" width="800" alt="havn web UI" />
+  <img src="https://raw.githubusercontent.com/chraltro/havn/main/.github/assets/screenshot.png" width="800" alt="havn web UI" />
 </p>
 -->
 
@@ -143,8 +143,8 @@ pip install havn
 From source (for development):
 
 ```bash
-git clone https://github.com/chraltro/db.git
-cd db
+git clone https://github.com/chraltro/havn.git
+cd havn
 pip install -e ".[dev]"
 cd frontend && npm install && npm run build && cd ..
 ```
@@ -255,8 +255,8 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ```bash
 # Development setup
-git clone https://github.com/chraltro/db.git
-cd db
+git clone https://github.com/chraltro/havn.git
+cd havn
 pip install -e ".[dev]"
 cd frontend && npm install && npm run build && cd ..
 pytest tests/

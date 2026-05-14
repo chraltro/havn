@@ -516,10 +516,12 @@ _conn_macros_registered: set[int] = set()
 # ``sys.modules``), CPython is free to GC it and reuse its memory address
 # for another object.  When DuckDB later invokes the UDF, the C pointer
 # now points at a totally unrelated Python callable and the user gets a
-# bizarre traceback ("'float' has no attribute 'execute'", etc.).  Pinning
-# the functions here keeps every registered UDF alive for the life of the
-# process and eliminates that class of bug entirely.
-_pinned_udfs: list[Callable[..., Any]] = []
+# bizarre traceback ("'float' has no attribute 'execute'", etc.).  Pin in
+# a bounded deque so a long-running ``havn serve`` with many hot reloads
+# does not accumulate dead closures indefinitely; 10k entries is enough
+# for thousands of reloads across all stdlib + user macros.
+from collections import deque
+_pinned_udfs: deque[Callable[..., Any]] = deque(maxlen=10_000)
 
 
 def reset_macro_state() -> None:
@@ -529,24 +531,31 @@ def reset_macro_state() -> None:
 
 
 def _is_read_only_connection(conn: duckdb.DuckDBPyConnection) -> bool:
-    """Best-effort check for whether ``conn`` was opened read-only.
+    """Check whether ``conn``'s default catalog is read-only.
 
-    DuckDB doesn't expose a flag for it, so we probe with a non-TEMP
-    ``CREATE OR REPLACE MACRO`` against the default catalog — TEMP
-    objects live in the always-writable temp catalog and can't tell
-    us whether the persistent default is read-only.
+    Prefer ``duckdb_databases()`` (no side effects) over the historical
+    CREATE-then-DROP probe, which left transient catalog artifacts on
+    every macro registration. Falls back to the probe only if the
+    metadata view isn't available.
     """
     try:
-        conn.execute("CREATE OR REPLACE MACRO __havn_ro_probe() AS 0")
+        row = conn.execute(
+            "SELECT readonly FROM duckdb_databases() "
+            "WHERE database_name = current_database() LIMIT 1"
+        ).fetchone()
+        if row is not None:
+            return bool(row[0])
+    except Exception:
+        pass
+    try:
+        conn.execute("CREATE OR REPLACE TEMP MACRO __havn_ro_probe() AS 0")
         try:
             conn.execute("DROP MACRO IF EXISTS __havn_ro_probe")
         except Exception:
             pass
         return False
     except Exception as exc:
-        if "read-only" in str(exc).lower():
-            return True
-        return False
+        return "read-only" in str(exc).lower()
 
 
 def _build_scalar_macro_sql(

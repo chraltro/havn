@@ -5,8 +5,8 @@ Thanks for your interest in contributing to havn! This document covers everythin
 ## Development Setup
 
 ```bash
-git clone https://github.com/chraltro/db.git
-cd db
+git clone https://github.com/chraltro/havn.git
+cd havn
 pip install -e ".[dev]"
 cd frontend && npm install && npm run build && cd ..
 ```
@@ -32,9 +32,9 @@ See [CLAUDE.md](CLAUDE.md) for a detailed architecture reference.
 ### Backend (Python)
 
 1. Source is in `src/havn/`
-2. CLI commands live in `cli.py`
-3. Engine logic is in `engine/` — `transform.py` is the core SQL DAG engine
-4. API endpoints are in `server/app.py`
+2. CLI commands live in `src/havn/cli/` (a package, split into modules)
+3. Engine logic is in `src/havn/engine/` -- `engine/transform/` is the core SQL DAG engine
+4. API endpoints are in `src/havn/server/routes/` (21 modules) wired up in `server/app.py`
 5. Run `pytest tests/` after changes
 
 ### Frontend (React)
@@ -94,10 +94,10 @@ Open an issue on GitHub with:
 
 ## Adding a New CLI Command
 
-1. Add `@app.command()` function in `src/havn/cli.py`
-2. Import engine modules lazily (inside the function body)
+1. Add `@app.command()` function in the appropriate module under `src/havn/cli/`
+2. Import engine modules lazily (inside the function body) to keep `havn --help` fast
 3. Use `_resolve_project()` for project dir resolution
-4. Add corresponding API endpoint in `server/app.py` if needed
+4. Add a corresponding API endpoint in the matching `src/havn/server/routes/` module if needed
 5. Add tests
 
 ## Adding a New Connector

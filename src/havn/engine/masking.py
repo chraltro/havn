@@ -65,15 +65,18 @@ def mask_null(value: Any) -> None:
     return None
 
 
-def mask_partial(value: Any, show_first: int = 0, show_last: int = 0) -> str:
+def mask_partial(value: Any, show_first: int = 0, show_last: int = 0) -> str | None:
     """Show first/last N chars, mask the rest with ``*``."""
     if value is None:
         return None
     s = str(value)
+    show_first = max(0, int(show_first))
+    show_last = max(0, int(show_last))
     if show_first + show_last >= len(s):
         return s
     masked_len = len(s) - show_first - show_last
-    return s[:show_first] + "*" * masked_len + s[len(s) - show_last:] if show_last else s[:show_first] + "*" * masked_len
+    suffix = s[len(s) - show_last:] if show_last else ""
+    return s[:show_first] + ("*" * masked_len) + suffix
 
 
 def mask_email(value: Any) -> str:

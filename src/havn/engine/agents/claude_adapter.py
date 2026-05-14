@@ -50,6 +50,14 @@ class ClaudeCodeAdapter(AgentAdapter):
         if self._system_prompt:
             cmd.extend(["--append-system-prompt", self._system_prompt])
 
+        if self._process is not None and self._process.returncode is None:
+            try:
+                self._process.kill()
+                await self._process.wait()
+            except Exception:
+                pass
+            self._process = None
+
         try:
             self._process = await spawn_cli(cmd, cwd=self._project_path)
         except (FileNotFoundError, OSError) as exc:

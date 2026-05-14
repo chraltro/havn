@@ -295,6 +295,85 @@ def test_write_queue_survives_cancelled_future(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_snapshots_reject_malicious_model_name(tmp_path):
+    """capture_snapshot must refuse a model name containing SQL terminators."""
+    from havn.engine.snapshots import capture_snapshot, start_run
+
+    db_path = tmp_path / "warehouse.duckdb"
+    conn = duckdb.connect(str(db_path))
+    conn.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+    conn.execute("CREATE TABLE bronze.t AS SELECT 1 AS id")
+
+    run_id = start_run(tmp_path, trigger="test")
+    ok = capture_snapshot(
+        tmp_path, conn,
+        'bronze.t"; DROP TABLE bronze.t; --',
+        run_id, row_count=1,
+    )
+    conn.close()
+    assert ok is False
+
+
+def test_versioning_rejects_traversal_in_table_name(tmp_path):
+    """create_version must skip table refs containing path-traversal characters."""
+    from havn.engine.versioning import create_version
+
+    db_path = tmp_path / "warehouse.duckdb"
+    conn = duckdb.connect(str(db_path))
+    conn.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+    conn.execute("CREATE TABLE bronze.t AS SELECT 1 AS id")
+    result = create_version(
+        conn, tmp_path,
+        description="evil",
+        tables=["../etc/passwd", "bronze.t"],
+    )
+    conn.close()
+    expected = result["tables"]
+    assert "bronze.t" in expected
+    assert "../etc/passwd" not in expected
+
+
+def test_mask_partial_handles_zero_show_last():
+    from havn.engine.masking import mask_partial
+
+    assert mask_partial("abcdefgh", show_first=2, show_last=0) == "ab******"
+    assert mask_partial("abcdefgh", show_first=0, show_last=2) == "******gh"
+    assert mask_partial("abc", show_first=5, show_last=5) == "abc"
+    assert mask_partial(None) is None
+
+
+def test_freshness_minutes_is_minutes_not_months(tmp_path):
+    """The freshness 'm' unit must mean minutes, matching industry convention."""
+    from havn.engine.contracts import _evaluate_freshness
+    from havn.engine.database import ensure_meta_table
+
+    db_path = tmp_path / "warehouse.duckdb"
+    conn = duckdb.connect(str(db_path))
+    ensure_meta_table(conn)
+    conn.execute(
+        "INSERT INTO _havn.model_state (model_path, content_hash, upstream_hash, "
+        "materialized_as, row_count, run_duration_ms, last_run_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, current_timestamp - INTERVAL '10 minutes')",
+        ["bronze.x", "h", "h", "table", 0, 0],
+    )
+    passed, detail = _evaluate_freshness(conn, "bronze.x", "freshness < 5m")
+    conn.close()
+    assert passed is False
+    assert "ago" in detail or "hour" in detail or "minute" in detail
+
+
+def test_cdc_reset_returns_row_count(tmp_path):
+    from havn.engine.cdc import ensure_cdc_table, update_watermark, reset_watermark
+
+    conn = duckdb.connect(str(tmp_path / "wh.duckdb"))
+    ensure_cdc_table(conn)
+    update_watermark(conn, "conn1", "t1", "high_watermark", "2025-01-01", rows_synced=10)
+    update_watermark(conn, "conn1", "t2", "high_watermark", "2025-01-01", rows_synced=5)
+    removed = reset_watermark(conn, "conn1")
+    conn.close()
+    assert removed == 2
+
+
 def test_unique_key_validates_identifiers(tmp_path):
     """A unique_key containing a non-identifier value should fail loudly,
     not silently splice into SQL."""

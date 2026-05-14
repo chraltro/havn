@@ -1,408 +1,167 @@
 # havn -- Platform Summary Report
 
-> **Date:** 2026-03-11
-> **Version:** 0.1.0
-> **Classification:** Self-hosted data platform (alternative to Databricks / Snowflake)
+> **Version:** 0.2.18
+> **Classification:** Self-hosted data platform (open-source alternative to Databricks / Snowflake)
 
 ---
 
 ## Executive Summary
 
-**havn** is a self-hosted, zero-cost data platform that consolidates the entire analytics stack -- ingestion, transformation, quality, orchestration, collaboration, and serving -- into a single tool backed by a single DuckDB file. No data leaves the machine. No cloud account required. No vendor lock-in.
+**havn** is a self-hosted data platform that consolidates ingest, transformation, data quality, orchestration, masking, collaboration, and serving into a single tool backed by a single DuckDB file (self-hosted) or a DuckLake catalog (cloud-friendly). No data leaves the machine, no cloud account required, no vendor lock-in.
 
-Where Databricks requires a cloud account, Spark cluster, and dozens of services, havn runs on a laptop with `pip install havn` and delivers 80% of the capability at 0% of the cost.
+Where Databricks needs a cloud account, a Spark cluster, and dozens of services, havn runs on a laptop with `pip install havn` and delivers most of the same capability surface for everyday analytics workloads.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      havn CLI / Web UI                    │
-├─────────────┬─────────────┬─────────────┬───────────────┤
-│  Ingest     │  Transform  │  Export     │  Notebooks    │
-│  (Python)   │  (SQL DAG)  │  (Python)  │  (.dpnb)      │
-├─────────────┴─────────────┴─────────────┴───────────────┤
-│              DuckDB Engine (OLAP)                       │
-├─────────────────────────────────────────────────────────┤
-│              warehouse.duckdb (single file)             │
-└─────────────────────────────────────────────────────────┘
-
-Data flows through four schemas:
-  landing/  →  bronze/  →  silver/  →  gold/
-  (raw)        (cleaned)   (modeled)   (consumption)
++--------------------------------------------------------------------+
+|                       havn CLI / Web UI / SDK                       |
++--------------+----------------+----------------+-------------------+
+|   Ingest     |   Transform    |   Export       |   Notebooks       |
+|   (Python)   |   (SQL DAG)    |   (Python)     |   (.dpnb)         |
++--------------+----------------+----------------+-------------------+
+|                       Backend abstraction                           |
+|   DuckDB (single file)  |  DuckLake (Postgres/file catalog +        |
+|                         |             Parquet on local/S3)          |
++--------------------------------------------------------------------+
+|     Metadata (`_havn` schema): runs, model_state, profiles,         |
+|     assertions, contracts, masking, audit, circuits, slow queries   |
++--------------------------------------------------------------------+
 ```
 
-All metadata (model state, run logs, profiles, users, tokens, alerts, CDC state, versions, contracts) lives in a `_havn` schema inside the same warehouse file.
+### Backends
+
+- **DuckDB**: single warehouse.duckdb file. Default for self-hosted users.
+- **DuckLake**: DuckDB compute + Postgres or file catalog + Parquet data path
+  (local, S3, GCS, R2). Enables real multi-writer concurrency.
+
+Both backends share the same engine, the same metadata schema, and the same
+`_havn` table layout, so projects can move between them with no SQL changes.
 
 ---
 
-## Complete Feature Inventory
-
-### 1. SQL Transform Engine
-
-The core of havn. SQL files in `transform/` are automatically discovered, dependency-ordered, and executed.
-
-| Capability | Description |
-|---|---|
-| **DAG execution** | Builds a dependency graph from auto-extracted `FROM`/`JOIN` references (overridable via `@depends_on`); executes models in topological order |
-| **Change detection** | SHA256 hash of normalized SQL; only rebuilds models whose SQL actually changed |
-| **Materializations** | `view` (default), `table`, `incremental`; configured via `@config materialized=table` |
-| **Incremental models** | Three strategies: `append`, `delete+insert` (default), `merge` (true upsert with matched updates) |
-| **Schema evolution** | Automatically adds new columns to existing tables during incremental runs |
-| **Inline assertions** | `@assert row_count > 0` directives run post-build and fail the pipeline on violation |
-| **Column documentation** | `@col name: description` directives parsed and surfaced in docs |
-| **Profile statistics** | Auto-computes row counts, null percentages, distinct counts after each build |
-| **Freshness monitoring** | Configurable SLA thresholds; alerts when models go stale |
-| **Force rebuild** | `havn transform --force` ignores cache and rebuilds everything |
-| **Selective builds** | Build individual models or filtered subsets |
-| **No Jinja** | Plain SQL only -- config via comments, no templating language to learn |
-
-### 2. Python Script Execution
-
-Ingest and export scripts are plain Python with a DuckDB connection (`db`) pre-injected at runtime.
-
-| Capability | Description |
-|---|---|
-| **Zero boilerplate** | Write top-level Python code; `db` is available immediately |
-| **Legacy support** | `def run(db)` function signature still works (backward compatible) |
-| **Timeout protection** | 5-minute default; runs in background thread to prevent process hangs |
-| **Output capture** | stdout/stderr captured and logged; row counts auto-extracted |
-| **Pipeline integration** | Scripts in `ingest/` and `export/` are orchestrated as pipeline steps |
-| **Skip convention** | Files prefixed with `_` are silently skipped |
-| **Failure semantics** | Ingest failures halt the pipeline (data integrity); export failures are non-blocking |
-
-### 3. Interactive Notebooks (.dpnb)
-
-A lightweight notebook format (JSON-based) supporting mixed-mode execution.
-
-| Capability | Description |
-|---|---|
-| **Cell types** | Code (Python), SQL, Markdown, and Ingest (structured data loading) |
-| **Shared namespace** | Variables persist across cells; `db` and `pd` (pandas) pre-loaded |
-| **Auto-rendering** | Tables, charts, and inline output rendered automatically |
-| **Pipeline steps** | `.dpnb` files can serve as ingest/export steps in streams |
-| **Conversion** | Convert SQL models to notebooks; promote notebook SQL to full transforms |
-
-### 4. Data Connectors & Import Wizard
-
-Pluggable connectors for external data sources with auto-generated ingest scripts.
-
-| Capability | Description |
-|---|---|
-| **File formats** | CSV, Parquet, JSON/JSONL, Excel -- auto-inferred schema |
-| **Database sources** | PostgreSQL, MySQL, SQLite via DuckDB extensions |
-| **Connector framework** | `BaseConnector` abstract class for custom sources |
-| **Auto-generation** | `setup_connector()` creates ingest scripts, updates project.yml, stores secrets |
-| **Discovery** | Connectors expose `discover()` to list available tables/endpoints |
-| **Connection testing** | `havn test-connection` verifies connectivity before committing config |
-| **Preview** | Non-destructive preview before import |
-
-### 5. Change Data Capture (CDC)
-
-Incremental data extraction from external sources using watermarking and file tracking.
-
-| Capability | Description |
-|---|---|
-| **High watermark** | Tracks last-seen value of a column (e.g., `updated_at`) for incremental pulls |
-| **File tracking** | Monitors file modification timestamps; only re-ingests changed files |
-| **Full refresh** | Fallback mode that replaces the entire table |
-| **State management** | CDC state persisted in `_havn.cdc_state` |
-| **Status & reset** | Query sync status and reset watermarks per source |
-
-### 6. Data Quality & Contracts
-
-Two complementary systems for ensuring data correctness.
-
-| Capability | Description |
-|---|---|
-| **Inline assertions** | `@assert <expression>` directives in SQL files; evaluated post-build |
-| **YAML contracts** | Standalone contract files in `contracts/` for reusable quality rules |
-| **Assertion types** | `row_count`, `no_nulls`, `unique`, `accepted_values`, custom SQL expressions |
-| **Severity levels** | `error` (fails pipeline) or `warn` (logs warning, continues) |
-| **History tracking** | Results stored in `_havn.assertion_results` and `contract_results` |
-| **Batch execution** | `havn contracts` evaluates all contracts; supports filtering |
-
-### 7. Authentication & RBAC
-
-Optional token-based security with role-based access control.
-
-| Capability | Description |
-|---|---|
-| **Three roles** | `admin` (full), `editor` (read/write/execute), `viewer` (read-only) |
-| **Token auth** | 30-day expiring tokens; PBKDF2 password hashing (100k iterations) |
-| **Rate limiting** | 5 failed login attempts per 60 seconds per IP |
-| **User management** | Create, update, delete users; revoke tokens via CLI or API |
-| **Optional** | `havn serve` (no auth) vs `havn serve --auth` (enforced) |
-
-### 8. Secrets Management
-
-Secure handling of credentials and connection strings.
-
-| Capability | Description |
-|---|---|
-| **`.env` file** | Standard dotenv format; never committed to git |
-| **Variable expansion** | `${DB_PASSWORD}` in project.yml auto-resolved from .env |
-| **Log masking** | Secret values masked in logs and API responses |
-| **CLI management** | `havn secret set/get/delete` without manual file editing |
-
-### 9. Scheduling & Orchestration
-
-Built-in cron scheduler with multi-step pipeline orchestration.
-
-| Capability | Description |
-|---|---|
-| **Cron expressions** | 5-field standard cron syntax (`0 6 * * *`) |
-| **Streams** | Named multi-step pipelines: ingest → transform → export |
-| **Retry logic** | Configurable retry count and delay per stream |
-| **Webhooks** | POST notifications on completion or failure |
-| **File watcher** | Auto-rebuild transforms when `.sql` or `.py` files change (30s poll, 2s debounce) |
-| **Persistent queue** | Huey + SQLite backend; survives process restarts |
-
-### 10. Alerting & Notifications
-
-Multi-channel alerting for pipeline and data quality events.
-
-| Capability | Description |
-|---|---|
-| **Slack** | Formatted webhook messages with block layout |
-| **Generic webhooks** | POST to any HTTP endpoint |
-| **Logging** | Python logger integration |
-| **Alert types** | Pipeline success/failure, assertion failures, stale models |
-| **History** | All alerts tracked in `_havn.alert_log` |
-
-### 11. Versioning & Time Travel
-
-Parquet-based table snapshots for point-in-time queries and rollback.
-
-| Capability | Description |
-|---|---|
-| **Create versions** | Snapshot all tables to `_snapshots/{id}/` as Parquet files |
-| **Diff versions** | Compare two versions or version vs. current state |
-| **Restore** | Roll back tables from Parquet snapshots; auto-snapshots before restore |
-| **Table timeline** | Track a single table's changes across versions |
-| **Cleanup** | Retain N most recent versions; purge old snapshots |
-| **Trigger tagging** | Manual, transform, or restore triggers recorded |
-
-### 12. Snapshot & Diff Engine
-
-Lightweight project state comparison without full versioning.
-
-| Capability | Description |
-|---|---|
-| **Project snapshots** | Hash file contents + table schemas for baseline comparison |
-| **Model diff** | Row-level diff with added/removed/modified counts and sample rows |
-| **Schema diff** | Detects column additions, removals, and type changes |
-| **Primary key support** | `-- havn:primary_key = col1, col2` enables modified-row detection |
-| **Non-destructive** | Compares SQL output against materialized table without modifying warehouse |
-
-### 13. SQL Analysis & Lineage
-
-AST-based SQL parsing for dependency resolution and impact analysis.
-
-| Capability | Description |
-|---|---|
-| **Table references** | Extracts all upstream tables from CTEs, subqueries, JOINs, UNION ALL |
-| **Column lineage** | Traces column provenance through CTEs and subqueries |
-| **Impact analysis** | Identifies downstream models affected by a change |
-| **AST parsing** | Uses sqlglot for correct handling of complex SQL |
-| **Regex fallback** | Graceful degradation when AST parsing fails |
-
-### 14. Documentation Generator
-
-Auto-generated project documentation from metadata and SQL files.
-
-| Capability | Description |
-|---|---|
-| **Markdown output** | Human-readable docs with TOC, column metadata, lineage diagrams |
-| **JSON output** | Structured docs for the web UI's two-pane layout |
-| **Sources & exposures** | External source declarations and downstream consumer metadata |
-| **Lineage diagrams** | Text-based dependency visualization |
-| **Row counts** | Auto-included for tables |
-
-### 15. SQL Linting
-
-SQLFluff integration for consistent SQL style.
-
-| Capability | Description |
-|---|---|
-| **DuckDB dialect** | Defaults to DuckDB syntax rules |
-| **Auto-fix** | `havn lint --fix` applies fixable violations |
-| **Header preservation** | Config comment headers preserved during fixes |
-| **Configurable** | Rules and dialect configurable in project.yml or `.sqlfluff` |
-
-### 16. CI/CD Integration
-
-GitHub Actions workflow generation with PR-level data diff feedback.
-
-| Capability | Description |
-|---|---|
-| **Workflow generation** | Auto-creates `.github/workflows/havn-ci.yml` |
-| **PR comments** | Posts formatted data diff results as PR comments |
-| **Full pipeline** | Checkout → install → transform → snapshot → diff → comment |
-
-### 17. Live Collaboration
-
-WebSocket-based real-time shared query sessions.
-
-| Capability | Description |
-|---|---|
-| **Session management** | Create/join/leave shared sessions (max 100 concurrent) |
-| **Shared SQL editor** | Real-time content sync across participants (100KB limit) |
-| **Cursor tracking** | Live cursor position visibility |
-| **Query history** | Shared execution history (max 200 entries) |
-| **Auto-cleanup** | Stale sessions evicted after 24 hours |
-
-### 18. Seed Data
-
-Static CSV reference data loading with change detection.
-
-| Capability | Description |
-|---|---|
-| **CSV loading** | Files in `seeds/` auto-loaded into DuckDB tables |
-| **Change detection** | SHA256 hashing; skips unchanged seeds |
-| **Force reload** | Override change detection when needed |
-| **Schema inference** | Auto-detects column types from CSV content |
-
-### 19. Environment Management
-
-Multi-environment configuration for dev/staging/prod workflows.
-
-| Capability | Description |
-|---|---|
-| **Environment overrides** | Different databases, connections, and credentials per environment |
-| **CLI flag** | `--env prod` switches configuration context |
-| **project.yml** | `environments:` section defines overrides |
-
-### 20. Web UI
-
-Full-featured React 19 + Vite single-page application.
-
-| Tab | Description |
-|---|---|
-| **Overview** | Pipeline health, stream status, alert summary |
-| **Editor** | Monaco code editor with syntax highlighting and formatting |
-| **Query** | Interactive SQL runner with tabular results |
-| **Tables** | Browse warehouse tables grouped by schema (landing/bronze/silver/gold) |
-| **Data Sources** | Connector setup and data import wizard |
-| **Notebooks** | Interactive notebook viewer and editor |
-| **DAG** | Visual dependency graph of all models |
-| **Diff** | Preview model changes before applying |
-| **Docs** | Generated documentation viewer |
-| **History** | Pipeline run log with execution details |
-| **Settings** | Theme (dark/light), user settings, guided tour |
-
-Additional UI features: resizable panels, keyboard shortcuts (Alt+1..5), auth context, pipeline context.
-
-### 21. API
-
-FastAPI backend with 40+ endpoints covering every platform capability.
-
-| Category | Examples |
-|---|---|
-| **Pipeline** | Run ingest/transform/export, stream execution |
-| **Query** | Ad-hoc SQL execution with results |
-| **Models** | List, inspect, diff, profile models |
-| **Tables** | Schema browsing, data preview |
-| **Auth** | Login, token management, user CRUD |
-| **Notebooks** | Execute cells, save/load notebooks |
-| **Connectors** | Setup, test, discover, sync |
-| **Contracts** | Evaluate data quality rules |
-| **Versioning** | Create/restore/diff versions |
-| **Collaboration** | WebSocket sessions |
-| **Files** | Read/write/delete project files |
+## Feature Surface
+
+### Transform engine (`src/havn/engine/transform/`)
+
+- DAG execution with topological tier ordering, optional parallel workers.
+- Change detection: SHA256 of normalized SQL plus transitive upstream hashes.
+- Incremental materialization with four strategies: `delete+insert`,
+  `append`, `merge` (true upsert), `partition_by`.
+- Schema evolution: new columns are auto-added to incremental targets.
+- Inline assertions (`@assert row_count > 0`, `unique(col)`, `no_nulls(col)`,
+  `accepted_values(col, [...])`) and YAML contracts.
+- Assertion debugging surfaces duplicates, null samples, unexpected values.
+- Anomaly detection (z-score over historical profiles).
+- Schema sentinel detects upstream schema drift and impact.
+- Snapshots and rewind: deduplicated Parquet snapshots per run with restore-with-cascade.
+
+### Connectors (`src/havn/connectors/`)
+
+Ten built-in connectors: Postgres, MySQL, REST API, Google Sheets, CSV, S3/GCS,
+Stripe, HubSpot, Shopify, Webhook. Each generates an ingest script and
+optionally registers a CDC watermark column.
+
+### Python SQL macros (`src/havn/engine/macros.py`)
+
+Python functions become DuckDB UDFs at connection time. Includes scalar and
+table-returning macro support, hot-reload via the file watcher, and editor
+autocomplete via `GET /api/macros`. A `havn.stdlib` ships PII helpers
+(mask_email, hash_consistent, etc.) usable directly in SQL.
+
+### Data masking (`src/havn/engine/masking.py`, `masking_rewriter.py`)
+
+Pre-query SQL rewriting (with post-query fallback). Fourteen methods cover
+general redaction, PII categories, financial data, and analytics-safe
+transforms (range bucketing, deterministic noise, date shift, consistent
+hashing). Per-schema/table/column policies with conditional rules and
+role-based exemption.
+
+### Server (`src/havn/server/`)
+
+FastAPI app with 21 route modules and 150+ endpoints. Shared DuckDB connection
+singleton with per-thread cursors (Windows file-lock constraint). Pipeline
+runs in a background worker thread; SSE listeners are pushed via a
+`threading.Condition`. WebSockets for collaboration and the agent sidebar.
+Arrow Flight SQL server is also available.
+
+### Web UI (`frontend/`)
+
+React 19 + Vite single-page app with Monaco editor. Five sections (Overview,
+Develop, Explore, Observe, Configure), 14+ tabs, canvas-based DAG
+visualization with rewind timeline, dashboard designer, query plan tree,
+3-mode diff, command palette, agent sidebar.
+
+### CLI (`src/havn/cli/`)
+
+50+ commands across project lifecycle (init, validate, status, checkpoint,
+context, backup, restore), pipeline (transform, jobs, run, watch, schedule,
+lint, seed), model analysis (validate, promote, debug, impact, lineage,
+explain), querying (query, tables, shell, history), data quality (check,
+freshness, profile, assertions, contracts), masking (mask), diff and
+snapshots (diff, snapshot, rewind, restore, sentinel, version), admin
+(serve, ci, secrets, users, env), connectors (connect, connectors), and
+streaming integration (flight, streaming).
+
+### Auth and RBAC (`src/havn/engine/auth.py`)
+
+Token-based auth with PBKDF2-HMAC-SHA256 password hashing. Three roles:
+admin (full), editor (read/write/execute), viewer (read). 30-day token
+expiry, rate-limited login. Token validation cached for 30 seconds to keep
+authenticated traffic off the single write connection.
+
+### Observability
+
+Prometheus metrics at `/metrics` (optional bearer-token auth), slow-query
+log, audit log of 20+ action types, alert log with multi-channel delivery
+(Slack, generic webhook, Python logger).
 
 ---
 
-## Unique Selling Points
+## Internal metadata (`_havn` schema)
 
-### 1. Single-File Warehouse
-The entire database -- data, metadata, history, user accounts -- lives in one `warehouse.duckdb` file. Copy it, back it up, version-control it, email it. No server, no cluster, no cloud.
+All metadata lives inside the warehouse itself:
 
-### 2. Zero Cost
-$0/month. Runs on a laptop. No cloud subscription, no per-query pricing, no data egress charges. Total cost of ownership is the hardware you already own.
-
-### 3. No Data Leaves the Machine
-All processing is local. No telemetry, no cloud sync, no third-party data access. Full data sovereignty by default.
-
-### 4. Plain SQL, No Jinja
-Configuration via top-of-file `@`-prefixed directives (`@config`, `@assert`, `@description`). Dependencies are auto-extracted from `FROM`/`JOIN` clauses, so most models don't even need `@depends_on`. No templating language to learn, no macro system to debug, no compile step. Strip the directive lines and the `.sql` file runs directly in any DuckDB client.
-
-### 5. AI-Native Simplicity
-The directive-based convention system means LLMs can write correct havn SQL models on the first attempt. No proprietary DSL or macro system to hallucinate about.
-
-### 6. Batteries Included
-Ingestion, transformation, quality, orchestration, serving, authentication, documentation, linting, versioning, CI/CD, collaboration -- all in one `pip install`. No ecosystem of plugins to assemble.
-
-### 7. DuckDB Performance
-Columnar OLAP engine that handles analytical queries at speeds rivaling cloud warehouses, on local hardware. Parquet, CSV, JSON native support. No ETL into a separate system.
-
-### 8. Incremental by Default
-Change detection (SHA256 hashing) means `havn transform` only rebuilds what changed. Incremental models support append, delete+insert, and merge strategies with automatic schema evolution.
-
-### 9. Data Quality as Code
-Inline assertions and YAML contracts provide two complementary quality gates. Assertions fail the pipeline; contracts with `warn` severity log issues without blocking.
-
-### 10. Time Travel Without Git LFS
-Parquet-based versioning lets you snapshot, diff, and restore warehouse state at any point. No need to version-control large binary database files.
-
-### 11. From Laptop to Production
-Same tool for local development and production deployment. Environment overrides in project.yml switch database paths and credentials. GitHub Actions CI integration posts data diffs on pull requests.
-
-### 12. Interactive Notebooks
-`.dpnb` notebooks serve double duty: exploratory analysis and pipeline steps. No separate notebook server needed.
+- `model_state` -- content_hash, upstream_hash, materialized_as, row_count, run_duration_ms
+- `run_log` -- pipeline execution history with status, duration, error, log_output
+- `model_profiles` -- auto-computed column statistics (input to anomaly detection)
+- `assertion_results` -- DQ check results with diagnostics JSON
+- `anomaly_log` -- z-score-driven anomaly detections
+- `masking_policies` -- column masking rules
+- `audit_log` -- user action trail
+- `slow_queries` -- queries exceeding the 5s threshold
+- `alert_log` -- notification delivery tracking
+- `circuit_state` -- circuit breaker persistence
+- `users`, `tokens` -- auth (when enabled)
+- `contract_results`, `cdc_state`, `version_history`, `job_runs` -- quality,
+  CDC, versioning, orchestration state
 
 ---
 
-## Technology Stack
+## Security posture
 
-| Layer | Technology |
-|---|---|
-| Database | DuckDB >= 1.2.0 |
-| Backend | Python 3.10+, FastAPI, Typer |
-| Frontend | React 19, Vite, Monaco Editor |
-| SQL Parsing | sqlglot >= 26.0 |
-| SQL Linting | SQLFluff >= 3.0 |
-| Task Queue | Huey >= 2.5 (SQLite backend) |
-| File Watching | watchdog >= 4.0 |
-| Auth | PBKDF2 (hashlib), token-based |
-| Testing | pytest >= 8.0, httpx >= 0.28.0 |
-
----
-
-## CLI Command Reference
-
-| Command | Description |
-|---|---|
-| `havn init` | Scaffold a new project |
-| `havn transform` | Build SQL models (DAG-ordered, change-detected) |
-| `havn transform --force` | Force rebuild all models |
-| `havn run <script>` | Execute an ingest/export Python script |
-| `havn jobs run <name>` | Run a named multi-step pipeline |
-| `havn query "<sql>"` | Ad-hoc SQL execution |
-| `havn tables` | List warehouse objects |
-| `havn lint` | Check SQL style |
-| `havn lint --fix` | Auto-fix SQL style violations |
-| `havn seed` | Load CSV seed data |
-| `havn serve` | Start web UI (port 3000) |
-| `havn serve --auth` | Start web UI with authentication |
-| `havn history` | Show pipeline run log |
-| `havn docs` | Generate documentation |
-| `havn diff` | Compare model output vs. materialized state |
-| `havn contracts` | Evaluate data quality contracts |
-| `havn snapshot` | Create a project checkpoint |
-| `havn version create` | Create a warehouse version |
-| `havn version restore` | Restore from a version |
-| `havn watch` | Auto-rebuild on file changes |
-| `havn schedule` | Start the cron scheduler |
-| `havn secret set/get/delete` | Manage secrets |
-| `havn user create/list/delete` | Manage users |
-| `havn ci generate` | Generate GitHub Actions workflow |
-| `havn test-connection` | Verify external source connectivity |
-| `havn validate` | Validate project configuration |
-| `havn status` | Show project status |
-| `havn context` | Show project context for AI assistants |
+- Strict identifier validation (regex allowlist) on every place a user
+  string enters SQL.
+- Path traversal closed via `Path.is_relative_to()` everywhere.
+- Query endpoint validates SQL after stripping strings and comments,
+  walks past CTE bodies via balanced-paren skipping, and rejects file-access
+  functions (`read_csv`, `read_parquet`, `httpfs_*`) including quoted-identifier
+  variants.
+- Webhook endpoint requires a shared secret (`HAVN_WEBHOOK_SECRET`).
+- Token validation cached but invalidated on user delete / token revoke.
+- Subprocess agents use `create_subprocess_exec` with arg arrays (no shell).
+- WriteQueue worker survives cancelled futures (no permanent stall).
 
 ---
 
-*This report covers all features and unique selling points of havn v0.1.0 as of 2026-03-11.*
+## Roadmap (excerpt)
+
+- Aggregate UDFs and pip-installable macro packs.
+- Live collaboration sessions: multi-user cursor + presence in the editor.
+- Cloud / hosted version on DuckLake with control-plane provisioning,
+  Stripe billing, and tenant-per-container routing.
+
+For the full backlog see `docs/internal/to-do.md` (gitignored, working
+file).

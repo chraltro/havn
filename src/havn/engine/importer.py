@@ -12,14 +12,21 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
 import duckdb
 
 from havn.engine.database import connect, ensure_meta_table, log_run
+from havn.engine.utils import validate_identifier
 
 logger = logging.getLogger("havn.importer")
+
+
+def _sql_literal(value: str) -> str:
+    """Escape a string for safe single-quoted SQL embedding."""
+    return value.replace("'", "''")
 
 
 def preview_file(file_path: str, limit: int = 100) -> dict:
@@ -31,14 +38,16 @@ def preview_file(file_path: str, limit: int = 100) -> dict:
     conn = duckdb.connect(":memory:")
     try:
         ext = path.suffix.lower()
+        safe_path = _sql_literal(str(path))
+        safe_limit = int(limit)
         if ext == ".csv":
-            query = f"SELECT * FROM read_csv('{file_path}', auto_detect=true) LIMIT {limit}"
+            query = f"SELECT * FROM read_csv('{safe_path}', auto_detect=true) LIMIT {safe_limit}"
         elif ext in (".parquet", ".pq"):
-            query = f"SELECT * FROM read_parquet('{file_path}') LIMIT {limit}"
+            query = f"SELECT * FROM read_parquet('{safe_path}') LIMIT {safe_limit}"
         elif ext in (".json", ".jsonl", ".ndjson"):
-            query = f"SELECT * FROM read_json('{file_path}', auto_detect=true) LIMIT {limit}"
+            query = f"SELECT * FROM read_json('{safe_path}', auto_detect=true) LIMIT {safe_limit}"
         elif ext in (".xlsx", ".xls"):
-            query = f"SELECT * FROM st_read('{file_path}') LIMIT {limit}"
+            query = f"SELECT * FROM st_read('{safe_path}') LIMIT {safe_limit}"
         else:
             raise ValueError(f"Unsupported file type: {ext}")
 
@@ -46,10 +55,9 @@ def preview_file(file_path: str, limit: int = 100) -> dict:
         columns = [desc[0] for desc in result.description]
         rows = result.fetchall()
 
-        # Get column types
         col_types = []
         type_result = conn.execute(
-            f"SELECT column_name, column_type FROM (DESCRIBE {query.replace(f' LIMIT {limit}', ' LIMIT 1')})"
+            f"SELECT column_name, column_type FROM (DESCRIBE {query.replace(f' LIMIT {safe_limit}', ' LIMIT 1')})"
         )
         for row in type_result.fetchall():
             col_types.append({"name": row[0], "type": row[1]})
@@ -70,18 +78,19 @@ def preview_query(connection_string: str, query: str, limit: int = 100) -> dict:
     """Preview data from an external database using DuckDB's extension system."""
     conn = duckdb.connect(":memory:")
     try:
-        # Install and load extensions as needed
+        safe_cs = _sql_literal(connection_string)
         if "postgres" in connection_string.lower() or "postgresql" in connection_string.lower():
             conn.execute("INSTALL postgres; LOAD postgres;")
-            conn.execute(f"ATTACH '{connection_string}' AS ext_db (TYPE POSTGRES, READ_ONLY)")
+            conn.execute(f"ATTACH '{safe_cs}' AS ext_db (TYPE POSTGRES, READ_ONLY)")
         elif "mysql" in connection_string.lower():
             conn.execute("INSTALL mysql; LOAD mysql;")
-            conn.execute(f"ATTACH '{connection_string}' AS ext_db (TYPE MYSQL, READ_ONLY)")
+            conn.execute(f"ATTACH '{safe_cs}' AS ext_db (TYPE MYSQL, READ_ONLY)")
         elif "sqlite" in connection_string.lower() or connection_string.endswith(".db"):
             conn.execute("INSTALL sqlite; LOAD sqlite;")
-            conn.execute(f"ATTACH '{connection_string}' AS ext_db (TYPE SQLITE, READ_ONLY)")
+            conn.execute(f"ATTACH '{safe_cs}' AS ext_db (TYPE SQLITE, READ_ONLY)")
 
-        limited_query = f"SELECT * FROM ({query}) sub LIMIT {limit}"
+        safe_limit = int(limit)
+        limited_query = f"SELECT * FROM ({query}) sub LIMIT {safe_limit}"
         result = conn.execute(limited_query)
         columns = [desc[0] for desc in result.description]
         rows = result.fetchall()
@@ -102,16 +111,17 @@ def test_connection(connection_type: str, params: dict) -> dict:
     conn = duckdb.connect(":memory:")
     try:
         conn_string = _build_connection_string(connection_type, params)
+        safe_cs = _sql_literal(conn_string)
 
         if connection_type == "postgres":
             conn.execute("INSTALL postgres; LOAD postgres;")
-            conn.execute(f"ATTACH '{conn_string}' AS ext_db (TYPE POSTGRES, READ_ONLY)")
+            conn.execute(f"ATTACH '{safe_cs}' AS ext_db (TYPE POSTGRES, READ_ONLY)")
         elif connection_type == "mysql":
             conn.execute("INSTALL mysql; LOAD mysql;")
-            conn.execute(f"ATTACH '{conn_string}' AS ext_db (TYPE MYSQL, READ_ONLY)")
+            conn.execute(f"ATTACH '{safe_cs}' AS ext_db (TYPE MYSQL, READ_ONLY)")
         elif connection_type == "sqlite":
             conn.execute("INSTALL sqlite; LOAD sqlite;")
-            conn.execute(f"ATTACH '{conn_string}' AS ext_db (TYPE SQLITE, READ_ONLY)")
+            conn.execute(f"ATTACH '{safe_cs}' AS ext_db (TYPE SQLITE, READ_ONLY)")
         else:
             return {"success": False, "error": f"Unsupported connection type: {connection_type}"}
 
@@ -144,34 +154,38 @@ def import_file(
         raise FileNotFoundError(f"File not found: {file_path}")
 
     table_name = target_table or path.stem.replace("-", "_").replace(" ", "_")
+    validate_identifier(target_schema, "target_schema")
+    validate_identifier(table_name, "target_table")
     full_name = f"{target_schema}.{table_name}"
+    quoted_name = f'"{target_schema}"."{table_name}"'
 
     ensure_meta_table(db_conn)
-    db_conn.execute(f"CREATE SCHEMA IF NOT EXISTS {target_schema}")
+    db_conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{target_schema}"')
 
     ext = path.suffix.lower()
     start = time.perf_counter()
+    safe_path = _sql_literal(str(path))
 
     try:
         if ext == ".csv":
             db_conn.execute(
-                f"CREATE OR REPLACE TABLE {full_name} AS "
-                f"SELECT * FROM read_csv('{file_path}', auto_detect=true)"
+                f"CREATE OR REPLACE TABLE {quoted_name} AS "
+                f"SELECT * FROM read_csv('{safe_path}', auto_detect=true)"
             )
         elif ext in (".parquet", ".pq"):
             db_conn.execute(
-                f"CREATE OR REPLACE TABLE {full_name} AS "
-                f"SELECT * FROM read_parquet('{file_path}')"
+                f"CREATE OR REPLACE TABLE {quoted_name} AS "
+                f"SELECT * FROM read_parquet('{safe_path}')"
             )
         elif ext in (".json", ".jsonl", ".ndjson"):
             db_conn.execute(
-                f"CREATE OR REPLACE TABLE {full_name} AS "
-                f"SELECT * FROM read_json('{file_path}', auto_detect=true)"
+                f"CREATE OR REPLACE TABLE {quoted_name} AS "
+                f"SELECT * FROM read_json('{safe_path}', auto_detect=true)"
             )
         else:
             raise ValueError(f"Unsupported file type: {ext}")
 
-        row_count = db_conn.execute(f"SELECT COUNT(*) FROM {full_name}").fetchone()[0]
+        row_count = db_conn.execute(f"SELECT COUNT(*) FROM {quoted_name}").fetchone()[0]
         duration_ms = int((time.perf_counter() - start) * 1000)
 
         log_run(db_conn, "import", full_name, "success", duration_ms, rows_affected=row_count, log_output=path.name)
@@ -200,38 +214,50 @@ def import_from_connection(
     import time
 
     table_name = target_table or source_table.split(".")[-1]
+    validate_identifier(target_schema, "target_schema")
+    validate_identifier(table_name, "target_table")
     full_name = f"{target_schema}.{table_name}"
+    quoted_name = f'"{target_schema}"."{table_name}"'
+    src_parts = source_table.split(".")
+    if not (1 <= len(src_parts) <= 2):
+        raise ValueError(f"Invalid source_table: {source_table!r}")
+    for part in src_parts:
+        validate_identifier(part, "source_table identifier")
+    if len(src_parts) == 1:
+        safe_source = f'_import_src."{src_parts[0]}"'
+    else:
+        safe_source = f'_import_src."{src_parts[0]}"."{src_parts[1]}"'
 
     ensure_meta_table(db_conn)
-    db_conn.execute(f"CREATE SCHEMA IF NOT EXISTS {target_schema}")
+    db_conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{target_schema}"')
 
     conn_string = _build_connection_string(connection_type, params)
+    safe_cs = _sql_literal(conn_string)
     start = time.perf_counter()
 
     try:
         if connection_type == "postgres":
             db_conn.execute("INSTALL postgres; LOAD postgres;")
-            db_conn.execute(f"ATTACH '{conn_string}' AS _import_src (TYPE POSTGRES, READ_ONLY)")
+            db_conn.execute(f"ATTACH '{safe_cs}' AS _import_src (TYPE POSTGRES, READ_ONLY)")
         elif connection_type == "mysql":
             db_conn.execute("INSTALL mysql; LOAD mysql;")
-            db_conn.execute(f"ATTACH '{conn_string}' AS _import_src (TYPE MYSQL, READ_ONLY)")
+            db_conn.execute(f"ATTACH '{safe_cs}' AS _import_src (TYPE MYSQL, READ_ONLY)")
         elif connection_type == "sqlite":
             db_conn.execute("INSTALL sqlite; LOAD sqlite;")
-            db_conn.execute(f"ATTACH '{conn_string}' AS _import_src (TYPE SQLITE, READ_ONLY)")
+            db_conn.execute(f"ATTACH '{safe_cs}' AS _import_src (TYPE SQLITE, READ_ONLY)")
 
         db_conn.execute(
-            f"CREATE OR REPLACE TABLE {full_name} AS "
-            f"SELECT * FROM _import_src.{source_table}"
+            f"CREATE OR REPLACE TABLE {quoted_name} AS "
+            f"SELECT * FROM {safe_source}"
         )
 
-        row_count = db_conn.execute(f"SELECT COUNT(*) FROM {full_name}").fetchone()[0]
+        row_count = db_conn.execute(f"SELECT COUNT(*) FROM {quoted_name}").fetchone()[0]
         duration_ms = int((time.perf_counter() - start) * 1000)
 
-        # Detach
         try:
             db_conn.execute("DETACH _import_src")
         except Exception as e:
-            logger.debug("Could not get row count: %s", e)
+            logger.debug("Failed to detach import source: %s", e)
 
         log_run(db_conn, "import", full_name, "success", duration_ms, rows_affected=row_count)
 
