@@ -12,7 +12,10 @@ in havn depends on PK enforcement (uuid defaults + INSERT OR REPLACE patterns).
 
 from __future__ import annotations
 
+import logging
 import os
+import threading
+import time
 from pathlib import Path
 
 import duckdb
@@ -20,9 +23,16 @@ import duckdb
 from havn.config import DatabaseConfig
 from havn.engine.backends.base import BackendStatus
 
+logger = logging.getLogger("havn.backends.ducklake")
+
+_extension_install_lock = threading.Lock()
+_extension_install_done = False
+
 
 class DuckLakeBackend:
     name = "ducklake"
+
+    _STATUS_CACHE_TTL = 5.0
 
     def __init__(self, config: DatabaseConfig, project_dir: str | Path | None = None):
         self._config = config
@@ -30,7 +40,9 @@ class DuckLakeBackend:
         self._catalog = self._resolve(config.catalog or "")
         self._data_path = self._resolve(config.data_path or "")
         self._encrypted = config.encrypted
-        self._eager_install_done = False
+        self._status_cache: BackendStatus | None = None
+        self._status_cache_at = 0.0
+        self._status_lock = threading.Lock()
 
     def _resolve(self, spec: str) -> str:
         """Resolve a relative catalog or data_path against project_dir.
@@ -49,21 +61,22 @@ class DuckLakeBackend:
         return p.as_posix()
 
     def _eager_install(self) -> None:
-        """Pre-install the DuckLake extension so the first real connect() is fast.
-
-        DuckLake 1.0 (released April 2026) ships as a core DuckDB extension,
-        not a community one — plain ``INSTALL ducklake`` resolves against the
-        core repo. INSTALL is idempotent and upgrades in place.
-        """
-        if self._eager_install_done:
+        """Pre-install the DuckLake extension once per process."""
+        global _extension_install_done
+        if _extension_install_done:
             return
-        try:
-            conn = duckdb.connect(":memory:")
-            conn.execute("INSTALL ducklake")
-            conn.close()
-            self._eager_install_done = True
-        except Exception:
-            pass
+        with _extension_install_lock:
+            if _extension_install_done:
+                return
+            try:
+                conn = duckdb.connect(":memory:")
+                try:
+                    conn.execute("INSTALL ducklake")
+                finally:
+                    conn.close()
+                _extension_install_done = True
+            except Exception as e:
+                logger.warning("DuckLake extension pre-install failed: %s", e)
 
     def _load_extensions(self, conn: duckdb.DuckDBPyConnection) -> None:
         conn.execute("INSTALL ducklake")
@@ -137,7 +150,8 @@ class DuckLakeBackend:
             resolved = _resolve_memory_limit(self._config.memory_limit)
             conn.execute(f"SET memory_limit = '{resolved}'")
         threads = self._config.threads
-        max_threads = threads if (threads is not None and threads > 0) else max(1, os.cpu_count() // 2)
+        cpu = os.cpu_count() or 2
+        max_threads = threads if (threads is not None and threads > 0) else max(1, cpu // 2)
         conn.execute(f"SET threads = {max_threads}")
 
     def connect(self, read_only: bool = False) -> duckdb.DuckDBPyConnection:
@@ -159,6 +173,13 @@ class DuckLakeBackend:
         return conn
 
     def status(self) -> BackendStatus:
+        now = time.monotonic()
+        with self._status_lock:
+            if (
+                self._status_cache is not None
+                and (now - self._status_cache_at) < self._STATUS_CACHE_TTL
+            ):
+                return self._status_cache
         try:
             conn = self.connect(read_only=True)
             try:
@@ -167,7 +188,7 @@ class DuckLakeBackend:
                 ).fetchone()[0]
             finally:
                 conn.close()
-            return BackendStatus(
+            result = BackendStatus(
                 backend="ducklake",
                 healthy=True,
                 catalog=self._catalog,
@@ -177,7 +198,7 @@ class DuckLakeBackend:
                 catalog_reachable=True,
             )
         except Exception as e:
-            return BackendStatus(
+            result = BackendStatus(
                 backend="ducklake",
                 healthy=False,
                 catalog=self._catalog,
@@ -186,6 +207,10 @@ class DuckLakeBackend:
                 catalog_reachable=False,
                 error=str(e),
             )
+        with self._status_lock:
+            self._status_cache = result
+            self._status_cache_at = time.monotonic()
+        return result
 
     def exists(self) -> bool:
         # For a Postgres catalog, "exists" means reachable. For a local file

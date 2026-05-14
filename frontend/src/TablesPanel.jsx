@@ -63,6 +63,8 @@ export default function TablesPanel({ selectedTable, onQueryTable, tables, onSel
     }
   }, [selectedTable]);
 
+  const requestIdRef = useRef(0);
+
   useEffect(() => {
     if (!selectedTable) {
       setColumns([]);
@@ -72,12 +74,10 @@ export default function TablesPanel({ selectedTable, onQueryTable, tables, onSel
       setStats(null);
       return;
     }
-    // Split on the LAST dot only: schemas in non-default catalogs come back
-    // as ``catalog.schema`` (e.g. ``__ducklake_metadata_warehouse.main``),
-    // and a naive split would slice off the catalog and lose the table.
     const lastDot = selectedTable.lastIndexOf(".");
     const schema = selectedTable.slice(0, lastDot);
     const name = selectedTable.slice(lastDot + 1);
+    const myRequest = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     setRowCount(null);
@@ -89,14 +89,21 @@ export default function TablesPanel({ selectedTable, onQueryTable, tables, onSel
       api.runQuery(`SELECT COUNT(*) AS cnt FROM ${schema}.${name}`),
     ])
       .then(([info, data, countData]) => {
+        if (myRequest !== requestIdRef.current) return;
         setColumns(info.columns);
         setPreview(data);
         if (countData.rows && countData.rows[0]) {
           setRowCount(countData.rows[0][0]);
         }
       })
-      .catch((e) => setError(e.message || "Failed to load table data"))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (myRequest !== requestIdRef.current) return;
+        setError(e.message || "Failed to load table data");
+      })
+      .finally(() => {
+        if (myRequest !== requestIdRef.current) return;
+        setLoading(false);
+      });
   }, [selectedTable]);
 
   function handleColumnClick(colName) {
@@ -107,11 +114,21 @@ export default function TablesPanel({ selectedTable, onQueryTable, tables, onSel
     const newDir = sortCol === colName && sortDir === "ASC" ? "DESC" : "ASC";
     setSortCol(colName);
     setSortDir(newDir);
+    const myRequest = ++requestIdRef.current;
     setLoading(true);
     api.runQuery(`SELECT * FROM ${schema}.${name} ORDER BY "${colName}" ${newDir} LIMIT 100`)
-      .then((data) => setPreview(data))
-      .catch((e) => setError(e.message || "Failed to sort table"))
-      .finally(() => setLoading(false));
+      .then((data) => {
+        if (myRequest !== requestIdRef.current) return;
+        setPreview(data);
+      })
+      .catch((e) => {
+        if (myRequest !== requestIdRef.current) return;
+        setError(e.message || "Failed to sort table");
+      })
+      .finally(() => {
+        if (myRequest !== requestIdRef.current) return;
+        setLoading(false);
+      });
   }
 
   async function loadStats() {

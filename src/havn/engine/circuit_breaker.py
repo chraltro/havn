@@ -74,12 +74,15 @@ class CircuitBreaker:
         recovery_timeout: float = 60.0,
         backoff_base: float = 2.0,
         max_backoff: float = 60.0,
+        failure_window_seconds: float = 600.0,
     ) -> None:
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.backoff_base = backoff_base
         self.max_backoff = max_backoff
+        self.failure_window_seconds = failure_window_seconds
         self._circuits: dict[str, _CircuitEntry] = {}
+        self._open_attempts: dict[str, int] = {}
         self._lock = threading.Lock()
 
     def _get_entry(self, name: str) -> _CircuitEntry:
@@ -132,29 +135,45 @@ class CircuitBreaker:
         return result
 
     def _record_failure(self, name: str) -> None:
+        now = time.time()
         with self._lock:
             entry = self._get_entry(name)
+            # Decay: forget failures older than the window so a script that
+            # fails once a week never silently accumulates into a permanent
+            # open circuit.
+            if (
+                entry.last_failure_at
+                and (now - entry.last_failure_at) > self.failure_window_seconds
+                and entry.state == CircuitState.CLOSED
+            ):
+                entry.failure_count = 0
             entry.failure_count += 1
-            entry.last_failure_at = time.time()
+            entry.last_failure_at = now
             entry.consecutive_successes = 0
 
             if entry.state == CircuitState.HALF_OPEN:
-                # Probe failed — re-open immediately
+                attempts = self._open_attempts.get(name, 0) + 1
+                self._open_attempts[name] = attempts
                 entry.state = CircuitState.OPEN
-                entry.opens_at = time.time() + self.recovery_timeout
+                base = self.recovery_timeout * (self.backoff_base ** (attempts - 1))
+                jitter = random.random() * min(base, 1.0)
+                entry.opens_at = now + min(base + jitter, self.max_backoff)
                 logger.warning(
-                    "Circuit '%s' probe failed — re-opened (failures=%d)",
+                    "Circuit '%s' probe failed. Re-opened (failures=%d, attempt=%d)",
                     name,
                     entry.failure_count,
+                    attempts,
                 )
             elif entry.failure_count >= self.failure_threshold:
+                attempts = self._open_attempts.get(name, 0) + 1
+                self._open_attempts[name] = attempts
                 entry.state = CircuitState.OPEN
-                entry.opens_at = time.time() + self.recovery_timeout
+                entry.opens_at = now + self.recovery_timeout
                 logger.warning(
                     "Circuit '%s' opened after %d failures. Recovery at +%ds.",
                     name,
                     entry.failure_count,
-                    self.recovery_timeout,
+                    int(entry.opens_at - now),
                 )
 
     def _record_success(self, name: str) -> None:
@@ -163,11 +182,11 @@ class CircuitBreaker:
             entry.consecutive_successes += 1
 
             if entry.state == CircuitState.HALF_OPEN:
-                # Probe succeeded — close the circuit
                 entry.state = CircuitState.CLOSED
                 entry.failure_count = 0
                 entry.last_failure_at = 0.0
                 entry.opens_at = 0.0
+                self._open_attempts.pop(name, None)
                 logger.info("Circuit '%s' closed after successful probe.", name)
 
     def reset(self, name: str) -> None:
@@ -179,6 +198,7 @@ class CircuitBreaker:
             entry.last_failure_at = 0.0
             entry.opens_at = 0.0
             entry.consecutive_successes = 0
+            self._open_attempts.pop(name, None)
 
     def get_all_states(self) -> list[dict[str, Any]]:
         """Return a snapshot of all circuit states."""

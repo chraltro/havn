@@ -26,7 +26,11 @@ function loadFavorites() {
 }
 
 function saveFavorites(ids) {
-  localStorage.setItem(FAVORITES_KEY, JSON.stringify(ids));
+  try {
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(ids));
+  } catch {
+    /* ignore quota errors */
+  }
 }
 
 export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {

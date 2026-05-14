@@ -371,35 +371,66 @@ def connector_health_endpoint(
 # --- Webhook receive ---
 
 
+def _verify_webhook_secret(request: Request, webhook_name: str) -> None:
+    """Verify webhook secret via header. Fails closed unless explicitly opened."""
+    import hmac
+    import os as _os
+
+    secret_env = f"HAVN_WEBHOOK_SECRET_{webhook_name.upper()}"
+    expected = _os.environ.get(secret_env) or _os.environ.get("HAVN_WEBHOOK_SECRET")
+    if expected:
+        provided = (
+            request.headers.get("x-havn-webhook-secret")
+            or request.headers.get("x-webhook-secret")
+            or ""
+        )
+        if not provided or not hmac.compare_digest(provided, expected):
+            raise HTTPException(401, "Invalid or missing webhook secret")
+        return
+    if _os.environ.get("HAVN_WEBHOOK_OPEN", "").lower() in ("1", "true", "yes"):
+        return
+    raise HTTPException(
+        401,
+        f"Webhook authentication required. Set {secret_env} or HAVN_WEBHOOK_SECRET, "
+        "or set HAVN_WEBHOOK_OPEN=true to allow unauthenticated webhooks.",
+    )
+
+
 @router.post("/api/webhook/{webhook_name}")
 async def receive_webhook(
     request: Request, webhook_name: str, conn: DbConn
 ) -> dict:
-    """Receive webhook data and store it in the inbox table."""
+    """Receive webhook data and store it in the inbox table.
+
+    Authentication: requires shared secret via X-Havn-Webhook-Secret header
+    matching HAVN_WEBHOOK_SECRET_<NAME> or HAVN_WEBHOOK_SECRET env var. Set
+    HAVN_WEBHOOK_OPEN=true to disable (development only).
+    """
     _validate_identifier(webhook_name, "webhook name")
+    _verify_webhook_secret(request, webhook_name)
 
     body = await request.body()
+    if len(body) > 5_000_000:
+        raise HTTPException(413, "Webhook payload too large")
     try:
         payload = json.loads(body)
     except Exception:
         raise HTTPException(400, "Invalid JSON payload")
 
-    table = f"landing.{webhook_name}_inbox"
+    safe_name = webhook_name
+    qualified_table = f'landing."{safe_name}_inbox"'
     conn.execute("CREATE SCHEMA IF NOT EXISTS landing")
     conn.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {table} (
-            id VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
-            received_at TIMESTAMP DEFAULT current_timestamp,
-            payload JSON
-        )
-    """
+        f"CREATE TABLE IF NOT EXISTS {qualified_table} ("
+        "id VARCHAR DEFAULT gen_random_uuid()::VARCHAR, "
+        "received_at TIMESTAMP DEFAULT current_timestamp, "
+        "payload JSON)"
     )
     conn.execute(
-        f"INSERT INTO {table} (payload) VALUES (?::JSON)",
+        f"INSERT INTO {qualified_table} (payload) VALUES (?::JSON)",
         [json.dumps(payload)],
     )
-    return {"status": "received", "table": table}
+    return {"status": "received", "table": f"landing.{safe_name}_inbox"}
 
 
 # --- CDC Status ---

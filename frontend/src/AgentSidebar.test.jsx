@@ -117,7 +117,7 @@ describe("AgentSidebar", () => {
     await new Promise((r) => setTimeout(r, 10));
     const ws = MockWebSocket.instances[0];
     expect(ws.sentMessages.length).toBeGreaterThanOrEqual(1);
-    expect(ws.sentMessages[0]).toEqual({
+    expect(ws.sentMessages[0]).toMatchObject({
       type: "start",
       agent: "claude",
     });

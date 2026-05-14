@@ -60,9 +60,12 @@ def _execute_incremental(
             f"WHERE {wm} > (SELECT COALESCE(MAX({wm}), '1900-01-01') FROM {{this}})"
         )
     if exists and incremental_filter:
-        # Replace {this} with the target table name
+        # Replace {this} with the target table name. Wrap the user query in
+        # a subquery so trailing clauses (GROUP BY / ORDER BY / LIMIT / ;)
+        # don't produce malformed SQL when the filter is appended.
         filter_clause = incremental_filter.replace("{this}", model.full_name)
-        query = f"{query}\n{filter_clause}"
+        inner = query.rstrip().rstrip(";").rstrip()
+        query = f"SELECT * FROM (\n{inner}\n) _havn_src\n{filter_clause}"
 
     strategy = model.incremental_strategy
 
@@ -75,7 +78,14 @@ def _execute_incremental(
         conn.execute(f"INSERT INTO {model.full_name}\n{query}")
     else:
         # Strategies that need staging: delete+insert, merge
-        keys = [k.strip() for k in model.unique_key.split(",")]
+        keys = [k.strip() for k in model.unique_key.split(",") if k.strip()]
+        if not keys:
+            raise ValueError(
+                f"Model {model.full_name}: incremental strategy '{strategy}' requires a non-empty unique_key"
+            )
+        for k in keys:
+            validate_identifier(k, "unique_key column")
+        validate_identifier(model.name, "staging table name")
         staging_name = f"_havn_staging_{model.name}"
 
         # Create staging table with new data

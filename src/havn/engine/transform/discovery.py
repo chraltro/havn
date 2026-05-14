@@ -48,11 +48,22 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         owner = parse_owner(sql)
         source_freshness = parse_source_freshness(sql)
         query = strip_config_comments(sql)
-        if not depends:
-            folder_schema_tmp = sql_file.relative_to(transform_dir).parent.name or "public"
-            own_schema_tmp = config.get("schema", folder_schema_tmp)
-            own_name_tmp = sql_file.stem
-            depends = extract_table_refs(query, exclude=f"{own_schema_tmp}.{own_name_tmp}")
+        folder_schema_tmp = sql_file.relative_to(transform_dir).parent.name or "public"
+        own_schema_tmp = config.get("schema", folder_schema_tmp)
+        own_name_tmp = sql_file.stem
+        auto_refs = extract_table_refs(
+            query, exclude=f"{own_schema_tmp}.{own_name_tmp}"
+        )
+        if depends:
+            merged = list(depends)
+            seen = set(depends)
+            for ref in auto_refs:
+                if ref not in seen:
+                    merged.append(ref)
+                    seen.add(ref)
+            depends = merged
+        else:
+            depends = auto_refs
 
         # Schema from folder name (convention) or config override
         rel = sql_file.relative_to(transform_dir)

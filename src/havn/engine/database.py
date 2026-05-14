@@ -69,16 +69,24 @@ def connect(
         threads: Max DuckDB threads (default: half of CPU cores).
         project_dir: If provided, auto-register macros from ``project_dir/macros/``.
     """
+    import os
+
     db_path = str(db_path)
     conn = duckdb.connect(db_path, read_only=read_only)
-    conn.execute("SET enable_progress_bar = true")
+    if _progress_bar_enabled():
+        conn.execute("SET enable_progress_bar = true")
+    else:
+        try:
+            conn.execute("SET enable_progress_bar = false")
+        except Exception:
+            pass
 
     if memory_limit:
         resolved = _resolve_memory_limit(memory_limit)
         conn.execute(f"SET memory_limit = '{resolved}'")
 
-    import os
-    max_threads = threads if (threads is not None and threads > 0) else max(1, os.cpu_count() // 2)
+    cpu = os.cpu_count() or 2
+    max_threads = threads if (threads is not None and threads > 0) else max(1, cpu // 2)
     conn.execute(f"SET threads = {max_threads}")
 
     if project_dir is not None:

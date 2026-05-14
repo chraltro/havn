@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+
+_MODEL_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
+
+
+def _is_safe_model_name(name: str) -> bool:
+    return bool(name) and len(name) <= 200 and bool(_MODEL_NAME_RE.match(name))
 
 from havn.server.deps import (
     DbConn,
@@ -287,6 +294,8 @@ def model_to_notebook_endpoint(
         nb = model_to_notebook(
             conn, model_name, transform_dir, project_dir / "notebooks"
         )
+        if not _is_safe_model_name(model_name):
+            raise HTTPException(400, "Invalid model name")
         safe_name = model_name.replace(".", "_")
         nb_path = project_dir / "notebooks" / f"debug_{safe_name}.dpnb"
         save_notebook(nb_path, nb)
@@ -346,6 +355,8 @@ def debug_notebook_endpoint(
             error_message=error_message,
             assertion_failures=assertion_failures,
         )
+        if not _is_safe_model_name(model_name):
+            raise HTTPException(400, "Invalid model name")
         safe_name = model_name.replace(".", "_")
         nb_path = project_dir / "notebooks" / f"debug_{safe_name}.dpnb"
         save_notebook(nb_path, nb)

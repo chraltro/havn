@@ -36,7 +36,8 @@ class DuckDBBackend:
 
         import os
         threads = self._config.threads
-        max_threads = threads if (threads is not None and threads > 0) else max(1, os.cpu_count() // 2)
+        cpu = os.cpu_count() or 2
+        max_threads = threads if (threads is not None and threads > 0) else max(1, cpu // 2)
         conn.execute(f"SET threads = {max_threads}")
 
         if self._project_dir is not None:

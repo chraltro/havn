@@ -110,13 +110,19 @@ _pipeline_state = {
     "finished": False,   # True when pipeline completes (events still available)
 }
 _pipeline_lock = threading.Lock()
+_pipeline_cond = threading.Condition(_pipeline_lock)
 
 _STALE_TIMEOUT = 600  # 10 minutes
 
 
 def _start_operation(operation: str, label: str, target_fn, args: tuple) -> dict:
-    """Start a background operation. Returns status dict."""
-    with _pipeline_lock:
+    """Start a background operation. Returns status dict.
+
+    Atomic check-and-set under a single lock acquisition: returns
+    'already_running' if a pipeline is in progress, otherwise reserves
+    the slot and starts the worker thread.
+    """
+    with _pipeline_cond:
         if _pipeline_state["running"]:
             return {
                 "status": "already_running",
@@ -127,10 +133,11 @@ def _start_operation(operation: str, label: str, target_fn, args: tuple) -> dict
         _pipeline_state["running"] = True
         _pipeline_state["operation"] = operation
         _pipeline_state["operation_label"] = label
-        _pipeline_state["stream_name"] = label  # backward compat
+        _pipeline_state["stream_name"] = label
         _pipeline_state["started_at"] = time.time()
         _pipeline_state["events"] = []
         _pipeline_state["finished"] = False
+        _pipeline_cond.notify_all()
 
     t = threading.Thread(target=target_fn, args=args, daemon=True)
     t.start()
@@ -138,10 +145,11 @@ def _start_operation(operation: str, label: str, target_fn, args: tuple) -> dict
 
 
 def _emit(event_type: str, data: dict):
-    """Append an event to the pipeline event buffer."""
+    """Append an event to the pipeline event buffer and wake SSE listeners."""
     data["ts"] = time.time()
-    with _pipeline_lock:
+    with _pipeline_cond:
         _pipeline_state["events"].append({"event": event_type, "data": data})
+        _pipeline_cond.notify_all()
 
 
 def _finish_operation():
@@ -151,9 +159,10 @@ def _finish_operation():
         _get_shared_conn().execute("FORCE CHECKPOINT")
     except Exception:
         pass
-    with _pipeline_lock:
+    with _pipeline_cond:
         _pipeline_state["running"] = False
         _pipeline_state["finished"] = True
+        _pipeline_cond.notify_all()
 
 
 # --- Background thread: Lint ---
@@ -1190,32 +1199,7 @@ def start_stream(request: Request, stream_name: str, force: bool = False) -> dic
     """Start a pipeline in a background thread. Returns immediately."""
     user = _require_permission(request, "execute")
 
-    with _pipeline_lock:
-        if _pipeline_state["running"]:
-            return {"status": "already_running", "stream_name": _pipeline_state["stream_name"]}
-
-    _cancel_flag.clear()
     logger.info("Stream start requested: %s (force=%s)", stream_name, force)
-
-    # Audit pipeline start
-    try:
-        from havn.engine.audit import log_audit
-        from havn.server.deps import _get_shared_conn
-
-        shared = _get_shared_conn()
-        audit_cur = cursor_for(shared)
-        client_ip = request.client.host if request.client else None
-        log_audit(
-            audit_cur,
-            user=user.get("username", "anonymous"),
-            action="transform",
-            resource=stream_name,
-            detail=f"stream started (force={force})",
-            ip_address=client_ip,
-        )
-        audit_cur.close()
-    except Exception:
-        logger.debug("Failed to write audit log for stream start", exc_info=True)
 
     config = _get_config()
     if stream_name not in config.streams:
@@ -1226,24 +1210,35 @@ def start_stream(request: Request, stream_name: str, force: bool = False) -> dic
     db_path_str = str(_get_db_path())
     project_dir = _get_project_dir()
 
-    # Initialize pipeline state
-    with _pipeline_lock:
-        _pipeline_state["running"] = True
-        _pipeline_state["operation"] = "stream"
-        _pipeline_state["operation_label"] = stream_name
-        _pipeline_state["stream_name"] = stream_name
-        _pipeline_state["started_at"] = time.time()
-        _pipeline_state["events"] = []
-        _pipeline_state["finished"] = False
+    try:
+        from havn.engine.audit import log_audit
+        from havn.server.deps import _get_shared_conn
 
-    # Start background thread
-    t = threading.Thread(
-        target=_run_pipeline_thread,
-        args=(stream_name, stream_config, project_dir, db_path_str, force, user),
-        daemon=True,
+        shared = _get_shared_conn()
+        audit_cur = cursor_for(shared)
+        client_ip = request.client.host if request.client else None
+        try:
+            log_audit(
+                audit_cur,
+                user=user.get("username", "anonymous"),
+                action="transform",
+                resource=stream_name,
+                detail=f"stream started (force={force})",
+                ip_address=client_ip,
+            )
+        finally:
+            audit_cur.close()
+    except Exception:
+        logger.debug("Failed to write audit log for stream start", exc_info=True)
+
+    result = _start_operation(
+        "stream",
+        stream_name,
+        _run_pipeline_thread,
+        (stream_name, stream_config, project_dir, db_path_str, force, user),
     )
-    t.start()
-
+    if result.get("status") == "already_running":
+        return {"status": "already_running", "stream_name": _pipeline_state["stream_name"]}
     return {"status": "started", "operation": "stream", "stream_name": stream_name}
 
 
@@ -1317,30 +1312,33 @@ async def stream_events_sse(request: Request, from_event: int = 0):
         last_sent = from_event
 
         while True:
-            with _pipeline_lock:
-                events = _pipeline_state["events"]
+            with _pipeline_cond:
+                # Block until there are new events or the pipeline finishes.
+                while (
+                    last_sent >= len(_pipeline_state["events"])
+                    and _pipeline_state["running"]
+                    and not _pipeline_state["finished"]
+                ):
+                    notified = _pipeline_cond.wait(timeout=15.0)
+                    if not notified:
+                        break
+                events = list(_pipeline_state["events"])
                 finished = _pipeline_state["finished"]
                 running = _pipeline_state["running"]
 
-            # Send any new events
             if last_sent < len(events):
-                for evt in events[last_sent:]:
+                batch = events[last_sent:]
+                last_sent = len(events)
+                for evt in batch:
                     payload = _json.dumps(evt["data"])
                     yield f"event: {evt['event']}\ndata: {payload}\n\n"
-                last_sent = len(events)
 
-            # If pipeline is finished and we've sent everything, we're done
             if finished and last_sent >= len(events):
                 break
 
-            # If no pipeline has run (not running, not finished, no events), close immediately
             if not running and not finished and len(events) == 0:
                 break
 
-            # Poll for new events
-            time.sleep(0.3)
-
-            # Keepalive
             yield ": keepalive\n\n"
 
     return StreamingResponse(
@@ -1391,9 +1389,10 @@ def get_active_stream(request: Request) -> dict:
         elapsed = time.time() - started_at
         if elapsed > _STALE_TIMEOUT:
             logger.warning("Clearing stale active stream (%.0fs old)", elapsed)
-            with _pipeline_lock:
+            with _pipeline_cond:
                 _pipeline_state["running"] = False
                 _pipeline_state["finished"] = True
+                _pipeline_cond.notify_all()
             return {"running": False, "operation": operation, "operation_label": operation_label,
                     "stream_name": stream_name, "started_at": started_at,
                     "total_events": total_events, "finished": True,
@@ -1459,41 +1458,38 @@ async def run_stream_sse(
     db_path_str = str(_get_db_path())
     project_dir = _get_project_dir()
 
-    # Start the pipeline in the background (if not already running)
-    with _pipeline_lock:
-        if not _pipeline_state["running"]:
-            _pipeline_state["running"] = True
-            _pipeline_state["operation"] = "stream"
-            _pipeline_state["operation_label"] = stream_name
-            _pipeline_state["stream_name"] = stream_name
-            _pipeline_state["started_at"] = time.time()
-            _pipeline_state["events"] = []
-            _pipeline_state["finished"] = False
+    _start_operation(
+        "stream",
+        stream_name,
+        _run_pipeline_thread,
+        (stream_name, stream_config, project_dir, db_path_str, force, user),
+    )
 
-            t = threading.Thread(
-                target=_run_pipeline_thread,
-                args=(stream_name, stream_config, project_dir, db_path_str, force, user),
-                daemon=True,
-            )
-            t.start()
-
-    # Now stream events (same logic as /api/stream/events)
     def _generate():
         import json as _json
 
         last_sent = 0
 
         while True:
-            with _pipeline_lock:
-                events = _pipeline_state["events"]
+            with _pipeline_cond:
+                while (
+                    last_sent >= len(_pipeline_state["events"])
+                    and _pipeline_state["running"]
+                    and not _pipeline_state["finished"]
+                ):
+                    notified = _pipeline_cond.wait(timeout=15.0)
+                    if not notified:
+                        break
+                events = list(_pipeline_state["events"])
                 finished = _pipeline_state["finished"]
                 running = _pipeline_state["running"]
 
             if last_sent < len(events):
-                for evt in events[last_sent:]:
+                batch = events[last_sent:]
+                last_sent = len(events)
+                for evt in batch:
                     payload = _json.dumps(evt["data"])
                     yield f"event: {evt['event']}\ndata: {payload}\n\n"
-                last_sent = len(events)
 
             if finished and last_sent >= len(events):
                 break
@@ -1501,7 +1497,6 @@ async def run_stream_sse(
             if not running and not finished and len(events) == 0:
                 break
 
-            time.sleep(0.3)
             yield ": keepalive\n\n"
 
     return StreamingResponse(

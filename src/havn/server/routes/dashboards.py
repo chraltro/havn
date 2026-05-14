@@ -139,23 +139,32 @@ def _execute_widget_query(
     params: list = []
     where_clauses: list[str] = []
 
+    import re
+    _ASCII_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
     for col, val in filters.items():
-        # Validate column name to prevent injection
-        if not col.replace("_", "").replace(".", "").isalnum():
+        if not isinstance(col, str) or not _ASCII_IDENT_RE.match(col):
             continue
         params.append(val)
-        where_clauses.append(f'"{col}" = ${len(params)}')
+        if "." in col:
+            schema_, name_ = col.split(".", 1)
+            where_clauses.append(f'"{schema_}"."{name_}" = ${len(params)}')
+        else:
+            where_clauses.append(f'"{col}" = ${len(params)}')
 
-    # Substitute ${param_name} placeholders with positional params
-    import re
     param_pattern = re.compile(r"\$\{(\w+)\}")
+    unresolved: list[str] = []
+
     def _replace_param(m):
         name = m.group(1)
         if name in parameters:
             params.append(parameters[name])
             return f"${len(params)}"
-        return m.group(0)  # leave unresolved
+        unresolved.append(name)
+        return "NULL"
+
     base_sql = param_pattern.sub(_replace_param, base_sql)
+    if unresolved:
+        logger.warning("Dashboard query had unresolved parameters: %s", unresolved)
 
     if where_clauses:
         # Try to inject WHERE into the base SQL before GROUP BY/ORDER BY/LIMIT

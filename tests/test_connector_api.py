@@ -158,11 +158,13 @@ def test_remove_nonexistent(client):
     assert resp.status_code == 404
 
 
-def test_webhook_endpoint(client, project):
-    """POST /api/webhook/{name} should store data."""
+def test_webhook_endpoint(client, project, monkeypatch):
+    """POST /api/webhook/{name} should store data when authenticated."""
+    monkeypatch.setenv("HAVN_WEBHOOK_SECRET", "test-secret-123")
     resp = client.post(
         "/api/webhook/test_events",
         json={"event": "signup", "user_id": 42},
+        headers={"X-Havn-Webhook-Secret": "test-secret-123"},
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -173,6 +175,37 @@ def test_webhook_endpoint(client, project):
     resp2 = client.post("/api/query", json={"sql": "SELECT COUNT(*) FROM landing.test_events_inbox"})
     assert resp2.status_code == 200
     assert resp2.json()["rows"][0][0] == 1
+
+
+def test_webhook_rejected_without_secret(client, project):
+    """POST /api/webhook/{name} must require auth when no env var set."""
+    resp = client.post(
+        "/api/webhook/test_events",
+        json={"event": "signup"},
+    )
+    assert resp.status_code == 401
+
+
+def test_webhook_rejected_wrong_secret(client, project, monkeypatch):
+    """Wrong secret should be rejected."""
+    monkeypatch.setenv("HAVN_WEBHOOK_SECRET", "real-secret")
+    resp = client.post(
+        "/api/webhook/test_events",
+        json={"event": "signup"},
+        headers={"X-Havn-Webhook-Secret": "wrong-secret"},
+    )
+    assert resp.status_code == 401
+
+
+def test_webhook_open_mode(client, project, monkeypatch):
+    """HAVN_WEBHOOK_OPEN=true allows unauthenticated webhooks (dev only)."""
+    monkeypatch.setenv("HAVN_WEBHOOK_OPEN", "true")
+    monkeypatch.delenv("HAVN_WEBHOOK_SECRET", raising=False)
+    resp = client.post(
+        "/api/webhook/open_test",
+        json={"event": "ping"},
+    )
+    assert resp.status_code == 200
 
 
 def test_regenerate_connector(client, project):

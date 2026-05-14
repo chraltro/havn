@@ -274,16 +274,20 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
     setAgentStates((prev) => ({ ...prev, [agentId]: typeof updater === "function" ? updater(prev[agentId]) : { ...prev[agentId], ...updater } }));
   }, []);
 
-  // Persist agent messages to sessionStorage
+  // Persist agent messages to sessionStorage (debounced to avoid serializing
+  // on every streaming chunk).
   useEffect(() => {
-    try {
-      const toSave = {};
-      for (const [id, state] of Object.entries(agentStates)) {
-        const msgs = state.messages || [];
-        toSave[id] = { messages: msgs.length > 200 ? msgs.slice(-200) : msgs };
-      }
-      sessionStorage.setItem('havn_agent_messages', JSON.stringify(toSave));
-    } catch { /* storage full - ignore */ }
+    const timer = setTimeout(() => {
+      try {
+        const toSave = {};
+        for (const [id, state] of Object.entries(agentStates)) {
+          const msgs = state.messages || [];
+          toSave[id] = { messages: msgs.length > 200 ? msgs.slice(-200) : msgs };
+        }
+        sessionStorage.setItem('havn_agent_messages', JSON.stringify(toSave));
+      } catch { /* quota exceeded or session disabled */ }
+    }, 500);
+    return () => clearTimeout(timer);
   }, [agentStates]);
 
   // Current agent shorthand
