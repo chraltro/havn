@@ -1,6 +1,6 @@
-# havn — Data in safe waters
+# havn -- Data in safe waters
 
-havn is a self-hosted data platform — a lightweight, Nordic alternative to Databricks and Snowflake. It uses **DuckDB** for OLAP analytics, **plain SQL** for transforms, and **Python** for ingest/export scripts. All data lives in a single `warehouse.duckdb` file. No data leaves your machine.
+havn is a self-hosted data platform -- a lightweight, Nordic alternative to Databricks and Snowflake. It uses **DuckDB** for OLAP analytics, **plain SQL** for transforms, and **Python** for ingest/export scripts. All data lives in a single `warehouse.duckdb` file. No data leaves your machine.
 
 ## Quick Start
 
@@ -27,15 +27,15 @@ docker run -v $(pwd):/project -p 3000:3000 ghcr.io/chraltro/havn serve
 | **Setup time** | 1 minute | Hours | Hours | Hours |
 | **Cost** | Free | $$$ | $ - $$$ | $$$ |
 | **SQL dialect** | DuckDB (Postgres-compatible) | Spark SQL | Varies | Snowflake SQL |
-| **Templating** | None — plain SQL | Jinja | Jinja | None |
+| **Templating** | None -- plain SQL | Jinja | Jinja | None |
 
 ## Features
 
 ### Transform Engine
-Plain SQL with `-- config:` and `-- depends_on:` comments. Automatic DAG resolution with change detection via SHA256 hashing. No Jinja, no templating — just SQL.
+Plain SQL with `@config` directives. Dependencies are auto-extracted from `FROM` and `JOIN` clauses, so the DAG builds itself. SHA256 content hashing means only changed models rebuild. No Jinja, no templating, just SQL.
 
 ### Data Quality
-Inline assertions (`-- assert: row_count > 0, unique(id)`), YAML contracts, column profiling, and freshness monitoring.
+Inline assertions (`@assert row_count > 0`, `@assert unique(id)`), YAML contracts, column profiling, and freshness monitoring.
 
 ### Connectors
 Pre-built connectors for PostgreSQL, MySQL, Stripe, Shopify, Google Sheets, REST APIs, S3/GCS, CSV, and webhooks.
@@ -65,10 +65,10 @@ Ingest Scripts (.py / .dpnb)
    (APIs, DBs, files)                                    (reports, APIs)
 ```
 
-- **landing** — Raw data ingested from external sources via Python scripts or notebooks
-- **bronze** — Light cleanup: column renaming, type casting, deduplication
-- **silver** — Business logic: joins, aggregations, calculations
-- **gold** — Consumption-ready tables for dashboards, APIs, and reports
+- **landing** -- Raw data ingested from external sources via Python scripts or notebooks
+- **bronze** -- Light cleanup: column renaming, type casting, deduplication
+- **silver** -- Business logic: joins, aggregations, calculations
+- **gold** -- Consumption-ready tables for dashboards, APIs, and reports
 
 ## Documentation
 

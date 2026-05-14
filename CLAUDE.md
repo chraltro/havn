@@ -1,8 +1,8 @@
-# CLAUDE.md — Agent Instructions for havn
+# CLAUDE.md -- Agent Instructions for havn
 
 ## What is havn?
 
-havn is a self-hosted data platform — a Nordic alternative to Databricks/Snowflake. It uses **DuckDB** for OLAP analytics, **plain SQL** for transforms, and **Python** for ingest/export scripts. All data lives in a single `warehouse.duckdb` file. No data leaves the machine. Data in safe waters.
+havn is a self-hosted data platform -- a Nordic alternative to Databricks/Snowflake. It uses **DuckDB** for OLAP analytics, **plain SQL** for transforms, and **Python** for ingest/export scripts. All data lives in a single `warehouse.duckdb` file. No data leaves the machine. Data in safe waters.
 
 ## Quick Reference
 
@@ -135,8 +135,7 @@ Internal DuckDB schemas:
 Every `.sql` file in `transform/` follows this convention:
 
 ```sql
--- config: materialized=table, schema=silver
--- depends_on: bronze.customers, bronze.orders
+@config materialized=table, schema=silver
 
 SELECT
     c.customer_id,
@@ -147,11 +146,14 @@ LEFT JOIN bronze.orders o ON c.customer_id = o.customer_id
 GROUP BY 1, 2
 ```
 
-- `-- config:` sets materialization (`view` or `table`) and schema
-- `-- depends_on:` declares upstream dependencies (used for DAG ordering)
-- Folder name is the default schema (e.g., `transform/bronze/` → `schema=bronze`)
-- No Jinja, no templating — just plain SQL (use Python macros for reusable logic)
-- Change detection uses SHA256 hash of normalized SQL content
+- `@config` sets materialization (`view` / `table` / `incremental`) and schema. Other useful keys: `unique_key`, `incremental_strategy` (`delete+insert` / `merge` / `append`), `incremental_filter`, `partition_by`.
+- Dependencies are auto-extracted from `FROM` and `JOIN` clauses via `sqlglot`. You only need `@depends_on` when the parser can't see the reference (e.g. a model name passed through a function or constructed in a string).
+- Folder name is the default schema (e.g., `transform/bronze/` → `schema=bronze`); override with `schema=` in `@config`.
+- Other directives: `@description <text>` for model docs, `@assert <expr>` for data-quality assertions (one per line, runs after build), `@col <name>: <text>` for column-level docs.
+- Parenthesised form is also accepted: `@config(materialized=table, schema=silver)`.
+- Legacy `-- config:` / `-- depends_on:` / `-- assert:` lines still parse (back-compat) but new code should use the `@`-prefixed form.
+- No Jinja, no templating -- just plain SQL (use Python macros for reusable logic).
+- Change detection uses SHA256 hash of normalized SQL content + transitive upstream hashes.
 
 ### Python SQL Macros
 
@@ -197,9 +199,9 @@ def active_users(status: str) -> list:
 SELECT * FROM active_users('active')
 ```
 
-- `schema=` declares output columns and DuckDB types — required (or inferred from first row)
+- `schema=` declares output columns and DuckDB types -- required (or inferred from first row)
 - Each dict in the returned list is one row; keys are column names
-- No pyarrow required — uses DuckDB's native SQL TABLE MACRO + json_each internally
+- No pyarrow required -- uses DuckDB's native SQL TABLE MACRO + json_each internally
 
 ### Python Script Convention
 
@@ -263,9 +265,9 @@ Tests use temporary DuckDB databases (in-memory or tmp files). No external servi
 ### Making Backend Changes
 
 1. Source is in `src/havn/`
-2. CLI commands are in `cli/` — each `@app.command()` function maps to a `havn <command>`
-3. Engine logic is in `engine/` — transform/ is the core SQL DAG engine
-4. API endpoints are in `server/app.py` — FastAPI with Pydantic models
+2. CLI commands are in `cli/` -- each `@app.command()` function maps to a `havn <command>`
+3. Engine logic is in `engine/` -- transform/ is the core SQL DAG engine
+4. API endpoints are in `server/app.py` -- FastAPI with Pydantic models
 5. Run `pytest tests/` after changes
 
 ### Making Frontend Changes
@@ -291,8 +293,7 @@ Tests use temporary DuckDB databases (in-memory or tmp files). No external servi
 Create a `.sql` file in the appropriate `transform/` subdirectory:
 
 ```sql
--- config: materialized=table, schema=gold
--- depends_on: silver.dim_customer
+@config materialized=table, schema=gold
 
 SELECT * FROM silver.dim_customer WHERE active = true
 ```
@@ -301,14 +302,14 @@ Run `havn transform` to build it.
 
 ## MemPalace (Project Memory)
 
-This repo is indexed by MemPalace — 6,823 drawers across 7 rooms (`src`, `frontend`, `testing`, `documentation`, `landing`, `general`, `design`), wing `havn`. Registered as an MCP server (`mempalace`); tools auto-load at session start. Palace data lives in `~/.mempalace/` (outside the repo). The repo-local `mempalace.yaml` + `entities.json` are gitignored.
+This repo is indexed by MemPalace -- 6,823 drawers across 7 rooms (`src`, `frontend`, `testing`, `documentation`, `landing`, `general`, `design`), wing `havn`. Registered as an MCP server (`mempalace`); tools auto-load at session start. Palace data lives in `~/.mempalace/` (outside the repo). The repo-local `mempalace.yaml` + `entities.json` are gitignored.
 
 ### Use it actively
 
-**Before you Grep, Glob, or Read to figure out "where does X live?" or "how does Y work?" — search the palace first.** It is hybrid semantic + BM25 + cross-reference, built for exactly these queries and orders of magnitude cheaper than loading many files.
+**Before you Grep, Glob, or Read to figure out "where does X live?" or "how does Y work?" -- search the palace first.** It is hybrid semantic + BM25 + cross-reference, built for exactly these queries and orders of magnitude cheaper than loading many files.
 
 1. **Session start:** call `mempalace_status` once to see the palace overview, then `mempalace_wake-up` when you need the ~800-token L0/L1 grounding bundle.
-2. **"Where is the X implementation?"** → `mempalace_search "X"` (keep the query short and literal — the retriever does the expansion). Add `wing: "havn"`, and `room: "src"` / `"frontend"` / `"testing"` when you know the area. The returned drawers contain the code verbatim; you usually don't need to Read the file afterwards.
+2. **"Where is the X implementation?"** → `mempalace_search "X"` (keep the query short and literal -- the retriever does the expansion). Add `wing: "havn"`, and `room: "src"` / `"frontend"` / `"testing"` when you know the area. The returned drawers contain the code verbatim; you usually don't need to Read the file afterwards.
 3. **"How does X interact with Y?"** → search for the concept, then follow `mempalace_traverse` / `mempalace_follow_tunnels` on the returned drawers to walk the cross-reference graph.
 4. **Design decisions, rationale, past incidents** → use `mempalace_kg_query` for structured facts; `mempalace_search` for prose (READMEs, `docs/`, `docs/internal/`).
 5. **Recording what you learn:** when you discover something non-obvious during a task (a gotcha, a non-intuitive dependency, a fix rationale), call `mempalace_kg_add` so the next session doesn't rediscover it. When a fact becomes wrong, `mempalace_kg_invalidate` the old one.
@@ -333,7 +334,7 @@ mempalace mine .                             # re-index changed files
 
 ### Guardrails
 
-- Search results are a starting point, not the final truth. **Verify against the current code** before recommending a function, flag, or file path — the palace can lag real-time edits by one mine cycle.
+- Search results are a starting point, not the final truth. **Verify against the current code** before recommending a function, flag, or file path -- the palace can lag real-time edits by one mine cycle.
 - Keep queries short and use the repo's own vocabulary (e.g. `"masking rewriter"`, not `"SQL query rewriting for PII redaction"`). Over-paraphrased queries miss.
 - If the first query misses, try: (a) a shorter variant, (b) adding `room` scope, (c) switching to an exact symbol/filename string. Don't try five variants of the same paraphrase.
 
@@ -344,13 +345,13 @@ mempalace mine .                             # re-index changed files
 - Imports: stdlib → third-party → local (standard Python convention)
 - Rich library for terminal formatting
 - Lazy imports in CLI commands (faster startup)
-- SQLFluff config in `pyproject.toml` — DuckDB dialect, keywords UPPER, identifiers lower
+- SQLFluff config in `pyproject.toml` -- DuckDB dialect, keywords UPPER, identifiers lower
 
 ## Testing Patterns
 
 - Tests use `tmp_path` fixture for temp databases
 - API tests use `httpx.AsyncClient` with FastAPI's `TestClient`
-- No mocking of DuckDB — tests use real (temporary) databases
+- No mocking of DuckDB -- tests use real (temporary) databases
 - Test files mirror source structure: `test_transform.py` tests `engine/transform.py`
 
 ## Common Tasks for Agents
@@ -371,7 +372,7 @@ mempalace mine .                             # re-index changed files
 
 ### "Fix a SQL model"
 1. Edit the `.sql` file in `transform/`
-2. Run `havn transform` — change detection will rebuild only changed models
+2. Run `havn transform` -- change detection will rebuild only changed models
 3. Use `havn transform --force` to rebuild everything
 4. Validate with `havn query "SELECT * FROM schema.table LIMIT 10"`
 

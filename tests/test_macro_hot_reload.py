@@ -3,6 +3,9 @@
 Each test uses real DuckDB in-memory connections and a real FileWatcher thread.
 The 2-second debounce means tests that rely on watchdog events sleep ~2.5s.
 Total test budget: < 30s.
+
+These tests are time-dependent (sleep around watchdog debounce), so they're
+marked slow and skipped by default. Run via `pytest --runslow` or nightly.
 """
 
 from __future__ import annotations
@@ -12,6 +15,8 @@ from pathlib import Path
 
 import duckdb
 import pytest
+
+pytestmark = pytest.mark.slow
 
 
 # ---------------------------------------------------------------------------

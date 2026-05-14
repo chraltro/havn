@@ -94,9 +94,21 @@ function createEventProcessor(
 
         const prefix = totalItems && num ? `(${num}/${totalItems}) ` : "";
         let msg = "";
-        const wallMs = nodeStartTimes[mName] ? Date.now() - nodeStartTimes[mName] : dur;
-        const durVal = wallMs || dur || 0;
-        const durStr = durVal ? `(${(durVal / 1000).toFixed(1)}s)` : "";
+        // Prefer server-reported duration: it measures the actual model run.
+        // wallMs measures from start-event arrival to end-event arrival, which
+        // can be near-zero when SSE events are batched in the same frame and
+        // misleadingly under-reports. Fall back to wallMs only if server didn't
+        // send one.
+        const wallMs = nodeStartTimes[mName] ? Date.now() - nodeStartTimes[mName] : 0;
+        const durVal = (typeof dur === "number" && dur > 0) ? dur : wallMs;
+        // Show ms when sub-second (so a 6.1s job never reads as "0.0s"); two
+        // decimals between 1-10s; one decimal above. Skip entirely when 0.
+        let durStr = "";
+        if (durVal > 0) {
+          if (durVal < 1000) durStr = `(${Math.round(durVal)}ms)`;
+          else if (durVal < 10000) durStr = `(${(durVal / 1000).toFixed(2)}s)`;
+          else durStr = `(${(durVal / 1000).toFixed(1)}s)`;
+        }
         const verb = action === "ingest" ? "Ingested" : action === "export" ? "Exported" : "Built";
         const rowCount = rows || rowsAff || 0;
         const rowStr = rowCount ? `${rowCount.toLocaleString()} rows` : "";
@@ -446,6 +458,12 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
     setRunning(true);
     setRunSummary(null);
     setProgress(0);
+    // Clear any stale "Pipeline complete" hint left from the previous run
+    // so the new run isn't accompanied by an outdated success notification.
+    try {
+      const evt = new CustomEvent('havn_dismiss_completion_hints');
+      window.dispatchEvent(evt);
+    } catch {}
 
     return new Promise<void>(async (resolve) => {
       try {

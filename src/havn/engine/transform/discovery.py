@@ -10,11 +10,15 @@ import duckdb
 
 from havn.engine.sql_analysis import (
     extract_table_refs,
+    parse_assertion_specs,
     parse_assertions,
     parse_column_docs,
     parse_config,
     parse_depends,
     parse_description,
+    parse_grain,
+    parse_owner,
+    parse_source_freshness,
     strip_config_comments,
 )
 from havn.engine.utils import validate_identifier
@@ -39,6 +43,10 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         description = parse_description(sql)
         column_docs = parse_column_docs(sql)
         assertions = parse_assertions(sql)
+        assertion_specs = parse_assertion_specs(sql)
+        grain = parse_grain(sql)
+        owner = parse_owner(sql)
+        source_freshness = parse_source_freshness(sql)
         query = strip_config_comments(sql)
         if not depends:
             folder_schema_tmp = sql_file.relative_to(transform_dir).parent.name or "public"
@@ -59,6 +67,7 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         incremental_strategy = config.get("incremental_strategy", "delete+insert")
         incremental_filter = config.get("incremental_filter")
         partition_by = config.get("partition_by")
+        watermark = config.get("watermark")
 
         models.append(
             SQLModel(
@@ -73,10 +82,15 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
                 description=description,
                 column_docs=column_docs,
                 assertions=assertions,
+                assertion_specs=assertion_specs,
                 unique_key=unique_key,
                 incremental_strategy=incremental_strategy,
                 incremental_filter=incremental_filter,
                 partition_by=partition_by,
+                watermark=watermark,
+                grain=grain,
+                owner=owner,
+                source_freshness=source_freshness,
             )
         )
 

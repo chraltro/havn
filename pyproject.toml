@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "havn"
-version = "0.2.7"
+version = "0.2.18"
 description = "Self-hosted data platform. A Nordic alternative to Databricks/Snowflake. DuckDB + SQL transforms + Python ingest/export. Data in safe waters."
 readme = "README.md"
 license = {text = "BUSL-1.1"}
@@ -43,6 +43,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "pytest-xdist>=3.0",
     "httpx>=0.28.0",
 ]
 snowflake = ["snowflake-connector-python>=3.0"]
@@ -85,6 +86,13 @@ capitalisation_policy = "upper"
 
 [tool.sqlfluff.rules.capitalisation.identifiers]
 capitalisation_policy = "lower"
+
+# RF03 fires "Unqualified reference 'foo' found in single table select" by
+# default. That is idiomatic SQL when only one table is in scope, and the
+# noise drowns out real findings on realistic projects (37 violations on a
+# 12-model project in user testing). Allow unqualified single-table refs.
+[tool.sqlfluff.rules.references.qualification]
+unqualified_single_table_references = "allow"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

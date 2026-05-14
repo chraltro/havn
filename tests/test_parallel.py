@@ -117,6 +117,50 @@ class TestParallelExecution:
         assert len(tiers) == 1
         assert len(tiers[0]) == 1
 
+    def test_parallel_first_run_creates_schemas_without_race(self, tmp_path, transform_dir):
+        """Regression: on the very first transform run, multiple models in
+        tier 1 targeting the same not-yet-existing schema must not race on
+        `CREATE SCHEMA`. Pre-creating schemas on the main connection before
+        dispatching workers is what prevents
+        `Catalog write-write conflict on create with "bronze"`.
+
+        Setup mimics a fresh `havn init` + `havn transform`: warehouse exists
+        but no `bronze` schema, four bronze models all in tier 1 (no deps on
+        each other), so they all dispatch to parallel workers simultaneously.
+        """
+        # Fresh DB, only landing schema exists
+        db_path = tmp_path / "test.duckdb"
+        conn = duckdb.connect(str(db_path))
+        ensure_meta_table(conn)
+        conn.execute("CREATE SCHEMA landing")
+        conn.execute("CREATE TABLE landing.src AS SELECT i AS id FROM range(100) g(i)")
+
+        # Four independent bronze models — all in tier 1, all need bronze schema
+        for name in ("a", "b", "c", "d"):
+            (transform_dir / "bronze" / f"{name}.sql").write_text(
+                f"-- config: materialized=table, schema=bronze\n"
+                f"-- depends_on: landing.src\n\n"
+                f"SELECT id FROM landing.src WHERE id % 4 = "
+                f"{ord(name) - ord('a')}\n"
+            )
+
+        # parallel=True with max_workers=4 forces the race condition
+        results = run_transform(
+            conn, transform_dir,
+            force=True, parallel=True, max_workers=4,
+            db_path=str(db_path),
+        )
+
+        # All four must succeed — the schema-precreate fix means the first
+        # tier doesn't race on CREATE SCHEMA bronze
+        for name in ("a", "b", "c", "d"):
+            assert results[f"bronze.{name}"] == "built", (
+                f"bronze.{name} did not build: status={results.get(f'bronze.{name}')!r}. "
+                "If the schema-precreate fix regressed, you'll see a "
+                "'Catalog write-write conflict' error here."
+            )
+        conn.close()
+
     def test_parallel_error_in_tier_blocks_next(self, db, transform_dir):
         """An error in one tier should block downstream tiers in parallel mode."""
         db.execute("CREATE TABLE landing.good AS SELECT 1 AS id")
@@ -134,6 +178,8 @@ class TestParallelExecution:
 
         results = run_transform(db, transform_dir, force=True, parallel=False)
         assert results["bronze.bad"] == "error"
-        # Downstream should still be attempted (sequential doesn't auto-block),
-        # but it should also error because the source doesn't exist
-        assert results.get("silver.downstream") in ("error", "skipped")
+        # When upstream errors, downstream is now skipped with a
+        # specific "upstream blocked" status — the runner refuses to
+        # build models that depend on a failed upstream so bad data
+        # can't cascade.
+        assert results.get("silver.downstream") in ("error", "skipped", "skipped_upstream_blocked")

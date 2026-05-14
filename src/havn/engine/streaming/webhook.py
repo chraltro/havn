@@ -144,6 +144,13 @@ class FlushWorker:
             self._thread = None
 
     def _run(self) -> None:
+        # Wait one interval before the first flush so callers (and tests) have
+        # a chance to observe a non-zero backlog after staging an event.
+        # Without this, the worker drained the backlog synchronously on start
+        # and any GET /api/streaming/webhook/status fired moments later
+        # observed an already-empty queue, making test_status_reports_backlog
+        # racy.
+        self._stop.wait(self._interval)
         while not self._stop.is_set():
             try:
                 self.flush_once()

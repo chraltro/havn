@@ -192,6 +192,23 @@ def _quote_columns(columns: list[str]) -> str:
     return ", ".join(f'"{c}"' for c in columns)
 
 
+def _row_hash_expr(columns: list[str]) -> str:
+    """Build a deterministic per-row hash expression.
+
+    Casting every column to VARCHAR before hashing avoids the type-comparison
+    drift that bit `EXCEPT` on tables whose temp-rebuilt types differ slightly
+    from the materialised types (e.g. DECIMAL precision on SUMs). Each value
+    is prefixed (`V:` for present, `N` for NULL) so no real value can hash to
+    the same shape as a NULL, and CONCAT_WS keeps column boundaries
+    unambiguous.
+    """
+    parts = ", ".join(
+        f"COALESCE('V:' || \"{c}\"::VARCHAR, 'N')"
+        for c in columns
+    )
+    return f"MD5(CONCAT_WS('|', {parts}))"
+
+
 def diff_model(
     conn: duckdb.DuckDBPyConnection,
     model_sql: str,
@@ -267,21 +284,28 @@ def diff_model(
         )
 
     quoted_common = _quote_columns(common_cols)
+    row_hash = _row_hash_expr(common_cols)
 
-    # Added rows: in new but not in old
+    # Compare via content hash rather than direct EXCEPT. EXCEPT depends on
+    # row type compatibility — when the temp-table column types don't exactly
+    # match the materialised ones (precision drift on DECIMAL/DOUBLE
+    # aggregates, etc.) it reports rows as different even though their values
+    # are the same. Hashing on the VARCHAR projection sidesteps that.
+    new_hashes_sql = f"SELECT {quoted_common}, {row_hash} AS _havn_h FROM _havn_diff_new"
+    old_hashes_sql = f"SELECT {quoted_common}, {row_hash} AS _havn_h FROM {target_ref}"
+
+    # Added rows: hash present in new, absent from old.
     added_sql = (
-        f"SELECT {quoted_common} FROM _havn_diff_new "
-        f"EXCEPT "
-        f"SELECT {quoted_common} FROM {target_ref}"
+        f"SELECT {quoted_common} FROM ({new_hashes_sql}) AS _new "
+        f"WHERE _new._havn_h NOT IN (SELECT _havn_h FROM ({old_hashes_sql}) AS _old)"
     )
     added_count = conn.execute(f"SELECT COUNT(*) FROM ({added_sql}) AS _a").fetchone()[0]
     sample_added = _rows_to_dicts(conn, added_sql, sample_limit)
 
-    # Removed rows: in old but not in new
+    # Removed rows: hash present in old, absent from new.
     removed_sql = (
-        f"SELECT {quoted_common} FROM {target_ref} "
-        f"EXCEPT "
-        f"SELECT {quoted_common} FROM _havn_diff_new"
+        f"SELECT {quoted_common} FROM ({old_hashes_sql}) AS _old "
+        f"WHERE _old._havn_h NOT IN (SELECT _havn_h FROM ({new_hashes_sql}) AS _new)"
     )
     removed_count = conn.execute(f"SELECT COUNT(*) FROM ({removed_sql}) AS _r").fetchone()[0]
     sample_removed = _rows_to_dicts(conn, removed_sql, sample_limit)

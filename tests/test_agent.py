@@ -195,19 +195,236 @@ class TestClaudeAdapter:
 
 
 class TestCodexAdapter:
-    def test_parse_event_with_message(self):
+    def test_parse_agent_message_delta(self):
         from havn.engine.agents.codex_adapter import CodexAdapter
 
         adapter = CodexAdapter()
-        result = adapter._parse_event({"message": "Hello from Codex"})
-        assert result == "Hello from Codex"
+        chunks = adapter._parse_event(
+            {"type": "agent.message.delta", "delta": "Hello "}
+        )
+        assert chunks == [{"type": "text", "content": "Hello "}]
 
-    def test_parse_event_without_message(self):
+    def test_parse_agent_message_marked_final(self):
         from havn.engine.agents.codex_adapter import CodexAdapter
 
         adapter = CodexAdapter()
-        result = adapter._parse_event({"status": "running"})
-        assert '"status"' in result  # JSON serialized
+        chunks = adapter._parse_event(
+            {"type": "agent.message", "message": "Done"}
+        )
+        assert len(chunks) == 1
+        assert chunks[0]["type"] == "text"
+        assert chunks[0]["content"] == "Done"
+        assert chunks[0].get("_final") is True
+
+    def test_parse_error_event(self):
+        from havn.engine.agents.codex_adapter import CodexAdapter
+
+        adapter = CodexAdapter()
+        chunks = adapter._parse_event(
+            {"type": "error", "message": "401 Unauthorized"}
+        )
+        assert chunks == [{"type": "error", "content": "401 Unauthorized"}]
+
+    def test_parse_turn_failed(self):
+        from havn.engine.agents.codex_adapter import CodexAdapter
+
+        adapter = CodexAdapter()
+        chunks = adapter._parse_event(
+            {"type": "turn.failed", "error": {"message": "Failed to refresh token"}}
+        )
+        assert chunks == [{"type": "error", "content": "Failed to refresh token"}]
+
+    def test_parse_ignored_event(self):
+        from havn.engine.agents.codex_adapter import CodexAdapter
+
+        adapter = CodexAdapter()
+        # thread.started / turn.started have no user-facing content
+        assert adapter._parse_event({"type": "thread.started"}) == []
+        assert adapter._parse_event({"type": "turn.started"}) == []
+        assert adapter._parse_event({"type": "turn.completed", "usage": {}}) == []
+
+    def test_parse_item_completed_agent_message(self):
+        """Codex 0.125 emits assistant text via item.completed/agent_message."""
+        from havn.engine.agents.codex_adapter import CodexAdapter
+
+        adapter = CodexAdapter()
+        chunks = adapter._parse_event(
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "Hi"}}
+        )
+        assert chunks == [{"type": "text", "content": "Hi"}]
+
+    def test_parse_file_change_add_emits_write_tool_use(self):
+        """file_change with kind=add should produce a Write tool_use so the
+        sidebar editor reload hook fires."""
+        from havn.engine.agents.codex_adapter import CodexAdapter
+
+        adapter = CodexAdapter()
+        chunks = adapter._parse_event(
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "file_change",
+                    "changes": [{"path": "C:/foo/bar.sql", "kind": "add"}],
+                    "status": "completed",
+                },
+            }
+        )
+        assert len(chunks) == 1
+        assert chunks[0]["type"] == "tool_use"
+        assert chunks[0]["content"] == "Write"
+        assert chunks[0]["tool_input"] == {"file_path": "C:/foo/bar.sql"}
+
+    def test_parse_file_change_update_emits_edit_tool_use(self):
+        from havn.engine.agents.codex_adapter import CodexAdapter
+
+        adapter = CodexAdapter()
+        chunks = adapter._parse_event(
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "file_change",
+                    "changes": [{"path": "C:/foo/bar.sql", "kind": "update"}],
+                },
+            }
+        )
+        assert len(chunks) == 1
+        assert chunks[0]["content"] == "Edit"
+
+    def test_parse_file_change_multiple_paths(self):
+        from havn.engine.agents.codex_adapter import CodexAdapter
+
+        adapter = CodexAdapter()
+        chunks = adapter._parse_event(
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "file_change",
+                    "changes": [
+                        {"path": "a.sql", "kind": "update"},
+                        {"path": "b.sql", "kind": "add"},
+                    ],
+                },
+            }
+        )
+        assert len(chunks) == 2
+        assert chunks[0]["content"] == "Edit"
+        assert chunks[1]["content"] == "Write"
+
+    def test_parse_item_completed_tool_call(self):
+        from havn.engine.agents.codex_adapter import CodexAdapter
+
+        adapter = CodexAdapter()
+        chunks = adapter._parse_event(
+            {
+                "type": "item.completed",
+                "item": {"type": "command_execution", "command": "ls"},
+            }
+        )
+        assert len(chunks) == 1
+        assert chunks[0]["type"] == "tool_use"
+        assert chunks[0]["content"] == "ls"
+
+    def test_filter_benign_stderr_drops_rollout_warning(self):
+        from havn.engine.agents.codex_adapter import _filter_benign_stderr
+
+        noisy = (
+            "2026-04-29T12:30:04.912646Z ERROR codex_core::session: "
+            "failed to record rollout items: thread abc not found"
+        )
+        assert _filter_benign_stderr(noisy) == ""
+
+    def test_filter_benign_stderr_keeps_real_errors(self):
+        from havn.engine.agents.codex_adapter import _filter_benign_stderr
+
+        real = "Error: invalid API key"
+        assert _filter_benign_stderr(real) == real
+
+    def test_filter_benign_stderr_mixed(self):
+        from havn.engine.agents.codex_adapter import _filter_benign_stderr
+
+        mixed = (
+            "ERROR codex_core::session: failed to record rollout items: thread x not found\n"
+            "Error: something actually broke"
+        )
+        assert _filter_benign_stderr(mixed) == "Error: something actually broke"
+
+    def test_resumes_thread_on_second_message(self, monkeypatch, tmp_path):
+        """Follow-up sends should use `codex exec resume <id>` to keep history."""
+        import asyncio
+        import json
+        from havn.engine.agents import codex_adapter as mod
+
+        captured_cmds: list[list[str]] = []
+
+        class FakeStdout:
+            def __init__(self, lines: list[bytes]):
+                self._lines = list(lines)
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if not self._lines:
+                    raise StopAsyncIteration
+                return self._lines.pop(0)
+
+        class FakeStdin:
+            def write(self, data: bytes) -> None:
+                pass
+
+            async def drain(self) -> None:
+                pass
+
+            def close(self) -> None:
+                pass
+
+        class FakeProcess:
+            def __init__(self, thread_id: str):
+                self.stdout = FakeStdout(
+                    [
+                        json.dumps(
+                            {"type": "thread.started", "thread_id": thread_id}
+                        ).encode()
+                        + b"\n",
+                        json.dumps(
+                            {
+                                "type": "item.completed",
+                                "item": {"type": "agent_message", "text": "ok"},
+                            }
+                        ).encode()
+                        + b"\n",
+                    ]
+                )
+                self.stderr = FakeStdout([])
+                self.stdin = FakeStdin()
+                self.returncode = 0
+
+            async def wait(self) -> int:
+                return 0
+
+        async def fake_spawn(cmd, cwd=None, stdin=None):
+            captured_cmds.append(list(cmd))
+            return FakeProcess("thread-abc-123")
+
+        monkeypatch.setattr(mod, "spawn_cli", fake_spawn)
+
+        async def run():
+            adapter = mod.CodexAdapter()
+            await adapter.start_session(str(tmp_path))
+            async for _ in adapter.send_message("hi"):
+                pass
+            async for _ in adapter.send_message("again"):
+                pass
+            return adapter._thread_id
+
+        thread_id = asyncio.run(run())
+        assert thread_id == "thread-abc-123"
+        assert len(captured_cmds) == 2
+        first, second = captured_cmds
+        assert "resume" not in first
+        assert second[1] == "exec"
+        assert second[2] == "resume"
+        assert second[3] == "thread-abc-123"
 
 
 # ---------------------------------------------------------------------------

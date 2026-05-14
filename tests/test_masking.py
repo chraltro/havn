@@ -405,25 +405,54 @@ def test_api_invalid_method(client):
 
 
 def test_query_masking_e2e(client):
-    """Create a policy, then query — viewer sees masked data."""
-    # Create a redact policy on email
+    """Create a policy with explicit admin exemption, then query.
+
+    NB: Since 0.2.13, masking policies default to ``exempted_roles=[]`` when
+    auth is disabled, so this test passes ``exempted_roles=["admin"]``
+    explicitly to verify that admin exemption still works on demand.
+    """
     client.post("/api/masking/policies", json={
         "schema_name": "gold",
         "table_name": "customers",
         "column_name": "email",
         "method": "redact",
+        "exempted_roles": ["admin"],
     })
 
-    # Query (auth disabled → user is admin by default, so exempted)
     resp = client.post("/api/query", json={"sql": "SELECT * FROM gold.customers ORDER BY id"})
     assert resp.status_code == 200
     data = resp.json()
-    # Default local user is admin — should see unmasked
+    # Local user is admin AND admin is explicitly exempted: see unmasked.
     assert data["rows"][0][2] == "alice@example.com"
 
 
 def test_sample_masking_e2e(client):
-    """Sample endpoint applies masking based on schema/table."""
+    """Sample endpoint applies masking based on schema/table.
+
+    Same NB as test_query_masking_e2e: explicit admin exemption required
+    in 0.2.13+.
+    """
+    client.post("/api/masking/policies", json={
+        "schema_name": "gold",
+        "table_name": "customers",
+        "column_name": "email",
+        "method": "redact",
+        "exempted_roles": ["admin"],
+    })
+
+    resp = client.get("/api/tables/gold/customers/sample")
+    assert resp.status_code == 200
+    data = resp.json()
+    emails = [row[2] for row in data["rows"]]
+    assert all("@" in e for e in emails)
+
+
+def test_no_auth_default_does_not_exempt_admin(client):
+    """Regression: 0.2.13 changed the default in no-auth mode.
+
+    A policy created without specifying exempted_roles MUST mask the local
+    admin user, otherwise the policy is silently inert (the prior footgun).
+    """
     client.post("/api/masking/policies", json={
         "schema_name": "gold",
         "table_name": "customers",
@@ -431,10 +460,8 @@ def test_sample_masking_e2e(client):
         "method": "redact",
     })
 
-    # Default user is admin — exempted
-    resp = client.get("/api/tables/gold/customers/sample")
+    resp = client.post("/api/query", json={"sql": "SELECT * FROM gold.customers ORDER BY id"})
     assert resp.status_code == 200
     data = resp.json()
-    # Admin sees unmasked
-    emails = [row[2] for row in data["rows"]]
-    assert all("@" in e for e in emails)
+    # No exemption granted -> admin sees masked (no @-sign in redacted email).
+    assert "@" not in data["rows"][0][2]

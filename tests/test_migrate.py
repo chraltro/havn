@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import duckdb
+import pytest
 import yaml
 
 import click
@@ -11,6 +13,36 @@ import click
 from havn.cli.migrate import migrate
 from havn.config import load_project
 from havn.engine.database import ensure_meta_table, open_warehouse
+
+
+def _ducklake_available() -> bool:
+    """Probe whether the DuckDB ducklake extension can be installed/loaded.
+
+    Cached on the function object so it runs once per test session. Mirrors
+    the helper in tests/test_backends.py — duplicated here rather than shared
+    via conftest so the suites stay decoupled.
+    """
+    cached = getattr(_ducklake_available, "_cached", None)
+    if cached is not None:
+        return cached
+    try:
+        c = duckdb.connect(":memory:")
+        try:
+            c.execute("INSTALL ducklake")
+            c.execute("LOAD ducklake")
+            result = True
+        finally:
+            c.close()
+    except Exception:
+        result = False
+    _ducklake_available._cached = result
+    return result
+
+
+requires_ducklake = pytest.mark.skipif(
+    not _ducklake_available(),
+    reason="ducklake extension not installable (network restricted or unsupported)",
+)
 
 
 def _seed_duckdb_project(tmp_path: Path) -> None:
@@ -31,6 +63,7 @@ def _seed_duckdb_project(tmp_path: Path) -> None:
     c.close()
 
 
+@requires_ducklake
 def test_migrate_duckdb_to_ducklake_and_back(tmp_path, capsys):
     _seed_duckdb_project(tmp_path)
     (tmp_path / ".havn" / "data").mkdir(parents=True, exist_ok=True)

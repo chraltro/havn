@@ -181,3 +181,72 @@ class TestColumnLineage:
         )
         lineage = extract_column_lineage(model)
         assert lineage == {}
+
+    def test_lineage_multi_source_with_cte(self):
+        """Multi-source models with CTEs must split lineage across the right
+        upstreams. Reproduces the route_b bug where every column was attributed
+        to depends_on[0]."""
+        model = SQLModel(
+            path=Path("test.sql"), name="cfo", schema="gold",
+            full_name="gold.cfo", sql="",
+            query=textwrap.dedent("""\
+                WITH top_branches AS (
+                    SELECT branch_id, branch_name FROM bronze.branches LIMIT 3
+                )
+                SELECT
+                    f.amount,
+                    b.branch_name
+                FROM silver.fact_transactions f
+                JOIN top_branches b ON f.branch_id = b.branch_id
+            """),
+            materialized="table",
+            depends_on=["bronze.branches", "silver.fact_transactions"],
+        )
+        lineage = extract_column_lineage(model)
+        amount_sources = {s["source_table"] for s in lineage["amount"]}
+        branch_sources = {s["source_table"] for s in lineage["branch_name"]}
+        assert "silver.fact_transactions" in amount_sources, amount_sources
+        assert "bronze.branches" in branch_sources, branch_sources
+        # Most importantly, amount must NOT be attributed to bronze.branches.
+        assert "bronze.branches" not in amount_sources, amount_sources
+
+    def test_lineage_nested_cte(self):
+        """Lineage should propagate through CTEs that reference other CTEs."""
+        model = SQLModel(
+            path=Path("test.sql"), name="nested", schema="gold",
+            full_name="gold.nested", sql="",
+            query=textwrap.dedent("""\
+                WITH base AS (
+                    SELECT id, amount FROM bronze.txns
+                ),
+                doubled AS (
+                    SELECT id, amount * 2 AS amount FROM base
+                )
+                SELECT d.id, d.amount FROM doubled d
+            """),
+            materialized="table",
+            depends_on=["bronze.txns"],
+        )
+        lineage = extract_column_lineage(model)
+        assert "id" in lineage
+        assert "amount" in lineage
+        for col in ["id", "amount"]:
+            assert any(s["source_table"] == "bronze.txns" for s in lineage[col]), (
+                col, lineage[col]
+            )
+
+    def test_lineage_select_b_star(self, db):
+        """`SELECT b.*` with a real connection should expand from the aliased table."""
+        db.execute("CREATE SCHEMA IF NOT EXISTS silver")
+        db.execute("CREATE TABLE silver.fact_transactions AS SELECT 1 AS id, 'x' AS kind, 100.0 AS amount")
+        model = SQLModel(
+            path=Path("test.sql"), name="passthrough", schema="gold",
+            full_name="gold.passthrough", sql="",
+            query="SELECT b.* FROM silver.fact_transactions b",
+            materialized="view",
+            depends_on=["silver.fact_transactions"],
+        )
+        lineage = extract_column_lineage(model, conn=db)
+        for col in ("id", "kind", "amount"):
+            assert col in lineage, lineage
+            assert lineage[col][0]["source_table"] == "silver.fact_transactions"

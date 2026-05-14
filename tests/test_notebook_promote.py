@@ -28,9 +28,9 @@ def test_promote_sql_to_model(tmp_path):
     assert model_path.parent.name == "bronze"
 
     content = model_path.read_text()
-    assert "-- config: materialized=table, schema=bronze" in content
-    assert "-- depends_on: landing.customers, landing.orders" in content
-    assert "-- description: Customer orders summary" in content
+    assert "@config materialized=table, schema=bronze" in content
+    assert "@depends_on landing.customers, landing.orders" in content
+    assert "@description Customer orders summary" in content
     assert "SELECT c.id, c.name FROM landing.customers c" in content
 
 
@@ -71,8 +71,8 @@ def test_promote_sql_no_deps(tmp_path):
     )
 
     content = model_path.read_text()
-    assert "-- config:" in content
-    assert "-- depends_on:" not in content
+    assert "@config" in content
+    assert "@depends_on" not in content
 
 
 def test_model_to_notebook(tmp_path):

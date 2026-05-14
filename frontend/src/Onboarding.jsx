@@ -12,11 +12,17 @@ import { createPortal } from "react-dom";
 //   "beside-sidebar"   — right of sidebar, vertically centered
 //   "center"           — centered on screen
 
+// Six-step welcome tour. Earlier we shipped 11 steps which advertised
+// "about two minutes" but felt longer because every screen got a tooltip
+// even when the screen was self-explanatory. The hint system handles
+// surface-area discovery on demand (DAG, Quality, Connectors, etc.); the
+// tour itself focuses on the four things a first-time user actually needs:
+// the layout, the project shape, where transforms go, and how to query.
 const ONBOARDING_STEPS = [
   {
     id: "welcome",
     title: "Welcome to havn",
-    description: "Your entire data warehouse lives in one file on your machine. No cloud, no accounts, no data leaving your network.\nThis tour takes about two minutes. Let's look around.",
+    description: "Your entire data warehouse lives in one file on your machine. No cloud, no accounts, no data leaving your network.\nThis quick tour gets you oriented in under a minute.",
     illustration: "welcome",
     navigate: "Overview",
     highlight: null,
@@ -38,21 +44,9 @@ const ONBOARDING_STEPS = [
     prefillQuery: null,
   },
   {
-    id: "warehouse",
-    title: "Your Warehouse",
-    description: "All your data lives in one file, organized into layers that refine it step by step: landing, bronze, silver, gold. Powered by {DuckDB|A fast, embedded analytics database. Runs in-process, no server needed.} -- everything stays on your machine.",
-    illustration: "warehouse",
-    navigate: "Overview",
-    highlight: '[data-havn-guide="tables-pane"]',
-    position: "beside-sidebar",
-    autoSelectTable: false,
-    autoOpenFile: null,
-    prefillQuery: null,
-  },
-  {
     id: "project",
     title: "Your Project",
-    description: "{Ingest scripts|Python files in ingest/ that pull raw data from external sources into landing/} bring data in, {SQL transforms|.sql files in transform/ that define how data moves between schema layers} shape it layer by layer, and {export scripts|Python files in export/ that send finished data to external systems} send it out. The file tree on the left is your pipeline.",
+    description: "{Ingest scripts|Python files in ingest/ that pull raw data from external sources into landing/} bring data in, {SQL transforms|.sql files in transform/ that define how data moves between schema layers} shape it layer by layer through bronze, silver, and gold, and {export scripts|Python files in export/ that send finished data to external systems} send it out. The file tree on the left is your pipeline.",
     illustration: "data-flow",
     navigate: "Overview",
     highlight: '[data-havn-guide="files-pane"]',
@@ -64,25 +58,13 @@ const ONBOARDING_STEPS = [
   {
     id: "transforms",
     title: "Writing Transforms",
-    description: "Every .sql file in transform/ becomes a model. Add {-- config:|Sets materialization (table or view), target schema, and incremental strategy} to set options. havn reads your SQL and automatically figures out which models depend on each other. No special syntax, no templates. Just SQL.",
+    description: "Every .sql file in transform/ becomes a model. Add {@config|Sets materialization (table, view, or incremental), target schema, and incremental strategy} at the top to set options. Dependencies are picked up from your FROM and JOIN clauses automatically. No templates, no Jinja. Just SQL.",
     illustration: "transforms",
     navigate: "Editor",
     highlight: ['[data-havn-guide="main-panel"]', '[data-havn-guide="sub-tab-bar"]', '[data-havn-guide="files-pane"]'],
     position: "bottom-center",
     autoSelectTable: false,
     autoOpenFile: ["transform/silver", "transform/bronze", "transform"],
-    prefillQuery: null,
-  },
-  {
-    id: "connectors",
-    title: "Connect Your Sources",
-    description: "When you're ready for your own data, pick a {connector|Pre-built integrations for databases, APIs, files, and SaaS tools like Stripe and HubSpot.}: Postgres, MySQL, REST APIs, CSV, S3, and more. havn generates the ingest script for you. Just add credentials to your {.env file|A local file for secrets like passwords and API keys. Never committed to git.}.",
-    illustration: "data-flow",
-    navigate: "Data Sources",
-    highlight: ['[data-havn-guide="main-panel"]', '[data-havn-guide="sub-tab-bar"]'],
-    position: "bottom-center",
-    autoSelectTable: false,
-    autoOpenFile: null,
     prefillQuery: null,
   },
   {
@@ -96,42 +78,6 @@ const ONBOARDING_STEPS = [
     autoSelectTable: false,
     autoOpenFile: null,
     prefillQuery: "__auto__",
-  },
-  {
-    id: "dag",
-    title: "The DAG",
-    description: "Every model and its dependencies, visualized. Nodes are colored by layer, the same layers you saw in your warehouse. When you change a SQL file, havn knows exactly which {downstream models|Models that depend on the one you changed. They need rebuilding too.} need rebuilding.\nTry clicking a node to see its {column lineage|Traces each column back to its source, showing exactly where every field comes from across your pipeline.}.",
-    illustration: "dag",
-    navigate: "DAG",
-    highlight: ['[data-havn-guide="main-panel"]', '[data-havn-guide="sub-tab-bar"]'],
-    position: "bottom-center",
-    autoSelectTable: false,
-    autoOpenFile: null,
-    prefillQuery: null,
-  },
-  {
-    id: "quality",
-    title: "Data Quality",
-    description: "Add {assertions|Checks written as SQL comments, like: -- assert: row_count > 0. Validated on every pipeline run.} to your SQL files and havn validates them automatically. Set up {contracts|YAML files that define expected row counts, freshness thresholds, and column rules.} for stricter guarantees across models. When something breaks, you'll know before your stakeholders do.",
-    illustration: "quality",
-    navigate: "Quality",
-    highlight: ['[data-havn-guide="main-panel"]', '[data-havn-guide="sub-tab-bar"]'],
-    position: "bottom-center",
-    autoSelectTable: false,
-    autoOpenFile: null,
-    prefillQuery: null,
-  },
-  {
-    id: "pipelines",
-    title: "Running Pipelines",
-    description: "Hit Run to execute your full pipeline: {ingest|Python scripts that pull raw data from sources into landing/}, then {transforms|SQL models that process data through bronze, silver, gold}, then {exports|Python scripts that push finished data to dashboards, APIs, or files}. Output streams live so you see every step as it happens.\nGo ahead, try it now, or keep exploring.",
-    illustration: "pipelines",
-    navigate: "Overview",
-    highlight: '[data-havn-guide="actions"]',
-    position: "below-actions",
-    autoSelectTable: false,
-    autoOpenFile: null,
-    prefillQuery: null,
   },
   {
     id: "ready",
@@ -530,6 +476,7 @@ export default function Onboarding({ onComplete, isOpen, onNavigate, tables, onS
     if (step.prefillQuery) {
       setTimeout(() => {
         let sql = step.prefillQuery;
+        let autoRun = true;
         if (sql === "__auto__" && tables && tables.length > 0) {
           // Pick first gold table, then silver, then bronze, then any non-internal table
           const pick = tables.find(t => t.schema === "gold")
@@ -542,9 +489,14 @@ export default function Onboarding({ onComplete, isOpen, onNavigate, tables, onS
             sql = `SELECT * FROM ${tables[0].schema}.${tables[0].name} LIMIT 20`;
           }
         } else if (sql === "__auto__") {
-          sql = "SELECT 'Run a pipeline first to see data here' AS hint";
+          // No warehouse yet: pre-fill a friendly SQL hint but DON'T auto-run.
+          // Auto-running would 404 against an empty warehouse and show a
+          // misleading error in the OUTPUT panel before the user has done
+          // anything.
+          sql = "-- Run a pipeline first, then come back and try a query like:\nSELECT 1 AS placeholder";
+          autoRun = false;
         }
-        window.__havn_prefill_query = { sql, run: true };
+        window.__havn_prefill_query = { sql, run: autoRun };
       }, 200);
     }
 

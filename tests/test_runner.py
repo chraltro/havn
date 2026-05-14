@@ -181,3 +181,174 @@ def test_extract_row_count_bytes_only():
 
 def test_extract_row_count_empty():
     assert _extract_row_count("") == 0
+
+
+def test_extract_row_count_with_thousand_separators():
+    """Row counts printed with comma thousand-separators must be preserved.
+
+    Regression: a script that printed 'loaded 2,616,838 rows' was being
+    summarised as '845 rows' because the regex stopped at the first comma.
+    """
+    assert _extract_row_count("loading landing.transactions ... 2,616,838 rows") == 2616838
+    assert _extract_row_count("Loaded 1_234_567 rows") == 1234567
+    # Mixed output: the largest match still wins
+    output = (
+        "  loading landing.customers ...\n    10,003 rows\n"
+        "  loading landing.transactions ...\n    2,616,838 rows\n"
+    )
+    assert _extract_row_count(output) == 2616838
+
+
+# ---------------------------------------------------------------------------
+# Pragma parsing and schedule=once skip behavior
+# ---------------------------------------------------------------------------
+
+
+def test_parse_pragma_basic():
+    from havn.engine.runner import _parse_pragma
+    src = "# @havn: schedule=once\nimport os\n"
+    assert _parse_pragma(src) == {"schedule": "once"}
+
+
+def test_parse_pragma_multiple_keys():
+    from havn.engine.runner import _parse_pragma
+    src = "# @havn: schedule=once owner=data-team\nx = 1\n"
+    out = _parse_pragma(src)
+    assert out["schedule"] == "once"
+    assert out["owner"] == "data-team"
+
+
+def test_parse_pragma_skipped_after_first_code_line():
+    from havn.engine.runner import _parse_pragma
+    src = "import os\n# @havn: schedule=once\n"
+    # Pragma must be at the top; comments after code don't count.
+    assert _parse_pragma(src) == {}
+
+
+def test_parse_pragma_after_module_docstring():
+    from havn.engine.runner import _parse_pragma
+    src = '"""Module docstring."""\n# @havn: schedule=once\nimport os\n'
+    assert _parse_pragma(src) == {"schedule": "once"}
+
+
+def test_parse_pragma_inside_multiline_docstring_ignored():
+    from havn.engine.runner import _parse_pragma
+    src = '"""Hello\n# @havn: schedule=once\n"""\nimport os\n'
+    # The pragma sits inside the docstring, so it must not be parsed.
+    assert _parse_pragma(src) == {}
+
+
+def test_parse_pragma_no_directive():
+    from havn.engine.runner import _parse_pragma
+    assert _parse_pragma("import os\n") == {}
+
+
+def test_run_script_schedule_once_skips_after_first_success(tmp_path):
+    """Second run of a `schedule=once` script must be skipped, not re-executed."""
+    db_path = tmp_path / "test.duckdb"
+    conn = duckdb.connect(str(db_path))
+
+    script = tmp_path / "once_ingest.py"
+    # Each run appends a row to a sentinel table so we can count executions.
+    script.write_text(
+        "# @havn: schedule=once\n"
+        "db.execute('CREATE TABLE IF NOT EXISTS sentinel (n INT)')\n"
+        "db.execute('INSERT INTO sentinel VALUES (1)')\n"
+        "print('ran')\n"
+    )
+
+    # First run: executes normally.
+    r1 = run_script(conn, script, "ingest")
+    assert r1["status"] == "success"
+    assert conn.execute("SELECT COUNT(*) FROM sentinel").fetchone()[0] == 1
+
+    # Second run: skipped, no new rows.
+    r2 = run_script(conn, script, "ingest")
+    assert r2["status"] == "skipped"
+    assert "schedule=once" in r2["log_output"]
+    assert conn.execute("SELECT COUNT(*) FROM sentinel").fetchone()[0] == 1
+    conn.close()
+
+
+def test_run_script_schedule_once_force_overrides(tmp_path):
+    """`force=True` must re-run a `schedule=once` script even with prior success."""
+    db_path = tmp_path / "test.duckdb"
+    conn = duckdb.connect(str(db_path))
+
+    script = tmp_path / "once_ingest.py"
+    script.write_text(
+        "# @havn: schedule=once\n"
+        "db.execute('CREATE TABLE IF NOT EXISTS sentinel (n INT)')\n"
+        "db.execute('INSERT INTO sentinel VALUES (1)')\n"
+    )
+
+    run_script(conn, script, "ingest")
+    run_script(conn, script, "ingest", force=True)
+    # Two executions = two rows in sentinel.
+    assert conn.execute("SELECT COUNT(*) FROM sentinel").fetchone()[0] == 2
+    conn.close()
+
+
+def test_run_script_no_pragma_runs_every_time(tmp_path):
+    """Scripts without a schedule pragma keep the old behavior: run every time."""
+    db_path = tmp_path / "test.duckdb"
+    conn = duckdb.connect(str(db_path))
+
+    script = tmp_path / "always_ingest.py"
+    script.write_text(
+        "db.execute('CREATE TABLE IF NOT EXISTS sentinel (n INT)')\n"
+        "db.execute('INSERT INTO sentinel VALUES (1)')\n"
+    )
+
+    run_script(conn, script, "ingest")
+    run_script(conn, script, "ingest")
+    assert conn.execute("SELECT COUNT(*) FROM sentinel").fetchone()[0] == 2
+    conn.close()
+
+
+def test_run_script_long_running_does_not_corrupt_cursor(tmp_path, monkeypatch):
+    """Regression: long-running scripts must not have their result cursor
+    clobbered by the runner's idle-detection poll.
+
+    Originally the runner polled `duckdb_queries()` on the *same* connection
+    used by the script thread. DuckDB connections are not thread-safe; the
+    concurrent probe corrupted the script's cursor state, so chained
+    `db.execute(...).fetchone()` returned None and unpacking blew up with
+    "cannot unpack non-iterable NoneType object". Real failure surfaced via
+    the Nordvik case ingest on a ~20s Postgres CTAS.
+
+    To make the test deterministic and fast, we shorten the poll interval so
+    several polls fire during a ~1s script. With the bug present, at least one
+    of the chained fetches returns None.
+    """
+    from havn.engine import runner as runner_mod
+
+    monkeypatch.setattr(runner_mod, "SCRIPT_POLL_INTERVAL_SECONDS", 0.05)
+
+    db_path = tmp_path / "test.duckdb"
+    conn = duckdb.connect(str(db_path))
+    conn.execute("CREATE SCHEMA landing")
+
+    # 30 iterations of (CTAS, COUNT, sleep 50ms) ≈ 1.5s wall time, with the
+    # poll firing every 50ms. Many overlap windows; the bug reproduces ~always.
+    script = tmp_path / "long_ingest.py"
+    script.write_text(
+        "import time\n"
+        "for i in range(30):\n"
+        "    db.execute(f'CREATE OR REPLACE TABLE landing.t AS "
+        "SELECT range AS x FROM range(50000)')\n"
+        "    row = db.execute('SELECT COUNT(*) FROM landing.t').fetchone()\n"
+        "    assert row is not None, "
+        "f'iter {i}: fetchone returned None — runner clobbered the cursor'\n"
+        "    (n,) = row\n"
+        "    assert n == 50000, f'iter {i}: got {n} rows, expected 50000'\n"
+        "    time.sleep(0.05)\n"
+        "print('all iterations OK', flush=True)\n"
+    )
+
+    result = run_script(conn, script, "ingest", timeout=60)
+    assert result["status"] == "success", (
+        f"script failed: {result.get('error')!r}\nlog:\n{result.get('log_output')}"
+    )
+    assert "all iterations OK" in result["log_output"]
+    conn.close()

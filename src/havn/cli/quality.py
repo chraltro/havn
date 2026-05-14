@@ -66,7 +66,12 @@ def check(
     try:
         env_label = f" [dim](env={config.active_environment})[/dim]" if config.active_environment else ""
         console.print(f"[bold]Checking {len(models)} model(s)...{env_label}[/bold]")
-        errors = validate_models(conn, models, known_tables=known_tables, source_columns=source_columns)
+        errors = validate_models(
+            conn, models,
+            known_tables=known_tables,
+            source_columns=source_columns,
+            deny_rules=list(config.policies.deny) if config.policies.deny else None,
+        )
 
         if errors:
             err_count = sum(1 for e in errors if e.severity == "error")
@@ -141,14 +146,17 @@ def check(
 def freshness(
     hours: Annotated[float, typer.Option("--hours", "-h", help="Max age in hours before a model is stale")] = 24.0,
     alert: Annotated[bool, typer.Option("--alert", help="Send alerts for stale models")] = False,
-    sources_only: Annotated[bool, typer.Option("--sources", help="Only check source freshness from sources.yml")] = False,
+    sources: Annotated[bool, typer.Option("--sources", help="Include source-side row counts and freshness from @source_freshness contracts")] = False,
+    source_min_rows: Annotated[int, typer.Option("--source-min-rows", help="Mark a model stale if any upstream source has fewer than N rows (with --sources)")] = 0,
     env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use")] = None,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
     """Check model and source freshness.
 
-    Without --sources, checks model freshness as before.
-    With --sources, checks source freshness against SLAs declared in sources.yml.
+    Without --sources, checks model freshness based on last build time.
+    With --sources, also queries each model's ``@source_freshness``
+    contracts to surface source row counts and max-on-column timestamps,
+    so "fresh" can't mask an upstream that has zero rows.
     """
     from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.transform import check_freshness
@@ -162,7 +170,13 @@ def freshness(
     conn = open_warehouse(config, project_dir)
     try:
         ensure_meta_table(conn)
-        results = check_freshness(conn, max_age_hours=hours)
+        results = check_freshness(
+            conn,
+            max_age_hours=hours,
+            include_sources=sources,
+            source_min_rows=source_min_rows,
+            transform_dir=project_dir / "transform" if sources else None,
+        )
         if not results:
             console.print("[yellow]No model state found. Run a transform first.[/yellow]")
             return
@@ -172,6 +186,8 @@ def freshness(
         table.add_column("Last Run")
         table.add_column("Hours Ago", justify="right")
         table.add_column("Rows", justify="right")
+        if sources:
+            table.add_column("Sources")
         table.add_column("Status")
 
         stale_models = []
@@ -181,13 +197,26 @@ def freshness(
             if is_stale:
                 stale_models.append(r)
             status = "[red]STALE[/red]" if is_stale else "[green]fresh[/green]"
-            table.add_row(
+            row_cells = [
                 r["model"],
                 r["last_run_at"][:19] if r["last_run_at"] else "never",
                 f"{hours_ago}h" if hours_ago is not None else "?",
                 str(r["row_count"]) if r["row_count"] else "",
-                status,
-            )
+            ]
+            if sources:
+                src_list = r.get("sources", [])
+                if not src_list:
+                    src_label = "[dim]none[/dim]"
+                else:
+                    parts = []
+                    for s in src_list:
+                        marker = "[red]!" if s["is_stale"] else "[green]ok"
+                        rc = f"{s['row_count']:,}" if s.get("row_count") is not None else "?"
+                        parts.append(f"{marker}[/] {s['table']} ({rc} rows)")
+                    src_label = "\n".join(parts)
+                row_cells.append(src_label)
+            row_cells.append(status)
+            table.add_row(*row_cells)
         console.print(table)
 
         if stale_models:

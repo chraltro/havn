@@ -6,8 +6,14 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 
-__version__ = "0.2.7"
+try:
+    __version__ = _pkg_version("havn")
+except PackageNotFoundError:
+    # Editable install before metadata is generated, or running from a
+    # source checkout without `pip install -e .` first.
+    __version__ = "0.0.0+unknown"
 
 # Re-export decorators for user-facing macros
 from havn.engine.macros import macro, table_macro  # noqa: F401
