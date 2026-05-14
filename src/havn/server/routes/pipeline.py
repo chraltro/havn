@@ -1367,7 +1367,7 @@ def cancel_stream(request: Request) -> dict:
 def get_active_stream(request: Request) -> dict:
     """Check if a pipeline is currently running or has finished events."""
     _require_permission(request, "read")
-    with _pipeline_lock:
+    with _pipeline_cond:
         running = _pipeline_state["running"]
         operation = _pipeline_state["operation"]
         operation_label = _pipeline_state["operation_label"]

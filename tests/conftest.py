@@ -9,7 +9,47 @@ demand via ``pytest tests/ --runslow``.
 
 from __future__ import annotations
 
+import duckdb
 import pytest
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture
+def shared_project(tmp_path):
+    """Minimal havn project on disk: project.yml, transform dirs, warehouse."""
+    (tmp_path / "project.yml").write_text(
+        "name: test\n"
+        "database:\n"
+        "  path: warehouse.duckdb\n"
+        "connections: {}\n"
+        "streams:\n"
+        "  full-refresh:\n"
+        "    description: test\n"
+        "    steps:\n"
+        "      - ingest: [all]\n"
+    )
+    (tmp_path / "transform" / "bronze").mkdir(parents=True)
+    (tmp_path / "ingest").mkdir()
+    (tmp_path / ".env").write_text("")
+
+    conn = duckdb.connect(str(tmp_path / "warehouse.duckdb"))
+    conn.execute("CREATE SCHEMA IF NOT EXISTS landing")
+    conn.close()
+
+    return tmp_path
+
+
+@pytest.fixture
+def shared_client(shared_project):
+    """TestClient against the shared minimal project."""
+    import havn.server.app as server_app
+    from havn.server.deps import reset_shared_conn
+
+    reset_shared_conn()
+    server_app.PROJECT_DIR = shared_project
+    server_app.AUTH_ENABLED = False
+    yield TestClient(server_app.app)
+    reset_shared_conn()
 
 
 def pytest_addoption(parser):

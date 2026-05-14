@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger("havn.server")
 
 from havn.server.deps import (
     DbConn,
@@ -200,10 +204,12 @@ def delete_user_endpoint(request: Request, username: str, conn: DbConn) -> dict:
     """Delete a user (admin only)."""
     admin = _require_permission(request, "manage_users")
     from havn.engine.auth import delete_user
+    from havn.server.deps import invalidate_token_cache
 
     found = delete_user(conn, username)
     if not found:
         raise HTTPException(404, f"User '{username}' not found")
+    invalidate_token_cache()
     try:
         from havn.engine.audit import log_audit
 
@@ -217,7 +223,7 @@ def delete_user_endpoint(request: Request, username: str, conn: DbConn) -> dict:
             ip_address=client_ip,
         )
     except Exception:
-        pass
+        logger.debug("Failed to write audit log for user_delete", exc_info=True)
     return {"status": "deleted"}
 
 

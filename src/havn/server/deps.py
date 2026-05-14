@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Annotated, Any, Generator
@@ -404,6 +405,52 @@ DbConnReadOnlyOptional = Annotated[
 # ---------------------------------------------------------------------------
 
 
+_token_cache: dict[str, tuple[float, dict | None]] = {}
+_token_cache_lock = threading.Lock()
+_TOKEN_CACHE_TTL = 30.0
+_TOKEN_CACHE_MAX = 1000
+
+
+def _cached_validate_token(token: str) -> dict | None:
+    """Validate a token with a short-lived cache.
+
+    Token validation queries the write queue on every authenticated request.
+    Without a cache, a heavy-traffic server serializes all requests through
+    the single write connection just to look up the same token row repeatedly.
+    """
+    now = time.monotonic()
+    with _token_cache_lock:
+        entry = _token_cache.get(token)
+        if entry and (now - entry[0]) < _TOKEN_CACHE_TTL:
+            return entry[1]
+    wq = _get_write_queue()
+    cursor = wq.cursor()
+    try:
+        from havn.engine.auth import validate_token
+        result = validate_token(cursor, token)
+    finally:
+        cursor.close()
+    with _token_cache_lock:
+        if len(_token_cache) > _TOKEN_CACHE_MAX:
+            for k in list(_token_cache.keys())[: _TOKEN_CACHE_MAX // 2]:
+                _token_cache.pop(k, None)
+        _token_cache[token] = (now, result)
+    return result
+
+
+def invalidate_token_cache(token: str | None = None) -> None:
+    """Drop one or all entries from the token cache.
+
+    Called by logout / revoke flows so a revoked token cannot continue
+    to be accepted until the TTL elapses.
+    """
+    with _token_cache_lock:
+        if token is None:
+            _token_cache.clear()
+        else:
+            _token_cache.pop(token, None)
+
+
 def _get_user(request: Request) -> dict | None:
     """Extract and validate user from auth header. Returns None if auth disabled."""
     if not _get_auth_enabled():
@@ -414,16 +461,7 @@ def _get_user(request: Request) -> dict | None:
         return None
 
     token = auth_header[7:]
-    # Use the write queue's cursor so we don't try to open a second
-    # connection to the same DuckDB file with a different mode.
-    wq = _get_write_queue()
-    cursor = wq.cursor()
-    try:
-        from havn.engine.auth import validate_token
-
-        return validate_token(cursor, token)
-    finally:
-        cursor.close()
+    return _cached_validate_token(token)
 
 
 def _require_user(request: Request) -> dict:
