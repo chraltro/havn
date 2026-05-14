@@ -95,6 +95,7 @@ def _strip_sql_comments_and_strings(sql: str) -> str:
 
 _IDENT_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 _FUNCTION_CALL_RE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)\s*\(')
+_QUOTED_FUNCTION_CALL_RE = re.compile(r'"([A-Za-z_][A-Za-z0-9_]*)"\s*\(')
 
 
 def _split_statements(sql: str) -> list[str]:
@@ -124,8 +125,10 @@ def _split_statements(sql: str) -> list[str]:
 def _leading_statement_keyword(stmt: str) -> str:
     """Return the lowercased leading keyword of a statement.
 
-    For statements starting with WITH, walks past the CTE definitions (which
-    are wrapped in balanced parens) and returns the first non-CTE keyword.
+    For statements starting with WITH, walks the CTE definitions
+    ``name [AS] (...)``, possibly comma-separated and possibly leading
+    with ``RECURSIVE``, then returns the first keyword after the last
+    CTE body (the real statement verb: SELECT / DELETE / INSERT / ...).
     """
     s = stmt.lstrip()
     m = _IDENT_RE.match(s)
@@ -136,44 +139,55 @@ def _leading_statement_keyword(stmt: str) -> str:
         return head
     i = m.end()
     n = len(s)
-    while i < n:
-        if s[i].isspace() or s[i] == ",":
-            i += 1
-            continue
+
+    def _skip_ws(j: int) -> int:
+        while j < n and s[j].isspace():
+            j += 1
+        return j
+
+    def _skip_parens(j: int) -> int:
+        if j >= n or s[j] != "(":
+            return j
+        depth = 1
+        j += 1
+        while j < n and depth > 0:
+            if s[j] == "(":
+                depth += 1
+            elif s[j] == ")":
+                depth -= 1
+            j += 1
+        return j
+
+    i = _skip_ws(i)
+    if i < n:
+        rec = _IDENT_RE.match(s, i)
+        if rec and rec.group(0).lower() == "recursive":
+            i = rec.end()
+            i = _skip_ws(i)
+
+    while True:
         m2 = _IDENT_RE.match(s, i)
-        if m2:
-            tok = m2.group(0).lower()
-            i = m2.end()
-            if tok == "recursive":
-                continue
-            while i < n and s[i].isspace():
-                i += 1
-            if i < n and s[i] == "(":
-                depth = 1
-                i += 1
-                while i < n and depth > 0:
-                    if s[i] == "(":
-                        depth += 1
-                    elif s[i] == ")":
-                        depth -= 1
-                    i += 1
-                continue
-            if tok == "as":
-                while i < n and s[i].isspace():
-                    i += 1
-                if i < n and s[i] == "(":
-                    depth = 1
-                    i += 1
-                    while i < n and depth > 0:
-                        if s[i] == "(":
-                            depth += 1
-                        elif s[i] == ")":
-                            depth -= 1
-                        i += 1
-                continue
-            return tok
-        i += 1
-    return "with"
+        if not m2:
+            return "with"
+        i = m2.end()
+        i = _skip_ws(i)
+        if i < n:
+            opt_as = _IDENT_RE.match(s, i)
+            if opt_as and opt_as.group(0).lower() == "as":
+                i = opt_as.end()
+                i = _skip_ws(i)
+        if i >= n or s[i] != "(":
+            return m2.group(0).lower()
+        i = _skip_parens(i)
+        i = _skip_ws(i)
+        if i < n and s[i] == ",":
+            i += 1
+            i = _skip_ws(i)
+            continue
+        next_m = _IDENT_RE.match(s, i)
+        if next_m:
+            return next_m.group(0).lower()
+        return "with"
 
 
 def _validate_query_sql(sql: str) -> None:
@@ -199,7 +213,17 @@ def _validate_query_sql(sql: str) -> None:
         raise HTTPException(
             403, "Only SELECT queries are allowed through the query interface."
         )
+    # Note: at this point string literals are already stripped to '', so we
+    # can scan the cleaned statement directly. We also have to catch quoted
+    # identifiers: DuckDB happily accepts `"read_csv"(...)` and treats the
+    # quoted identifier as the same builtin.
     for fname in _FUNCTION_CALL_RE.findall(stmt):
+        if fname.lower() in _DANGEROUS_FUNCTION_NAMES:
+            raise HTTPException(
+                403,
+                "File-access functions (read_csv, read_parquet, etc.) are not allowed.",
+            )
+    for fname in _QUOTED_FUNCTION_CALL_RE.findall(stmt):
         if fname.lower() in _DANGEROUS_FUNCTION_NAMES:
             raise HTTPException(
                 403,
