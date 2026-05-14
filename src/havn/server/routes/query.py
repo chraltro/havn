@@ -31,54 +31,182 @@ _SLOW_QUERY_THRESHOLD_MS = 5000
 
 # --- SQL safety validation ---
 
-# Statements that modify data or schema — only SELECT is allowed through
-# the query endpoint.
-_FORBIDDEN_STATEMENT_RE = re.compile(
-    r'^\s*('
-    r'INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|MERGE'
-    r'|COPY|ATTACH|DETACH|INSTALL|LOAD|EXPORT|IMPORT'
-    r'|GRANT|REVOKE|SET|RESET|VACUUM|CHECKPOINT|PRAGMA'
-    r'|CALL|EXECUTE'
-    r')\b',
-    re.IGNORECASE,
-)
+_FORBIDDEN_STATEMENT_KEYWORDS = frozenset({
+    "insert", "update", "delete", "drop", "create", "alter", "truncate", "merge",
+    "copy", "attach", "detach", "install", "load", "export", "import",
+    "grant", "revoke", "set", "reset", "vacuum", "checkpoint", "pragma",
+    "call", "execute",
+})
 
-# DuckDB functions that can read/write files on the filesystem
-_DANGEROUS_FUNCTIONS_RE = re.compile(
-    r'\b('
-    r'read_csv_auto|read_csv|read_parquet|read_json_auto|read_json'
-    r'|read_json_objects|read_ndjson|read_ndjson_auto'
-    r'|read_blob|read_text'
-    r'|write_csv|write_parquet'
-    r'|iceberg_scan|delta_scan|parquet_scan|csv_scan'
-    r'|httpfs_.*|http_get|http_post'
-    r')\s*\(',
-    re.IGNORECASE,
-)
+_DANGEROUS_FUNCTION_NAMES = frozenset({
+    "read_csv_auto", "read_csv", "read_parquet", "read_json_auto", "read_json",
+    "read_json_objects", "read_ndjson", "read_ndjson_auto",
+    "read_blob", "read_text",
+    "write_csv", "write_parquet",
+    "iceberg_scan", "delta_scan", "parquet_scan", "csv_scan",
+    "http_get", "http_post",
+})
+
+
+def _strip_sql_comments_and_strings(sql: str) -> str:
+    """Remove string literals and comments so keyword/function scans cannot
+    be fooled by content inside quotes or comments."""
+    out: list[str] = []
+    i = 0
+    n = len(sql)
+    while i < n:
+        c = sql[i]
+        nx = sql[i + 1] if i + 1 < n else ""
+        if c == "-" and nx == "-":
+            j = sql.find("\n", i)
+            if j < 0:
+                break
+            i = j + 1
+            continue
+        if c == "/" and nx == "*":
+            j = sql.find("*/", i + 2)
+            if j < 0:
+                break
+            i = j + 2
+            continue
+        if c == "'":
+            i += 1
+            while i < n:
+                if sql[i] == "'" and (i + 1 < n and sql[i + 1] == "'"):
+                    i += 2
+                    continue
+                if sql[i] == "'":
+                    i += 1
+                    break
+                i += 1
+            out.append("''")
+            continue
+        if c == '"':
+            j = sql.find('"', i + 1)
+            if j < 0:
+                break
+            out.append(sql[i : j + 1])
+            i = j + 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+_IDENT_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
+_FUNCTION_CALL_RE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)\s*\(')
+
+
+def _split_statements(sql: str) -> list[str]:
+    """Split top-level SQL statements on ;, respecting strings/comments
+    (the input here is already stripped of those)."""
+    parts: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    for c in sql:
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth = max(0, depth - 1)
+        if c == ";" and depth == 0:
+            text = "".join(buf).strip()
+            if text:
+                parts.append(text)
+            buf = []
+            continue
+        buf.append(c)
+    text = "".join(buf).strip()
+    if text:
+        parts.append(text)
+    return parts
+
+
+def _leading_statement_keyword(stmt: str) -> str:
+    """Return the lowercased leading keyword of a statement.
+
+    For statements starting with WITH, walks past the CTE definitions (which
+    are wrapped in balanced parens) and returns the first non-CTE keyword.
+    """
+    s = stmt.lstrip()
+    m = _IDENT_RE.match(s)
+    if not m:
+        return ""
+    head = m.group(0).lower()
+    if head != "with":
+        return head
+    i = m.end()
+    n = len(s)
+    while i < n:
+        if s[i].isspace() or s[i] == ",":
+            i += 1
+            continue
+        m2 = _IDENT_RE.match(s, i)
+        if m2:
+            tok = m2.group(0).lower()
+            i = m2.end()
+            if tok == "recursive":
+                continue
+            while i < n and s[i].isspace():
+                i += 1
+            if i < n and s[i] == "(":
+                depth = 1
+                i += 1
+                while i < n and depth > 0:
+                    if s[i] == "(":
+                        depth += 1
+                    elif s[i] == ")":
+                        depth -= 1
+                    i += 1
+                continue
+            if tok == "as":
+                while i < n and s[i].isspace():
+                    i += 1
+                if i < n and s[i] == "(":
+                    depth = 1
+                    i += 1
+                    while i < n and depth > 0:
+                        if s[i] == "(":
+                            depth += 1
+                        elif s[i] == ")":
+                            depth -= 1
+                        i += 1
+                continue
+            return tok
+        i += 1
+    return "with"
+
 
 def _validate_query_sql(sql: str) -> None:
     """Reject SQL that is not a safe read-only query.
 
-    Raises HTTPException(403) if the SQL contains forbidden statements
-    or dangerous file-access functions. Reads against the ``_havn``
-    metadata schema are allowed; the ``_FORBIDDEN_STATEMENT_RE`` already
-    blocks any DDL/DML against it, and exposing the introspection tables
-    as read-only is consistent with how Databricks/Snowflake show
-    ``information_schema``.
+    Strips strings and comments, splits top-level statements, then rejects:
+      - multi-statement queries
+      - any statement whose leading keyword (after a CTE) is a mutation verb
+      - calls to file-access functions (read_csv, read_parquet, http_*)
+
+    Unknown leading keywords are passed through to DuckDB, which will return
+    a parse error so the caller gets a 400 (not a misleading 403).
     """
-    stripped = sql.strip().rstrip(";").strip()
-
-    if _FORBIDDEN_STATEMENT_RE.match(stripped):
+    cleaned = _strip_sql_comments_and_strings(sql)
+    statements = _split_statements(cleaned)
+    if not statements:
+        raise HTTPException(400, "Empty query.")
+    if len(statements) > 1:
+        raise HTTPException(403, "Multi-statement queries are not allowed.")
+    stmt = statements[0]
+    head = _leading_statement_keyword(stmt)
+    if head in _FORBIDDEN_STATEMENT_KEYWORDS:
         raise HTTPException(
-            403,
-            "Only SELECT queries are allowed through the query interface.",
+            403, "Only SELECT queries are allowed through the query interface."
         )
-
-    if _DANGEROUS_FUNCTIONS_RE.search(stripped):
-        raise HTTPException(
-            403,
-            "File-access functions (read_csv, read_parquet, etc.) are not allowed through the query interface.",
-        )
+    for fname in _FUNCTION_CALL_RE.findall(stmt):
+        if fname.lower() in _DANGEROUS_FUNCTION_NAMES:
+            raise HTTPException(
+                403,
+                "File-access functions (read_csv, read_parquet, etc.) are not allowed.",
+            )
+    if re.search(r'\bhttpfs_', stmt, re.IGNORECASE):
+        raise HTTPException(403, "HTTPFS access is not allowed through the query interface.")
 
 
 # --- Pydantic models ---
@@ -222,16 +350,16 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
         finally:
             conn_rw.close()
 
-    # CREATE MASKING POLICY ON schema.table.column METHOD method [EXEMPT role1,role2]
     create_match = re.match(
         r'^\s*CREATE\s+MASKING\s+POLICY\s+ON\s+(\w+)\.(\w+)\.(\w+)\s+METHOD\s+(\w+)(?:\s+EXEMPT\s+([\w,\s]+))?\s*$',
         sql_stripped, re.IGNORECASE | re.DOTALL
     )
     if create_match:
+        _require_permission(request, "write")
         schema, table, column, method, exempt_str = create_match.groups()
         method = method.lower()
         if method not in ('hash', 'redact', 'null', 'partial'):
-            return {"columns": ["error"], "rows": [["Invalid method. Use: hash, redact, null, partial"]], "row_count": 1, "truncated": False}
+            raise HTTPException(400, "Invalid masking method. Use: hash, redact, null, partial")
         exempted = [r.strip() for r in exempt_str.split(',')] if exempt_str else ['admin']
         from havn.engine.masking import ensure_masking_table
         from havn.engine.write_queue import cursor_for
@@ -244,9 +372,9 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
         finally:
             conn_rw.close()
 
-    # DROP MASKING POLICY <id>
     drop_match = re.match(r'^\s*DROP\s+MASKING\s+POLICY\s+([\w-]+)\s*$', sql_stripped, re.IGNORECASE | re.DOTALL)
     if drop_match:
+        _require_permission(request, "write")
         policy_id = drop_match.group(1)
         from havn.engine.masking import ensure_masking_table
         from havn.engine.write_queue import cursor_for
@@ -257,11 +385,9 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
             deleted = delete_policy(conn_rw, policy_id)
             if deleted:
                 return {"columns": ["result"], "rows": [["Masking policy deleted"]], "row_count": 1, "truncated": False}
-            else:
-                return {"columns": ["error"], "rows": [[f"Policy {policy_id} not found"]], "row_count": 1, "truncated": False}
+            raise HTTPException(404, f"Policy {policy_id} not found")
         finally:
             conn_rw.close()
-    # --- End masking SQL command interception ---
 
     # Validate the SQL is a safe read-only query
     _validate_query_sql(sql)

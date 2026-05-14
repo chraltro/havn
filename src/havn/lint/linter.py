@@ -78,7 +78,7 @@ def lint(
     sql_files = sorted(transform_dir.rglob("*.sql"))
     if not sql_files:
         console.print("[yellow]No SQL files found in transform/[/yellow]")
-        return 0, []
+        return 0, [], 0
 
     # Use .sqlfluff config file from project root if it exists,
     # falling back to kwargs-based config

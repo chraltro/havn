@@ -522,9 +522,14 @@ def _run_script_body(
             pass
 
     if thread.is_alive():
+        try:
+            conn.interrupt()
+        except Exception:
+            logger.debug("Script %s: conn.interrupt() failed", script_path.name, exc_info=True)
+        thread.join(timeout=5)
         duration_ms = int((time.perf_counter() - start) * 1000)
         if idle_killed:
-            error_msg = f"Script appears stuck — no DuckDB activity or output for {idle_timeout}s (total {duration_ms // 1000}s elapsed)"
+            error_msg = f"Script appears stuck. No DuckDB activity or output for {idle_timeout}s (total {duration_ms // 1000}s elapsed)"
         else:
             error_msg = f"Script timed out after {timeout}s"
         log_output = stdout_capture.getvalue() + stderr_capture.getvalue()

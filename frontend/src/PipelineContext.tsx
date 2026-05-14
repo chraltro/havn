@@ -308,10 +308,13 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
   runSummaryRef.current = runSummary;
 
   useEffect(() => {
-    try {
-      const toSave = output.length > 500 ? output.slice(-500) : output;
-      sessionStorage.setItem('havn_pipeline_output', JSON.stringify(toSave));
-    } catch { /* storage full - ignore */ }
+    const timer = setTimeout(() => {
+      try {
+        const toSave = output.length > 500 ? output.slice(-500) : output;
+        sessionStorage.setItem('havn_pipeline_output', JSON.stringify(toSave));
+      } catch { /* storage full - ignore */ }
+    }, 300);
+    return () => clearTimeout(timer);
   }, [output]);
 
   // Persist runSummary to sessionStorage

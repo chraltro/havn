@@ -72,6 +72,26 @@ def _file_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
 
 
+def _safe_project_path(project_dir: Path, rel_path: str) -> Path:
+    """Resolve rel_path under project_dir and reject any traversal.
+
+    Uses Path.is_relative_to (Python 3.9+) which compares path parts, avoiding
+    Windows string-prefix bypass where C:\\proj-evil starts with C:\\proj.
+    """
+    if not rel_path or rel_path.strip() in ("", ".", ".."):
+        raise HTTPException(400, "Invalid file path")
+    project_root = project_dir.resolve()
+    full = (project_dir / rel_path).resolve()
+    try:
+        full.relative_to(project_root)
+    except ValueError:
+        raise HTTPException(400, "Invalid file path")
+    rel_parts = Path(rel_path).parts
+    if any(part.startswith(".") for part in rel_parts):
+        raise HTTPException(403, "Access to dotfiles is not allowed")
+    return full
+
+
 def _scan_dir(base: Path, rel: Path | None = None) -> list[FileInfo]:
     """Scan a directory and return file tree."""
     target = base / rel if rel else base
@@ -115,14 +135,7 @@ def read_file(request: Request, file_path: str) -> dict:
     """Read a file's content."""
     _require_permission(request, "read")
     project_dir = _get_project_dir()
-    full_path = (project_dir / file_path).resolve()
-    # Path traversal protection
-    if not str(full_path).startswith(str(project_dir.resolve())):
-        raise HTTPException(400, "Invalid file path")
-    # Block reading dotfiles (e.g. .env containing secrets)
-    parts = Path(file_path).parts
-    if any(part.startswith(".") for part in parts):
-        raise HTTPException(403, "Access to dotfiles is not allowed")
+    full_path = _safe_project_path(project_dir, file_path)
     if not full_path.exists():
         raise HTTPException(404, f"File not found: {file_path}")
     if not full_path.is_file():
@@ -151,11 +164,7 @@ def save_file(request: Request, file_path: str, req: SaveFileRequest) -> dict:
     """Save a file (creates it if it doesn't exist)."""
     user = _require_permission(request, "write")
     project_dir = _get_project_dir()
-    full_path = (project_dir / file_path).resolve()
-    # Path traversal protection
-    if not str(full_path).startswith(str(project_dir.resolve())):
-        raise HTTPException(400, "Invalid file path")
-    # Only allow known file extensions
+    full_path = _safe_project_path(project_dir, file_path)
     if full_path.suffix not in (".sql", ".py", ".yml", ".yaml", ".dpnb", ".sqlfluff", ".csv", ".md"):
         raise HTTPException(400, f"Unsupported file type: {full_path.suffix}")
     # Conflict detection: if expected_hash is provided and file exists, compare
@@ -189,12 +198,8 @@ def move_file(request: Request, file_path: str, req: MoveFileRequest) -> dict:
     """Move/rename a file within the project."""
     _require_permission(request, "write")
     project_dir = _get_project_dir()
-    src = (project_dir / file_path).resolve()
-    dst = (project_dir / req.destination).resolve()
-    # Path traversal protection
-    proj_root = str(project_dir.resolve())
-    if not str(src).startswith(proj_root) or not str(dst).startswith(proj_root):
-        raise HTTPException(400, "Invalid file path")
+    src = _safe_project_path(project_dir, file_path)
+    dst = _safe_project_path(project_dir, req.destination)
     if not src.exists():
         raise HTTPException(404, f"File not found: {file_path}")
     if not src.is_file():
@@ -220,10 +225,7 @@ def delete_file(
     """Delete a file, optionally dropping the corresponding database object."""
     user = _require_permission(request, "write")
     project_dir = _get_project_dir()
-    full_path = (project_dir / file_path).resolve()
-    # Path traversal protection
-    if not str(full_path).startswith(str(project_dir.resolve())):
-        raise HTTPException(400, "Invalid file path")
+    full_path = _safe_project_path(project_dir, file_path)
     if not full_path.exists():
         raise HTTPException(404, f"File not found: {file_path}")
     if not full_path.is_file():

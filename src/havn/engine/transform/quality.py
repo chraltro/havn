@@ -163,7 +163,8 @@ def _evaluate_assertion(
     table = model.full_name
 
     # row_count > N / row_count >= N / etc.
-    m = re.match(r"row_count\s*(>|>=|<|<=|=|==|!=)\s*(\d+)", expr)
+    # Order alternatives longest-first so `>=` doesn't get split into `>` + `=`.
+    m = re.match(r"row_count\s*(>=|<=|==|!=|>|<|=)\s*(\d+)", expr)
     if m:
         op, val = m.group(1), int(m.group(2))
         if op == "==":

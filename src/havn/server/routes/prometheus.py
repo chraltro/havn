@@ -10,7 +10,10 @@ manager. See :mod:`havn.engine.observability` for the full catalogue.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Response
+import hmac
+import os
+
+from fastapi import APIRouter, HTTPException, Request, Response
 
 from havn.engine.observability import render_prometheus
 
@@ -18,8 +21,21 @@ router = APIRouter()
 
 
 @router.get("/metrics")
-def prometheus_metrics() -> Response:
-    """Scrape endpoint for Prometheus / VictoriaMetrics."""
+def prometheus_metrics(request: Request) -> Response:
+    """Scrape endpoint for Prometheus / VictoriaMetrics.
+
+    Optional auth: when HAVN_METRICS_TOKEN is set the client must present
+    a matching Bearer token. This prevents leaking query counts, model
+    names and error rates if the server is exposed publicly.
+    """
+    expected = os.environ.get("HAVN_METRICS_TOKEN")
+    if expected:
+        auth = request.headers.get("authorization", "")
+        provided = ""
+        if auth.lower().startswith("bearer "):
+            provided = auth.split(None, 1)[1].strip()
+        if not provided or not hmac.compare_digest(provided, expected):
+            raise HTTPException(401, "Invalid or missing metrics token")
     body = render_prometheus()
     return Response(content=body, media_type="text/plain; version=0.0.4; charset=utf-8")
 

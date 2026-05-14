@@ -838,7 +838,7 @@ export default function SortableTable({
         style={{ overflowY: "auto", maxHeight: "calc(100vh - 200px)", position: "relative" }}
         onScroll={handleScroll}
       >
-        <table style={{ ...S.table, tableLayout: hasFixedWidths ? "fixed" : undefined }}>
+        <table className="havn-sortable-table" style={{ ...S.table, tableLayout: hasFixedWidths ? "fixed" : undefined }}>
           <thead style={{ position: "sticky", top: 0, zIndex: 4 }}>
             <tr>
               {showSelectCol && (
@@ -869,7 +869,7 @@ export default function SortableTable({
   function renderRegularBody() {
     return (
       <div style={{ overflowX: "auto" }}>
-        <table style={{ ...S.table, tableLayout: hasFixedWidths ? "fixed" : undefined }}>
+        <table className="havn-sortable-table" style={{ ...S.table, tableLayout: hasFixedWidths ? "fixed" : undefined }}>
           <thead>
             <tr>
               {showSelectCol && (
@@ -1109,16 +1109,12 @@ const S = {
   },
 };
 
-/* Inject hover style via a global stylesheet (only once) */
 if (typeof document !== "undefined" && !document.getElementById("havn-sortable-table-styles")) {
   const sheet = document.createElement("style");
   sheet.id = "havn-sortable-table-styles";
   sheet.textContent = `
     .havn-st-ctx-item:hover { background: rgba(99,102,241,0.1); }
-  `;
-  /* Row hover */
-  sheet.textContent += `
-    table tr:hover td { background-color: rgba(99,102,241,0.06) !important; }
+    table.havn-sortable-table tr:hover td { background-color: rgba(99,102,241,0.06); }
   `;
   document.head.appendChild(sheet);
 }

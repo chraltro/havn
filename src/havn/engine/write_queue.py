@@ -19,6 +19,7 @@ import logging
 import queue
 import sys
 import threading
+import weakref
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Generator
@@ -58,13 +59,24 @@ class WriteQueue:
         while True:
             item = self._queue.get()
             if item is None:
+                self._queue.task_done()
                 break
             func, args, kwargs, future = item
             try:
-                result = func(self._conn, *args, **kwargs)
-                future.set_result(result)
-            except Exception as e:
-                future.set_exception(e)
+                try:
+                    result = func(self._conn, *args, **kwargs)
+                except Exception as e:
+                    try:
+                        future.set_exception(e)
+                    except (concurrent.futures.InvalidStateError, Exception):
+                        logger.exception("Write worker: failed to deliver exception to future")
+                else:
+                    try:
+                        future.set_result(result)
+                    except (concurrent.futures.InvalidStateError, Exception):
+                        logger.exception("Write worker: failed to deliver result to future")
+            except BaseException:
+                logger.exception("Write worker: unhandled error processing task")
             finally:
                 self._queue.task_done()
 
@@ -121,8 +133,17 @@ class WriteQueue:
 
     def close(self) -> None:
         """Shut down the queue and close the connection."""
-        self._queue.put(None)
+        try:
+            self._queue.put(None, timeout=2)
+        except queue.Full:
+            logger.warning("Write queue is full during shutdown; dropping sentinel")
         self._thread.join(timeout=5)
+        if self._thread.is_alive():
+            logger.warning("Write queue worker did not exit within timeout")
+        try:
+            tag_default_catalog(self._conn, None)
+        except Exception:
+            pass
         try:
             self._conn.close()
         except Exception:
@@ -147,30 +168,35 @@ def _default_catalog_for(backend: WarehouseBackend) -> str | None:
     return "warehouse" if backend.name == "ducklake" else None
 
 
-_conn_default_catalog: dict[int, str | None] = {}
+_conn_default_catalog: "weakref.WeakKeyDictionary[duckdb.DuckDBPyConnection, str]" = (
+    weakref.WeakKeyDictionary()
+)
+_cursor_for_lock = threading.Lock()
 
 
 def cursor_for(conn: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
     """Return a cursor with the warehouse catalog selected if needed.
 
-    Every place in havn that wrote ``conn.cursor()`` should switch to this
-    helper so that DuckLake's catalog state is preserved across DuckDB
-    cursors, which otherwise default to ``memory``.
-
-    No-op for the DuckDB file backend (the cursor already inherits the
-    correct default).
+    Tracks the per-connection catalog tag via WeakKeyDictionary so that
+    garbage-collected connections do not leak entries and recycled
+    ``id()`` values do not produce stale routing decisions.
     """
     cur = conn.cursor()
-    cat = _conn_default_catalog.get(id(conn))
+    try:
+        cat = _conn_default_catalog.get(conn)
+    except TypeError:
+        cat = None
     if not cat:
-        # Auto-detect: if the conn has a ``warehouse`` catalog attached
-        # we treat that as the default. Covers id() mismatches where the
-        # tag was set on a different connection wrapper but the underlying
-        # DuckDB instance is the same (e.g. cursor-derived connections).
         try:
-            cats = [r[0] for r in cur.execute("SELECT database_name FROM duckdb_databases()").fetchall()]
+            cats = [r[0] for r in cur.execute(
+                "SELECT database_name FROM duckdb_databases()"
+            ).fetchall()]
             if "warehouse" in cats:
                 cat = "warehouse"
+                try:
+                    _conn_default_catalog[conn] = cat
+                except TypeError:
+                    pass
         except Exception:
             pass
     if cat:
@@ -178,17 +204,24 @@ def cursor_for(conn: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
     return cur
 
 
-def tag_default_catalog(conn: duckdb.DuckDBPyConnection, catalog: str | None) -> None:
+def tag_default_catalog(
+    conn: duckdb.DuckDBPyConnection, catalog: str | None
+) -> None:
     """Mark a connection so :func:`cursor_for` knows which catalog to USE.
 
-    Set on the parent connection right after ATTACH so subsequent cursors
-    can be enriched. ``catalog`` is the name passed to ``ATTACH ... AS`` —
-    e.g. ``warehouse`` for DuckLake. Pass ``None`` for plain DuckDB.
+    WeakKeyDictionary keys auto-evict when the connection is collected,
+    so closed connections do not leak.
     """
     if catalog is None:
-        _conn_default_catalog.pop(id(conn), None)
+        try:
+            _conn_default_catalog.pop(conn, None)
+        except TypeError:
+            pass
     else:
-        _conn_default_catalog[id(conn)] = catalog
+        try:
+            _conn_default_catalog[conn] = catalog
+        except TypeError:
+            pass
 
 
 class ReadPool:

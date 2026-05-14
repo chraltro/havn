@@ -1347,15 +1347,17 @@ function AppContent() {
               onResizeStart={onAgentResizeStart}
             />
             <div style={{ ...styles.agentPanel, width: agentWidth }} aria-label="Agent">
-              <AgentSidebar
-                isOpen={agentSidebarOpen}
-                onToggle={() => setAgentSidebarOpen(false)}
-                onFileChanged={() => { reloadActiveFile(); refreshAll(); }}
-                onOpenFile={openFile}
-                onSelectTable={handleSelectTable}
-                pendingPrompt={pendingAgentPromptRef.current}
-                onPromptConsumed={() => { pendingAgentPromptRef.current = null; }}
-              />
+              <ErrorBoundary name="Agent Sidebar">
+                <AgentSidebar
+                  isOpen={agentSidebarOpen}
+                  onToggle={() => setAgentSidebarOpen(false)}
+                  onFileChanged={() => { reloadActiveFile(); refreshAll(); }}
+                  onOpenFile={openFile}
+                  onSelectTable={handleSelectTable}
+                  pendingPrompt={pendingAgentPromptRef.current}
+                  onPromptConsumed={() => { pendingAgentPromptRef.current = null; }}
+                />
+              </ErrorBoundary>
             </div>
           </>
         )}

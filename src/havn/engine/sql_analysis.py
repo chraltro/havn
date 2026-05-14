@@ -127,19 +127,22 @@ def parse_config(sql: str) -> dict[str, str]:
 def parse_depends(sql: str) -> list[str]:
     """Parse dependencies from SQL header.
 
-    Primary syntax::
-
-        @depends_on bronze.customers, bronze.orders
-        @depends_on(bronze.customers, bronze.orders)
-
-    Legacy syntax (still supported)::
-
-        -- depends_on: bronze.customers, bronze.orders
+    Multiple @depends_on lines are merged in order, preserving the first
+    occurrence of each table. Legacy ``-- depends_on:`` lines are appended
+    after canonical ones.
     """
-    match = _search_patterns(DEPENDS_PATTERN, sql) or _LEGACY_DEPENDS_PATTERN.search(sql)
-    if not match:
-        return []
-    return [dep.strip() for dep in match.group(1).split(",") if dep.strip()]
+    deps: list[str] = []
+    seen: set[str] = set()
+    matches = _finditer_patterns(DEPENDS_PATTERN, sql) + list(
+        _LEGACY_DEPENDS_PATTERN.finditer(sql)
+    )
+    for m in matches:
+        for dep in m.group(1).split(","):
+            d = dep.strip()
+            if d and d not in seen:
+                deps.append(d)
+                seen.add(d)
+    return deps
 
 
 def parse_assertions(sql: str) -> list[str]:

@@ -86,6 +86,51 @@ def _parse_cron(cron_expr: str) -> dict:
     return kwargs
 
 
+def _cron_field_matches(pattern: str, current: int) -> bool:
+    """Return True if `current` matches a single cron field `pattern`.
+
+    Supports lists (1,5,30), ranges (1-5), steps (*/5, 0-29/5), and the
+    star wildcard. Each comma-separated alternative is evaluated independently
+    and the result is the logical OR.
+    """
+    if pattern == "*":
+        return True
+    try:
+        for token in pattern.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            step = 1
+            if "/" in token:
+                head, step_str = token.split("/", 1)
+                step = int(step_str)
+                if step <= 0:
+                    continue
+            else:
+                head = token
+            if head == "*" or head == "":
+                lo, hi = None, None
+            elif "-" in head:
+                lo_s, hi_s = head.split("-", 1)
+                lo, hi = int(lo_s), int(hi_s)
+            else:
+                value = int(head)
+                if step == 1:
+                    if current == value:
+                        return True
+                    continue
+                lo, hi = value, value
+            if lo is None:
+                if current % step == 0:
+                    return True
+                continue
+            if lo <= current <= hi and (current - lo) % step == 0:
+                return True
+    except (ValueError, ZeroDivisionError):
+        return False
+    return False
+
+
 def get_scheduled_streams(project_dir: Path) -> list[dict]:
     """Return info about all streams that have cron schedules."""
     from havn.config import load_project
@@ -139,27 +184,7 @@ class SchedulerThread(threading.Thread):
         ]
 
         for pattern, current in checks:
-            if pattern == "*":
-                continue
-            try:
-                if "/" in pattern:
-                    # */5 = every 5 units
-                    _, step_str = pattern.split("/", 1)
-                    step = int(step_str)
-                    if step <= 0:
-                        return False
-                    if current % step != 0:
-                        return False
-                elif "," in pattern:
-                    if current not in [int(v) for v in pattern.split(",")]:
-                        return False
-                elif "-" in pattern:
-                    lo, hi = pattern.split("-", 1)
-                    if not (int(lo) <= current <= int(hi)):
-                        return False
-                elif current != int(pattern):
-                    return False
-            except (ValueError, ZeroDivisionError):
+            if not _cron_field_matches(pattern, current):
                 return False
 
         # Don't run more than once per minute
