@@ -220,9 +220,32 @@ Run an ingest or export script.
 {"script_path": "ingest/customers.py"}
 ```
 
-### POST /api/stream/{stream_name}
+### POST /api/stream/{stream_name}/start
 
-Run a full stream. Optional `?force=true`.
+Start a pipeline in a background thread. Returns immediately with
+`{"status": "started", "stream_name": "..."}` or `{"status": "already_running"}`.
+This is the preferred entry point; the legacy single-shot
+`POST /api/stream/{name}` still works for short pipelines.
+
+Optional query parameter: `?force=true`.
+
+### GET /api/stream/events
+
+Server-sent events for the currently running pipeline. Emits:
+`start`, `step_start`, `model_start`, `model_end`, `complete`, `error`.
+Events are pushed via a server-side `threading.Condition`, so listeners do
+not poll. Heartbeat (`: keepalive`) every 15 seconds when idle.
+
+### GET /api/stream/active
+
+Snapshot of the current pipeline state: `{ running, operation,
+operation_label, stream_name, started_at, total_events, finished, status,
+duration_seconds }`. Stale runs older than 10 minutes are auto-cleared.
+
+### POST /api/stream/cancel
+
+Request cancellation of the running pipeline. Workers check the cancel
+flag between steps; in-flight queries are not interrupted by default.
 
 ### GET /api/streams
 
@@ -296,6 +319,11 @@ Get last sync status for each connector.
 ### POST /api/webhook/{webhook_name}
 
 Receive webhook data and store in `landing.<name>_inbox`.
+
+Authentication: requires a shared secret. Set
+`HAVN_WEBHOOK_SECRET_<NAME>` (per-webhook) or `HAVN_WEBHOOK_SECRET` (global)
+and pass it as the `X-Havn-Webhook-Secret` header. To run open for local
+development set `HAVN_WEBHOOK_OPEN=true`. Payloads are capped at 5 MB.
 
 ## CDC
 

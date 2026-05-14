@@ -422,28 +422,30 @@ havn watch [--project PATH]
 
 ## Masking
 
-### havn masking create
-
-Create a masking policy.
-
-```bash
-havn masking create --schema S --table T --column C --method M [--exempt ROLES] [--project PATH]
-```
-
-### havn masking list
+### havn mask list
 
 List all masking policies.
 
 ```bash
-havn masking list [--project PATH]
+havn mask list [--project PATH]
 ```
 
-### havn masking delete
+### havn mask add
 
-Delete a masking policy.
+Add a masking policy. Supports all 14 methods (`hash`, `redact`, `null`,
+`partial`, `truncate`, `email`, `phone`, `first_initial`, `ip_address`,
+`credit_card`, `range`, `noise`, `date_shift`, `consistent_hash`).
 
 ```bash
-havn masking delete POLICY_ID [--project PATH]
+havn mask add --schema S --table T --column C --method M [--show-first N] [--show-last N] [--project PATH]
+```
+
+### havn mask remove
+
+Remove a masking policy by ID.
+
+```bash
+havn mask remove --id POLICY_ID [--project PATH]
 ```
 
 ## Server
@@ -495,4 +497,98 @@ Show havn version.
 
 ```bash
 havn version
+```
+
+## Interactive
+
+### havn shell
+
+Open an interactive SQL REPL connected to the warehouse. Supports multi-line
+queries, history, and tab completion.
+
+```bash
+havn shell [--env NAME] [--project PATH]
+```
+
+### havn explain
+
+Print a model's query plan with operator timings.
+
+```bash
+havn explain MODEL [--analyze] [--project PATH]
+```
+
+`--analyze` runs the model's query with `EXPLAIN ANALYZE` and reports
+operator-level wall-clock times.
+
+## Pipeline Rewind
+
+### havn rewind
+
+Inspect rewind metadata.
+
+```bash
+havn rewind runs [--limit N] [--project PATH]
+havn rewind snapshot --run RUN_ID [--limit N] [--project PATH]
+havn rewind sample --run RUN_ID --model NAME [--limit N] [--project PATH]
+havn rewind gc [--project PATH]
+```
+
+## Schema Sentinel
+
+### havn sentinel
+
+Detect upstream schema drift and analyze impact.
+
+```bash
+havn sentinel check [--source NAME] [--project PATH]
+havn sentinel diffs [--limit N] [--project PATH]
+havn sentinel impacts --diff DIFF_ID [--limit N] [--project PATH]
+havn sentinel history --source NAME [--limit N] [--project PATH]
+```
+
+## Pull Requests (GitHub)
+
+### havn pr
+
+Create and review havn pipeline changes via GitHub pull requests.
+
+```bash
+havn pr open                    # open the current branch as a PR
+havn pr review NUMBER           # local data diff for a PR
+```
+
+## Arrow Flight SQL
+
+### havn flight
+
+Start an Arrow Flight SQL server that exposes the warehouse to Flight-aware
+clients (BI tools, Python `pyarrow.flight`, etc.).
+
+```bash
+havn flight start [--host HOST] [--port PORT] [--project PATH]
+```
+
+## Streaming
+
+### havn streaming
+
+Drive long-lived streaming sources from the CLI.
+
+```bash
+havn streaming start [--project PATH]
+havn streaming stop [--project PATH]
+havn streaming status [--project PATH]
+havn streaming poll-once SOURCE [--project PATH]
+```
+
+## Migration
+
+### havn migrate
+
+Convert between backends (DuckDB to DuckLake or vice versa). Reads the
+current backend, writes to the target.
+
+```bash
+havn migrate --target ducklake [--project PATH]
 ```

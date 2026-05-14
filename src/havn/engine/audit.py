@@ -58,8 +58,10 @@ def _ensure_sequence(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
     try:
         conn.execute("CREATE SEQUENCE IF NOT EXISTS _havn.audit_log_seq START 1")
-    except Exception:
-        pass  # sequence already exists
+    except duckdb.CatalogException:
+        pass
+    except Exception as e:
+        logger.debug("CREATE SEQUENCE audit_log_seq failed: %s", e)
 
 
 def log_audit(

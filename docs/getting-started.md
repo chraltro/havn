@@ -20,8 +20,8 @@ The web UI frontend is bundled into the package — no separate build step neede
 ### Install from Source (development)
 
 ```bash
-git clone https://github.com/chraltro/db
-cd db
+git clone https://github.com/chraltro/havn
+cd havn
 pip install -e ".[dev]"
 cd frontend && npm install && npm run build
 ```

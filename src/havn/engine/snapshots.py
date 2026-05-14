@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import shutil
 import time
 import uuid
@@ -13,7 +14,28 @@ from pathlib import Path
 
 import duckdb
 
+from havn.engine.utils import validate_identifier
+
 logger = logging.getLogger("havn.snapshots")
+
+_MODEL_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
+
+
+def _safe_model_fqn(model_name: str) -> str:
+    """Return a safely double-quoted ``"schema"."name"`` for SQL embedding.
+
+    Raises ValueError if the model name fails identifier validation. Callers
+    must use this whenever ``model_name`` flows into a SQL string that
+    cannot be parameterised (CREATE TABLE, COPY, FROM clauses).
+    """
+    if not _MODEL_NAME_RE.match(model_name or ""):
+        raise ValueError(f"Invalid model name: {model_name!r}")
+    parts = model_name.split(".")
+    for p in parts:
+        validate_identifier(p, "model identifier")
+    if len(parts) == 1:
+        return f'"{parts[0]}"'
+    return f'"{parts[0]}"."{parts[1]}"'
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -85,47 +107,87 @@ def _meta_db_path(project_dir: Path) -> Path:
     return project_dir / _METADATA_DIR / "rewind.duckdb"
 
 
+import threading
+
+_meta_conns: dict[str, duckdb.DuckDBPyConnection] = {}
+_meta_lock = threading.Lock()
+
+
+def _conn_is_alive(conn: duckdb.DuckDBPyConnection) -> bool:
+    """Probe a cached connection; return False if the underlying handle was closed."""
+    try:
+        conn.execute("SELECT 1").fetchone()
+        return True
+    except Exception:
+        return False
+
+
+def _meta_conn_for(project_dir: Path) -> duckdb.DuckDBPyConnection:
+    """Return a long-lived metadata connection for `project_dir`.
+
+    The metadata DB is a separate DuckDB file; opening it on every helper
+    call serialises all callers on the file lock and adds significant
+    latency in hot paths like `capture_snapshot`. We cache one connection
+    per project_dir and reuse it. A closed cached connection is detected
+    and replaced so accidental external closes do not poison subsequent
+    calls.
+    """
+    key = str(project_dir.resolve())
+    with _meta_lock:
+        conn = _meta_conns.get(key)
+        if conn is not None and _conn_is_alive(conn):
+            return conn
+        if conn is not None:
+            _meta_conns.pop(key, None)
+        meta_dir = project_dir / _METADATA_DIR
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        db_path = _meta_db_path(project_dir)
+        conn = duckdb.connect(str(db_path))
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS runs ("
+            "run_id VARCHAR PRIMARY KEY, "
+            "started_at TIMESTAMP DEFAULT current_timestamp, "
+            "finished_at TIMESTAMP, "
+            "status VARCHAR DEFAULT 'running', "
+            "trigger VARCHAR DEFAULT 'manual', "
+            "models_run VARCHAR[] DEFAULT [])"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS snapshots ("
+            "run_id VARCHAR NOT NULL, "
+            "model_name VARCHAR NOT NULL, "
+            "row_count INTEGER DEFAULT 0, "
+            "col_count INTEGER DEFAULT 0, "
+            "schema_hash VARCHAR DEFAULT '', "
+            "size_bytes BIGINT DEFAULT 0, "
+            "checksum VARCHAR DEFAULT '', "
+            "file_path VARCHAR, "
+            "created_at TIMESTAMP DEFAULT current_timestamp, "
+            "PRIMARY KEY (run_id, model_name))"
+        )
+        _meta_conns[key] = conn
+        return conn
+
+
 def _ensure_meta_db(project_dir: Path) -> duckdb.DuckDBPyConnection:
-    """Open (and create if needed) the rewind metadata database."""
-    meta_dir = project_dir / _METADATA_DIR
-    meta_dir.mkdir(parents=True, exist_ok=True)
-
-    db_path = _meta_db_path(project_dir)
-    conn = duckdb.connect(str(db_path))
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS runs (
-            run_id      VARCHAR PRIMARY KEY,
-            started_at  TIMESTAMP DEFAULT current_timestamp,
-            finished_at TIMESTAMP,
-            status      VARCHAR DEFAULT 'running',
-            trigger     VARCHAR DEFAULT 'manual',
-            models_run  VARCHAR[] DEFAULT []
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS snapshots (
-            run_id      VARCHAR NOT NULL,
-            model_name  VARCHAR NOT NULL,
-            row_count   INTEGER DEFAULT 0,
-            col_count   INTEGER DEFAULT 0,
-            schema_hash VARCHAR DEFAULT '',
-            size_bytes  BIGINT DEFAULT 0,
-            checksum    VARCHAR DEFAULT '',
-            file_path   VARCHAR,
-            created_at  TIMESTAMP DEFAULT current_timestamp,
-            PRIMARY KEY (run_id, model_name)
-        )
-    """)
-    return conn
+    """Backwards-compatible wrapper that now reuses a cached connection."""
+    return _meta_conn_for(project_dir)
 
 
 def _close_meta_db(conn: duckdb.DuckDBPyConnection) -> None:
-    """Close the metadata database connection."""
-    try:
-        conn.close()
-    except Exception:
-        pass
+    """No-op: cached connections are kept alive for the process lifetime."""
+    return None
+
+
+def close_meta_db_cache() -> None:
+    """Close all cached metadata connections."""
+    with _meta_lock:
+        for c in list(_meta_conns.values()):
+            try:
+                c.close()
+            except Exception:
+                pass
+        _meta_conns.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -188,8 +250,13 @@ def _compute_checksum(
     For larger tables, uses a proxy (row count + schema + sample rows).
     """
     try:
+        fqn = _safe_model_fqn(model_name)
+    except ValueError as e:
+        logger.warning("Snapshot checksum skipped: %s", e)
+        return ""
+    try:
         row_count = warehouse_conn.execute(
-            f"SELECT COUNT(*) FROM {model_name}"
+            f"SELECT COUNT(*) FROM {fqn}"
         ).fetchone()[0]
     except Exception:
         return ""
@@ -198,32 +265,35 @@ def _compute_checksum(
         return hashlib.sha256(b"empty").hexdigest()[:16]
 
     if row_count <= 1_000_000:
-        # Hash the full MD5 aggregate from DuckDB
         try:
             result = warehouse_conn.execute(
-                f"SELECT md5(string_agg(COLUMNS(*)::VARCHAR, '|' ORDER BY rowid)) FROM {model_name}"
+                f"SELECT md5(string_agg(COLUMNS(*)::VARCHAR, '|' ORDER BY rowid)) FROM {fqn}"
             ).fetchone()
             if result and result[0]:
                 return hashlib.sha256(result[0].encode()).hexdigest()[:16]
         except Exception:
             pass
 
-    # Proxy hash for large tables: schema + count + sample
     try:
+        parts = model_name.split(".")
+        if len(parts) == 2:
+            schema, name = parts
+        else:
+            schema, name = "main", model_name
         cols = warehouse_conn.execute(
-            f"SELECT column_name, data_type FROM information_schema.columns "
-            f"WHERE table_schema || '.' || table_name = '{model_name}' "
-            f"ORDER BY ordinal_position"
+            "SELECT column_name, data_type FROM information_schema.columns "
+            "WHERE table_schema = ? AND table_name = ? "
+            "ORDER BY ordinal_position",
+            [schema, name],
         ).fetchall()
         schema_str = "|".join(f"{c[0]}:{c[1]}" for c in cols)
 
-        # Sample first 1000, last 1000
         first_sample = warehouse_conn.execute(
-            f"SELECT md5(string_agg(COLUMNS(*)::VARCHAR, '|')) FROM (SELECT * FROM {model_name} LIMIT 1000)"
+            f"SELECT md5(string_agg(COLUMNS(*)::VARCHAR, '|')) FROM (SELECT * FROM {fqn} LIMIT 1000)"
         ).fetchone()[0] or ""
 
         last_sample = warehouse_conn.execute(
-            f"SELECT md5(string_agg(COLUMNS(*)::VARCHAR, '|')) FROM (SELECT * FROM {model_name} ORDER BY rowid DESC LIMIT 1000)"
+            f"SELECT md5(string_agg(COLUMNS(*)::VARCHAR, '|')) FROM (SELECT * FROM {fqn} ORDER BY rowid DESC LIMIT 1000)"
         ).fetchone()[0] or ""
 
         combined = f"{row_count}|{schema_str}|{first_sample}|{last_sample}"
@@ -308,15 +378,24 @@ def capture_snapshot(
             )
             return False
 
-        # Write new snapshot as parquet
+        try:
+            fqn = _safe_model_fqn(model_name)
+        except ValueError as e:
+            logger.warning("Snapshot rejected: %s", e)
+            return False
+
         snapshot_dir = project_dir / _SNAPSHOTS_DIR / model_name.replace(".", "/")
         snapshot_dir.mkdir(parents=True, exist_ok=True)
+        if not snapshot_dir.resolve().is_relative_to(project_dir.resolve()):
+            logger.warning("Snapshot dir would escape project_dir for %s", model_name)
+            return False
         snapshot_path = snapshot_dir / f"{run_id}.parquet"
         rel_path = str(snapshot_path.relative_to(project_dir))
 
         try:
+            safe_path = str(snapshot_path).replace("'", "''")
             warehouse_conn.execute(
-                f"COPY (SELECT * FROM {model_name}) TO '{snapshot_path}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+                f"COPY (SELECT * FROM {fqn}) TO '{safe_path}' (FORMAT PARQUET, COMPRESSION ZSTD)"
             )
         except Exception as e:
             logger.warning("Failed to write snapshot for %s: %s", model_name, e)
@@ -356,45 +435,42 @@ def run_gc(project_dir: Path, config: RewindConfig | None = None) -> int:
     deleted = 0
 
     try:
-        # Delete files older than retention, keep metadata
         expired = meta_conn.execute(
-            """
-            SELECT run_id, model_name, file_path FROM snapshots
-            WHERE file_path IS NOT NULL
-              AND created_at < current_timestamp - INTERVAL '1 second' * ?
-            """,
+            "SELECT run_id, model_name, file_path FROM snapshots "
+            "WHERE file_path IS NOT NULL "
+            "AND created_at < current_timestamp - INTERVAL '1 second' * ?",
             [retention_s],
         ).fetchall()
 
-        # Track which file_paths are still referenced by non-expired snapshots
-        for run_id, model_name, file_path in expired:
-            # Check if this file is referenced by any non-expired snapshot
-            refs = meta_conn.execute(
-                """
-                SELECT COUNT(*) FROM snapshots
-                WHERE file_path = ?
-                  AND created_at >= current_timestamp - INTERVAL '1 second' * ?
-                """,
-                [file_path, retention_s],
-            ).fetchone()[0]
+        if expired:
+            # Compute live reference counts in a single grouped query so
+            # GC stays O(N) rather than O(N^2) on the metadata DB.
+            ref_rows = meta_conn.execute(
+                "SELECT file_path, COUNT(*) FROM snapshots "
+                "WHERE file_path IS NOT NULL "
+                "AND created_at >= current_timestamp - INTERVAL '1 second' * ? "
+                "GROUP BY file_path",
+                [retention_s],
+            ).fetchall()
+            live_refs: dict[str, int] = {fp: cnt for fp, cnt in ref_rows}
 
-            if refs == 0:
-                full_path = project_dir / file_path
-                if full_path.exists():
-                    try:
-                        full_path.unlink()
-                        deleted += 1
-                    except Exception as e:
-                        logger.warning("Failed to delete snapshot %s: %s", file_path, e)
+            for run_id, model_name, file_path in expired:
+                if live_refs.get(file_path, 0) == 0:
+                    full_path = project_dir / file_path
+                    if full_path.exists():
+                        try:
+                            full_path.unlink()
+                            deleted += 1
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to delete snapshot %s: %s", file_path, e
+                            )
 
-            # Null out file_path for expired snapshots
             meta_conn.execute(
-                """
-                UPDATE snapshots SET file_path = NULL
-                WHERE run_id = ? AND model_name = ?
-                  AND created_at < current_timestamp - INTERVAL '1 second' * ?
-                """,
-                [run_id, model_name, retention_s],
+                "UPDATE snapshots SET file_path = NULL "
+                "WHERE file_path IS NOT NULL "
+                "AND created_at < current_timestamp - INTERVAL '1 second' * ?",
+                [retention_s],
             )
 
         # Storage cap enforcement
@@ -558,11 +634,13 @@ def get_snapshot_sample(
         if not file_path.exists():
             return {"error": "Snapshot file missing", "columns": [], "rows": []}
 
-        # Use DuckDB to read the parquet file
+        if not file_path.resolve().is_relative_to(project_dir.resolve()):
+            return {"error": "Snapshot path escapes project", "columns": [], "rows": []}
         read_conn = duckdb.connect(":memory:")
         try:
+            safe_path = str(file_path).replace("'", "''")
             result = read_conn.execute(
-                f"SELECT * FROM read_parquet('{file_path}') LIMIT ?", [limit]
+                f"SELECT * FROM read_parquet('{safe_path}') LIMIT ?", [limit]
             )
             columns = [desc[0] for desc in result.description]
             rows = [[str(v) if v is not None else None for v in row] for row in result.fetchall()]
@@ -615,16 +693,20 @@ def restore_snapshot(
         current_hash, _ = _compute_schema_hash(warehouse_conn, model_name)
         schema_warning = bool(old_schema_hash and current_hash and old_schema_hash != current_hash)
 
-        # Restore: load parquet into the model's location
+        try:
+            fqn = _safe_model_fqn(model_name)
+        except ValueError as e:
+            return {"status": "error", "message": str(e), "schema_warning": False}
+        if not full_path.resolve().is_relative_to(project_dir.resolve()):
+            return {"status": "error", "message": "Snapshot path escapes project", "schema_warning": False}
         parts = model_name.split(".")
         if len(parts) == 2:
-            schema, name = parts
-        else:
-            schema, name = "main", model_name
-
-        warehouse_conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+            schema, _name = parts
+            validate_identifier(schema, "schema")
+            warehouse_conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+        safe_path = str(full_path).replace("'", "''")
         warehouse_conn.execute(
-            f"CREATE OR REPLACE TABLE {model_name} AS SELECT * FROM read_parquet('{full_path}')"
+            f"CREATE OR REPLACE TABLE {fqn} AS SELECT * FROM read_parquet('{safe_path}')"
         )
 
         return {

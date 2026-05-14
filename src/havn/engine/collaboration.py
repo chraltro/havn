@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -50,46 +51,51 @@ class Session:
 class SessionManager:
     """Manages all active collaboration sessions.
 
-    Thread-safe via asyncio — all mutations happen in the event loop.
+    The manager is reachable from both the event loop (WebSocket handlers)
+    and synchronous HTTP routes (which run on FastAPI's threadpool). Use
+    a re-entrant lock on every mutation so concurrent callers cannot
+    exceed `_max_sessions`, double-evict, or race on `_connections`.
     """
 
     def __init__(self) -> None:
         self._sessions: dict[str, Session] = {}
-        # websocket_id -> (session_id, websocket)
         self._connections: dict[str, tuple[str, object]] = {}
         self._max_sessions = 100
         self._max_history = 200
-        self._max_sql_length = 100_000  # 100KB limit for shared SQL
-        self._session_ttl = 86400  # 24 hours — stale sessions auto-evicted
+        self._max_sql_length = 100_000
+        self._session_ttl = 86400
+        self._lock = threading.RLock()
 
     def create_session(self, name: str = "") -> Session:
         """Create a new collaboration session."""
-        if len(self._sessions) >= self._max_sessions:
-            self._evict_stale_sessions()
-        if len(self._sessions) >= self._max_sessions:
-            self._evict_empty_sessions()
-        session_id = uuid.uuid4().hex[:12]
-        # Sanitize session name to prevent XSS when rendered
-        safe_name = (name or f"Session {session_id[:6]}")[:200]
-        session = Session(session_id=session_id, name=safe_name)
-        self._sessions[session_id] = session
-        return session
+        with self._lock:
+            if len(self._sessions) >= self._max_sessions:
+                self._evict_stale_sessions()
+            if len(self._sessions) >= self._max_sessions:
+                self._evict_empty_sessions()
+            session_id = uuid.uuid4().hex[:12]
+            safe_name = (name or f"Session {session_id[:6]}")[:200]
+            session = Session(session_id=session_id, name=safe_name)
+            self._sessions[session_id] = session
+            return session
 
     def get_session(self, session_id: str) -> Session | None:
         """Get a session by ID."""
-        return self._sessions.get(session_id)
+        with self._lock:
+            return self._sessions.get(session_id)
 
     def list_sessions(self) -> list[dict]:
         """List all active sessions with participant counts."""
-        return [
-            {
-                "session_id": s.session_id,
-                "name": s.name,
-                "participants": len(s.participants),
-                "created_at": s.created_at,
-            }
-            for s in self._sessions.values()
-        ]
+        with self._lock:
+            return [
+                {
+                    "session_id": s.session_id,
+                    "name": s.name,
+                    "participants": len(s.participants),
+                    "created_at": s.created_at,
+                }
+                for s in self._sessions.values()
+            ]
 
     def join_session(
         self,
@@ -99,38 +105,40 @@ class SessionManager:
         websocket: object,
     ) -> Session | None:
         """Add a participant to a session. Returns the session or None."""
-        session = self._sessions.get(session_id)
-        if not session:
-            return None
-        session.participants[user_id] = Participant(
-            user_id=user_id,
-            display_name=display_name,
-        )
-        ws_id = id(websocket)
-        self._connections[str(ws_id)] = (session_id, websocket)
-        return session
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            session.participants[user_id] = Participant(
+                user_id=user_id,
+                display_name=display_name,
+            )
+            ws_id = id(websocket)
+            self._connections[str(ws_id)] = (session_id, websocket)
+            return session
 
     def leave_session(self, session_id: str, user_id: str, websocket: object) -> None:
         """Remove a participant from a session."""
-        session = self._sessions.get(session_id)
-        if session:
-            session.participants.pop(user_id, None)
-        ws_id = id(websocket)
-        self._connections.pop(str(ws_id), None)
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session:
+                session.participants.pop(user_id, None)
+            ws_id = id(websocket)
+            self._connections.pop(str(ws_id), None)
 
     def delete_session(self, session_id: str) -> bool:
         """Delete a session entirely."""
-        session = self._sessions.pop(session_id, None)
-        if not session:
-            return False
-        # Clean up connections for this session
-        to_remove = [
-            ws_id for ws_id, (sid, _) in self._connections.items()
-            if sid == session_id
-        ]
-        for ws_id in to_remove:
-            self._connections.pop(ws_id, None)
-        return True
+        with self._lock:
+            session = self._sessions.pop(session_id, None)
+            if not session:
+                return False
+            to_remove = [
+                ws_id for ws_id, (sid, _) in self._connections.items()
+                if sid == session_id
+            ]
+            for ws_id in to_remove:
+                self._connections.pop(ws_id, None)
+            return True
 
     def add_query_result(
         self,
@@ -143,32 +151,33 @@ class SessionManager:
         error: str | None = None,
     ) -> dict | None:
         """Record a query execution in the session history."""
-        session = self._sessions.get(session_id)
-        if not session:
-            return None
-        entry = {
-            "id": uuid.uuid4().hex[:8],
-            "user_id": user_id,
-            "sql": sql,
-            "columns": columns,
-            "rows": rows,
-            "duration_ms": duration_ms,
-            "error": error,
-            "timestamp": time.time(),
-        }
-        session.query_history.append(entry)
-        if len(session.query_history) > self._max_history:
-            session.query_history = session.query_history[-self._max_history:]
-        return entry
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            entry = {
+                "id": uuid.uuid4().hex[:8],
+                "user_id": user_id,
+                "sql": sql,
+                "columns": columns,
+                "rows": rows,
+                "duration_ms": duration_ms,
+                "error": error,
+                "timestamp": time.time(),
+            }
+            session.query_history.append(entry)
+            if len(session.query_history) > self._max_history:
+                session.query_history = session.query_history[-self._max_history:]
+            return entry
 
     def update_shared_sql(self, session_id: str, sql: str) -> bool:
         """Update the shared SQL editor content."""
-        session = self._sessions.get(session_id)
-        if not session:
-            return False
-        # Enforce size limit to prevent memory exhaustion
-        session.shared_sql = sql[:self._max_sql_length]
-        return True
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return False
+            session.shared_sql = sql[:self._max_sql_length]
+            return True
 
     def update_cursor(
         self,
@@ -177,36 +186,39 @@ class SessionManager:
         position: dict,
     ) -> bool:
         """Update a participant's cursor position."""
-        session = self._sessions.get(session_id)
-        if not session:
-            return False
-        participant = session.participants.get(user_id)
-        if not participant:
-            return False
-        participant.cursor_position = position
-        return True
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return False
+            participant = session.participants.get(user_id)
+            if not participant:
+                return False
+            participant.cursor_position = position
+            return True
 
     def get_participants(self, session_id: str) -> list[dict]:
         """Get all participants in a session."""
-        session = self._sessions.get(session_id)
-        if not session:
-            return []
-        return [
-            {
-                "user_id": p.user_id,
-                "display_name": p.display_name,
-                "connected_at": p.connected_at,
-                "cursor_position": p.cursor_position,
-            }
-            for p in session.participants.values()
-        ]
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return []
+            return [
+                {
+                    "user_id": p.user_id,
+                    "display_name": p.display_name,
+                    "connected_at": p.connected_at,
+                    "cursor_position": p.cursor_position,
+                }
+                for p in session.participants.values()
+            ]
 
     def get_websockets_for_session(self, session_id: str) -> list[object]:
         """Get all WebSocket connections for a session."""
-        return [
-            ws for sid, ws in self._connections.values()
-            if sid == session_id
-        ]
+        with self._lock:
+            return [
+                ws for sid, ws in self._connections.values()
+                if sid == session_id
+            ]
 
     def _evict_empty_sessions(self) -> None:
         """Remove sessions with no participants (oldest first)."""

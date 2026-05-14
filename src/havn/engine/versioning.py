@@ -85,13 +85,18 @@ def create_version(
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     version_id = f"v{ver_count + 1}-{ts}"
 
-    # Discover tables to snapshot
+    # Discover tables to snapshot. Strictly validate any user-supplied
+    # `tables` entries so a malicious name like ``../foo`` cannot produce
+    # parquet writes outside the snapshot directory.
+    _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
     if tables:
         table_list = []
         for t in tables:
             parts = t.split(".")
-            if len(parts) == 2:
+            if len(parts) == 2 and _IDENT.match(parts[0]) and _IDENT.match(parts[1]):
                 table_list.append((parts[0], parts[1]))
+            else:
+                logger.warning("Skipping invalid table reference: %r", t)
     else:
         table_list = _get_user_tables(conn)
 
@@ -106,11 +111,15 @@ def create_version(
     snap_dir = project_dir / "_snapshots" / version_id
     snap_dir.mkdir(parents=True, exist_ok=True)
 
-    # Export each table to Parquet
     tables_info: dict[str, dict] = {}
+    snap_root = snap_dir.resolve()
     for schema, table in table_list:
         full_name = f"{schema}.{table}"
         parquet_path = snap_dir / f"{full_name}.parquet"
+        if not parquet_path.resolve().is_relative_to(snap_root):
+            logger.warning("Refusing to write %s outside snapshot dir", full_name)
+            tables_info[full_name] = {"error": "Path escapes snapshot directory"}
+            continue
         try:
             row_count = conn.execute(
                 f'SELECT COUNT(*) FROM "{schema}"."{table}"'
@@ -508,9 +517,8 @@ def cleanup_old_versions(
 
     for vid in to_remove:
         snap_dir = (project_dir / "_snapshots" / vid).resolve()
-        # Safety: only delete if within the project _snapshots directory
         snapshots_root = (project_dir / "_snapshots").resolve()
-        if snap_dir.exists() and str(snap_dir).startswith(str(snapshots_root)):
+        if snap_dir.exists() and snap_dir.is_relative_to(snapshots_root) and snap_dir != snapshots_root:
             shutil.rmtree(snap_dir)
         conn.execute(
             "DELETE FROM _havn.version_history WHERE version_id = ?",

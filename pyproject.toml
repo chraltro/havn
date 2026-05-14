@@ -57,9 +57,9 @@ warehouses = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/chraltro/db"
-Repository = "https://github.com/chraltro/db"
-Issues = "https://github.com/chraltro/db/issues"
+Homepage = "https://github.com/chraltro/havn"
+Repository = "https://github.com/chraltro/havn"
+Issues = "https://github.com/chraltro/havn/issues"
 
 [project.scripts]
 havn = "havn.cli:app"

@@ -4,46 +4,138 @@ havn provides column-level data masking to protect sensitive data. Masking is ap
 
 ## Masking Methods
 
-### hash
+havn ships fourteen masking methods covering general redaction, PII categories,
+financial data, and analytics-safe transformations. Use the catalog API
+`GET /api/masking/methods` to fetch the live list with config schemas.
 
-Replaces the value with the first 8 characters of its SHA-256 hash:
+### General
+
+#### hash
+
+Replaces the value with the first 8 characters of its SHA-256 hash.
+Deterministic per value, NOT JOIN-safe (use `consistent_hash` for that).
 
 ```
 "john@example.com" -> "a1b2c3d4"
-"Jane Smith"       -> "e5f6g7h8"
 ```
 
-### redact
+#### redact
 
-Replaces the value with `***`:
+Replaces the value with `***`.
 
-```
-"john@example.com" -> "***"
-"555-1234"         -> "***"
-```
+#### null
 
-### null
+Replaces the value with NULL.
 
-Replaces the value with NULL:
+#### partial
 
-```
-"john@example.com" -> NULL
-"555-1234"         -> NULL
-```
-
-### partial
-
-Shows the first and/or last N characters, masking the rest with `*`:
+Shows the first and/or last N characters, masking the middle with `*`.
 
 ```
 # show_first=2, show_last=4
-"john@example.com" -> "jo***********e.com"  (show_first=2, show_last=5)
-"555-123-4567"     -> "55*******4567"       (show_first=2, show_last=4)
+"555-123-4567" -> "55*******4567"
 ```
 
-Configuration:
-- `show_first` -- Number of characters to show from the beginning (default: 0)
-- `show_last` -- Number of characters to show from the end (default: 0)
+Configuration: `show_first` (default 0), `show_last` (default 0).
+
+#### truncate
+
+Shows the first N characters followed by `...`. Useful for analytics where
+the column prefix is informative.
+
+Configuration: `length` (default 3).
+
+### PII
+
+#### email
+
+Hides the local part of an email address, keeps the domain.
+
+```
+"john.doe@company.com" -> "***@company.com"
+```
+
+#### phone
+
+Keeps the last N digits of a phone number, masks the rest.
+
+Configuration: `show_last` (default 4).
+
+#### first_initial
+
+Reduces a name to initials separated by periods.
+
+```
+"Jane Smith Doe" -> "J. S. D."
+```
+
+#### ip_address
+
+Masks host octets of an IPv4 address.
+
+```
+# keep_octets=2
+"192.168.1.42" -> "192.168.x.x"
+```
+
+Configuration: `keep_octets` (default 2).
+
+### Financial
+
+#### credit_card
+
+PCI-DSS-compliant: masks all but the last N digits of a credit card number.
+
+```
+"4111-1111-1111-1234" -> "************1234"
+```
+
+Configuration: `show_last` (default 4).
+
+### Analytics-safe
+
+#### range
+
+Buckets a numeric value into a fixed-size range string. Preserves rough
+distributions for analytics while hiding precise values.
+
+```
+# bucket_size=10000
+42_500 -> "40000-49999"
+```
+
+Configuration: `bucket_size` (default 10000).
+
+#### noise
+
+Adds deterministic random noise within `+/- percentage`. Same input always
+returns the same output for a given `seed_key`.
+
+```
+# percentage=10, seed_key="salary"
+50000 -> 51234   (or 48721, etc., but stable per value)
+```
+
+Configuration: `percentage` (default 10.0), `seed_key` (default "").
+
+#### date_shift
+
+Shifts a date or timestamp by a deterministic random number of days within
+`+/- max_days`. Stable per value+seed.
+
+Configuration: `max_days` (default 30), `seed_key` (default "").
+
+#### consistent_hash
+
+JOIN-safe pseudonym: same input always produces the same output. Use this
+when masked columns are used as join keys.
+
+```
+# prefix="cust_", length=8
+"123e4567-..." -> "cust_a1b2c3d4"
+```
+
+Configuration: `prefix` (default ""), `length` (default 8).
 
 ## Creating Masking Policies
 
@@ -95,10 +187,10 @@ curl -X POST http://localhost:3000/api/masking/policies \
 ### Via CLI
 
 ```bash
-havn masking create --schema gold --table customers --column email --method hash
-havn masking create --schema gold --table customers --column ssn --method redact --exempt admin,editor
-havn masking list
-havn masking delete <policy_id>
+havn mask add --schema gold --table customers --column email --method hash
+havn mask add --schema gold --table customers --column ssn --method redact
+havn mask list
+havn mask remove --id <policy_id>
 ```
 
 ## Policy Properties
@@ -108,7 +200,7 @@ havn masking delete <policy_id>
 | `schema_name` | string | yes | Table schema |
 | `table_name` | string | yes | Table name |
 | `column_name` | string | yes | Column to mask |
-| `method` | string | yes | `hash`, `redact`, `null`, or `partial` |
+| `method` | string | yes | One of: `hash`, `redact`, `null`, `partial`, `truncate`, `email`, `phone`, `first_initial`, `ip_address`, `credit_card`, `range`, `noise`, `date_shift`, `consistent_hash` |
 | `method_config` | object | no | Method-specific config (e.g., `{"show_first": 2}`) |
 | `condition_column` | string | no | Column to check for conditional masking |
 | `condition_value` | string | no | Value that triggers masking |

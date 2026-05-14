@@ -235,19 +235,24 @@ def sync_table_high_watermark(
                 [target_schema, table_name],
             ).fetchone()[0] > 0
 
+            count_before = (
+                conn.execute(f"SELECT COUNT(*) FROM {target_table}").fetchone()[0]
+                if exists else 0
+            )
             if not exists:
                 conn.execute(f"CREATE TABLE {target_table} AS {query}")
             else:
                 conn.execute(f"INSERT INTO {target_table} {query}")
 
-            # Get new watermark
             new_watermark_row = conn.execute(
                 f'SELECT MAX("{cdc_column}")::VARCHAR FROM {target_table}'
             ).fetchone()
             watermark_after = new_watermark_row[0] if new_watermark_row else watermark_before
 
-            # Count rows synced
-            rows_synced = conn.execute(f"SELECT COUNT(*) FROM {target_table}").fetchone()[0]
+            count_after = conn.execute(
+                f"SELECT COUNT(*) FROM {target_table}"
+            ).fetchone()[0]
+            rows_synced = max(0, count_after - count_before)
 
             # Update state
             update_watermark(
@@ -425,17 +430,26 @@ def reset_watermark(
     """
     ensure_cdc_table(conn)
     if table_name:
-        result = conn.execute(
+        before = conn.execute(
+            "SELECT COUNT(*) FROM _havn.cdc_state "
+            "WHERE connector_name = ? AND table_name = ?",
+            [connector_name, table_name],
+        ).fetchone()[0]
+        conn.execute(
             "DELETE FROM _havn.cdc_state "
             "WHERE connector_name = ? AND table_name = ?",
             [connector_name, table_name],
         )
-    else:
-        result = conn.execute(
-            "DELETE FROM _havn.cdc_state WHERE connector_name = ?",
-            [connector_name],
-        )
-    return result.fetchone()[0] if result.description else 0
+        return int(before)
+    before = conn.execute(
+        "SELECT COUNT(*) FROM _havn.cdc_state WHERE connector_name = ?",
+        [connector_name],
+    ).fetchone()[0]
+    conn.execute(
+        "DELETE FROM _havn.cdc_state WHERE connector_name = ?",
+        [connector_name],
+    )
+    return int(before)
 
 
 def parse_cdc_config(raw: dict) -> list[CDCConnectorConfig]:
