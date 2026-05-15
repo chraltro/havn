@@ -2,11 +2,11 @@
 
 All notable changes to havn are documented in this file.
 
-## [Unreleased]
+## [0.2.19] - 2026-05-15
 
 Comprehensive stability, security, and performance sweep across the whole
-codebase. No new user-facing features; every change strengthens existing
-ones. 1340 tests pass (up from 1300).
+codebase, plus a small agent-sidebar markdown improvement. Every change
+strengthens an existing feature. 1340 tests pass (up from 1300).
 
 ### Security
 

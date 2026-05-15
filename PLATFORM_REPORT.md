@@ -1,6 +1,6 @@
 # havn -- Platform Summary Report
 
-> **Version:** 0.2.18
+> **Version:** 0.2.19
 > **Classification:** Self-hosted data platform (open-source alternative to Databricks / Snowflake)
 
 ---
