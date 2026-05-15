@@ -89,7 +89,8 @@ ones. 1340 tests pass (up from 1300).
 
 - 30-second authenticated-token validation cache (`_cached_validate_token`)
   drops repeated single-thread write-queue lookups; `invalidate_token_cache`
-  is called from user delete.
+  is called from user delete and user update so a role or password change
+  takes effect immediately rather than lagging the cache TTL.
 - DuckLake `status()` cached for 5 seconds; hot endpoint no longer
   triggers a Postgres round-trip per call.
 - Frontend bundle split via Vite `manualChunks`: Monaco, react-vendor,
@@ -100,6 +101,11 @@ ones. 1340 tests pass (up from 1300).
   so per-chunk streaming does not serialize the whole log every paint.
 - `_pinned_udfs` is a bounded deque (10000 entries) so long-running
   servers with many hot reloads do not accumulate dead closures.
+
+### Frontend
+
+- Agent sidebar markdown now renders `[label](url)` links as clickable
+  anchors (open in a new tab) instead of showing the raw markdown syntax.
 
 ### Cleanups
 

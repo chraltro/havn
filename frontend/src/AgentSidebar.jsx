@@ -125,17 +125,19 @@ const _HAVN_SCHEMAS = new Set(["landing", "bronze", "silver", "gold"]);
 const _FILE_EXT_RE = /\.(?:sql|py|yml|yaml|json|csv|parquet|md|txt|toml|cfg|env|dpnb)$/;
 
 function renderInline(text, keyBase, actions) {
-  // First pass: handle **bold** and `code` (with linkable code detection)
+  // First pass: handle [label](url) links, **bold**, and `code`.
   const tokens = [];
-  const re = /(\*\*(.+?)\*\*|`([^`]+)`)/g;
+  const re = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*(.+?)\*\*|`([^`]+)`)/g;
   let last = 0;
   let m;
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) tokens.push({ type: "plain", text: text.slice(last, m.index) });
-    if (m[2]) {
-      tokens.push({ type: "bold", text: m[2] });
-    } else if (m[3]) {
-      tokens.push({ type: "code", text: m[3] });
+    if (m[2] && m[3]) {
+      tokens.push({ type: "link", text: m[2], href: m[3] });
+    } else if (m[4]) {
+      tokens.push({ type: "bold", text: m[4] });
+    } else if (m[5]) {
+      tokens.push({ type: "code", text: m[5] });
     }
     last = re.lastIndex;
   }
@@ -145,7 +147,19 @@ function renderInline(text, keyBase, actions) {
   const parts = [];
   let ki = 0;
   for (const token of tokens) {
-    if (token.type === "bold") {
+    if (token.type === "link") {
+      parts.push(
+        <a
+          key={`${keyBase}-l-${ki++}`}
+          href={token.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={st.mdLink}
+        >
+          {token.text}
+        </a>
+      );
+    } else if (token.type === "bold") {
       parts.push(<strong key={`${keyBase}-b-${ki++}`} style={{ fontWeight: 600 }}>{token.text}</strong>);
     } else if (token.type === "code") {
       const link = _tryLink(token.text, keyBase, ki, actions);
@@ -1049,6 +1063,11 @@ const st = {
     fontFamily: "inherit",
     fontSize: "inherit",
     color: "var(--havn-accent)",
+  },
+  mdLink: {
+    color: "var(--havn-accent)",
+    textDecoration: "underline",
+    textUnderlineOffset: "2px",
   },
   fileLink: {
     color: "var(--havn-accent)",
