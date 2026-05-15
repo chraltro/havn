@@ -168,11 +168,14 @@ def update_user_endpoint(
     """Update a user (admin only)."""
     admin = _require_permission(request, "manage_users")
     from havn.engine.auth import update_user
+    from havn.server.deps import invalidate_token_cache
 
     try:
         found = update_user(conn, username, req.role, req.password, req.display_name)
         if not found:
             raise HTTPException(404, f"User '{username}' not found")
+        # Clear token cache so a role/password change is not masked by the 30s TTL.
+        invalidate_token_cache()
         try:
             from havn.engine.audit import log_audit
 
