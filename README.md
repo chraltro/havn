@@ -14,7 +14,6 @@
   [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
   [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB.svg)](https://python.org)
   [![DuckDB](https://img.shields.io/badge/Powered%20by-DuckDB-FFF000.svg)](https://duckdb.org)
-  [![Tests](https://img.shields.io/github/actions/workflow/status/chraltro/havn/ci.yml?label=tests)](https://github.com/chraltro/havn/actions)
 
 </p>
 
