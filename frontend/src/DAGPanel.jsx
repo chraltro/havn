@@ -914,17 +914,24 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
   }
 
   async function handleRestore(runId, modelName) {
+    // Use the app's themed dialog instead of a blocking native alert(); both
+    // paths fall back to alert() only if showConfirm wasn't provided.
+    const notify = (title, body) =>
+      showConfirm ? showConfirm(title, body, "OK") : alert(`${title}\n\n${body}`);
     try {
       const result = await api.restoreSnapshot(runId, modelName, true);
       if (result.status === "success") {
-        alert(`Restored ${modelName}. ${result.cascade_results ? Object.keys(result.cascade_results).length + " downstream models rebuilt." : ""}`);
+        const downstream = result.cascade_results
+          ? `${Object.keys(result.cascade_results).length} downstream models rebuilt.`
+          : "";
+        await notify("Snapshot restored", `Restored ${modelName}. ${downstream}`.trim());
         // Refresh rewind data
         const [r, s] = await Promise.all([api.getRewindRuns(), api.getRewindSnapshots()]);
         setRuns(r);
         setSnapshots(s);
       }
     } catch (err) {
-      alert("Restore failed: " + (err.message || err));
+      await notify("Restore failed", err.message || String(err));
     }
   }
 

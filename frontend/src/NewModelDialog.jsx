@@ -43,12 +43,12 @@ export default function NewModelDialog({ onClose, onCreated }) {
 
   return (
     <FocusTrap labelledBy="havn-new-model-dialog-title" className="dialog-overlay" onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()} style={{ background: "var(--bg, #1e1e1e)", border: "1px solid var(--border, #333)", borderRadius: "8px", padding: "20px", width: "400px" }}>
+      <div className="dialog" onClick={(e) => e.stopPropagation()} style={{ background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "8px", padding: "20px", width: "400px", color: "var(--havn-text)" }}>
         <h3 id="havn-new-model-dialog-title" style={{ margin: "0 0 16px" }}>New</h3>
 
         <div style={{ marginBottom: "12px" }}>
-          <label htmlFor="new-model-type" style={{ display: "block", marginBottom: "4px", fontSize: "12px", color: "#888" }}>Type</label>
-          <select id="new-model-type" value={type} onChange={(e) => setType(e.target.value)} style={{ width: "100%", padding: "6px", background: "var(--bg-secondary, #252525)", color: "var(--text, #ccc)", border: "1px solid var(--border, #333)", borderRadius: "4px" }}>
+          <label htmlFor="new-model-type" style={{ display: "block", marginBottom: "4px", fontSize: "12px", color: "var(--havn-text-secondary)" }}>Type</label>
+          <select id="new-model-type" value={type} onChange={(e) => setType(e.target.value)} style={{ width: "100%", padding: "6px", background: "var(--havn-bg-secondary)", color: "var(--havn-text)", border: "1px solid var(--havn-border)", borderRadius: "4px" }}>
             <option value="model">SQL Model</option>
             <option value="notebook">Notebook</option>
             <option value="ingest">Ingest Script</option>
@@ -56,13 +56,13 @@ export default function NewModelDialog({ onClose, onCreated }) {
         </div>
 
         <div style={{ marginBottom: "12px" }}>
-          <label htmlFor="new-model-name" style={{ display: "block", marginBottom: "4px", fontSize: "12px", color: "#888" }}>Name</label>
+          <label htmlFor="new-model-name" style={{ display: "block", marginBottom: "4px", fontSize: "12px", color: "var(--havn-text-secondary)" }}>Name</label>
           <input
             id="new-model-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={type === "model" ? "my_model" : type === "notebook" ? "my_notebook" : "my_ingest"}
-            style={{ width: "100%", padding: "6px", background: "var(--bg-secondary, #252525)", color: "var(--text, #ccc)", border: "1px solid var(--border, #333)", borderRadius: "4px", boxSizing: "border-box" }}
+            style={{ width: "100%", padding: "6px", background: "var(--havn-bg-secondary)", color: "var(--havn-text)", border: "1px solid var(--havn-border)", borderRadius: "4px", boxSizing: "border-box" }}
             autoFocus
             aria-required="true"
             aria-invalid={error ? "true" : undefined}
@@ -73,16 +73,16 @@ export default function NewModelDialog({ onClose, onCreated }) {
         {type === "model" && (
           <>
             <div style={{ marginBottom: "12px" }}>
-              <label htmlFor="new-model-schema" style={{ display: "block", marginBottom: "4px", fontSize: "12px", color: "#888" }}>Schema</label>
-              <select id="new-model-schema" value={schema} onChange={(e) => setSchema(e.target.value)} style={{ width: "100%", padding: "6px", background: "var(--bg-secondary, #252525)", color: "var(--text, #ccc)", border: "1px solid var(--border, #333)", borderRadius: "4px" }}>
+              <label htmlFor="new-model-schema" style={{ display: "block", marginBottom: "4px", fontSize: "12px", color: "var(--havn-text-secondary)" }}>Schema</label>
+              <select id="new-model-schema" value={schema} onChange={(e) => setSchema(e.target.value)} style={{ width: "100%", padding: "6px", background: "var(--havn-bg-secondary)", color: "var(--havn-text)", border: "1px solid var(--havn-border)", borderRadius: "4px" }}>
                 <option value="bronze">bronze</option>
                 <option value="silver">silver</option>
                 <option value="gold">gold</option>
               </select>
             </div>
             <div style={{ marginBottom: "12px" }}>
-              <label htmlFor="new-model-materialized" style={{ display: "block", marginBottom: "4px", fontSize: "12px", color: "#888" }}>Materialization</label>
-              <select id="new-model-materialized" value={materialized} onChange={(e) => setMaterialized(e.target.value)} style={{ width: "100%", padding: "6px", background: "var(--bg-secondary, #252525)", color: "var(--text, #ccc)", border: "1px solid var(--border, #333)", borderRadius: "4px" }}>
+              <label htmlFor="new-model-materialized" style={{ display: "block", marginBottom: "4px", fontSize: "12px", color: "var(--havn-text-secondary)" }}>Materialization</label>
+              <select id="new-model-materialized" value={materialized} onChange={(e) => setMaterialized(e.target.value)} style={{ width: "100%", padding: "6px", background: "var(--havn-bg-secondary)", color: "var(--havn-text)", border: "1px solid var(--havn-border)", borderRadius: "4px" }}>
                 <option value="table">table</option>
                 <option value="view">view</option>
               </select>
@@ -90,7 +90,7 @@ export default function NewModelDialog({ onClose, onCreated }) {
           </>
         )}
 
-        {error && <div style={{ color: "#e74c3c", fontSize: "12px", marginBottom: "8px" }}>{error}</div>}
+        {error && <div role="alert" style={{ color: "var(--havn-red)", fontSize: "12px", marginBottom: "8px" }}>{error}</div>}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
           <button onClick={onClose} className="btn-sm">Cancel</button>

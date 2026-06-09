@@ -137,7 +137,7 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
                   <thead>
                     <tr>
                       {data.sample_data.columns.map((col) => (
-                        <th key={col} style={{ padding: "4px 8px", borderBottom: "1px solid var(--border, #333)", textAlign: "left", whiteSpace: "nowrap" }}>
+                        <th key={col} style={{ padding: "4px 8px", borderBottom: "1px solid var(--havn-border)", textAlign: "left", whiteSpace: "nowrap" }}>
                           {col}
                         </th>
                       ))}
@@ -147,8 +147,8 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
                     {data.sample_data.rows.map((row, i) => (
                       <tr key={i}>
                         {row.map((val, j) => (
-                          <td key={j} style={{ padding: "3px 8px", borderBottom: "1px solid var(--border, #222)", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {val === null ? <span style={{ color: "#666" }}>null</span> : String(val)}
+                          <td key={j} style={{ padding: "3px 8px", borderBottom: "1px solid var(--havn-border-light)", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {val === null ? <span style={{ color: "var(--havn-text-dim)" }}>null</span> : String(val)}
                           </td>
                         ))}
                       </tr>
@@ -157,7 +157,7 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
                 </table>
               </div>
             ) : (
-              <div className="cell-output-empty" style={{ padding: "12px", color: "#666" }}>
+              <div className="cell-output-empty" style={{ padding: "12px", color: "var(--havn-text-dim)" }}>
                 No data. Run the model first.
               </div>
             )}
@@ -166,7 +166,7 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
 
         {/* Lineage sidebar */}
         {showLineage && (
-          <div className="model-lineage-sidebar" style={{ width: "250px", padding: "8px 12px", borderLeft: "1px solid var(--border, #333)", fontSize: "12px" }}>
+          <div className="model-lineage-sidebar" style={{ width: "250px", padding: "8px 12px", borderLeft: "1px solid var(--havn-border)", fontSize: "12px" }}>
             <h4 style={{ margin: "0 0 8px" }}>Upstream</h4>
             {data.upstream.length > 0 ? (
               <ul style={{ listStyle: "none", padding: 0, margin: "0 0 16px" }}>
@@ -174,7 +174,7 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
                   <li key={u} style={{ padding: "2px 0" }}>{u}</li>
                 ))}
               </ul>
-            ) : <p style={{ color: "#666" }}>None</p>}
+            ) : <p style={{ color: "var(--havn-text-dim)" }}>None</p>}
 
             <h4 style={{ margin: "0 0 8px" }}>Downstream</h4>
             {data.downstream.length > 0 ? (
@@ -183,7 +183,7 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
                   <li key={d} style={{ padding: "2px 0" }}>{d}</li>
                 ))}
               </ul>
-            ) : <p style={{ color: "#666" }}>None</p>}
+            ) : <p style={{ color: "var(--havn-text-dim)" }}>None</p>}
 
             {data.lineage && Object.keys(data.lineage).length > 0 && (
               <>
@@ -193,7 +193,7 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
                     <li key={col} style={{ padding: "2px 0" }}>
                       <strong>{col}</strong>
                       {Array.isArray(sources) && sources.length > 0 && (
-                        <span style={{ color: "#888" }}> ← {sources.map(s => typeof s === "string" ? s : `${s.table}.${s.column}`).join(", ")}</span>
+                        <span style={{ color: "var(--havn-text-secondary)" }}> ← {sources.map(s => typeof s === "string" ? s : `${s.table}.${s.column}`).join(", ")}</span>
                       )}
                     </li>
                   ))}

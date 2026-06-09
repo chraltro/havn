@@ -461,6 +461,13 @@ function CronWizardModal({ initial, onCancel, onSave }) {
   const [intervalExpr, setIntervalExpr] = useState(() => initialIsInterval ? initial : "");
   const [activeTab, setActiveTab] = useState(initialIsInterval ? "interval" : "common");
 
+  // Close on Escape, matching the backdrop-click dismiss.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onCancel(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
   // Final expression: interval mode wins whenever intervalExpr is set
   const expr = intervalExpr || parts.join(" ");
   const description = useMemo(() => describeCron(expr), [expr]);
@@ -1102,6 +1109,13 @@ function DagPickerModal({ initialTargets, onCancel, onSave }) {
   const [filter, setFilter] = useState("");
   const [hover, setHover] = useState(null);
   const [planPreview, setPlanPreview] = useState(null);
+
+  // Close on Escape, matching the backdrop-click dismiss.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onCancel(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel]);
 
   useEffect(() => {
     (async () => {
@@ -2364,6 +2378,7 @@ function JobResultsTab() {
 
 function JobRunDetail({ run: initialRun, onBack, onRerun }) {
   const [run, setRun] = useState(initialRun);
+  const [rerunError, setRerunError] = useState(null);
 
   // Auto-refresh while the run is still in progress
   useEffect(() => {
@@ -2383,12 +2398,13 @@ function JobRunDetail({ run: initialRun, onBack, onRerun }) {
   const skipped = run.steps_skipped || 0;
 
   const handleRerun = async () => {
+    setRerunError(null);
     try {
       await api.runJob(run.job_name);
       if (onRerun) onRerun();
       onBack();
     } catch (e) {
-      alert(e.message || "Failed to rerun job");
+      setRerunError(e.message || "Failed to rerun job");
     }
   };
 
@@ -2398,6 +2414,12 @@ function JobRunDetail({ run: initialRun, onBack, onRerun }) {
         <button style={s.btn} onClick={onBack}>← Back</button>
         <button style={s.btnPrimary} onClick={handleRerun}>Rerun</button>
       </div>
+
+      {rerunError && (
+        <div role="alert" style={{ padding: "8px 12px", marginBottom: 12, border: "1px solid var(--havn-red)", borderRadius: 4, color: "var(--havn-red)", fontSize: 12, background: "color-mix(in srgb, var(--havn-red) 10%, transparent)" }}>
+          {rerunError}
+        </div>
+      )}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "12px 16px", border: "1px solid var(--havn-border)", borderRadius: 4, marginBottom: 12 }}>
         <div>
