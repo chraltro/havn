@@ -163,7 +163,7 @@ function CellOutput({ outputs }) {
                 </tbody>
               </table>
               {out.truncated && (
-                <div style={cs.truncated}>Results truncated ({out.total_rows} rows shown)</div>
+                <div style={cs.truncated}>Results truncated ({out.displayed_rows ?? out.total_rows} rows shown)</div>
               )}
             </div>
           );

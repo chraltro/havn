@@ -691,8 +691,8 @@ export const api = {
   },
 
   // Query
-  runQuery: (sql: string) =>
-    request<QueryResult>("/query", { method: "POST", body: JSON.stringify({ sql }) }),
+  runQuery: (sql: string, signal?: AbortSignal) =>
+    request<QueryResult>("/query", { method: "POST", body: JSON.stringify({ sql }), signal }),
   explainQuery: (sql: string) =>
     request<{ plan: string }>("/query/explain", { method: "POST", body: JSON.stringify({ sql }) }),
   profileQuery: (sql: string) =>

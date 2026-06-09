@@ -3,6 +3,15 @@ import { api } from "./api";
 import SortableTable from "./SortableTable";
 import { useHintTriggerFn } from "./HintSystem";
 
+// Split a qualified name into [schema, table] on the LAST dot, so
+// catalog-qualified names (e.g. DuckLake "__ducklake.foo.orders") keep the
+// table as the final segment instead of dropping it.
+function splitTableName(qualified) {
+  const lastDot = (qualified || "").lastIndexOf(".");
+  if (lastDot === -1) return ["", qualified || ""];
+  return [qualified.slice(0, lastDot), qualified.slice(lastDot + 1)];
+}
+
 export default function TablesPanel({ selectedTable, onQueryTable, tables, onSelectTable }) {
   const [columns, setColumns] = useState([]);
   const [preview, setPreview] = useState(null);
@@ -170,7 +179,7 @@ export default function TablesPanel({ selectedTable, onQueryTable, tables, onSel
 
   function handleQueryTable() {
     if (!selectedTable || !onQueryTable) return;
-    const [schema, name] = selectedTable.split(".");
+    const [schema, name] = splitTableName(selectedTable);
     onQueryTable(schema, name);
   }
 
@@ -258,9 +267,9 @@ export default function TablesPanel({ selectedTable, onQueryTable, tables, onSel
     <div style={st.container}>
       <div style={st.tableHeader}>
         <div style={st.nameGroup}>
-          <span style={st.schemaLabel}>{selectedTable.split(".")[0]}</span>
+          <span style={st.schemaLabel}>{splitTableName(selectedTable)[0]}</span>
           <span style={st.nameSep}>.</span>
-          <strong style={st.selectedName}>{selectedTable.split(".")[1]}</strong>
+          <strong style={st.selectedName}>{splitTableName(selectedTable)[1]}</strong>
         </div>
         <div style={st.metaBadges}>
           <span style={st.metaBadge}>{columns.length} col{columns.length !== 1 ? "s" : ""}</span>
