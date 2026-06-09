@@ -1,5 +1,36 @@
 # havn — To-Do
 
+## UX/UI sweep (2026-06-09) — high-value fixed, rest open
+
+Multi-agent UX + accessibility review (static + live Playwright). Fixed and
+committed: stuck "Run Sample Pipeline" button; NewModelDialog/ModelNotebookView
+theming; FocusTrap + Orchestration modal Escape; native alert() removal;
+DataSources keyboard-operable cards; showDocs leak; progress-bar/logo theming;
+run-status-dot a11y.
+
+Remaining (lower priority, not yet fixed):
+- [ ] Disabled action buttons give no reason/tooltip (App "Run Model", Masking
+  Edit/Delete disabled while a form is open, Query Explain). Add `title`.
+- [ ] Number inputs in Orchestration interval/range silently coerce invalid
+  values (clear/0 → 1) with no feedback. Clamp on blur + reflect.
+- [ ] DataSources "Skip Test"/Continue advances with empty required fields; no
+  inline required-field validation.
+- [ ] DataSources file upload: no progress/loading indicator during upload.
+- [ ] QueryPanel "Query this table" auto-run bypasses limit-wrapping that the
+  normal Run path applies (inconsistent result set).
+- [ ] WikiPanel fetch failure renders a fake "Error" page via dangerouslySet
+  HTML with no retry/styled error; also raw `<` in prose isn't escaped.
+- [ ] Dashboard/Widget/Filter modals aren't FocusTrap-wrapped (no Escape/focus
+  mgmt); their close `×` buttons lack aria-label.
+- [ ] SortableTable headers / column-menu / pin items are mouse-only (no
+  tabIndex/keydown); column-type indicator relies on color (add title).
+- [ ] NotebookPanel save has no dirty/saved indicator.
+- [ ] MaskingPanel inline "Add Policy" form isn't scrolled into view on open.
+- [ ] FileTree per-file delete (×) and dir "+" are hover-only (not focusable).
+- [ ] Color-only status in DiffPanel / connector dots (add glyph/text).
+- [ ] CommandPalette results lack listbox/option roles + aria-activedescendant.
+- [ ] GitPanel hardcoded button text color (#0B0E14) can vanish on some themes.
+
 ## Issue-hunt sweep (2026-06-09) — all resolved
 
 Multi-agent review (Playwright + code review, adversarially verified). All
