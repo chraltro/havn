@@ -1239,6 +1239,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#issue-hunt-sweep-2026-06-09-all-resolved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Issue-hunt sweep (2026-06-09) — all resolved
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cloud-hosted-version" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1442,6 +1453,29 @@
 
 
 <h1 id="havn-to-do">havn — To-Do<a class="headerlink" href="#havn-to-do" title="Permanent link">&para;</a></h1>
+<h2 id="issue-hunt-sweep-2026-06-09-all-resolved">Issue-hunt sweep (2026-06-09) — all resolved<a class="headerlink" href="#issue-hunt-sweep-2026-06-09-all-resolved" title="Permanent link">&para;</a></h2>
+<p>Multi-agent review (Playwright + code review, adversarially verified). All
+findings have been fixed and committed:</p>
+<ul>
+<li>[x] <strong>P1 path traversal</strong> in the SPA catch-all — containment check added.</li>
+<li>[x] <strong>P1 notebook sandbox escape</strong> — closed via <code>guard_sql_calls()</code> AST
+  rewrite (<code>__havn_sql_guard</code> validates every <code>.execute/.sql/.query</code> argument at
+  runtime regardless of aliasing/dynamic SQL, while keeping the call direct so
+  DuckDB's DataFrame replacement scan still works). Regression tests added.</li>
+<li>[x] Cancel-callback memory leak in <code>resource_manager._finish_task</code>.</li>
+<li>[x] Stale <code>_havn.model_state</code> on file delete (wrong column name).</li>
+<li>[x] Empty USGS feed aborting the starter pipeline.</li>
+<li>[x] Misleading <code>ModuleNotFoundError</code> install hints (<code>deps.py</code>).</li>
+<li>[x] DAGPanel redraw churn (shared <code>EMPTY</code> constant).</li>
+<li>[x] Query Cancel button no-op — AbortController wired through <code>api.runQuery</code>.</li>
+<li>[x] Wiki cross-reference links + "Open in New Tab" (in-place nav, no JSON tab).</li>
+<li>[x] RunSummary success card auto-dismisses after 12s.</li>
+<li>[x] TablesPanel catalog-qualified name parsing (<code>splitTableName</code>).</li>
+<li>[x] QueryPanel <code>extractAliases</code> mis-parse + autocomplete async race.</li>
+<li>[x] SQL cell <code>total_rows</code> mislabel (renamed to <code>displayed_rows</code>).</li>
+<li>[x] <code>notebooks.py</code> identifier validation moved to top of each handler.</li>
+<li>[x] Incremental staging-column query constrained to the temp catalog.</li>
+</ul>
 <h2 id="cloud-hosted-version">Cloud / Hosted Version<a class="headerlink" href="#cloud-hosted-version" title="Permanent link">&para;</a></h2>
 <h3 id="database-abstraction-layer-databasepy">Database Abstraction Layer (<code>database.py</code>)<a class="headerlink" href="#database-abstraction-layer-databasepy" title="Permanent link">&para;</a></h3>
 <ul>
