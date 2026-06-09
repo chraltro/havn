@@ -46,7 +46,8 @@ def _format_result(result: Any) -> dict:
                 "type": "table",
                 "columns": columns,
                 "rows": [[_serialize(v) for v in row] for row in rows[:500]],
-                "total_rows": len(rows),
+                "displayed_rows": min(len(rows), 500),
+                "truncated": len(rows) > 500,
             }
         except Exception as e:
             logger.debug("Result serialization fallback: %s", e)
@@ -65,5 +66,6 @@ def _format_dataframe(df) -> dict:
         "type": "table",
         "columns": columns,
         "rows": rows,
-        "total_rows": len(df),
+        "displayed_rows": min(len(df), 500),
+        "truncated": len(df) > 500,
     }

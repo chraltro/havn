@@ -64,7 +64,7 @@ def test_execute_sql_cell_select():
     assert out["type"] == "table"
     assert out["columns"] == ["id", "name"]
     assert out["rows"] == [[1, "hello"]]
-    assert out["total_rows"] == 1
+    assert out["displayed_rows"] == 1
     conn.close()
 
 
@@ -158,7 +158,7 @@ def test_execute_sql_cell_truncation():
     result = execute_sql_cell(conn, "SELECT * FROM big")
     out = result["outputs"][0]
     assert out["type"] == "table"
-    assert out["total_rows"] == 500
+    assert out["displayed_rows"] == 500
     assert out["truncated"] is True
     conn.close()
 
