@@ -71,15 +71,26 @@ def module_name_from_error(exc: BaseException) -> str | None:
 def augment_import_error(text: str, exc: BaseException) -> str:
     """Append an install hint to ``text`` when ``exc`` is a missing-module error.
 
-    ``text`` is the formatted traceback/error string shown to the user. If the
-    exception is a ``ModuleNotFoundError`` (or ``ImportError`` naming a missing
-    module), the returned string has a ``havn:`` hint appended. Otherwise the
+    ``text`` is the formatted traceback/error string shown to the user. The hint
+    is appended only when the *top-level* package genuinely can't be imported, so
+    we don't tell users to ``pip install os`` for ``from os import nope`` (a plain
+    ImportError on an existing package) or ``pip install json`` for
+    ``import json.nope`` (a bad submodule of an installed package). Otherwise the
     text is returned unchanged.
     """
-    if not isinstance(exc, ImportError):
+    if not isinstance(exc, ModuleNotFoundError):
         return text
     module = module_name_from_error(exc)
     if not module:
         return text
-    hint = missing_module_hint(module)
-    return f"{text}\n\nhavn: '{module}' is not installed. {hint}"
+    top = module.split(".")[0]
+    # If the top-level package resolves, the real problem is a bad submodule or
+    # symbol path, not a missing install — don't suggest installing it.
+    import importlib.util
+    try:
+        if importlib.util.find_spec(top) is not None:
+            return text
+    except (ImportError, ValueError, ModuleNotFoundError):
+        pass  # find_spec itself failed → treat as genuinely missing
+    hint = missing_module_hint(top)
+    return f"{text}\n\nhavn: '{top}' is not installed. {hint}"

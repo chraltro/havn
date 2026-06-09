@@ -143,6 +143,11 @@ try:
     with urlopen(FEED_URL, timeout=15) as resp:
         data = json.loads(resp.read())
     features = data.get("features", [])
+    if not features:
+        # An empty-but-valid response (the M2.5+ feed can legitimately return
+        # zero events) would produce a zero-column table downstream and break
+        # the pipeline; fall back to sample data instead.
+        raise ValueError("USGS feed returned no earthquakes")
     print(f"Fetched {len(features)} earthquakes (M2.5+, last 30 days)")
 except Exception as e:
     print(f"USGS API unavailable ({type(e).__name__}), using sample data...")

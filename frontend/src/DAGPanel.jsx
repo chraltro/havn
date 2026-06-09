@@ -19,6 +19,9 @@ const NODE_H = 56;
 const LAYER_GAP_X = 220;
 const NODE_GAP_Y = 78;
 
+// Stable empty-object identity for snapshot lookups that miss (avoids redraw churn).
+const EMPTY = {};
+
 function getCV(prop) {
   return getComputedStyle(document.documentElement).getPropertyValue(prop).trim();
 }
@@ -502,8 +505,11 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
   const currentRunId = runs[sliderIndex]?.run_id;
   const prevRunId = runs[sliderIndex + 1]?.run_id;
 
-  const currentSnaps = snapshotsByRun[currentRunId] || {};
-  const prevSnaps = snapshotsByRun[prevRunId] || {};
+  // Use a shared EMPTY constant on a miss so these keep a stable identity
+  // across renders — otherwise a fresh {} each render churns the `draw`
+  // useCallback (and the ResizeObserver effect) on every state change.
+  const currentSnaps = snapshotsByRun[currentRunId] || EMPTY;
+  const prevSnaps = snapshotsByRun[prevRunId] || EMPTY;
 
   // Memoize layout
   const layout = useMemo(() => {
