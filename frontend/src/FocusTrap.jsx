@@ -16,9 +16,10 @@ const FOCUSABLE_SELECTOR =
  *   labelledBy — id of the title element (for aria-labelledby)
  *   style      — passed through to the wrapper div
  *   className  — passed through to the wrapper div
- *   onClick    — passed through to the wrapper div
+ *   onClick    — passed through to the wrapper div (typically backdrop dismiss)
+ *   onEscape   — called when Escape is pressed; falls back to onClick if omitted
  */
-export default function FocusTrap({ children, labelledBy, style, className, onClick }) {
+export default function FocusTrap({ children, labelledBy, style, className, onClick, onEscape }) {
   const containerRef = useRef(null);
   const previousFocusRef = useRef(null);
 
@@ -45,6 +46,17 @@ export default function FocusTrap({ children, labelledBy, style, className, onCl
   }, []);
 
   function handleKeyDown(e) {
+    if (e.key === "Escape") {
+      // Dismiss on Escape. Prefer an explicit onEscape, else reuse the
+      // backdrop dismiss handler (onClick) so every FocusTrap modal closes.
+      const dismiss = onEscape || onClick;
+      if (dismiss) {
+        e.preventDefault();
+        e.stopPropagation();
+        dismiss(e);
+      }
+      return;
+    }
     if (e.key !== "Tab") return;
 
     const container = containerRef.current;

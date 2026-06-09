@@ -2,6 +2,22 @@ import React, { useState, useEffect } from "react";
 import { api } from "./api";
 import { useHintTriggerFn } from "./HintSystem";
 
+// Make a div-based card behave like a button for keyboard/AT users:
+// spread {...clickable(handler)} onto the element (in addition to onClick).
+function clickable(onActivate, label) {
+  return {
+    role: "button",
+    tabIndex: 0,
+    "aria-label": label,
+    onKeyDown: (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onActivate(e);
+      }
+    },
+  };
+}
+
 function _timeAgo(dateStr) {
   if (!dateStr) return "";
   const seconds = Math.floor((new Date() - new Date(dateStr)) / 1000);
@@ -552,7 +568,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
         <div style={st.content}>
           <div style={st.catalog}>
             {available.map((c) => (
-              <div key={c.name} style={st.card} onClick={() => startSetup(c)}
+              <div key={c.name} style={st.card} onClick={() => startSetup(c)} {...clickable(() => startSetup(c), `Set up ${c.display_name}`)}
                 onMouseEnter={(e) => e.currentTarget.style.borderColor = "var(--havn-accent)"}
                 onMouseLeave={(e) => e.currentTarget.style.borderColor = ""}>
                 <div style={st.cardName}>{c.display_name}</div>
@@ -817,7 +833,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
       <div style={st.content}>
         {/* Success banner after import */}
         {successBanner && (
-          <div style={st.successBanner} onClick={() => setSuccessBanner(null)}>
+          <div style={st.successBanner} onClick={() => setSuccessBanner(null)} {...clickable(() => setSuccessBanner(null), "Dismiss import success message")}>
             Imported {successBanner.rows.toLocaleString()} rows into <strong>{successBanner.table}</strong>
           </div>
         )}
@@ -825,7 +841,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
           Bring data into your warehouse from files, databases, or recurring connectors.
         </div>
         <div style={st.methodGrid}>
-          <div style={st.methodCard} onClick={() => setView("file")}
+          <div style={st.methodCard} onClick={() => setView("file")} {...clickable(() => setView("file"), "Upload File")}
             onMouseEnter={(e) => e.currentTarget.style.borderColor = "var(--havn-accent)"}
             onMouseLeave={(e) => e.currentTarget.style.borderColor = ""}>
             <div style={st.methodIcon}>
@@ -840,7 +856,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
               Import a CSV, Parquet, or JSON file as a one-time load.
             </div>
           </div>
-          <div style={st.methodCard} onClick={() => setView("database")}
+          <div style={st.methodCard} onClick={() => setView("database")} {...clickable(() => setView("database"), "Database Import")}
             onMouseEnter={(e) => e.currentTarget.style.borderColor = "var(--havn-accent)"}
             onMouseLeave={(e) => e.currentTarget.style.borderColor = ""}>
             <div style={st.methodIcon}>
@@ -855,7 +871,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
               Connect to PostgreSQL, MySQL, or SQLite and import a table.
             </div>
           </div>
-          <div style={st.methodCard} onClick={() => setView("connector-catalog")}
+          <div style={st.methodCard} onClick={() => setView("connector-catalog")} {...clickable(() => setView("connector-catalog"), "Recurring Connector")}
             onMouseEnter={(e) => e.currentTarget.style.borderColor = "var(--havn-accent)"}
             onMouseLeave={(e) => e.currentTarget.style.borderColor = ""}>
             <div style={st.methodIcon}>

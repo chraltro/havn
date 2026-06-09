@@ -70,6 +70,9 @@ export default function TablesPanel({ selectedTable, onQueryTable, tables, onSel
       hasTriggeredRef.current = true;
       setHintTrigger("firstTableSelected", true);
     }
+    // Reset docs visibility to the default per table, so a "Hide Docs" choice
+    // on one table doesn't silently carry over to the next.
+    setShowDocs(true);
   }, [selectedTable]);
 
   const requestIdRef = useRef(0);
