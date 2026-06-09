@@ -113,7 +113,7 @@ def test_run_notebook_with_ingest_cells(tmp_path):
     sql_out = result["cells"][1]["outputs"]
     assert len(sql_out) == 1
     assert sql_out[0]["type"] == "table"
-    assert sql_out[0]["total_rows"] == 2
+    assert sql_out[0]["displayed_rows"] == 2
     conn.close()
 
 

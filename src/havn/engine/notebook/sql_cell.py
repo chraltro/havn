@@ -102,7 +102,9 @@ def execute_sql_cell(
                     "type": "table",
                     "columns": columns,
                     "rows": [[_serialize(v) for v in row] for row in rows],
-                    "total_rows": len(rows),
+                    # Number of rows in this payload, not the table's true total
+                    # (we only fetch display_limit+1). `truncated` signals more exist.
+                    "displayed_rows": len(rows),
                     "truncated": truncated,
                 })
             else:

@@ -272,17 +272,57 @@ class TestSandboxedExecution:
         assert any(o["type"] == "error" for o in result["outputs"])
         assert any("Sandbox" in o.get("text", "") for o in result["outputs"])
 
-    def test_havn_dynamic_not_caught_by_ast(self):
-        """Dynamic SQL construction bypasses AST check — known limitation."""
-        # This is a known limitation: AST validation only catches string
-        # literals. Dynamic construction reaches the real db connection.
-        # The query will fail with a catalog error (table doesn't exist
-        # in :memory:) but NOT a sandbox error.
+    def test_havn_dynamic_sql_blocked(self):
+        """Runtime-constructed SQL hitting _havn is blocked by the SQL guard."""
+        # The runtime guard validates the actual string argument, so dynamic
+        # construction no longer bypasses the check (it used to).
         result = execute_cell(
             self.conn,
             'sql = "_ha" + "vn.users"\ndb.execute(f"SELECT * FROM {sql}")',
         )
-        assert any(o["type"] == "error" for o in result["outputs"])
+        assert any(
+            "not allowed" in o.get("text", "") for o in result["outputs"]
+        )
+
+    def test_havn_via_alias_blocked(self):
+        """Aliasing the connection does not bypass the SQL guard."""
+        result = execute_cell(
+            self.conn,
+            'x = db\nx.execute("SELECT * FROM _havn.tokens").fetchall()',
+        )
+        assert any(
+            "not allowed" in o.get("text", "") for o in result["outputs"]
+        )
+
+    def test_install_blocked(self):
+        result = execute_cell(self.conn, 'db.execute("INSTALL httpfs")')
+        assert any(
+            "not allowed" in o.get("text", "") for o in result["outputs"]
+        )
+
+    def test_attach_blocked(self):
+        result = execute_cell(self.conn, "db.execute(\"ATTACH ':memory:' AS evil\")")
+        assert any(
+            "not allowed" in o.get("text", "") for o in result["outputs"]
+        )
+
+    def test_copy_to_blocked(self):
+        result = execute_cell(self.conn, "db.execute(\"COPY (SELECT 1) TO 'x.csv'\")")
+        assert any(
+            "not allowed" in o.get("text", "") for o in result["outputs"]
+        )
+
+    def test_dataframe_replacement_scan_still_works(self):
+        """The SQL guard must not break DuckDB's replacement scan for DataFrames."""
+        pd = pytest.importorskip("pandas")
+        ns = {}
+        r1 = execute_cell(
+            self.conn, "import pandas as pd\nmy_df = pd.DataFrame({'a': [10, 20, 30]})", ns
+        )
+        ns = r1["namespace"]
+        r2 = execute_cell(self.conn, "db.execute('SELECT sum(a) AS s FROM my_df').fetchall()", ns)
+        assert not any(o["type"] == "error" for o in r2["outputs"])
+        assert any("60" in str(o.get("text", "")) for o in r2["outputs"])
 
     # --- Blocked: .env file reads ---
 

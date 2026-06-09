@@ -15,9 +15,12 @@ import duckdb
 from .formatting import _format_result
 from .sandbox import (
     CELL_TIMEOUT_SECONDS,
+    SQL_GUARD_NAME,
     SandboxViolation,
     _guarded_open,
     execute_with_timeout,
+    guard_sql_calls,
+    sql_guard,
     validate_ast,
 )
 
@@ -36,7 +39,7 @@ def execute_cell(
 
     Parameters
     ----------
-    conn : DuckDB connection (will be wrapped in SafeDbProxy when sandboxed)
+    conn : DuckDB connection (SQL is guarded via AST rewriting when sandboxed)
     source : Python source code to execute
     namespace : shared namespace for variable persistence between cells
     sandboxed : if True, apply all sandbox restrictions (default True)
@@ -65,8 +68,11 @@ def execute_cell(
 
     # Inject the real connection — DuckDB's replacement scan needs the real
     # object to find Python variables (like DataFrames) in the caller's frame.
-    # SQL validation is handled by AST checks + runtime patching below.
+    # SQL is validated at runtime by the __havn_sql_guard wrapper that
+    # guard_sql_calls() injects around every .execute/.sql/.query argument.
     namespace["db"] = conn
+    if sandboxed:
+        namespace[SQL_GUARD_NAME] = sql_guard
 
     # Full builtins, but with open() replaced by guarded version
     namespace["__builtins__"] = __builtins__
@@ -98,6 +104,11 @@ def execute_cell(
         nonlocal outputs
         with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
             tree = ast.parse(source)
+            if sandboxed:
+                # Wrap every .execute/.sql/.query argument in the runtime SQL
+                # guard so blocked SQL is caught regardless of how `db` is
+                # aliased, while keeping the call direct (replacement scan).
+                tree = guard_sql_calls(tree)
             last_expr_value = None
 
             if tree.body and isinstance(tree.body[-1], ast.Expr):
