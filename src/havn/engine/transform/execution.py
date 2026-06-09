@@ -102,7 +102,10 @@ def _execute_incremental(
         }
         staging_cols = conn.execute(
             "SELECT column_name, data_type FROM information_schema.columns "
-            "WHERE table_name = ? "
+            # table_catalog = 'temp' isolates the TEMP staging table so a
+            # same-named non-temp table in another schema can't pollute the
+            # column list (which drives ALTER ADD COLUMN and the INSERT list).
+            "WHERE table_name = ? AND table_catalog = 'temp' "
             "ORDER BY ordinal_position",
             [staging_name],
         ).fetchall()

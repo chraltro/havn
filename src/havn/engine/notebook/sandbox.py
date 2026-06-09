@@ -4,11 +4,16 @@ Defense-in-depth sandbox for executing user-supplied Python code in notebook
 cells. Uses a **blocklist** approach — users can import any package and use
 the full Python language, with targeted restrictions on:
 
-1. AST validation — block access to havn server internals, dunder-based
-   sandbox escapes, and _havn access via db
+1. AST validation — block imports of havn server internals and dunder-based
+   sandbox escapes
 2. Guarded open() — intercepts file reads to block .env and dotfiles
-3. SafeDbProxy — wraps the DuckDB connection to block _havn,
-   ATTACH, INSTALL, LOAD, COPY TO
+3. Runtime SQL guard — guard_sql_calls() rewrites every .execute/.sql/.query
+   call so its SQL argument passes through __havn_sql_guard (check_sql), which
+   blocks _havn, ATTACH, INSTALL, LOAD, COPY TO no matter how `db` is aliased
+   or how the SQL string is built. The call stays direct so DuckDB's
+   replacement scan (used for `SELECT * FROM a_dataframe`) keeps working — a
+   connection-wrapping proxy can't do that, since the scan only sees the
+   immediate caller frame.
 4. Execution timeout — prevents infinite loops from hanging the server
 
 This is an in-process sandbox (not subprocess-based) because DuckDB on
@@ -225,6 +230,70 @@ def check_sql(query: str) -> None:
             "Access to _havn, ATTACH, INSTALL, LOAD, "
             "and COPY TO are blocked."
         )
+
+
+# ---------------------------------------------------------------------------
+# Runtime SQL guard via AST rewriting
+#
+# A wrapper proxy around the connection can't be used: DuckDB's replacement
+# scan inspects only the *immediate* caller frame, so any indirection breaks
+# `db.execute("SELECT * FROM my_df")`. Instead we rewrite every
+# `<expr>.execute/sql/query(SQL, ...)` call so its SQL argument is wrapped in
+# `__havn_sql_guard(SQL)`, which validates at runtime and returns the value
+# unchanged. The `.execute(...)` call itself stays a direct call in the user's
+# frame, so the replacement scan keeps working — while the SQL is checked no
+# matter how `db` is aliased or how the SQL string was built.
+# ---------------------------------------------------------------------------
+
+SQL_GUARD_NAME = "__havn_sql_guard"
+
+_SQL_METHODS = frozenset({"execute", "sql", "query"})
+
+
+def sql_guard(value):
+    """Runtime guard: validate a SQL string, then return it unchanged.
+
+    Non-string values (parameters, relations) pass through untouched so the
+    wrapper is transparent for every legitimate call shape.
+    """
+    if isinstance(value, str):
+        check_sql(value)
+    return value
+
+
+class _GuardSqlCalls(ast.NodeTransformer):
+    """Wrap the SQL argument of ``.execute/.sql/.query`` calls in the guard."""
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        self.generic_visit(node)
+        func = node.func
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr in _SQL_METHODS
+            and node.args
+            # Don't double-wrap if the arg is already a guard call.
+            and not (
+                isinstance(node.args[0], ast.Call)
+                and isinstance(node.args[0].func, ast.Name)
+                and node.args[0].func.id == SQL_GUARD_NAME
+            )
+        ):
+            node.args[0] = ast.Call(
+                func=ast.Name(id=SQL_GUARD_NAME, ctx=ast.Load()),
+                args=[node.args[0]],
+                keywords=[],
+            )
+        return node
+
+
+def guard_sql_calls(tree: ast.Module) -> ast.Module:
+    """Rewrite a parsed module so SQL method calls validate their argument.
+
+    Returns a new, location-fixed tree ready to compile.
+    """
+    new_tree = _GuardSqlCalls().visit(tree)
+    ast.fix_missing_locations(new_tree)
+    return new_tree
 
 
 class SafeDbProxy:

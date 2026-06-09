@@ -199,6 +199,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
   const [acIndex, setAcIndex] = useState(0);
   const [acToken, setAcToken] = useState(""); // the token being completed
   const colCacheRef = useRef({}); // schema.table -> columns[]
+  const acRequestRef = useRef(0); // monotonic id to drop stale autocomplete responses
 
   useEffect(() => {
     api.listTables().then(setTables).catch((e) => console.warn("Failed to load tables:", e.message));
@@ -274,6 +275,9 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
     setQueryRunning(true);
     setError(null);
     setExplainResult(null);
+    // Fresh AbortController so the Cancel button can abort the in-flight fetch.
+    const controller = new AbortController();
+    queryAbortRef.current = controller;
     // Apply default limit if enabled and query doesn't already have LIMIT
     let query = sql.trim();
     if (limitEnabled && !/\bLIMIT\b/i.test(query)) {
@@ -282,21 +286,26 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
     }
     addOutput("info", `Running query${limitEnabled && !/\bLIMIT\b/i.test(sql) ? ` (limit ${DEFAULT_LIMIT})` : ""}...`);
     try {
-      const data = await api.runQuery(query);
+      const data = await api.runQuery(query, controller.signal);
       setResults(data);
       const newHistory = [{ sql: sql.trim(), ts: new Date().toISOString() }, ...history.filter((h) => h.sql !== sql.trim())];
       setHistory(newHistory);
       saveHistory(newHistory);
       addOutput("info", `Query: ${data.rows.length} row${data.rows.length !== 1 ? "s" : ""} (${data.columns.length} cols)${data.truncated ? " — results capped for display. Use Export CSV for full results." : ""}`);
     } catch (e) {
-      const msg = e.message || "";
-      const isEmptyWarehouse =
-        msg.includes("Warehouse not found") || msg.includes("warehouse not initialized");
-      setError(msg);
-      if (!isEmptyWarehouse) {
-        addOutput("error", `Query error: ${msg}`);
+      if (e.name === "AbortError" || controller.signal.aborted) {
+        addOutput("info", "Query cancelled.");
+      } else {
+        const msg = e.message || "";
+        const isEmptyWarehouse =
+          msg.includes("Warehouse not found") || msg.includes("warehouse not initialized");
+        setError(msg);
+        if (!isEmptyWarehouse) {
+          addOutput("error", `Query error: ${msg}`);
+        }
       }
     } finally {
+      queryAbortRef.current = null;
       setQueryRunning(false);
     }
   }
@@ -372,22 +381,36 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
     setTimeout(() => { ta.focus(); ta.selectionStart = ta.selectionEnd = newCursor; }, 0);
   }
 
-  // Extract aliases from SQL: FROM/JOIN schema.table alias or schema.table AS alias
+  // SQL keywords that can follow a table name but are NOT aliases.
+  const ALIAS_STOPWORDS = new Set([
+    "ON", "WHERE", "AND", "OR", "SET", "LEFT", "RIGHT", "INNER", "OUTER",
+    "CROSS", "FULL", "JOIN", "GROUP", "ORDER", "HAVING", "LIMIT", "UNION",
+    "EXCEPT", "INTERSECT", "USING", "QUALIFY", "WINDOW", "OFFSET", "FETCH",
+    "TABLESAMPLE", "AS", "NATURAL", "LATERAL", "PIVOT", "UNPIVOT",
+  ]);
+
+  // Extract aliases from SQL: FROM/JOIN schema.table [AS] alias.
+  // The alias is optional (so `FROM a.b WHERE ...` doesn't capture `where`),
+  // and a captured token that is a SQL keyword is treated as "no alias".
   function extractAliases(sqlText) {
     const aliasMap = {};
-    const re = /\b(?:FROM|JOIN)\s+([\w]+\.[\w]+)\s+(?:AS\s+)?([\w]+)/gi;
+    const re = /\b(?:FROM|JOIN)\s+([\w]+\.[\w]+)(?:\s+(?:AS\s+)?([\w]+))?/gi;
     let m;
     while ((m = re.exec(sqlText)) !== null) {
       const fullTable = m[1]; // e.g. "landing.customers"
-      const alias = m[2].toLowerCase();
-      if (!["ON", "WHERE", "AND", "OR", "SET", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "FULL", "JOIN", "GROUP", "ORDER", "HAVING", "LIMIT", "UNION", "EXCEPT", "INTERSECT"].includes(alias.toUpperCase())) {
-        aliasMap[alias] = fullTable;
-      }
+      const aliasTok = m[2];
+      if (!aliasTok) continue;
+      if (ALIAS_STOPWORDS.has(aliasTok.toUpperCase())) continue;
+      aliasMap[aliasTok.toLowerCase()] = fullTable;
     }
     return aliasMap;
   }
 
   async function computeAutocomplete(value, cursor) {
+    // Stamp this invocation so a slow describeTable response from an earlier
+    // keystroke can't overwrite suggestions from a newer one.
+    const reqId = ++acRequestRef.current;
+    const isStale = () => acRequestRef.current !== reqId;
     if (cursor == null) cursor = value.length;
     const beforeCursor = value.substring(0, cursor);
 
@@ -418,6 +441,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
             colCacheRef.current[key] = cols;
           } catch { cols = []; }
         }
+        if (isStale()) return;
         const colMatches = cols
           .filter((c) => !partial || c.name.toLowerCase().startsWith(partial))
           .slice(0, 12)
@@ -457,6 +481,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
         }));
       }
 
+      if (isStale()) return;
       const items = [...tableMatches, ...colMatches];
       setAcToken(token);
       setAcItems(items);
@@ -500,6 +525,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
         }
       }
 
+      if (isStale()) return;
       const items = [...colMatches.slice(0, 8), ...tableMatches];
       setAcToken(token);
       setAcItems(items.slice(0, 12));

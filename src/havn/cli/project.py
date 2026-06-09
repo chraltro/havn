@@ -278,6 +278,11 @@ def init(
         console.print("  havn macros                 # see Python functions usable in SQL")
         console.print("  havn serve                  # open web UI")
         console.print("  havn contracts              # check data quality")
+        console.print()
+        console.print(
+            "[dim]Need a Python library (e.g. pandas) in your scripts? "
+            "See \"Python Dependencies\" in CLAUDE.md.[/dim]"
+        )
 
 
 @app.command()
