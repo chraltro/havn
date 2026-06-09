@@ -1,4 +1,6 @@
-import React from "react";
+import React, { useEffect } from "react";
+
+const SUCCESS_AUTO_DISMISS_MS = 12000;
 
 /**
  * Post-pipeline-run summary card.
@@ -6,10 +8,20 @@ import React from "react";
  * bridging the user from "it ran" to "here's what to do next."
  */
 export default function RunSummary({ summary, onNavigate, onDismiss }) {
+  const isSuccess = summary?.status === "success";
+
+  // Auto-dismiss the success card after a bit so it doesn't linger across
+  // unrelated sections. Failures stay until manually dismissed so the user
+  // always sees what broke. The timer resets whenever a new summary arrives.
+  useEffect(() => {
+    if (!summary || !isSuccess || !onDismiss) return;
+    const t = setTimeout(onDismiss, SUCCESS_AUTO_DISMISS_MS);
+    return () => clearTimeout(t);
+  }, [summary, isSuccess, onDismiss]);
+
   if (!summary) return null;
 
   const { type, status, models, totalRows, duration, errors } = summary;
-  const isSuccess = status === "success";
   const builtCount = models ? models.filter((m) => m.result === "built").length : 0;
   const skippedCount = models ? models.filter((m) => m.result === "skipped").length : 0;
   const errorCount = errors || (models ? models.filter((m) => m.result === "error").length : 0);
