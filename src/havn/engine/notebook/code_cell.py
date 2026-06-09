@@ -132,8 +132,10 @@ def execute_cell(
 
     except SandboxViolation as e:
         outputs.append({"type": "error", "text": f"Sandbox: {e}"})
-    except Exception:
+    except Exception as e:
         error_text = traceback.format_exc()
+        from havn.engine.deps import augment_import_error
+        error_text = augment_import_error(error_text, e)
         outputs.append({"type": "error", "text": error_text})
     duration_ms = int((time.perf_counter() - start) * 1000)
     return {"outputs": outputs, "namespace": namespace, "duration_ms": duration_ms}

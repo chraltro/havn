@@ -155,8 +155,12 @@ except Exception as e:
 """
 
 _INGEST_LOAD_SOURCE = """\
-import pandas as pd
+import json
+import os
+import tempfile
 
+# Flatten each GeoJSON feature into one row (no pandas needed: DuckDB reads
+# JSON natively, so a default `havn init` project runs with zero extra installs).
 rows = [
     {**f["properties"], "id": f["id"],
      "latitude": f["geometry"]["coordinates"][1],
@@ -165,15 +169,25 @@ rows = [
     for f in features
 ]
 
-df = pd.DataFrame(rows)
-db.execute("CREATE SCHEMA IF NOT EXISTS landing")
-db.execute(
-    "CREATE OR REPLACE TABLE landing.earthquakes AS "
-    "SELECT * REPLACE ("
-    "  epoch_ms(time::BIGINT) AS time,"
-    "  epoch_ms(updated::BIGINT) AS updated"
-    ") FROM df"
-)
+# Hand the rows to DuckDB via a temporary JSON file. read_json auto-detects the
+# full column set, so `SELECT *` still picks up every field automatically.
+with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+    json.dump(rows, f)
+    tmp_path = f.name
+
+try:
+    dest = tmp_path.replace("\\\\", "/").replace("'", "''")
+    db.execute("CREATE SCHEMA IF NOT EXISTS landing")
+    db.execute(
+        "CREATE OR REPLACE TABLE landing.earthquakes AS "
+        "SELECT * REPLACE ("
+        "  epoch_ms(time::BIGINT) AS time,"
+        "  epoch_ms(updated::BIGINT) AS updated"
+        f") FROM read_json('{dest}')"
+    )
+finally:
+    os.unlink(tmp_path)
+
 print(f"Loaded {len(rows)} earthquakes into landing.earthquakes")\
 """
 
@@ -933,6 +947,27 @@ db.execute("CREATE OR REPLACE TABLE landing.data AS SELECT * FROM ...")
 - Legacy `def run(db)` scripts are still supported (backward compatible)
 - `.dpnb` notebooks can also be used as ingest/export steps
 - Scripts prefixed with `_` are skipped
+
+### Python Dependencies
+
+Ingest/export scripts and notebook cells run inside havn's own Python
+environment, so any third-party library you import must be installed there.
+DuckDB can read CSV, JSON, and Parquet natively, so you often need nothing
+extra, but to use a library like pandas:
+
+```bash
+# If havn was installed with uv (uv tool install havn):
+uv tool install havn --with pandas        # re-run with more --with flags to add more
+
+# If havn was installed with pipx:
+pipx inject havn pandas
+
+# If havn is installed in a regular venv / via pip:
+pip install pandas
+```
+
+If a script or notebook hits `ModuleNotFoundError`, havn appends a hint
+showing the exact command for your install method.
 
 ## Data Quality
 
