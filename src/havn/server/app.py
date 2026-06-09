@@ -256,8 +256,19 @@ def serve_frontend(path: str = "") -> HTMLResponse:
     if path == "api" or path.startswith("api/"):
         raise HTTPException(404, "API endpoint not found")
 
-    file_path = _FRONTEND_DIR / path
-    if file_path.is_file():
+    # Path-traversal guard. Starlette decodes %2e%2e%2f into a literal "../"
+    # *after* normalization, so the :path converter can hand us "../../etc/passwd".
+    # Resolve the candidate and require it to stay inside the frontend dir, or
+    # we'd serve any file the server process can read (.env, warehouse.duckdb,
+    # SSH keys) to an unauthenticated client. Fall through to the SPA index on
+    # any escape so client-side routes still work.
+    frontend_root = _FRONTEND_DIR.resolve()
+    file_path = (_FRONTEND_DIR / path).resolve()
+    try:
+        file_path.relative_to(frontend_root)
+    except ValueError:
+        file_path = None
+    if file_path is not None and file_path.is_file():
         content_type = {
             ".html": "text/html",
             ".js": "application/javascript",

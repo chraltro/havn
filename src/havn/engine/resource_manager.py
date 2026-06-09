@@ -242,6 +242,10 @@ class ResourceManager:
         task.status = status
         with self._lock:
             self._active.pop(task.task_id, None)
+            # Release cancel callbacks (a bound conn.interrupt that retains the
+            # connection/cursor). cancel() also pops, so this is idempotent;
+            # without it, normally-completing tasks leak callbacks forever.
+            self._cancel_callbacks.pop(task.task_id, None)
             self._recent.appendleft(task)
         ACTIVE_TASKS.labels(category=task.category).dec()
         QUERIES_TOTAL.labels(category=task.category, status=status).inc()
