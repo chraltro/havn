@@ -1,43 +1,28 @@
 # havn — To-Do
 
-## Open findings from issue-hunt sweep (2026-06-09)
+## Issue-hunt sweep (2026-06-09) — all resolved
 
-Multi-agent review (Playwright + code review, adversarially verified). The 6
-verified fixes below the line are already committed; these remain open.
+Multi-agent review (Playwright + code review, adversarially verified). All
+findings have been fixed and committed:
 
-### Needs a decision (P1, security)
-- [ ] **Notebook sandbox escape.** `SafeDbProxy` in `engine/notebook/sandbox.py`
-  is dead code (never instantiated); `code_cell.py` injects the raw connection,
-  so cells can read `_havn.users`/`_havn.tokens` via aliasing (`x=db; x.execute(...)`)
-  or run `INSTALL`/`ATTACH`/`LOAD`. The AST guard only matches literal
-  `db.execute("..._havn...")`. Naive `SafeDbProxy` wrapping breaks DuckDB's
-  replacement scan (verified: it inspects only the immediate caller frame, so
-  `db.execute("SELECT * FROM my_df")` stops resolving local DataFrames).
-  Options weighed: (a) engine-level lockdown (`SET enable_external_access=false`
-  + hide `_havn` per-connection, keeps raw conn so DataFrame queries still work);
-  (b) wire in `SafeDbProxy` and drop direct-DataFrame scan, documenting
-  `db.register('df', df)`; (c) document the limitation only. Deferred for owner
-  to choose. Notebooks require an authenticated execute-permission user.
-
-### Lower priority (P2/P3, not yet fixed)
-- [ ] Query Cancel button is a no-op (`QueryPanel.jsx:181,605`): `queryAbortRef`
-  is never assigned and `api.runQuery` forwards no signal. Thread an
-  AbortController through, or remove the button.
-- [ ] Wiki cross-reference links open a new tab landing on the Masking panel;
-  "Open in New Tab" shows raw JSON (`WikiPanel.jsx` + `App.jsx` pathToTab). Wiki
-  internal navigation is half-wired — fix both together.
-- [ ] "Pipeline Complete" RunSummary never auto-dismisses and follows the user
-  across sections (`RunSummary.jsx`). Add an auto-dismiss timer / clear on nav.
-- [ ] `TablesPanel.jsx` uses `split('.')[0/1]` for dotted/catalog-qualified
-  names (breaks DuckLake `catalog.schema.table`); centralize on `lastIndexOf('.')`.
-- [ ] `QueryPanel.jsx extractAliases` mis-parses unaliased FROM / multi-word
-  JOINs and has an autocomplete async race (no request-id guard).
-- [ ] SQL cell reports truncated display count as `total_rows`
-  (`engine/notebook/sql_cell.py`) — rename or run a real COUNT(*).
-- [ ] `notebooks.py` runs `_is_safe_model_name` after the name is used (latent,
-  not exploitable — move the guard to the top of each handler).
-- [ ] Incremental staging-column query omits a schema/catalog filter
-  (`engine/transform/execution.py`) — mirror the target-column query.
+- [x] **P1 path traversal** in the SPA catch-all — containment check added.
+- [x] **P1 notebook sandbox escape** — closed via `guard_sql_calls()` AST
+  rewrite (`__havn_sql_guard` validates every `.execute/.sql/.query` argument at
+  runtime regardless of aliasing/dynamic SQL, while keeping the call direct so
+  DuckDB's DataFrame replacement scan still works). Regression tests added.
+- [x] Cancel-callback memory leak in `resource_manager._finish_task`.
+- [x] Stale `_havn.model_state` on file delete (wrong column name).
+- [x] Empty USGS feed aborting the starter pipeline.
+- [x] Misleading `ModuleNotFoundError` install hints (`deps.py`).
+- [x] DAGPanel redraw churn (shared `EMPTY` constant).
+- [x] Query Cancel button no-op — AbortController wired through `api.runQuery`.
+- [x] Wiki cross-reference links + "Open in New Tab" (in-place nav, no JSON tab).
+- [x] RunSummary success card auto-dismisses after 12s.
+- [x] TablesPanel catalog-qualified name parsing (`splitTableName`).
+- [x] QueryPanel `extractAliases` mis-parse + autocomplete async race.
+- [x] SQL cell `total_rows` mislabel (renamed to `displayed_rows`).
+- [x] `notebooks.py` identifier validation moved to top of each handler.
+- [x] Incremental staging-column query constrained to the temp catalog.
 
 ## Cloud / Hosted Version
 
