@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "havn"
-version = "0.2.19"
+version = "0.2.20"
 description = "Self-hosted data platform. A Nordic alternative to Databricks/Snowflake. DuckDB + SQL transforms + Python ingest/export. Data in safe waters."
 readme = "README.md"
 license = {text = "BUSL-1.1"}
