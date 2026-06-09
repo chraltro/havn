@@ -286,6 +286,8 @@ def model_to_notebook_endpoint(
 ) -> dict:
     """Create a notebook from a transform model for interactive debugging."""
     _require_permission(request, "write")
+    if not _is_safe_model_name(model_name):
+        raise HTTPException(400, "Invalid model name")
     from havn.engine.notebook import model_to_notebook, save_notebook
 
     project_dir = _get_project_dir()
@@ -294,8 +296,6 @@ def model_to_notebook_endpoint(
         nb = model_to_notebook(
             conn, model_name, transform_dir, project_dir / "notebooks"
         )
-        if not _is_safe_model_name(model_name):
-            raise HTTPException(400, "Invalid model name")
         safe_name = model_name.replace(".", "_")
         nb_path = project_dir / "notebooks" / f"debug_{safe_name}.dpnb"
         save_notebook(nb_path, nb)
@@ -317,6 +317,8 @@ def debug_notebook_endpoint(
 ) -> dict:
     """Generate a debug notebook for a failed model."""
     _require_permission(request, "write")
+    if not _is_safe_model_name(model_name):
+        raise HTTPException(400, "Invalid model name")
     from havn.engine.notebook import generate_debug_notebook, save_notebook
 
     project_dir = _get_project_dir()
@@ -355,8 +357,6 @@ def debug_notebook_endpoint(
             error_message=error_message,
             assertion_failures=assertion_failures,
         )
-        if not _is_safe_model_name(model_name):
-            raise HTTPException(400, "Invalid model name")
         safe_name = model_name.replace(".", "_")
         nb_path = project_dir / "notebooks" / f"debug_{safe_name}.dpnb"
         save_notebook(nb_path, nb)

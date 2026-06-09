@@ -18,8 +18,18 @@ function renderMarkdown(md) {
   // Bold and italic
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong style="color:var(--havn-text)">$1</strong>');
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  // Links
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:var(--havn-accent);text-decoration:none" target="_blank">$1</a>');
+  // Links. External links (http(s)://, mailto:, leading slash) open in a new
+  // tab as before. Intra-wiki links (bare slugs like "transforms") are tagged
+  // with data-wiki-slug so a delegated handler can load them in-place instead
+  // of opening a new tab that lands on the section default panel.
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
+    const isExternal = /^(https?:\/\/|mailto:|\/|#)/i.test(url);
+    if (isExternal) {
+      return `<a href="${url}" style="color:var(--havn-accent);text-decoration:none" target="_blank">${text}</a>`;
+    }
+    const slug = url.replace(/^\.\//, '').replace(/\.md$/, '');
+    return `<a href="#wiki/${slug}" data-wiki-slug="${slug}" style="color:var(--havn-accent);text-decoration:none;cursor:pointer">${text}</a>`;
+  });
   // Tables — collect consecutive pipe rows into a single <table>
   html = html.replace(/(^\|.+\|$\n?)+/gm, (block) => {
     const rows = block.trim().split('\n').filter(r => r.trim());
@@ -66,17 +76,36 @@ export default function WikiPanel() {
 
   useEffect(() => { loadPages(); }, []);
 
+  // A #wiki/<slug> hash (set by "Open in New Tab" or an internal link) selects
+  // the initial page; otherwise fall back to the index.
+  const initialSlug = () => {
+    const m = (window.location.hash || '').match(/^#wiki\/(.+)$/);
+    return m ? decodeURIComponent(m[1]) : null;
+  };
+
   const loadPages = async () => {
     setLoading(true);
     try {
       const data = await api.listWikiPages();
       setPages(data || []);
       if (data && data.length > 0) {
-        const index = data.find(p => p.slug === 'index') || data[0];
-        loadContent(index.slug);
+        const wanted = initialSlug();
+        const start = (wanted && data.find(p => p.slug === wanted))
+          || data.find(p => p.slug === 'index')
+          || data[0];
+        loadContent(start.slug);
       }
     } catch (e) { console.error(e); }
     setLoading(false);
+  };
+
+  // Intercept clicks on intra-wiki links (rendered with data-wiki-slug) so they
+  // load in-place instead of navigating to a new tab / the section default.
+  const handleContentClick = (e) => {
+    const a = e.target.closest('a[data-wiki-slug]');
+    if (!a) return;
+    e.preventDefault();
+    loadContent(a.getAttribute('data-wiki-slug'));
   };
 
   const loadContent = async (slug) => {
@@ -108,7 +137,8 @@ export default function WikiPanel() {
 
   const handleOpenNewTab = () => {
     if (activePage) {
-      const url = `${window.location.origin}/api/wiki/${activePage}`;
+      // Open the in-app wiki route (not the raw JSON API) so the page renders.
+      const url = `${window.location.origin}/configure/wiki#wiki/${activePage}`;
       window.open(url, '_blank');
     }
   };
@@ -142,7 +172,7 @@ export default function WikiPanel() {
               <span />
               <button style={s.openBtn} onClick={handleOpenNewTab}>Open in New Tab</button>
             </div>
-            <div style={{ color: 'var(--havn-text-secondary)', fontSize: 14, lineHeight: 1.7 }} dangerouslySetInnerHTML={{ __html: renderMarkdown(content.content) }} />
+            <div style={{ color: 'var(--havn-text-secondary)', fontSize: 14, lineHeight: 1.7 }} onClick={handleContentClick} dangerouslySetInnerHTML={{ __html: renderMarkdown(content.content) }} />
           </>
         ) : (
           <div style={{ color: 'var(--havn-text-secondary)', textAlign: 'center', marginTop: 60 }}>

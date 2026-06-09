@@ -148,6 +148,21 @@ pip install -e ".[dev]"
 cd frontend && npm install && npm run build && cd ..
 ```
 
+#### Adding Python libraries
+
+Your ingest/export scripts and notebook cells run inside havn's own Python
+environment. DuckDB reads CSV, JSON, and Parquet natively, so you usually need
+nothing extra, but to use a library such as pandas, install it where havn lives:
+
+```bash
+uv tool install havn --with pandas   # if you installed havn with uv
+pipx inject havn pandas              # if you installed havn with pipx
+pip install pandas                   # if havn is in a regular venv
+```
+
+If a script or notebook hits `ModuleNotFoundError`, havn prints the exact
+command for your install method.
+
 ### Create a project
 
 ```bash

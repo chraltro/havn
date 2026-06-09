@@ -1,5 +1,29 @@
 # havn — To-Do
 
+## Issue-hunt sweep (2026-06-09) — all resolved
+
+Multi-agent review (Playwright + code review, adversarially verified). All
+findings have been fixed and committed:
+
+- [x] **P1 path traversal** in the SPA catch-all — containment check added.
+- [x] **P1 notebook sandbox escape** — closed via `guard_sql_calls()` AST
+  rewrite (`__havn_sql_guard` validates every `.execute/.sql/.query` argument at
+  runtime regardless of aliasing/dynamic SQL, while keeping the call direct so
+  DuckDB's DataFrame replacement scan still works). Regression tests added.
+- [x] Cancel-callback memory leak in `resource_manager._finish_task`.
+- [x] Stale `_havn.model_state` on file delete (wrong column name).
+- [x] Empty USGS feed aborting the starter pipeline.
+- [x] Misleading `ModuleNotFoundError` install hints (`deps.py`).
+- [x] DAGPanel redraw churn (shared `EMPTY` constant).
+- [x] Query Cancel button no-op — AbortController wired through `api.runQuery`.
+- [x] Wiki cross-reference links + "Open in New Tab" (in-place nav, no JSON tab).
+- [x] RunSummary success card auto-dismisses after 12s.
+- [x] TablesPanel catalog-qualified name parsing (`splitTableName`).
+- [x] QueryPanel `extractAliases` mis-parse + autocomplete async race.
+- [x] SQL cell `total_rows` mislabel (renamed to `displayed_rows`).
+- [x] `notebooks.py` identifier validation moved to top of each handler.
+- [x] Incremental staging-column query constrained to the temp catalog.
+
 ## Cloud / Hosted Version
 
 ### Database Abstraction Layer (`database.py`)

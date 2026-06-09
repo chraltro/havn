@@ -309,14 +309,15 @@ def _drop_db_object(full_path: Path, file_path: str) -> str | None:
         obj_kind = "VIEW" if "VIEW" in table_type.upper() else "TABLE"
         conn.execute(f'DROP {obj_kind} IF EXISTS "{schema}"."{name}"')
 
-        # Clean up model_state metadata
+        # Clean up model_state metadata. The PK column is model_path, keyed by
+        # the model's full_name ("schema.name") — same value discovery writes.
         try:
             conn.execute(
-                "DELETE FROM _havn.model_state WHERE model_name = ?",
+                "DELETE FROM _havn.model_state WHERE model_path = ?",
                 [f"{schema}.{name}"],
             )
         except Exception:
-            pass  # table may not exist yet
+            pass  # table may not exist yet (fresh project, never transformed)
 
         return f"{schema}.{name}"
     finally:

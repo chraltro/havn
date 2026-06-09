@@ -19,6 +19,9 @@ const NODE_H = 56;
 const LAYER_GAP_X = 220;
 const NODE_GAP_Y = 78;
 
+// Stable empty-object identity for snapshot lookups that miss (avoids redraw churn).
+const EMPTY = {};
+
 function getCV(prop) {
   return getComputedStyle(document.documentElement).getPropertyValue(prop).trim();
 }
@@ -502,8 +505,11 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
   const currentRunId = runs[sliderIndex]?.run_id;
   const prevRunId = runs[sliderIndex + 1]?.run_id;
 
-  const currentSnaps = snapshotsByRun[currentRunId] || {};
-  const prevSnaps = snapshotsByRun[prevRunId] || {};
+  // Use a shared EMPTY constant on a miss so these keep a stable identity
+  // across renders — otherwise a fresh {} each render churns the `draw`
+  // useCallback (and the ResizeObserver effect) on every state change.
+  const currentSnaps = snapshotsByRun[currentRunId] || EMPTY;
+  const prevSnaps = snapshotsByRun[prevRunId] || EMPTY;
 
   // Memoize layout
   const layout = useMemo(() => {
@@ -705,14 +711,17 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
         ctx.globalAlpha = 1;
       }
 
-      // Node background
+      // Node background. Active nodes (hovered/selected) get the schema color
+      // for both border and glow so the highlight matches the box itself,
+      // rather than a generic theme accent. Search matches stay accent-colored
+      // so they read as a distinct "found it" affordance.
       ctx.fillStyle = isHovered || isSelected ? getCV("--havn-bg") : getCV("--havn-bg-secondary");
-      ctx.strokeStyle = isSearchMatch ? getCV("--havn-accent") : isSelected ? getCV("--havn-accent") : color;
+      ctx.strokeStyle = isSearchMatch ? getCV("--havn-accent") : color;
       ctx.lineWidth = isHovered || isSelected || isSearchMatch ? 2.5 : (isTable ? 2 : 1.5);
 
       const r = 7;
       if (isHovered || isSelected) {
-        ctx.shadowColor = isSelected ? getCV("--havn-accent") : color;
+        ctx.shadowColor = color;
         ctx.shadowBlur = 12;
         ctx.shadowOffsetX = 0;
         ctx.shadowOffsetY = 2;
@@ -730,8 +739,8 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
       ctx.roundRect(pos.x, pos.y, 3, NODE_H, [r, 0, 0, r]);
       ctx.fill();
 
-      // Label
-      ctx.fillStyle = isHovered ? getCV("--havn-accent") : getCV("--havn-text");
+      // Label — active nodes get the schema color to match their border/glow.
+      ctx.fillStyle = isHovered || isSelected ? color : getCV("--havn-text");
       ctx.font = `600 11px ${fontFamily}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
