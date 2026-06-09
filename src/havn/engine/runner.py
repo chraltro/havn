@@ -547,8 +547,12 @@ def _run_script_body(
         error_str = "".join(error_msg)
         log_output = stdout_capture.getvalue() + stderr_capture.getvalue() + "\n" + error_str
 
-        log_run(conn, script_type, script_path.name, "error", duration_ms, error=str(e), log_output=log_output, pipeline_run_id=pipeline_run_id)
-        console.print(f"  [red]fail[/red] {label}: {e}")
+        from havn.engine.deps import augment_import_error
+        log_output = augment_import_error(log_output, e)
+        error_summary = augment_import_error(str(e), e)
+
+        log_run(conn, script_type, script_path.name, "error", duration_ms, error=error_summary, log_output=log_output, pipeline_run_id=pipeline_run_id)
+        console.print(f"  [red]fail[/red] {label}: {error_summary}")
 
         if use_circuit_breaker:
             _get_circuit_breaker()._record_failure(script_path.name)
