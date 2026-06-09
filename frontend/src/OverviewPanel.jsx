@@ -34,6 +34,10 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
   useEffect(() => {
     load();
     loadGitStatus();
+    // The parent bumps refreshKey when a run completes / data changes, so clear
+    // the demo-run flag here — otherwise the "Run Sample Pipeline" button stays
+    // stuck on "Running..." forever (onRunStream is fire-and-forget).
+    setRunningDemo(false);
   }, [refreshKey]);
 
   async function load() {
@@ -293,10 +297,15 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
                             ...st.runItem,
                             ...(run.run_type === "ingest" || run.run_type === "export" ? { background: "color-mix(in srgb, var(--havn-accent) 4%, transparent)" } : {}),
                           }}>
-                      <span style={{
-                        ...st.statusDot,
-                        background: run.status === "success" ? "var(--havn-green)" : "var(--havn-red)",
-                      }} />
+                      <span
+                        title={run.status}
+                        aria-label={run.status}
+                        role="img"
+                        style={{
+                          ...st.statusDot,
+                          background: run.status === "success" ? "var(--havn-green)" : "var(--havn-red)",
+                        }}
+                      />
                       <span style={st.runType}>{run.run_type}</span>
                       <span
                         style={{ ...st.runTarget, cursor: "pointer" }}

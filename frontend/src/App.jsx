@@ -1330,8 +1330,8 @@ function AppContent() {
           />}
           <div data-havn-guide="output" style={{ flexShrink: 0 }}>
             {running && progress > 0 && (
-              <div style={{ height: 3, background: "#1a1a2e", width: "100%" }}>
-                <div style={{ height: 3, background: "#2dd4bf", width: `${Math.round(progress * 100)}%`, transition: "width 0.3s ease" }} />
+              <div style={{ height: 3, background: "var(--havn-bg-secondary)", width: "100%" }}>
+                <div style={{ height: 3, background: "var(--havn-accent)", width: `${Math.round(progress * 100)}%`, transition: "width 0.3s ease" }} />
               </div>
             )}
             <OutputPanel output={output} onClear={clearOutput} height={outputCollapsed ? 28 : outputHeight} onOpenFile={openFileAtLine} running={running} progress={progress} collapsed={outputCollapsed} onToggleCollapse={toggleOutputCollapsed} />
@@ -1531,7 +1531,7 @@ const styles = {
 
   // Header
   header: { display: "flex", alignItems: "center", padding: "0 16px", borderBottom: "1px solid var(--havn-border)", background: "var(--havn-bg-secondary)", minHeight: "46px", gap: "12px" },
-  logo: { display: "inline-flex", alignItems: "center", fontSize: "17px", fontWeight: 700, fontFamily: "var(--havn-font)", color: "#3ECFB4", letterSpacing: "-0.5px", background: "none", border: "none", cursor: "pointer", padding: "8px 0", marginRight: "4px", flexShrink: 0 },
+  logo: { display: "inline-flex", alignItems: "center", fontSize: "17px", fontWeight: 700, fontFamily: "var(--havn-font)", color: "var(--havn-accent)", letterSpacing: "-0.5px", background: "none", border: "none", cursor: "pointer", padding: "8px 0", marginRight: "4px", flexShrink: 0 },
 
   // Section navigation (in header)
   sectionNav: { display: "flex", alignItems: "center", gap: "1px", flex: 1 },
