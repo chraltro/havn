@@ -39,6 +39,29 @@ def shared_project(tmp_path):
     return tmp_path
 
 
+@pytest.fixture(autouse=True)
+def _reset_server_singletons():
+    """Reset the server deps singletons after any test that initialized them.
+
+    The backend, write queue, and read pool in ``havn.server.deps`` are
+    module-level singletons keyed to whichever project first touched them.
+    Without this, a test that sets ``server_app.PROJECT_DIR`` but forgets to
+    call ``reset_shared_conn()`` silently runs against the previous test's
+    warehouse (see the test_version_detail nightly flake). Teardown-only is
+    enough: every test then starts with clean singletons, and they re-create
+    lazily from the current PROJECT_DIR on the next request.
+    """
+    yield
+    import havn.server.deps as deps
+
+    if (
+        deps._backend is not None
+        or deps._write_queue is not None
+        or deps._read_pool is not None
+    ):
+        deps.reset_shared_conn()
+
+
 @pytest.fixture
 def shared_client(shared_project):
     """TestClient against the shared minimal project."""
