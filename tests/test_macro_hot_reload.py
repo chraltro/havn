@@ -55,7 +55,12 @@ def _table_macro_src(fn_name: str, row_expr: str) -> str:
 
 
 class TestIdempotentRegistration:
-    """register_macros must be safely callable multiple times on the same connection."""
+    """register_macros must be safely callable multiple times on the same connection.
+
+    Plain re-entrant calls are no-ops (idempotent per connection); picking up
+    file edits requires ``force_reload=True``, which is what the macros file
+    watcher passes (see ``server/deps.py:reregister_macros_on_shared_conns``).
+    """
 
     def test_scalar_reregister_updates_behaviour(self, tmp_path: Path) -> None:
         from havn.engine.macros import register_macros
@@ -69,10 +74,25 @@ class TestIdempotentRegistration:
 
         # Edit the file and re-register on the same connection.
         _write(macros_dir / "fn.py", _scalar_macro_src("greet", "'hi ' + x"))
-        register_macros(conn, tmp_path)
+        register_macros(conn, tmp_path, force_reload=True)
 
         result = conn.execute("SELECT greet('world')").fetchone()[0]
         assert result == "hi world", f"Expected 'hi world', got {result!r}"
+        conn.close()
+
+    def test_reregister_without_force_reload_is_noop(self, tmp_path: Path) -> None:
+        """Without force_reload, a re-entrant call returns 0 and keeps old behaviour."""
+        from havn.engine.macros import register_macros
+
+        macros_dir = tmp_path / "macros"
+        _write(macros_dir / "fn.py", _scalar_macro_src("greet", "'hello ' + x"))
+
+        conn = duckdb.connect(":memory:")
+        assert register_macros(conn, tmp_path) > 0
+
+        _write(macros_dir / "fn.py", _scalar_macro_src("greet", "'hi ' + x"))
+        assert register_macros(conn, tmp_path) == 0
+        assert conn.execute("SELECT greet('world')").fetchone()[0] == "hello world"
         conn.close()
 
     def test_scalar_reregister_does_not_raise(self, tmp_path: Path) -> None:
@@ -107,7 +127,7 @@ class TestIdempotentRegistration:
             macros_dir / "rows.py",
             _table_macro_src("get_rows", "{'val': 'v2'}"),
         )
-        register_macros(conn, tmp_path)
+        register_macros(conn, tmp_path, force_reload=True)
 
         rows2 = conn.execute("SELECT val FROM get_rows('x')").fetchall()
         assert rows2 == [("v2",)], f"Expected [('v2',)], got {rows2}"
@@ -155,7 +175,7 @@ class TestIdempotentRegistration:
 
         # Add a second file and reload.
         _write(macros_dir / "fn2.py", _scalar_macro_src("fn_b", "'b'"))
-        register_macros(conn, tmp_path)
+        register_macros(conn, tmp_path, force_reload=True)
 
         assert conn.execute("SELECT fn_a('')").fetchone()[0] == "a"
         assert conn.execute("SELECT fn_b('')").fetchone()[0] == "b"
@@ -260,7 +280,7 @@ class TestEndToEndHotReload:
     STARTUP_WAIT = 0.5
 
     def test_scalar_macro_hot_reload_e2e(self, tmp_path: Path) -> None:
-        from havn.engine.macros import register_macros
+        from havn.engine.macros import register_macros, reset_macro_state
         from havn.engine.scheduler import FileWatcher
 
         macros_dir = tmp_path / "macros"
@@ -268,8 +288,10 @@ class TestEndToEndHotReload:
 
         conn = duckdb.connect(":memory:")
 
+        # Mirror the production watcher callback (server/deps.py:_reload).
         def _reload(project_dir: Path) -> None:
-            register_macros(conn, project_dir)
+            reset_macro_state()
+            register_macros(conn, project_dir, force_reload=True)
 
         _write(macros_dir / "fn.py", _scalar_macro_src("tag", "'v1:' + x"))
         register_macros(conn, tmp_path)
@@ -292,7 +314,7 @@ class TestEndToEndHotReload:
             conn.close()
 
     def test_table_macro_hot_reload_e2e(self, tmp_path: Path) -> None:
-        from havn.engine.macros import register_macros
+        from havn.engine.macros import register_macros, reset_macro_state
         from havn.engine.scheduler import FileWatcher
 
         macros_dir = tmp_path / "macros"
@@ -300,8 +322,10 @@ class TestEndToEndHotReload:
 
         conn = duckdb.connect(":memory:")
 
+        # Mirror the production watcher callback (server/deps.py:_reload).
         def _reload(project_dir: Path) -> None:
-            register_macros(conn, project_dir)
+            reset_macro_state()
+            register_macros(conn, project_dir, force_reload=True)
 
         _write(macros_dir / "rows.py", _table_macro_src("get_tag", "{'val': 'r1'}"))
         register_macros(conn, tmp_path)

@@ -1209,7 +1209,7 @@ class TestParallelEdgeCases:
         conn.close()
 
     def test_parallel_with_error_blocks_downstream(self, tmp_path):
-        """Error in tier N should block tier N+1 in parallel mode."""
+        """An error blocks its own descendants; unrelated siblings still build."""
         db_path = tmp_path / "par_err.duckdb"
         conn = duckdb.connect(str(db_path))
         ensure_meta_table(conn)
@@ -1232,10 +1232,15 @@ class TestParallelEdgeCases:
             "-- depends_on: landing.nonexistent\n\n"
             "SELECT * FROM landing.nonexistent\n"
         )
-        (silver / "downstream.sql").write_text(
+        (silver / "downstream_ok.sql").write_text(
             "-- config: materialized=table, schema=silver\n"
             "-- depends_on: bronze.ok\n\n"
             "SELECT val FROM bronze.ok\n"
+        )
+        (silver / "downstream_bad.sql").write_text(
+            "-- config: materialized=table, schema=silver\n"
+            "-- depends_on: bronze.bad\n\n"
+            "SELECT * FROM bronze.bad\n"
         )
 
         results = run_transform(
@@ -1243,8 +1248,10 @@ class TestParallelEdgeCases:
             parallel=True, db_path=str(db_path),
         )
         assert results["bronze.bad"] == "error"
-        # Downstream should be skipped due to error in same tier
-        assert results["silver.downstream"] == "skipped"
+        # Descendants of the failed model are blocked...
+        assert results["silver.downstream_bad"] == "skipped_upstream_blocked"
+        # ...but siblings whose upstreams succeeded still build.
+        assert results["silver.downstream_ok"] == "built"
         conn.close()
 
 

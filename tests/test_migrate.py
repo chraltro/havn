@@ -8,7 +8,9 @@ import duckdb
 import pytest
 import yaml
 
-import click
+# Catch typer.Exit, not click.exceptions.Exit: newer typer versions vendor
+# click (typer._click), so the installed click's Exit is a different class.
+import typer
 
 from havn.cli.migrate import migrate
 from havn.config import load_project
@@ -71,7 +73,7 @@ def test_migrate_duckdb_to_ducklake_and_back(tmp_path, capsys):
     # Migrate: duckdb -> ducklake  (typer commands raise Exit even on success)
     try:
         migrate(to="ducklake", project_dir=tmp_path)
-    except click.exceptions.Exit as e:
+    except typer.Exit as e:
         assert e.exit_code in (0, None), f"migrate to ducklake exited with {e.exit_code}"
     except SystemExit as e:
         assert e.code in (0, None), f"migrate to ducklake exited with {e.code}"
@@ -97,7 +99,7 @@ def test_migrate_duckdb_to_ducklake_and_back(tmp_path, capsys):
     # Migrate back: ducklake -> duckdb
     try:
         migrate(to="duckdb", project_dir=tmp_path)
-    except click.exceptions.Exit as e:
+    except typer.Exit as e:
         assert e.exit_code in (0, None), f"migrate back exited with {e.exit_code}"
     except SystemExit as e:
         assert e.code in (0, None)
@@ -126,7 +128,7 @@ def test_migrate_rejects_invalid_target(tmp_path):
     try:
         migrate(to="sqlite", project_dir=tmp_path)
         raise AssertionError("expected Exit")
-    except click.exceptions.Exit as e:
+    except typer.Exit as e:
         assert e.exit_code == 1
     except SystemExit as e:
         assert e.code == 1
