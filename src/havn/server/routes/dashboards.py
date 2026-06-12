@@ -110,10 +110,48 @@ def _get_user_name(request: Request) -> str:
     return "anonymous"
 
 
-def _cache_key(widget_id: str, filters: dict, parameters: dict) -> str:
-    """Compute cache key from widget ID + filter/param state."""
-    payload = json.dumps({"w": widget_id, "f": filters, "p": parameters}, sort_keys=True)
+def _cache_key(widget_id: str, filters: dict, parameters: dict, sql_query: str = "") -> str:
+    """Compute cache key from widget ID + SQL + filter/param state.
+
+    The SQL is part of the key so editing a widget's query immediately
+    misses the old cache entry instead of serving stale results until the
+    TTL expires; the orphaned entries age out via expires_at.
+    """
+    payload = json.dumps(
+        {"w": widget_id, "f": filters, "p": parameters, "s": sql_query},
+        sort_keys=True,
+    )
     return hashlib.sha256(payload.encode()).hexdigest()[:32]
+
+
+def _store_cache(cache_key: str, result: dict, cache_ttl: int) -> None:
+    """Write a widget result to _havn.dashboard_cache.
+
+    Must run on the write connection: the query endpoints hold a read-only
+    cursor from the read pool, on which INSERT/DELETE fail (which is why
+    the cache never populated when these writes ran on the request cursor).
+    """
+    from havn.engine.write_queue import cursor_for
+    from havn.server.deps import _get_shared_conn
+
+    try:
+        cur = cursor_for(_get_shared_conn())
+        try:
+            cur.execute("DELETE FROM _havn.dashboard_cache WHERE cache_key = ?", [cache_key])
+            # NB: "INTERVAL ? SECOND" is a DuckDB parser error — the
+            # multiply-by-interval form is the parameterizable spelling.
+            cur.execute(
+                """
+                INSERT INTO _havn.dashboard_cache
+                    (cache_key, result_json, row_count, cached_at, expires_at)
+                VALUES (?, ?, ?, current_timestamp, current_timestamp + ? * INTERVAL '1 second')
+                """,
+                [cache_key, json.dumps(result), result.get("row_count", 0), cache_ttl],
+            )
+        finally:
+            cur.close()
+    except Exception:
+        logger.debug("Dashboard cache write failed", exc_info=True)
 
 
 def _execute_widget_query(
@@ -835,7 +873,7 @@ def query_widget(
 
     # Check cache
     if cache_ttl > 0:
-        ck = _cache_key(widget_id, req.filters, req.parameters)
+        ck = _cache_key(widget_id, req.filters, req.parameters, sql_query)
         cached = conn.execute(
             """
             SELECT result_json, row_count FROM _havn.dashboard_cache
@@ -854,19 +892,7 @@ def query_widget(
 
     # Store in cache
     if cache_ttl > 0:
-        ck = _cache_key(widget_id, req.filters, req.parameters)
-        try:
-            conn.execute("DELETE FROM _havn.dashboard_cache WHERE cache_key = ?", [ck])
-            conn.execute(
-                """
-                INSERT INTO _havn.dashboard_cache
-                    (cache_key, result_json, row_count, cached_at, expires_at)
-                VALUES (?, ?, ?, current_timestamp, current_timestamp + INTERVAL ? SECOND)
-                """,
-                [ck, json.dumps(result), result.get("row_count", 0), cache_ttl],
-            )
-        except Exception:
-            pass  # Cache write failure is not critical
+        _store_cache(_cache_key(widget_id, req.filters, req.parameters, sql_query), result, cache_ttl)
 
     return result
 
@@ -896,7 +922,7 @@ def query_batch(
 
         # Check cache first
         if cache_ttl > 0:
-            ck = _cache_key(w_id, req.filters, req.parameters)
+            ck = _cache_key(w_id, req.filters, req.parameters, sql_query)
             cached = conn.execute(
                 """
                 SELECT result_json FROM _havn.dashboard_cache
@@ -917,19 +943,7 @@ def query_batch(
 
             # Cache the result
             if cache_ttl > 0:
-                ck = _cache_key(w_id, req.filters, req.parameters)
-                try:
-                    conn.execute("DELETE FROM _havn.dashboard_cache WHERE cache_key = ?", [ck])
-                    conn.execute(
-                        """
-                        INSERT INTO _havn.dashboard_cache
-                            (cache_key, result_json, row_count, cached_at, expires_at)
-                        VALUES (?, ?, ?, current_timestamp, current_timestamp + INTERVAL ? SECOND)
-                        """,
-                        [ck, json.dumps(result), result.get("row_count", 0), cache_ttl],
-                    )
-                except Exception:
-                    pass
+                _store_cache(_cache_key(w_id, req.filters, req.parameters, sql_query), result, cache_ttl)
         except HTTPException:
             results[w_id] = {"columns": [], "rows": [], "row_count": 0, "error": "Query failed"}
         except Exception as e:

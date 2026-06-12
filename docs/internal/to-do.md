@@ -11,15 +11,18 @@ run-status-dot a11y.
 Remaining (lower priority, not yet fixed):
 - [ ] Disabled action buttons give no reason/tooltip (App "Run Model", Masking
   Edit/Delete disabled while a form is open, Query Explain). Add `title`.
-- [ ] Number inputs in Orchestration interval/range silently coerce invalid
-  values (clear/0 → 1) with no feedback. Clamp on blur + reflect.
+- [x] Number inputs in Orchestration interval/range silently coerce invalid
+  values — fixed 2026-06-12: raw value while typing, clamp on blur, and the
+  cron builder / job save clamp again so NaN can't leak into schedules.
 - [ ] DataSources "Skip Test"/Continue advances with empty required fields; no
   inline required-field validation.
 - [ ] DataSources file upload: no progress/loading indicator during upload.
-- [ ] QueryPanel "Query this table" auto-run bypasses limit-wrapping that the
-  normal Run path applies (inconsistent result set).
-- [ ] WikiPanel fetch failure renders a fake "Error" page via dangerouslySet
-  HTML with no retry/styled error; also raw `<` in prose isn't escaped.
+- [x] QueryPanel "Query this table" auto-run limit bypass — verified stale
+  2026-06-12: the 0.2.22 query editor rework routes auto-run through
+  runQuery(), which applies the limit.
+- [x] WikiPanel fetch failure / raw `<` — fixed 2026-06-12: prose is
+  HTML-escaped before dangerouslySetInnerHTML (code blocks extracted first),
+  and fetch failures render a styled error with a Retry button.
 - [ ] Dashboard/Widget/Filter modals aren't FocusTrap-wrapped (no Escape/focus
   mgmt); their close `×` buttons lack aria-label.
 - [ ] SortableTable headers / column-menu / pin items are mouse-only (no
