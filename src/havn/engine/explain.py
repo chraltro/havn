@@ -273,20 +273,21 @@ def _parse_text_plan(raw_text: str) -> PlanNode:
     return root
 
 
-def explain_query(conn, sql: str) -> tuple[PlanNode, str]:
+def explain_query(conn, sql: str, params: dict | None = None) -> tuple[PlanNode, str]:
     """Run EXPLAIN on a query and return (structured plan, raw text).
 
     Attempts JSON format first, falls back to text parsing.
+    ``params`` binds named ``$name`` placeholders in the query.
     """
     raw_text = ""
     try:
-        result = conn.execute(f"EXPLAIN (FORMAT JSON) {sql}")
+        result = conn.execute(f"EXPLAIN (FORMAT JSON) {sql}", params)
         rows = result.fetchall()
         raw_json = rows[0][1] if rows and len(rows[0]) > 1 else rows[0][0]
         plan = _parse_json_plan(raw_json, is_analyze=False)
 
         # Also get text format for raw display
-        result2 = conn.execute(f"EXPLAIN {sql}")
+        result2 = conn.execute(f"EXPLAIN {sql}", params)
         rows2 = result2.fetchall()
         raw_text = "\n".join(
             str(r[1]) if len(r) > 1 else str(r[0]) for r in rows2
@@ -296,7 +297,7 @@ def explain_query(conn, sql: str) -> tuple[PlanNode, str]:
         logger.debug("JSON EXPLAIN failed, falling back to text", exc_info=True)
 
     # Fallback: text format
-    result = conn.execute(f"EXPLAIN {sql}")
+    result = conn.execute(f"EXPLAIN {sql}", params)
     rows = result.fetchall()
     raw_text = "\n".join(
         str(r[1]) if len(r) > 1 else str(r[0]) for r in rows
@@ -305,15 +306,16 @@ def explain_query(conn, sql: str) -> tuple[PlanNode, str]:
     return plan, raw_text
 
 
-def explain_analyze_query(conn, sql: str) -> tuple[PlanNode, str]:
+def explain_analyze_query(conn, sql: str, params: dict | None = None) -> tuple[PlanNode, str]:
     """Run EXPLAIN ANALYZE on a query and return (structured plan, raw text).
 
     Enables JSON profiling, runs the query, then parses the result.
+    ``params`` binds named ``$name`` placeholders in the query.
     """
     raw_text = ""
     try:
         conn.execute("PRAGMA enable_profiling='json'")
-        result = conn.execute(f"EXPLAIN ANALYZE {sql}")
+        result = conn.execute(f"EXPLAIN ANALYZE {sql}", params)
         rows = result.fetchall()
         raw_json = rows[0][1] if rows and len(rows[0]) > 1 else rows[0][0]
 
@@ -322,7 +324,7 @@ def explain_analyze_query(conn, sql: str) -> tuple[PlanNode, str]:
         # Get text format for raw display
         try:
             conn.execute("PRAGMA enable_profiling='query_tree'")
-            result2 = conn.execute(f"EXPLAIN ANALYZE {sql}")
+            result2 = conn.execute(f"EXPLAIN ANALYZE {sql}", params)
             rows2 = result2.fetchall()
             raw_text = "\n".join(
                 str(r[1]) if len(r) > 1 else str(r[0]) for r in rows2
@@ -341,7 +343,7 @@ def explain_analyze_query(conn, sql: str) -> tuple[PlanNode, str]:
         conn.execute("PRAGMA enable_profiling='query_tree'")
     except Exception:
         pass
-    result = conn.execute(f"EXPLAIN ANALYZE {sql}")
+    result = conn.execute(f"EXPLAIN ANALYZE {sql}", params)
     rows = result.fetchall()
     raw_text = "\n".join(
         str(r[1]) if len(r) > 1 else str(r[0]) for r in rows

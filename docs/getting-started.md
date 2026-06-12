@@ -135,7 +135,7 @@ havn serve
 This starts the web server on `http://localhost:3000` with:
 
 - **File Browser** -- Edit SQL and Python files with Monaco editor
-- **Query Panel** -- Run ad-hoc SQL queries with autocomplete
+- **Query Panel** -- Run ad-hoc SQL queries with autocomplete and `$name` parameters
 - **Table Browser** -- Browse schemas, tables, and column profiles
 - **DAG Viewer** -- Interactive dependency graph visualization
 - **Notebook Runner** -- Execute `.dpnb` notebooks interactively

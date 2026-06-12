@@ -236,14 +236,21 @@ def _validate_query_sql(sql: str) -> None:
 # --- Pydantic models ---
 
 
+QueryParams = dict[str, str | int | float | bool | None]
+
+
 class QueryRequest(BaseModel):
     sql: str = Field(..., min_length=1, max_length=100_000)
     limit: int | None = Field(default=None, gt=0, le=50_000)
     offset: int = Field(default=0, ge=0)
+    params: QueryParams | None = Field(
+        default=None, description="Named values bound to $name placeholders"
+    )
 
 
 class ExplainRequest(BaseModel):
     sql: str = Field(..., min_length=1, max_length=100_000)
+    params: QueryParams | None = None
 
 
 from havn.engine.query_governor import QueryTimeoutError, get_timeout_for_role
@@ -262,7 +269,7 @@ def explain_endpoint(request: Request, req: ExplainRequest, conn: DbConnReadOnly
     try:
         from havn.engine.explain import explain_query as _explain_query, plan_to_dict
 
-        plan_node, raw = _explain_query(conn, req.sql)
+        plan_node, raw = _explain_query(conn, req.sql, params=req.params)
         return {"plan": plan_to_dict(plan_node), "raw": raw}
     except Exception as e:
         logger.warning("EXPLAIN failed: %s", e)
@@ -277,7 +284,7 @@ def explain_analyze_endpoint(request: Request, req: ExplainRequest, conn: DbConn
     try:
         from havn.engine.explain import explain_analyze_query as _explain_analyze, plan_to_dict
 
-        plan_node, raw = _explain_analyze(conn, req.sql)
+        plan_node, raw = _explain_analyze(conn, req.sql, params=req.params)
         return {"plan": plan_to_dict(plan_node), "raw": raw}
     except Exception as e:
         logger.warning("EXPLAIN ANALYZE failed: %s", e)
@@ -292,7 +299,7 @@ def profile_query(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -
     try:
         from havn.engine.explain import explain_analyze_query as _explain_analyze, plan_to_dict
 
-        plan_node, raw = _explain_analyze(conn, req.sql)
+        plan_node, raw = _explain_analyze(conn, req.sql, params=req.params)
         return {"plan": plan_to_dict(plan_node), "raw": raw}
     except Exception as e:
         logger.warning("EXPLAIN ANALYZE failed: %s", e)
@@ -437,7 +444,9 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
                 # server-side cap so DuckDB never buffers millions of rows.
                 # The response includes total_rows so the user knows it was capped.
                 SERVER_ROW_CAP = 50_000
-                sql_clean = sql_to_execute.strip().rstrip(";")
+                # Trailing newline before the closing paren so a query that
+                # ends with a `-- line comment` can't swallow the wrapper.
+                sql_clean = sql_to_execute.strip().rstrip(";") + "\n"
                 has_limit = bool(re.search(r'\bLIMIT\b', sql_to_execute, re.IGNORECASE))
                 effective_limit = req.limit
 
@@ -456,7 +465,7 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
                 if req.offset > 0 and effective_limit is None:
                     wrapped = f"SELECT * FROM ({sql_clean}) AS _q OFFSET {req.offset}"
 
-                result = conn.execute(wrapped)
+                result = conn.execute(wrapped, req.params)
                 columns = [desc[0] for desc in result.description]
                 column_types = [str(desc[1]) for desc in result.description]
                 if effective_limit is not None:
@@ -845,10 +854,11 @@ def get_autocomplete(request: Request, conn: DbConnReadOnly) -> dict:
 
 class ExportRequest(BaseModel):
     sql: str = Field(..., min_length=1, max_length=100_000)
+    params: QueryParams | None = None
 
 
 @router.post("/api/query/export-csv")
-def export_csv(request: Request, req: ExportRequest, conn: DbConnReadOnly):
+def export_csv(request: Request, req: ExportRequest):
     """Stream query results as CSV download. No row limit."""
     user = _require_permission(request, "read")
     import csv
@@ -857,51 +867,71 @@ def export_csv(request: Request, req: ExportRequest, conn: DbConnReadOnly):
     # Validate the SQL is a safe read-only query
     _validate_query_sql(req.sql)
 
-    # Pre-query masking rewrite
-    try:
-        csv_rewritten, csv_rewrite_ok, csv_handled = rewrite_query_with_masking(
-            req.sql, user["role"], conn,
-        )
-    except MaskedColumnAccessError as e:
-        raise HTTPException(403, str(e))
-    csv_sql = csv_rewritten if csv_rewrite_ok else req.sql
+    # FastAPI (0.106+) closes yield-dependency cursors before a StreamingResponse body runs, so manage the read cursor manually and release it when the stream ends
+    from havn.server.deps import _get_backend, _get_read_pool, _require_db
 
-    csv_timeout = get_timeout_for_role(user.get("role", "viewer"))
+    _require_db(_get_backend())
+    pool_ctx = _get_read_pool().connection()
+    conn = pool_ctx.__enter__()
+
+    def _release():
+        try:
+            pool_ctx.__exit__(None, None, None)
+        except Exception:
+            logger.debug("Failed to release export-csv cursor", exc_info=True)
+
     try:
-        from havn.engine.query_governor import execute_governed
-        result, _ = execute_governed(conn, csv_sql, timeout_s=csv_timeout)
-        columns = [desc[0] for desc in result.description]
-    except QueryTimeoutError as e:
-        raise HTTPException(408, str(e))
-    except Exception as e:
-        raise HTTPException(400, f"SQL error: {e}")
+        # Pre-query masking rewrite
+        try:
+            csv_rewritten, csv_rewrite_ok, csv_handled = rewrite_query_with_masking(
+                req.sql, user["role"], conn,
+            )
+        except MaskedColumnAccessError as e:
+            raise HTTPException(403, str(e))
+        csv_sql = csv_rewritten if csv_rewrite_ok else req.sql
+
+        csv_timeout = get_timeout_for_role(user.get("role", "viewer"))
+        try:
+            from havn.engine.query_governor import execute_governed
+            result, _ = execute_governed(conn, csv_sql, timeout_s=csv_timeout, params=req.params)
+            columns = [desc[0] for desc in result.description]
+        except QueryTimeoutError as e:
+            raise HTTPException(408, str(e))
+        except Exception as e:
+            raise HTTPException(400, f"SQL error: {e}")
+    except BaseException:
+        _release()
+        raise
 
     def generate():
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        # Header
-        writer.writerow(columns)
-        yield buf.getvalue()
-        buf.seek(0)
-        buf.truncate(0)
-        # Stream rows in batches, applying masking to each batch
-        while True:
-            batch = result.fetchmany(5000)
-            if not batch:
-                break
-            serialized = [[_serialize(v) for v in row] for row in batch]
-            if not csv_rewrite_ok:
-                serialized = apply_masking(columns, serialized, user["role"], conn)
-            elif csv_handled:
-                serialized = apply_masking(
-                    columns, serialized, user["role"], conn,
-                    skip_policy_ids=csv_handled,
-                )
-            for row in serialized:
-                writer.writerow(row)
+        try:
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            # Header
+            writer.writerow(columns)
             yield buf.getvalue()
             buf.seek(0)
             buf.truncate(0)
+            # Stream rows in batches, applying masking to each batch
+            while True:
+                batch = result.fetchmany(5000)
+                if not batch:
+                    break
+                serialized = [[_serialize(v) for v in row] for row in batch]
+                if not csv_rewrite_ok:
+                    serialized = apply_masking(columns, serialized, user["role"], conn)
+                elif csv_handled:
+                    serialized = apply_masking(
+                        columns, serialized, user["role"], conn,
+                        skip_policy_ids=csv_handled,
+                    )
+                for row in serialized:
+                    writer.writerow(row)
+                yield buf.getvalue()
+                buf.seek(0)
+                buf.truncate(0)
+        finally:
+            _release()
 
     return StreamingResponse(
         generate(),

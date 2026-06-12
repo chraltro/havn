@@ -155,7 +155,7 @@ The Develop tab contains the code editor and DAG viewer for building your data w
 
 The Explore tab has two sub-sections for querying and browsing your data.
 
-**Query** -- Run ad-hoc SQL queries against any table in your warehouse. Write SQL in the editor, press Ctrl+Enter (or Cmd+Enter on Mac), and see results in the table below. Results can be exported as CSV or JSON. Autocomplete suggests table names and columns as you type.
+**Query** -- Run ad-hoc SQL queries against any table in your warehouse. Write SQL in the editor, press Ctrl+Enter (or Cmd+Enter on Mac), and see results in the table below. Select part of your SQL to run only the selection. Use named parameters like `$region` in the SQL and fill in their values in the Parameters row that appears above the toolbar; values are bound server-side as prepared-statement parameters, so they cannot inject SQL. Results can be exported as CSV. Autocomplete suggests table names and columns as you type, and your draft, history, and parameter values survive tab switches and reloads.
 
 **Tables** -- Browse all tables and views in your warehouse organized by schema. Click on any table to see column details, data types, and a preview of the first rows. This is useful for exploring data without writing SQL, and for understanding the structure of bronze/silver/gold models.
 
