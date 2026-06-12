@@ -2,6 +2,76 @@
 
 All notable changes to havn are documented in this file.
 
+## [0.2.22] - 2026-06-12
+
+Query editor release: named query parameters, safer limits, and a
+streaming-export fix. 1351 tests pass (up from 1345).
+
+### Added
+
+- Query parameters: the Query panel detects named `$name` placeholders
+  and shows a Parameters row above the toolbar. Values are bound
+  server-side as DuckDB prepared-statement parameters (no string
+  interpolation, so values cannot inject SQL). Numbers and true/false
+  are sent typed; everything else is sent as text and can be cast in
+  SQL (`$day::DATE`). The `params` field is accepted by `/api/query`,
+  `/api/query/explain`, `/api/query/explain-analyze`,
+  `/api/query/profile`, and `/api/query/export-csv`.
+- Run selection: with text selected in the editor, Run / Ctrl+Enter
+  executes only the selection.
+- The editor draft, parameter values, and query history survive tab
+  switches and reloads. History entries record the parameter values
+  used and show relative timestamps, and the dropdown gained a Clear
+  button. Shortcut labels show Cmd instead of Ctrl on macOS.
+
+### Fixed
+
+- CSV export was completely broken ("No open result set"): FastAPI
+  closes yield-dependency DB cursors before a StreamingResponse body
+  runs, so the export endpoint now manages its own read cursor for the
+  lifetime of the stream.
+- The Explain button rendered an empty plan: the structured plan was
+  passed to the viewer as raw text. The visual plan tree now renders.
+- Queries ending in a `-- line comment` no longer break the auto-LIMIT:
+  the client previously spliced the query into a one-line subquery
+  string (commenting out the wrapper); the limit now travels in the
+  request body and the server-side wrap is newline-safe.
+- Running a query while the Plan tab was active left the results pane
+  blank; the view now switches back to Table.
+- Ctrl+Enter can no longer start a second query while one is running.
+
+### Documentation
+
+- API reference: documented `params`, the role-based query timeouts
+  (admin 300s / editor 120s / viewer 60s; the old "30s" claim was
+  outdated), and the previously undocumented explain and export-csv
+  endpoints.
+- Getting started: the Query panel section claimed JSON export exists
+  (it does not); it now describes parameters and run-selection.
+
+## [0.2.21] - 2026-06-09
+
+UX/UI and accessibility release (backfilled entry; see the GitHub
+release notes for full detail).
+
+- "Run Sample Pipeline" no longer gets stuck on "Running...".
+- New Model dialog follows the active theme; dialogs close on Escape;
+  the Data Sources import flow is keyboard-operable.
+- Native browser alerts replaced with in-app messages; run-status dots
+  carry text labels for screen readers.
+
+## [0.2.20] - 2026-06-09
+
+Bug-fix and security release (backfilled entry; see the GitHub release
+notes for full detail).
+
+- #28: fresh `havn init` projects no longer fail on "Run All" with
+  `ModuleNotFoundError: No module named 'pandas'`.
+- Security: fixed an unauthenticated path-traversal in the SPA
+  catch-all route and a notebook sandbox escape exposing `_havn`.
+- Query Cancel button aborts the running query; DAG glow, wiki links,
+  autocomplete race, and several smaller correctness fixes.
+
 ## [0.2.19] - 2026-05-15
 
 Comprehensive stability, security, and performance sweep across the whole
