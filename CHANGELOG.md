@@ -2,6 +2,33 @@
 
 All notable changes to havn are documented in this file.
 
+## [0.2.23] - 2026-06-12
+
+Patch release: macro hot-reload fix.
+
+### Fixed
+
+- Macro hot-reload was silently broken on the DuckDB file backend:
+  ``reset_macro_state()`` cleared the per-connection reload counters
+  that the versioned internal UDF names (``_udf_<name>_<gen>``) rely
+  on. The next registration collided with the existing
+  ``_udf_<name>_0`` (DuckDB cannot replace a Python UDF), the error
+  was swallowed as "already exists", and the public MACRO alias kept
+  pointing at the old function. Editing ``macros/*.py`` on a running
+  ``havn serve`` looked reloaded in the logs but queries kept running
+  the old code. The counters now survive reloads.
+
+### Tests
+
+- Nightly suite repaired: hot-reload tests now exercise the production
+  watcher contract (``force_reload=True``), the parallel-scheduler
+  stress test asserts descendant-only blocking (siblings of a failed
+  model still build), the migrate tests catch ``typer.Exit`` (newer
+  typer vendors click, so the installed click's ``Exit`` is a
+  different class), and an autouse fixture resets the server deps
+  singletons after every test so no API test can leak its warehouse
+  into the next one. Full suite: 1423 passing including slow tests.
+
 ## [0.2.22] - 2026-06-12
 
 Query editor release: named query parameters, safer limits, and a
