@@ -2,6 +2,40 @@
 
 All notable changes to havn are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Semantic layer**: declare metrics once in `metrics/*.yml` (model,
+  measure, dimensions, time dimension, filters) and query them
+  consistently everywhere. `havn metrics` lists definitions,
+  `havn metrics sql` shows the compiled SELECT, `havn metrics query`
+  runs it (routing through a live `havn serve` like `havn query` does).
+  API: `GET /api/semantic/metrics`, `POST /api/semantic/compile`,
+  `POST /api/semantic/query` (masking policies apply). The compiler
+  validates dimensions/grains against the declaration and escapes time
+  literals, and every compiled statement passes the same read-only SQL
+  validation as `/api/query`.
+- **MCP server**: `havn mcp` starts a Model Context Protocol stdio
+  server (no SDK dependency) so AI agents like Claude Code can work
+  against the warehouse. Tools: `query` (read-only), `list_tables`,
+  `describe_table`, `list_models`, `get_model`, `model_lineage`,
+  `run_history`, `list_metrics`, `query_metric`, and `run_transform`
+  (omitted with `--read-only`; creates Pipeline Rewind snapshots when
+  enabled). Reads route through a running `havn serve` when it holds
+  the warehouse lock, falling back to a direct read-only connection.
+- The read-only SQL validator moved to `havn.engine.sql_safety` so the
+  query API, dashboards, collaboration cells, semantic layer, and MCP
+  server share one implementation (`routes/query.py` re-exports the old
+  names for compatibility).
+
+### Fixed
+
+- `havn tables` and `havn history` crashed with "too many values to
+  unpack" whenever a `havn serve` was running for the project: both
+  unpacked the server-routed result into three variables after a fourth
+  field (`truncated`) was added to `_fetch_via_server`.
+
 ## [0.2.23] - 2026-06-12
 
 Patch release: macro hot-reload fix.

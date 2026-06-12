@@ -175,6 +175,7 @@ from havn.server.routes.pr import router as pr_router  # noqa: E402
 from havn.server.routes.backup import router as backup_router  # noqa: E402
 from havn.server.routes.prometheus import router as prometheus_router  # noqa: E402
 from havn.server.routes.resources import router as resources_router  # noqa: E402
+from havn.server.routes.semantic import router as semantic_router  # noqa: E402
 from havn.server.routes.sql_api import router as sql_api_router  # noqa: E402
 from havn.server.routes.export import router as export_router  # noqa: E402
 from havn.server.routes.streaming import router as streaming_router  # noqa: E402
@@ -207,6 +208,7 @@ app.include_router(pr_router)
 app.include_router(backup_router)
 app.include_router(prometheus_router)
 app.include_router(resources_router)
+app.include_router(semantic_router)
 app.include_router(sql_api_router)
 app.include_router(export_router)
 app.include_router(streaming_router)
