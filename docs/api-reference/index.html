@@ -1511,6 +1511,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#post-apiqueryexplain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/query/explain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiqueryexport-csv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/query/export-csv
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2981,6 +3003,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#post-apiqueryexplain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/query/explain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiqueryexport-csv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/query/export-csv
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4235,11 +4279,16 @@
 <p>Delete a file. Optional <code>?drop_object=true</code> to also drop the corresponding database object.</p>
 <h2 id="query">Query<a class="headerlink" href="#query" title="Permanent link">&para;</a></h2>
 <h3 id="post-apiquery">POST /api/query<a class="headerlink" href="#post-apiquery" title="Permanent link">&para;</a></h3>
-<p>Execute an ad-hoc SQL query with timeout (30s).</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;sql&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;SELECT * FROM gold.summary&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;limit&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1000</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;offset&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">}</span>
+<p>Execute an ad-hoc SQL query with a role-based timeout (admin 300s, editor 120s, viewer 60s by default).</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;sql&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;SELECT * FROM gold.summary WHERE region = $region&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;params&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;region&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;US&quot;</span><span class="p">},</span><span class="w"> </span><span class="nt">&quot;limit&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1000</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;offset&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">}</span>
 </code></pre></div>
-<p>Returns: <code>{columns, rows, truncated, offset, limit}</code></p>
+<p><code>params</code> binds named <code>$name</code> placeholders as DuckDB prepared-statement values (no string interpolation, so values cannot inject SQL). Numbers and booleans are bound typed; strings can be cast in SQL (<code>$day::DATE</code>).</p>
+<p>Returns: <code>{columns, column_types, rows, truncated, offset, limit}</code></p>
 <p>Also intercepts masking SQL commands: <code>SHOW MASKING POLICIES</code>, <code>CREATE MASKING POLICY ON ...</code>, <code>DROP MASKING POLICY &lt;id&gt;</code>.</p>
+<h3 id="post-apiqueryexplain">POST /api/query/explain<a class="headerlink" href="#post-apiqueryexplain" title="Permanent link">&para;</a></h3>
+<p>Return the DuckDB EXPLAIN plan (structured + raw text). Accepts the same <code>sql</code> and <code>params</code> fields.</p>
+<h3 id="post-apiqueryexport-csv">POST /api/query/export-csv<a class="headerlink" href="#post-apiqueryexport-csv" title="Permanent link">&para;</a></h3>
+<p>Stream full query results as a CSV download (no row limit). Accepts the same <code>sql</code> and <code>params</code> fields.</p>
 <h2 id="tables">Tables<a class="headerlink" href="#tables" title="Permanent link">&para;</a></h2>
 <h3 id="get-apitables">GET /api/tables<a class="headerlink" href="#get-apitables" title="Permanent link">&para;</a></h3>
 <p>List warehouse tables and views. Optional <code>?schema=gold</code> filter.</p>
