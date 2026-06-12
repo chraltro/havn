@@ -14,6 +14,9 @@ const DEFAULT_LIMIT = 1000;
 const FMT_OPTS = { language: "sql", keywordCase: "upper", indentStyle: "standard" };
 function fmt(sql) { try { return formatSQL(sql, FMT_OPTS); } catch { return sql; } }
 
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || "");
+const MOD_KEY = IS_MAC ? "⌘" : "Ctrl";
+
 function getHistory() {
   try {
     return JSON.parse(localStorage.getItem("havn_query_history") || "[]");
@@ -22,6 +25,52 @@ function getHistory() {
 
 function saveHistory(h) {
   localStorage.setItem("havn_query_history", JSON.stringify(h.slice(0, MAX_HISTORY)));
+}
+
+function getSavedParams() {
+  try {
+    return JSON.parse(localStorage.getItem("havn_query_params") || "{}");
+  } catch { return {}; }
+}
+
+// Blank out strings/comments so param detection can't be fooled by $tokens inside them
+function stripSqlLiterals(sql) {
+  return sql
+    .replace(/\$\$[\s\S]*?\$\$/g, "''")
+    .replace(/'(?:[^']|'')*'/g, "''")
+    .replace(/"[^"]*"/g, '""')
+    .replace(/--[^\n]*/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+// Find named $param placeholders (DuckDB prepared-statement syntax).
+function detectParams(sql) {
+  const names = [];
+  const re = /\$([A-Za-z_]\w*)/g;
+  let m;
+  const stripped = stripSqlLiterals(sql);
+  while ((m = re.exec(stripped)) !== null) {
+    if (!names.includes(m[1])) names.push(m[1]);
+  }
+  return names;
+}
+
+// Numbers and true/false are sent typed; everything else stays a string (cast in SQL: $day::DATE)
+function coerceParamValue(raw) {
+  const v = raw.trim();
+  if (/^-?\d+$/.test(v) && Number.isSafeInteger(Number(v))) return Number(v);
+  if (/^-?(\d+\.\d*|\.\d+)$/.test(v)) return Number(v);
+  if (/^(true|false)$/i.test(v)) return v.toLowerCase() === "true";
+  return raw;
+}
+
+function timeAgo(ts) {
+  if (!ts) return "";
+  const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }
 
 /**
@@ -190,6 +239,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
   const textareaRef = useRef(null);
   const historyRef = useRef(null);
   const [maskingPolicies, setMaskingPolicies] = useState({});
+  const [paramValues, setParamValues] = useState(getSavedParams);
   const setHintTrigger = useHintTriggerFn();
   const [sidebarWidth, onSidebarResize, onSidebarResizeStart] = useResizable("havn_query_sidebar_width", 200, 120, 400);
   const [editorHeight, onEditorResize, onEditorResizeStart] = useResizable("havn_query_editor_height", 300, 80, 600);
@@ -211,6 +261,23 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
     setHintTrigger("queryPanelOpened", true);
   }, []);
 
+  // Restore the last editor draft (tab switches/reloads keep the query); prefill takes priority
+  useEffect(() => {
+    if (window.__havn_prefill_query) return;
+    try {
+      const draft = localStorage.getItem("havn_query_draft");
+      if (draft && !sqlRef.current) setSql(draft);
+    } catch { /* localStorage unavailable */ }
+  }, []);
+
+  // Persist the draft (debounced) as the user types
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try { localStorage.setItem("havn_query_draft", sql); } catch { /* ignore */ }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [sql]);
+
   // Pick up prefilled query — polls briefly to catch async prefills (e.g. onboarding sets it after 200ms)
   useEffect(() => {
     let attempts = 0;
@@ -221,34 +288,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
       const query = typeof pf === "string" ? pf : pf.sql;
       const autoRun = typeof pf === "object" && pf.run;
       setSql(fmt(query));
-      if (autoRun) {
-        setTimeout(async () => {
-          setQueryRunning(true);
-          setError(null);
-          try {
-            const data = await api.runQuery(query);
-            setResults(data);
-            const newHistory = [{ sql: query.trim(), ts: new Date().toISOString() }, ...getHistory().filter((h) => h.sql !== query.trim())];
-            setHistory(newHistory);
-            saveHistory(newHistory);
-            addOutput("info", `Query: ${data.rows.length} row${data.rows.length !== 1 ? "s" : ""} (${data.columns.length} cols)${data.truncated ? " — results capped for display. Use Export CSV for full results." : ""}`);
-          } catch (e) {
-            // Suppress the "Warehouse not found" 404 in the OUTPUT panel:
-            // it's not actionable, the user hasn't run anything yet, and it
-            // misleads first-time viewers about the app's state. The Query
-            // panel itself still shows the inline error.
-            const msg = e.message || "";
-            const isEmptyWarehouse =
-              msg.includes("Warehouse not found") || msg.includes("warehouse not initialized");
-            setError(msg);
-            if (!isEmptyWarehouse) {
-              addOutput("error", `Query error: ${msg}`);
-            }
-          } finally {
-            setQueryRunning(false);
-          }
-        }, 0);
-      }
+      if (autoRun) setTimeout(() => runQuery(), 0);
       return true;
     }
     if (check()) return;
@@ -270,25 +310,75 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
     return () => document.removeEventListener("mousedown", handler);
   }, [historyOpen]);
 
+  // The query to execute: the textarea selection if one exists, else the full editor content
+  function getEditorQuery() {
+    const ta = textareaRef.current;
+    const full = sqlRef.current;
+    if (ta && ta.selectionStart !== ta.selectionEnd) {
+      const sel = full.substring(ta.selectionStart, ta.selectionEnd).trim();
+      if (sel) return { query: sel, isSelection: true };
+    }
+    return { query: full.trim(), isSelection: false };
+  }
+
+  // Collect typed values for the $params used by queryText; missing names block execution
+  function collectParams(queryText) {
+    const names = detectParams(queryText);
+    if (names.length === 0) return { params: undefined, missing: [] };
+    const params = {};
+    const missing = [];
+    for (const name of names) {
+      const raw = paramValues[name];
+      if (raw === undefined || String(raw).trim() === "") {
+        missing.push(name);
+        continue;
+      }
+      params[name] = coerceParamValue(String(raw));
+    }
+    return { params, missing };
+  }
+
+  function reportMissingParams(missing) {
+    const plural = missing.length > 1 ? "s" : "";
+    setError(`Missing value${plural} for parameter${plural}: ${missing.map((n) => `$${n}`).join(", ")}. Fill in the Parameters row above the toolbar.`);
+  }
+
+  function setParamValue(name, value) {
+    setParamValues((prev) => {
+      const next = { ...prev, [name]: value };
+      try { localStorage.setItem("havn_query_params", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }
+
   async function runQuery() {
-    if (!sql.trim()) return;
+    if (queryRunning) return;
+    const { query, isSelection } = getEditorQuery();
+    if (!query) return;
+    const { params, missing } = collectParams(query);
+    if (missing.length > 0) {
+      reportMissingParams(missing);
+      return;
+    }
     setQueryRunning(true);
     setError(null);
     setExplainResult(null);
+    setViewMode((m) => (m === "plan" ? "table" : m));
     // Fresh AbortController so the Cancel button can abort the in-flight fetch.
     const controller = new AbortController();
     queryAbortRef.current = controller;
-    // Apply default limit if enabled and query doesn't already have LIMIT
-    let query = sql.trim();
-    if (limitEnabled && !/\bLIMIT\b/i.test(query)) {
-      // Wrap in subquery to safely add LIMIT
-      query = `SELECT * FROM (${query.replace(/;\s*$/, "")}) AS _q LIMIT ${DEFAULT_LIMIT}`;
-    }
-    addOutput("info", `Running query${limitEnabled && !/\bLIMIT\b/i.test(sql) ? ` (limit ${DEFAULT_LIMIT})` : ""}...`);
+    // Default limit goes in the request body; the server wraps the query safely
+    const applyLimit = limitEnabled && !/\bLIMIT\b/i.test(query);
+    addOutput("info", `Running query${isSelection ? " (selection)" : ""}${applyLimit ? ` (limit ${DEFAULT_LIMIT})` : ""}...`);
     try {
-      const data = await api.runQuery(query, controller.signal);
+      const data = await api.runQuery(query, controller.signal, {
+        params,
+        limit: applyLimit ? DEFAULT_LIMIT : undefined,
+      });
       setResults(data);
-      const newHistory = [{ sql: sql.trim(), ts: new Date().toISOString() }, ...history.filter((h) => h.sql !== sql.trim())];
+      const entry = { sql: query, ts: new Date().toISOString() };
+      if (params && Object.keys(params).length > 0) entry.params = params;
+      const newHistory = [entry, ...getHistory().filter((h) => h.sql !== query)];
       setHistory(newHistory);
       saveHistory(newHistory);
       addOutput("info", `Query: ${data.rows.length} row${data.rows.length !== 1 ? "s" : ""} (${data.columns.length} cols)${data.truncated ? " — results capped for display. Use Export CSV for full results." : ""}`);
@@ -296,6 +386,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
       if (e.name === "AbortError" || controller.signal.aborted) {
         addOutput("info", "Query cancelled.");
       } else {
+        // Suppress "Warehouse not found" in the OUTPUT panel (not actionable); inline error still shows
         const msg = e.message || "";
         const isEmptyWarehouse =
           msg.includes("Warehouse not found") || msg.includes("warehouse not initialized");
@@ -311,13 +402,19 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
   }
 
   async function explainQuery() {
-    if (!sql.trim()) return;
+    const { query } = getEditorQuery();
+    if (!query) return;
+    const { params, missing } = collectParams(query);
+    if (missing.length > 0) {
+      reportMissingParams(missing);
+      return;
+    }
     setQueryRunning(true);
     setError(null);
     setExplainResult(null);
     try {
-      const data = await api.explainQuery(sql);
-      setExplainResult({ raw: data.plan, isAnalyze: false });
+      const data = await api.explainQuery(query, params);
+      setExplainResult({ plan: data.plan, raw: data.raw, isAnalyze: false });
       setViewMode("plan");
       addOutput("info", "EXPLAIN plan generated");
     } catch (e) {
@@ -576,6 +673,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
   }
 
   const suggestions = getSuggestions();
+  const detectedParams = detectParams(sql);
 
   return (
     <div style={st.container}>
@@ -621,10 +719,34 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
           )}
           <ResizeHandle direction="vertical" onResize={onEditorResize} onResizeStart={onEditorResizeStart} />
           <div style={st.shortcutHint}>
-            <span style={st.shortcutKey}>Ctrl+Enter</span> run &nbsp;·&nbsp;
-            <span style={st.shortcutKey}>Ctrl+Shift+F</span> format &nbsp;·&nbsp;
+            <span style={st.shortcutKey}>{MOD_KEY}+Enter</span> run selection or all &nbsp;·&nbsp;
+            <span style={st.shortcutKey}>{MOD_KEY}+Shift+F</span> format &nbsp;·&nbsp;
             <span style={st.shortcutKey}>Tab</span> autocomplete
           </div>
+          {/* Parameter inputs for $name placeholders in the query */}
+          {detectedParams.length > 0 && (
+            <div style={st.paramRow}>
+              <span
+                style={st.paramLabel}
+                title={"Named parameters are bound server-side as prepared-statement values (no string interpolation). Numbers and true/false are sent typed; everything else is sent as text. Cast in SQL when needed, e.g. $day::DATE."}
+              >
+                Parameters
+              </span>
+              {detectedParams.map((name) => (
+                <label key={name} style={st.paramItem}>
+                  <span style={st.paramName}>${name}</span>
+                  <input
+                    value={paramValues[name] ?? ""}
+                    onChange={(e) => setParamValue(name, e.target.value)}
+                    placeholder="value"
+                    style={st.paramInput}
+                    spellCheck={false}
+                    aria-label={`Value for parameter ${name}`}
+                  />
+                </label>
+              ))}
+            </div>
+          )}
           {/* Toolbar */}
           <div style={st.toolbar}>
             {queryRunning ? (
@@ -632,15 +754,15 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
                 Cancel
               </button>
             ) : (
-              <button onClick={runQuery} disabled={!sql.trim()} style={!sql.trim() ? st.runBtnDisabled : st.runBtn} aria-label="Run query">
-                Run <span style={st.shortcut}>Ctrl+Enter</span>
+              <button onClick={runQuery} disabled={!sql.trim()} style={!sql.trim() ? st.runBtnDisabled : st.runBtn} aria-label="Run query" title="Run the query, or only the selected text if you have a selection">
+                Run <span style={st.shortcut}>{MOD_KEY}+Enter</span>
               </button>
             )}
             <button onClick={explainQuery} disabled={queryRunning || !sql.trim()} style={st.fmtBtn} title="Show query execution plan">
               Explain
             </button>
-            <button onClick={formatQuery} disabled={!sql.trim()} style={st.fmtBtn} title="Format SQL (Ctrl+Shift+F)">
-              Format <span style={st.shortcut}>Ctrl+Shift+F</span>
+            <button onClick={formatQuery} disabled={!sql.trim()} style={st.fmtBtn} title={`Format SQL (${MOD_KEY}+Shift+F)`}>
+              Format <span style={st.shortcut}>{MOD_KEY}+Shift+F</span>
             </button>
             <button
               onClick={() => setLimitEnabled(!limitEnabled)}
@@ -657,10 +779,16 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
 
             <button
               onClick={async () => {
-                if (!sql.trim()) return;
+                const { query } = getEditorQuery();
+                if (!query) return;
+                const { params, missing } = collectParams(query);
+                if (missing.length > 0) {
+                  reportMissingParams(missing);
+                  return;
+                }
                 addOutput("info", "Exporting to CSV (no row limit)...");
                 try {
-                  await api.exportCsv(sql);
+                  await api.exportCsv(query, params);
                   addOutput("success", "CSV export downloaded");
                 } catch (e) {
                   addOutput("error", `Export failed: ${e.message}`);
@@ -680,19 +808,44 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
               </button>
               {historyOpen && (
                 <div style={st.historyDropdown}>
-                  <div style={st.historyHeader}>Recent Queries</div>
+                  <div style={st.historyHeader}>
+                    <span>Recent Queries</span>
+                    {history.length > 0 && (
+                      <button
+                        onClick={() => { setHistory([]); saveHistory([]); }}
+                        style={st.historyClear}
+                        title="Clear query history"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
                   {history.length === 0 ? (
                     <div style={st.historyEmpty}>No history yet</div>
                   ) : (
                     history.slice(0, 20).map((h, i) => (
                       <button
                         key={i}
-                        onClick={() => { setSql(h.sql); setHistoryOpen(false); }}
+                        onClick={() => {
+                          setSql(h.sql);
+                          if (h.params) {
+                            for (const [k, v] of Object.entries(h.params)) setParamValue(k, String(v));
+                          }
+                          setHistoryOpen(false);
+                        }}
                         style={st.historyItem}
                         onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-btn-bg)"}
                         onMouseLeave={(e) => e.currentTarget.style.background = "none"}
                       >
                         <span style={st.historySQL}>{h.sql.substring(0, 80)}{h.sql.length > 80 ? "..." : ""}</span>
+                        <span style={st.historyMeta}>
+                          {h.params && Object.keys(h.params).length > 0 && (
+                            <span style={st.historyParams}>
+                              {Object.entries(h.params).map(([k, v]) => `$${k}=${v}`).join("  ")}
+                            </span>
+                          )}
+                          {h.ts && <span style={st.historyTime}>{timeAgo(h.ts)}</span>}
+                        </span>
                       </button>
                     ))
                   )}
@@ -754,7 +907,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
           {/* Results area */}
           {viewMode === "plan" && explainResult && (
             <div style={st.results}>
-              <ExplainPanel raw={explainResult.raw} isAnalyze={explainResult.isAnalyze} />
+              <ExplainPanel plan={explainResult.plan} raw={explainResult.raw} isAnalyze={explainResult.isAnalyze} />
             </div>
           )}
           {viewMode === "table" && results && (
@@ -782,7 +935,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
           {!results && !explainResult && !error && (
             <div style={st.emptyState}>
               <div style={st.emptyText}>
-                {sql.trim() ? "Press Ctrl+Enter to run your query" : "Write a SQL query above to get started"}
+                {sql.trim() ? `Press ${MOD_KEY}+Enter to run your query` : "Write a SQL query above to get started"}
               </div>
             </div>
           )}
@@ -845,10 +998,14 @@ const st = {
   historyBtn: { background: "var(--havn-btn-bg)", border: "1px solid var(--havn-btn-border)", borderRadius: "var(--havn-radius-lg)", color: "var(--havn-text-secondary)", cursor: "pointer", padding: "4px 8px", fontSize: "14px", display: "flex", alignItems: "center", gap: "4px" },
   historyCount: { fontSize: "10px", background: "var(--havn-bg-tertiary)", padding: "0 5px", borderRadius: "8px", color: "var(--havn-text-dim)", fontWeight: 500 },
   historyDropdown: { position: "absolute", top: "100%", right: 0, marginTop: "4px", background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius)", zIndex: 100, width: "400px", maxHeight: "300px", overflow: "auto", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" },
-  historyHeader: { padding: "6px 12px", fontSize: "11px", fontWeight: 600, color: "var(--havn-text-secondary)", borderBottom: "1px solid var(--havn-border)" },
+  historyHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 12px", fontSize: "11px", fontWeight: 600, color: "var(--havn-text-secondary)", borderBottom: "1px solid var(--havn-border)" },
+  historyClear: { background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "10px", fontWeight: 500, padding: "0 2px", textDecoration: "underline" },
   historyEmpty: { padding: "16px", color: "var(--havn-text-dim)", fontSize: "12px", textAlign: "center" },
   historyItem: { display: "block", width: "100%", padding: "6px 12px", background: "none", border: "none", borderBottom: "1px solid var(--havn-border)", color: "var(--havn-text)", cursor: "pointer", textAlign: "left", fontSize: "12px" },
   historySQL: { fontFamily: "var(--havn-font-mono)", fontSize: "11px", color: "var(--havn-text)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  historyMeta: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginTop: "2px" },
+  historyParams: { fontFamily: "var(--havn-font-mono)", fontSize: "10px", color: "var(--havn-accent)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  historyTime: { fontSize: "10px", color: "var(--havn-text-dim)", flexShrink: 0, marginLeft: "auto" },
 
   viewToggle: { display: "flex", marginLeft: "auto", gap: "1px", background: "var(--havn-border)", borderRadius: "var(--havn-radius-lg)", overflow: "hidden" },
   viewBtn: { padding: "3px 10px", background: "var(--havn-btn-bg)", border: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "11px", fontWeight: 500 },
@@ -863,6 +1020,12 @@ const st = {
   acItemActive: { display: "flex", alignItems: "center", gap: "8px", padding: "5px 10px", cursor: "pointer", fontSize: "12px", background: "var(--havn-btn-bg)" },
   acKind: { fontSize: "9px", fontFamily: "var(--havn-font-mono)", color: "var(--havn-text-dim)", background: "var(--havn-bg-tertiary)", border: "1px solid var(--havn-border)", borderRadius: "3px", padding: "0 4px", flexShrink: 0, width: "22px", textAlign: "center" },
   acLabel: { fontFamily: "var(--havn-font-mono)", color: "var(--havn-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+
+  paramRow: { display: "flex", alignItems: "center", gap: "10px", padding: "5px 12px", flexWrap: "wrap", background: "var(--havn-bg-secondary)", borderBottom: "1px solid var(--havn-border)", flexShrink: 0 },
+  paramLabel: { fontSize: "10px", fontWeight: 600, color: "var(--havn-text-secondary)", textTransform: "uppercase", letterSpacing: "0.3px", cursor: "help" },
+  paramItem: { display: "flex", alignItems: "center", gap: "5px" },
+  paramName: { fontFamily: "var(--havn-font-mono)", fontSize: "11px", color: "var(--havn-accent)", fontWeight: 500 },
+  paramInput: { width: "120px", padding: "3px 6px", background: "var(--havn-bg)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", outline: "none" },
 
   suggestions: { display: "flex", alignItems: "center", gap: "6px", padding: "8px 12px", flexWrap: "wrap", borderBottom: "1px solid var(--havn-border)" },
   suggestLabel: { fontSize: "11px", color: "var(--havn-text-dim)", fontWeight: 500 },

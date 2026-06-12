@@ -114,31 +114,37 @@ Delete a file. Optional `?drop_object=true` to also drop the corresponding datab
 
 ### POST /api/query
 
-Execute an ad-hoc SQL query with timeout (30s).
+Execute an ad-hoc SQL query with a role-based timeout (admin 300s, editor 120s, viewer 60s by default).
 
 ```json
-{"sql": "SELECT * FROM gold.summary", "limit": 1000, "offset": 0}
+{"sql": "SELECT * FROM gold.summary WHERE region = $region", "params": {"region": "US"}, "limit": 1000, "offset": 0}
 ```
 
-Returns: `{columns, rows, truncated, offset, limit}`
+`params` binds named `$name` placeholders as DuckDB prepared-statement values (no string interpolation, so values cannot inject SQL). Numbers and booleans are bound typed; strings can be cast in SQL (`$day::DATE`).
+
+Returns: `{columns, column_types, rows, truncated, offset, limit}`
 
 Also intercepts masking SQL commands: `SHOW MASKING POLICIES`, `CREATE MASKING POLICY ON ...`, `DROP MASKING POLICY <id>`.
 
 ### POST /api/query/explain
 
-Get the DuckDB EXPLAIN PLAN for a query.
+Get the DuckDB EXPLAIN plan (structured + raw text) for a query.
 
 ```json
-{"sql": "SELECT * FROM gold.summary WHERE region = 'US'"}
+{"sql": "SELECT * FROM gold.summary WHERE region = $region", "params": {"region": "US"}}
 ```
 
 ### POST /api/query/profile
 
-Profile query performance with detailed execution metrics.
+Profile query performance with detailed execution metrics. Accepts the same `sql` and `params` fields.
 
 ```json
 {"sql": "SELECT * FROM gold.summary WHERE region = 'US'"}
 ```
+
+### POST /api/query/export-csv
+
+Stream full query results as a CSV download (no row limit). Accepts the same `sql` and `params` fields.
 
 ## Tables
 

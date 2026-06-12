@@ -92,6 +92,64 @@ def test_run_query_empty_rejected(client):
     assert resp.status_code == 422  # pydantic min_length=1
 
 
+def test_run_query_with_params(client):
+    resp = client.post(
+        "/api/query",
+        json={"sql": "SELECT $a + 1 AS x, $name AS n", "params": {"a": 41, "name": "duck"}},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["columns"] == ["x", "n"]
+    assert data["rows"] == [[42, "duck"]]
+
+
+def test_run_query_with_params_and_limit(client):
+    resp = client.post(
+        "/api/query",
+        json={
+            "sql": "SELECT * FROM range(10) WHERE range < $cap",
+            "params": {"cap": 5},
+            "limit": 3,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert len(data["rows"]) == 3
+    assert data["truncated"] is True
+
+
+def test_run_query_missing_param_is_400(client):
+    resp = client.post("/api/query", json={"sql": "SELECT $missing AS x"})
+    assert resp.status_code == 400
+
+
+def test_run_query_trailing_line_comment_with_limit(client):
+    resp = client.post(
+        "/api/query",
+        json={"sql": "SELECT 1 AS x -- trailing comment", "limit": 10},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["rows"] == [[1]]
+
+
+def test_explain_with_params(client):
+    resp = client.post(
+        "/api/query/explain",
+        json={"sql": "SELECT $a::INT AS x", "params": {"a": 1}},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "plan" in resp.json()
+
+
+def test_export_csv_with_params(client):
+    resp = client.post(
+        "/api/query/export-csv",
+        json={"sql": "SELECT $a AS x", "params": {"a": 7}},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "7" in resp.text
+
+
 def test_transform_accepts_empty_body(client):
     """POST /api/transform with no body must run all models, not 422."""
     resp = client.post("/api/transform")

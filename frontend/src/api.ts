@@ -43,7 +43,13 @@ export interface QueryResult {
   rows: unknown[][];
   row_count?: number;
   truncated?: boolean;
+  column_types?: string[];
+  limit?: number;
+  offset?: number;
 }
+
+/** Named values bound to $name placeholders via DuckDB prepared statements. */
+export type QueryParams = Record<string, string | number | boolean | null>;
 
 export interface TransformResult {
   results: Record<string, string>;
@@ -691,19 +697,33 @@ export const api = {
   },
 
   // Query
-  runQuery: (sql: string, signal?: AbortSignal) =>
-    request<QueryResult>("/query", { method: "POST", body: JSON.stringify({ sql }), signal }),
-  explainQuery: (sql: string) =>
-    request<{ plan: string }>("/query/explain", { method: "POST", body: JSON.stringify({ sql }) }),
-  profileQuery: (sql: string) =>
-    request<{ plan: string }>("/query/profile", { method: "POST", body: JSON.stringify({ sql }) }),
-  exportCsv: async (sql: string) => {
+  runQuery: (sql: string, signal?: AbortSignal, extra?: { params?: QueryParams; limit?: number }) =>
+    request<QueryResult>("/query", {
+      method: "POST",
+      body: JSON.stringify({
+        sql,
+        ...(extra?.params && Object.keys(extra.params).length ? { params: extra.params } : {}),
+        ...(extra?.limit ? { limit: extra.limit } : {}),
+      }),
+      signal,
+    }),
+  explainQuery: (sql: string, params?: QueryParams) =>
+    request<{ plan: Record<string, unknown>; raw: string }>("/query/explain", {
+      method: "POST",
+      body: JSON.stringify({ sql, ...(params && Object.keys(params).length ? { params } : {}) }),
+    }),
+  profileQuery: (sql: string, params?: QueryParams) =>
+    request<{ plan: Record<string, unknown>; raw: string }>("/query/profile", {
+      method: "POST",
+      body: JSON.stringify({ sql, ...(params && Object.keys(params).length ? { params } : {}) }),
+    }),
+  exportCsv: async (sql: string, params?: QueryParams) => {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
     const res = await fetch("/api/query/export-csv", {
       method: "POST",
       headers,
-      body: JSON.stringify({ sql }),
+      body: JSON.stringify({ sql, ...(params && Object.keys(params).length ? { params } : {}) }),
     });
     if (!res.ok) throw new Error(await res.text());
     const blob = await res.blob();
