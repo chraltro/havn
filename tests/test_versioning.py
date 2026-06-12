@@ -212,9 +212,14 @@ def api_client(project_with_contracts):
     """Create a FastAPI TestClient."""
     from starlette.testclient import TestClient
     import havn.server.app as server_app
+    from havn.server.deps import reset_shared_conn
+
+    # Reset deps singletons so requests hit this project's warehouse, not a previous test's
+    reset_shared_conn()
     server_app.PROJECT_DIR = project_with_contracts
     server_app.AUTH_ENABLED = False
-    return TestClient(server_app.app)
+    yield TestClient(server_app.app)
+    reset_shared_conn()
 
 
 class TestVersionsAPI:

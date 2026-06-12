@@ -525,9 +525,16 @@ _pinned_udfs: deque[Callable[..., Any]] = deque(maxlen=10_000)
 
 
 def reset_macro_state() -> None:
-    """Forget per-connection registration state.  Called by hot-reload."""
+    """Forget which connections have macros registered.  Called by hot-reload.
+
+    Deliberately does NOT clear ``_conn_reload_counters``: the versioned
+    internal UDF names (``_udf_<name>_<gen>``) rely on the generation
+    advancing across reloads. Resetting it made the next registration
+    collide with the existing ``_udf_<name>_0`` (DuckDB cannot replace a
+    Python UDF), the error was swallowed as "already exists", and the
+    public MACRO alias silently kept pointing at the old function.
+    """
     _conn_macros_registered.clear()
-    _conn_reload_counters.clear()
 
 
 def _is_read_only_connection(conn: duckdb.DuckDBPyConnection) -> bool:
