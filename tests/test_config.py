@@ -185,3 +185,29 @@ environments:
     assert config.database.backend == "ducklake"
     assert config.database.catalog == "prod.ducklake"
     assert config.database.data_path == "./prod-data/"
+
+
+def test_environment_override_new_connection_preserves_type(tmp_path):
+    """Regression: splitting "type" out of a new env-defined connection used
+    .pop() on the dict stored in EnvironmentConfig, corrupting the config."""
+    from havn.config import load_project
+
+    (tmp_path / "project.yml").write_text("""
+name: test
+database:
+  path: warehouse.duckdb
+environments:
+  prod:
+    connections:
+      analytics:
+        type: postgres
+        host: prod-db
+""")
+    config = load_project(tmp_path, env="prod")
+    assert config.connections["analytics"].type == "postgres"
+    assert config.connections["analytics"].params == {"host": "prod-db"}
+    # The EnvironmentConfig dict must keep its "type" key
+    assert config.environments["prod"].connections["analytics"]["type"] == "postgres"
+
+    config2 = load_project(tmp_path, env="prod")
+    assert config2.connections["analytics"].type == "postgres"

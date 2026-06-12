@@ -278,14 +278,17 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
                     wrapped = f"SELECT * FROM ({sql_clean}) AS _q LIMIT {effective_limit}"
                 elif not has_limit:
                     # No limit anywhere — inject server cap into the SQL itself
-                    # so DuckDB can optimize and stop scanning early
-                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q LIMIT {SERVER_ROW_CAP}"
+                    # so DuckDB can optimize and stop scanning early. Keep the
+                    # caller's offset: dropping it here silently re-served page 1
+                    # to clients paginating without an explicit limit.
+                    offset_clause = f"OFFSET {req.offset} " if req.offset > 0 else ""
+                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q {offset_clause}LIMIT {SERVER_ROW_CAP}"
                     effective_limit = SERVER_ROW_CAP
+                elif req.offset > 0:
+                    # SQL has its own LIMIT; apply just the offset
+                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q OFFSET {req.offset}"
                 else:
                     wrapped = sql_to_execute
-
-                if req.offset > 0 and effective_limit is None:
-                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q OFFSET {req.offset}"
 
                 result = conn.execute(wrapped, req.params)
                 columns = [desc[0] for desc in result.description]
@@ -298,6 +301,7 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
                     "columns": columns,
                     "column_types": column_types,
                     "rows": [[_serialize(v) for v in row] for row in rows],
+                    "row_count": len(rows),
                     "truncated": effective_limit is not None and len(rows) == effective_limit,
                     "offset": req.offset,
                     "limit": effective_limit,

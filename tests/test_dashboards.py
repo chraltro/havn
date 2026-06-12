@@ -459,3 +459,75 @@ def test_export_delete_import_roundtrip(client):
     assert full["name"] == "Roundtrip"
     assert len(full["widgets"]) == 1
     assert full["widgets"][0]["title"] == "Metric"
+
+
+# ---------------------------------------------------------------------------
+# Widget query cache
+# ---------------------------------------------------------------------------
+
+def _make_cached_widget(client, sql="SELECT COUNT(*) AS n FROM landing.sales", ttl=300):
+    dash_id = client.post("/api/dashboards", json={"name": "Cache Test"}).json()["id"]
+    wid = client.post(f"/api/dashboards/{dash_id}/widgets", json={
+        "widget_type": "chart",
+        "title": "Cached",
+        "sql_query": sql,
+        "position": {"x": 1, "y": 1, "w": 6, "h": 4},
+        "cache_ttl": ttl,
+    }).json()["id"]
+    return dash_id, wid
+
+
+def test_widget_query_cache_actually_caches(client):
+    """Regression: cache writes ran on a read-only cursor and failed silently,
+    so the cache never populated. A second query must be served from cache."""
+    dash_id, wid = _make_cached_widget(client)
+
+    r1 = client.post(f"/api/dashboards/{dash_id}/widgets/{wid}/query", json={})
+    assert r1.status_code == 200
+    assert r1.json()["rows"] == [[100]]
+
+    # Change the underlying data; a cache hit still returns the old count.
+    from havn.server.deps import _get_shared_conn
+    cur = _get_shared_conn().cursor()
+    try:
+        cur.execute("DELETE FROM landing.sales WHERE id > 50")
+    finally:
+        cur.close()
+
+    r2 = client.post(f"/api/dashboards/{dash_id}/widgets/{wid}/query", json={})
+    assert r2.status_code == 200
+    assert r2.json()["rows"] == [[100]], "expected cached result, cache was not populated"
+
+
+def test_widget_query_cache_invalidated_by_sql_edit(client):
+    """Regression: the cache key ignored the SQL, so editing a widget's query
+    served stale results from the old query until the TTL expired."""
+    dash_id, wid = _make_cached_widget(client)
+
+    r1 = client.post(f"/api/dashboards/{dash_id}/widgets/{wid}/query", json={})
+    assert r1.json()["rows"] == [[100]]
+
+    resp = client.put(f"/api/dashboards/{dash_id}/widgets/{wid}", json={
+        "sql_query": "SELECT COUNT(*) AS n FROM landing.sales WHERE category = 'A'",
+    })
+    assert resp.status_code == 200
+
+    r2 = client.post(f"/api/dashboards/{dash_id}/widgets/{wid}/query", json={})
+    assert r2.json()["rows"] == [[50]], "stale cache served after SQL edit"
+
+
+def test_batch_query_uses_cache(client):
+    dash_id, wid = _make_cached_widget(client)
+    r1 = client.post(f"/api/dashboards/{dash_id}/query-batch", json={})
+    assert r1.status_code == 200
+    assert r1.json()["results"][wid]["rows"] == [[100]]
+
+    from havn.server.deps import _get_shared_conn
+    cur = _get_shared_conn().cursor()
+    try:
+        cur.execute("DELETE FROM landing.sales")
+    finally:
+        cur.close()
+
+    r2 = client.post(f"/api/dashboards/{dash_id}/query-batch", json={})
+    assert r2.json()["results"][wid]["rows"] == [[100]], "batch did not hit cache"
