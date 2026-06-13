@@ -447,7 +447,7 @@ export default function MaskingPanel({ showConfirm }) {
             <span style={s.countBadge}>{policies.length}</span>
           )}
         </div>
-        <button style={s.btnPrimary} onClick={handleOpenNew} disabled={formMode === 'new'}>+ Add Policy</button>
+        <button style={s.btnPrimary} onClick={handleOpenNew} disabled={formMode === 'new'} title={formMode === 'new' ? 'Finish the open form first' : 'Add a masking policy'}>+ Add Policy</button>
       </div>
 
       {/* Filter bar */}
@@ -568,8 +568,8 @@ export default function MaskingPanel({ showConfirm }) {
                     </td>
                     <td style={{ ...s.td, textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                        <button style={s.actionBtn} onClick={() => handleEdit(p)} disabled={formMode != null} title="Edit">Edit</button>
-                        <button style={s.actionBtnDanger} onClick={() => handleDelete(p.id)} disabled={formMode != null} title="Delete">Delete</button>
+                        <button style={s.actionBtn} onClick={() => handleEdit(p)} disabled={formMode != null} title={formMode != null ? 'Finish the open form first' : 'Edit'}>Edit</button>
+                        <button style={s.actionBtnDanger} onClick={() => handleDelete(p.id)} disabled={formMode != null} title={formMode != null ? 'Finish the open form first' : 'Delete'}>Delete</button>
                       </div>
                     </td>
                   </tr>
