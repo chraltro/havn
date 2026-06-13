@@ -1205,11 +1205,11 @@ function AppContent() {
                     Run on save
                   </label>
                   {isTransformFile && (
-                    <button onClick={handleRunSingleModel} disabled={running} style={styles.btn} title="Run just this model">
+                    <button onClick={handleRunSingleModel} disabled={running} style={styles.btn} title={running ? "A run is already in progress" : "Run just this model"}>
                       Run Model
                     </button>
                   )}
-                  <button onClick={runCurrentFile} disabled={running} style={styles.btnPrimary}>
+                  <button onClick={runCurrentFile} disabled={running} style={styles.btnPrimary} title={running ? "A run is already in progress" : "Run this file"}>
                     Run
                   </button>
                 </div>

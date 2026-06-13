@@ -730,7 +730,7 @@ const st = {
   kbdHint: { marginLeft: "8px", fontSize: "10px", color: "var(--havn-text-dim)", opacity: 0.7 },
   commitBtn: {
     padding: "5px 16px", background: "var(--havn-accent)", border: "1px solid var(--havn-accent)",
-    borderRadius: "var(--havn-radius-lg)", color: "#0B0E14", cursor: "pointer",
+    borderRadius: "var(--havn-radius-lg)", color: "#fff", cursor: "pointer",
     fontSize: "12px", fontWeight: 600,
   },
 
