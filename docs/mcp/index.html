@@ -10,29 +10,31 @@
       
       
       
-        <link rel="canonical" href="https://chraltro.github.io/db/">
+        <link rel="canonical" href="https://chraltro.github.io/db/mcp/">
       
       
+        <link rel="prev" href="../auth/">
       
-        <link rel="next" href="getting-started/">
+      
+        <link rel="next" href="../cli-reference/">
       
       
         
       
       
-      <link rel="icon" href="assets/images/favicon.png">
+      <link rel="icon" href="../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>havn</title>
+        <title>MCP Server - havn</title>
       
     
     
-      <link rel="stylesheet" href="assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -51,7 +53,7 @@
       
     
     
-    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -76,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#havn-data-in-safe-waters" class="md-skip">
+        <a href="#mcp-server" class="md-skip">
           Skip to content
         </a>
       
@@ -90,7 +92,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="." title="havn" class="md-header__button md-logo" aria-label="havn" data-md-component="logo">
+    <a href=".." title="havn" class="md-header__button md-logo" aria-label="havn" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -110,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Home
+              MCP Server
             
           </span>
         </div>
@@ -207,11 +209,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="." class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
         
   
   
@@ -230,7 +230,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="getting-started/" class="md-tabs__link">
+      <a href="../getting-started/" class="md-tabs__link">
         
   
   
@@ -249,7 +249,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="configuration/" class="md-tabs__link">
+      <a href="../configuration/" class="md-tabs__link">
         
   
   
@@ -268,7 +268,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="transforms/" class="md-tabs__link">
+      <a href="../transforms/" class="md-tabs__link">
         
   
   
@@ -287,7 +287,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="seeds/" class="md-tabs__link">
+      <a href="../seeds/" class="md-tabs__link">
         
   
   
@@ -306,7 +306,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="sources/" class="md-tabs__link">
+      <a href="../sources/" class="md-tabs__link">
         
   
   
@@ -325,7 +325,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="quality/" class="md-tabs__link">
+      <a href="../quality/" class="md-tabs__link">
         
   
   
@@ -344,7 +344,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="contracts/" class="md-tabs__link">
+      <a href="../contracts/" class="md-tabs__link">
         
   
   
@@ -363,7 +363,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="macros/" class="md-tabs__link">
+      <a href="../macros/" class="md-tabs__link">
         
   
   
@@ -382,7 +382,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="semantic-layer/" class="md-tabs__link">
+      <a href="../semantic-layer/" class="md-tabs__link">
         
   
   
@@ -401,7 +401,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="lineage/" class="md-tabs__link">
+      <a href="../lineage/" class="md-tabs__link">
         
   
   
@@ -420,7 +420,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="masking/" class="md-tabs__link">
+      <a href="../masking/" class="md-tabs__link">
         
   
   
@@ -439,7 +439,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="notebooks/" class="md-tabs__link">
+      <a href="../notebooks/" class="md-tabs__link">
         
   
   
@@ -458,7 +458,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="pipelines/" class="md-tabs__link">
+      <a href="../pipelines/" class="md-tabs__link">
         
   
   
@@ -477,7 +477,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="scheduler/" class="md-tabs__link">
+      <a href="../scheduler/" class="md-tabs__link">
         
   
   
@@ -496,7 +496,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="connectors/" class="md-tabs__link">
+      <a href="../connectors/" class="md-tabs__link">
         
   
   
@@ -515,7 +515,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="cdc/" class="md-tabs__link">
+      <a href="../cdc/" class="md-tabs__link">
         
   
   
@@ -534,7 +534,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="versioning/" class="md-tabs__link">
+      <a href="../versioning/" class="md-tabs__link">
         
   
   
@@ -553,7 +553,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="environments/" class="md-tabs__link">
+      <a href="../environments/" class="md-tabs__link">
         
   
   
@@ -572,7 +572,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="auth/" class="md-tabs__link">
+      <a href="../auth/" class="md-tabs__link">
         
   
   
@@ -589,9 +589,11 @@
   
   
   
+    
   
-    <li class="md-tabs__item">
-      <a href="mcp/" class="md-tabs__link">
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
         
   
   
@@ -610,7 +612,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="cli-reference/" class="md-tabs__link">
+      <a href="../cli-reference/" class="md-tabs__link">
         
   
   
@@ -629,7 +631,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="api-reference/" class="md-tabs__link">
+      <a href="../api-reference/" class="md-tabs__link">
         
   
   
@@ -664,7 +666,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="." title="havn" class="md-nav__button md-logo" aria-label="havn" data-md-component="logo">
+    <a href=".." title="havn" class="md-nav__button md-logo" aria-label="havn" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -691,37 +693,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Home
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="." class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
         
   
   
@@ -737,153 +712,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#quick-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Quick Start
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#why-havn" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Why havn?
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#features" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Features
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Features">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#transform-engine" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Transform Engine
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#data-quality" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Data Quality
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#connectors" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Connectors
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#web-ui" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Web UI
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#ai-native" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AI-Native
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#single-file-database" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Single-File Database
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#architecture" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Architecture
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#documentation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Documentation
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -895,7 +723,7 @@
   
   
     <li class="md-nav__item">
-      <a href="getting-started/" class="md-nav__link">
+      <a href="../getting-started/" class="md-nav__link">
         
   
   
@@ -922,7 +750,7 @@
   
   
     <li class="md-nav__item">
-      <a href="configuration/" class="md-nav__link">
+      <a href="../configuration/" class="md-nav__link">
         
   
   
@@ -949,7 +777,7 @@
   
   
     <li class="md-nav__item">
-      <a href="transforms/" class="md-nav__link">
+      <a href="../transforms/" class="md-nav__link">
         
   
   
@@ -976,7 +804,7 @@
   
   
     <li class="md-nav__item">
-      <a href="seeds/" class="md-nav__link">
+      <a href="../seeds/" class="md-nav__link">
         
   
   
@@ -1003,7 +831,7 @@
   
   
     <li class="md-nav__item">
-      <a href="sources/" class="md-nav__link">
+      <a href="../sources/" class="md-nav__link">
         
   
   
@@ -1030,7 +858,7 @@
   
   
     <li class="md-nav__item">
-      <a href="quality/" class="md-nav__link">
+      <a href="../quality/" class="md-nav__link">
         
   
   
@@ -1057,7 +885,7 @@
   
   
     <li class="md-nav__item">
-      <a href="contracts/" class="md-nav__link">
+      <a href="../contracts/" class="md-nav__link">
         
   
   
@@ -1084,7 +912,7 @@
   
   
     <li class="md-nav__item">
-      <a href="macros/" class="md-nav__link">
+      <a href="../macros/" class="md-nav__link">
         
   
   
@@ -1111,7 +939,7 @@
   
   
     <li class="md-nav__item">
-      <a href="semantic-layer/" class="md-nav__link">
+      <a href="../semantic-layer/" class="md-nav__link">
         
   
   
@@ -1138,7 +966,7 @@
   
   
     <li class="md-nav__item">
-      <a href="lineage/" class="md-nav__link">
+      <a href="../lineage/" class="md-nav__link">
         
   
   
@@ -1165,7 +993,7 @@
   
   
     <li class="md-nav__item">
-      <a href="masking/" class="md-nav__link">
+      <a href="../masking/" class="md-nav__link">
         
   
   
@@ -1192,7 +1020,7 @@
   
   
     <li class="md-nav__item">
-      <a href="notebooks/" class="md-nav__link">
+      <a href="../notebooks/" class="md-nav__link">
         
   
   
@@ -1219,7 +1047,7 @@
   
   
     <li class="md-nav__item">
-      <a href="pipelines/" class="md-nav__link">
+      <a href="../pipelines/" class="md-nav__link">
         
   
   
@@ -1246,7 +1074,7 @@
   
   
     <li class="md-nav__item">
-      <a href="scheduler/" class="md-nav__link">
+      <a href="../scheduler/" class="md-nav__link">
         
   
   
@@ -1273,7 +1101,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/" class="md-nav__link">
+      <a href="../connectors/" class="md-nav__link">
         
   
   
@@ -1300,7 +1128,7 @@
   
   
     <li class="md-nav__item">
-      <a href="cdc/" class="md-nav__link">
+      <a href="../cdc/" class="md-nav__link">
         
   
   
@@ -1327,7 +1155,7 @@
   
   
     <li class="md-nav__item">
-      <a href="versioning/" class="md-nav__link">
+      <a href="../versioning/" class="md-nav__link">
         
   
   
@@ -1354,7 +1182,7 @@
   
   
     <li class="md-nav__item">
-      <a href="environments/" class="md-nav__link">
+      <a href="../environments/" class="md-nav__link">
         
   
   
@@ -1381,7 +1209,7 @@
   
   
     <li class="md-nav__item">
-      <a href="auth/" class="md-nav__link">
+      <a href="../auth/" class="md-nav__link">
         
   
   
@@ -1405,10 +1233,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="mcp/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Server
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1424,6 +1279,70 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tools
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-coexists-with-havn-serve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it coexists with havn serve
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#safety-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Safety model
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1435,7 +1354,7 @@
   
   
     <li class="md-nav__item">
-      <a href="cli-reference/" class="md-nav__link">
+      <a href="../cli-reference/" class="md-nav__link">
         
   
   
@@ -1462,7 +1381,7 @@
   
   
     <li class="md-nav__item">
-      <a href="api-reference/" class="md-nav__link">
+      <a href="../api-reference/" class="md-nav__link">
         
   
   
@@ -1509,10 +1428,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#quick-start" class="md-nav__link">
+  <a href="#setup" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Quick Start
+        Setup
       
     </span>
   </a>
@@ -1520,10 +1439,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#why-havn" class="md-nav__link">
+  <a href="#tools" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why havn?
+        Tools
       
     </span>
   </a>
@@ -1531,93 +1450,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#features" class="md-nav__link">
+  <a href="#how-it-coexists-with-havn-serve" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Features
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Features">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#transform-engine" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Transform Engine
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#data-quality" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Data Quality
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#connectors" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Connectors
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#web-ui" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Web UI
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#ai-native" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AI-Native
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#single-file-database" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Single-File Database
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#architecture" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Architecture
+        How it coexists with havn serve
       
     </span>
   </a>
@@ -1625,10 +1461,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#documentation" class="md-nav__link">
+  <a href="#safety-model" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Documentation
+        Safety model
       
     </span>
   </a>
@@ -1655,145 +1491,114 @@
   
 
 
-<h1 id="havn-data-in-safe-waters">havn -- Data in safe waters<a class="headerlink" href="#havn-data-in-safe-waters" title="Permanent link">&para;</a></h1>
-<p>havn is a self-hosted data platform -- a lightweight, Nordic alternative to Databricks and Snowflake. It uses <strong>DuckDB</strong> for OLAP analytics, <strong>plain SQL</strong> for transforms, and <strong>Python</strong> for ingest/export scripts. All data lives in a single <code>warehouse.duckdb</code> file. No data leaves your machine.</p>
-<h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>havn
-havn<span class="w"> </span>init<span class="w"> </span>my-project
-<span class="nb">cd</span><span class="w"> </span>my-project
-havn<span class="w"> </span><span class="nb">jobs</span><span class="w"> </span>run<span class="w"> </span>full-refresh
-havn<span class="w"> </span>serve
+<h1 id="mcp-server">MCP Server<a class="headerlink" href="#mcp-server" title="Permanent link">&para;</a></h1>
+<p><code>havn mcp</code> starts a <a href="https://modelcontextprotocol.io">Model Context Protocol</a>
+server over stdio, exposing your warehouse to AI agents — Claude Code,
+Codex CLI, or any other MCP client. The agent can explore tables, run
+read-only queries, inspect the transform DAG and lineage, query
+semantic-layer metrics, and (optionally) build models.</p>
+<p>No extra dependencies: the protocol implementation ships with havn.</p>
+<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Claude Code</span>
+claude<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span>havn<span class="w"> </span>--<span class="w"> </span>havn<span class="w"> </span>mcp<span class="w"> </span>-p<span class="w"> </span>/path/to/your/project
+
+<span class="c1"># Any other MCP client: configure a stdio server with</span>
+<span class="c1">#   command: havn</span>
+<span class="c1">#   args: [&quot;mcp&quot;, &quot;-p&quot;, &quot;/path/to/your/project&quot;]</span>
 </code></pre></div>
-<p>Or with Docker:</p>
-<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>-v<span class="w"> </span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span>:/project<span class="w"> </span>-p<span class="w"> </span><span class="m">3000</span>:3000<span class="w"> </span>ghcr.io/chraltro/havn<span class="w"> </span>serve
-</code></pre></div>
-<h2 id="why-havn">Why havn?<a class="headerlink" href="#why-havn" title="Permanent link">&para;</a></h2>
+<p>Options:</p>
 <table>
 <thead>
 <tr>
-<th></th>
-<th>havn</th>
-<th>Databricks</th>
-<th>dbt + Airflow</th>
-<th>Snowflake</th>
+<th>Flag</th>
+<th>Meaning</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>Runs on</strong></td>
-<td>Your machine</td>
-<td>Cloud</td>
-<td>Cloud / self-hosted</td>
-<td>Cloud</td>
+<td><code>-p, --project</code></td>
+<td>Project directory (default: current dir)</td>
 </tr>
 <tr>
-<td><strong>Data stays</strong></td>
-<td>Local</td>
-<td>Vendor cloud</td>
-<td>Depends</td>
-<td>Vendor cloud</td>
+<td><code>-e, --env</code></td>
+<td>Environment to use (<code>dev</code>, <code>prod</code>, ...)</td>
 </tr>
 <tr>
-<td><strong>Setup time</strong></td>
-<td>1 minute</td>
-<td>Hours</td>
-<td>Hours</td>
-<td>Hours</td>
-</tr>
-<tr>
-<td><strong>Cost</strong></td>
-<td>Free</td>
-<td>$$$</td>
-<td>$ - $$$</td>
-<td>$$$</td>
-</tr>
-<tr>
-<td><strong>SQL dialect</strong></td>
-<td>DuckDB (Postgres-compatible)</td>
-<td>Spark SQL</td>
-<td>Varies</td>
-<td>Snowflake SQL</td>
-</tr>
-<tr>
-<td><strong>Templating</strong></td>
-<td>None -- plain SQL</td>
-<td>Jinja</td>
-<td>Jinja</td>
-<td>None</td>
+<td><code>--read-only</code></td>
+<td>Disable the <code>run_transform</code> tool entirely</td>
 </tr>
 </tbody>
 </table>
-<h2 id="features">Features<a class="headerlink" href="#features" title="Permanent link">&para;</a></h2>
-<h3 id="transform-engine">Transform Engine<a class="headerlink" href="#transform-engine" title="Permanent link">&para;</a></h3>
-<p>Plain SQL with <code>@config</code> directives. Dependencies are auto-extracted from <code>FROM</code> and <code>JOIN</code> clauses, so the DAG builds itself. SHA256 content hashing means only changed models rebuild. No Jinja, no templating, just SQL.</p>
-<h3 id="data-quality">Data Quality<a class="headerlink" href="#data-quality" title="Permanent link">&para;</a></h3>
-<p>Inline assertions (<code>@assert row_count &gt; 0</code>, <code>@assert unique(id)</code>), YAML contracts, column profiling, and freshness monitoring.</p>
-<h3 id="connectors">Connectors<a class="headerlink" href="#connectors" title="Permanent link">&para;</a></h3>
-<p>Pre-built connectors for PostgreSQL, MySQL, Stripe, Shopify, Google Sheets, REST APIs, S3/GCS, CSV, and webhooks.</p>
-<h3 id="web-ui">Web UI<a class="headerlink" href="#web-ui" title="Permanent link">&para;</a></h3>
-<p>React SPA with Monaco code editor, interactive DAG visualization, table browser, query runner, and notebook support.</p>
-<h3 id="ai-native">AI-Native<a class="headerlink" href="#ai-native" title="Permanent link">&para;</a></h3>
-<p>Ships with <code>CLAUDE.md</code>, <code>.cursorrules</code>, and Copilot instructions. Run <code>havn context</code> to generate an AI-ready project summary.</p>
-<h3 id="single-file-database">Single-File Database<a class="headerlink" href="#single-file-database" title="Permanent link">&para;</a></h3>
-<p>Everything in one <code>warehouse.duckdb</code> file. Back up with <code>cp</code>. No servers, no clusters, no cloud accounts.</p>
-<h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>Ingest Scripts (.py / .dpnb)
-        |
-        v
-  +-----------+      +----------+      +----------+      +----------+
-  |  landing  | ---&gt; |  bronze  | ---&gt; |  silver  | ---&gt; |   gold   |
-  |  (raw)    |      | (cleaned)|      | (business|      | (consume)|
-  +-----------+      +----------+      +----------+      +----------+
-        ^                                                       |
-        |                                                       v
-   External Sources                                      Export Scripts
-   (APIs, DBs, files)                                    (reports, APIs)
-</code></pre></div>
+<h2 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>query</code></td>
+<td>Read-only SQL (mutations and file-access functions are rejected)</td>
+</tr>
+<tr>
+<td><code>list_tables</code></td>
+<td>Tables and views, optionally filtered by schema</td>
+</tr>
+<tr>
+<td><code>describe_table</code></td>
+<td>Columns, types, and row count</td>
+</tr>
+<tr>
+<td><code>list_models</code></td>
+<td>Transform models with materialization and dependencies</td>
+</tr>
+<tr>
+<td><code>get_model</code></td>
+<td>A model's SQL source, config, and dependencies</td>
+</tr>
+<tr>
+<td><code>model_lineage</code></td>
+<td>Direct + transitive upstreams and downstreams</td>
+</tr>
+<tr>
+<td><code>run_history</code></td>
+<td>Recent pipeline runs from <code>_havn.run_log</code></td>
+</tr>
+<tr>
+<td><code>list_metrics</code></td>
+<td>Semantic-layer metrics from <code>metrics/*.yml</code></td>
+</tr>
+<tr>
+<td><code>query_metric</code></td>
+<td>Query a metric by dimensions / grain / time range</td>
+</tr>
+<tr>
+<td><code>run_transform</code></td>
+<td>Build models (omitted with <code>--read-only</code>)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="how-it-coexists-with-havn-serve">How it coexists with <code>havn serve</code><a class="headerlink" href="#how-it-coexists-with-havn-serve" title="Permanent link">&para;</a></h2>
+<p>DuckDB allows one writing process at a time. When <code>havn serve</code> is running,
+it holds the warehouse lock — the MCP server detects this and routes read
+queries through the server's HTTP API instead of opening the file directly
+(the same strategy the CLI uses). <code>run_transform</code> refuses to run while the
+lock is held and tells the agent why.</p>
+<h2 id="safety-model">Safety model<a class="headerlink" href="#safety-model" title="Permanent link">&para;</a></h2>
+<p>The MCP server has the same trust level as your local CLI:</p>
 <ul>
-<li><strong>landing</strong> -- Raw data ingested from external sources via Python scripts or notebooks</li>
-<li><strong>bronze</strong> -- Light cleanup: column renaming, type casting, deduplication</li>
-<li><strong>silver</strong> -- Business logic: joins, aggregations, calculations</li>
-<li><strong>gold</strong> -- Consumption-ready tables for dashboards, APIs, and reports</li>
+<li>Every <code>query</code> / <code>query_metric</code> / introspection call goes through the same
+  read-only SQL validation as the web API: single statement, no mutation
+  verbs, no <code>read_csv</code> / <code>read_parquet</code> / HTTP functions.</li>
+<li>Reads use a read-only DuckDB connection — even a validator bypass could
+  not write.</li>
+<li><code>run_transform</code> is the only mutating tool. It builds your own transform
+  models (with Pipeline Rewind snapshots when enabled, so agent-triggered
+  builds can be rolled back like any other run). Start with <code>--read-only</code>
+  if the agent shouldn't build at all.</li>
 </ul>
-<h2 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Category</th>
-<th>Pages</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Getting Started</td>
-<td><a href="getting-started/">Getting Started</a>, <a href="configuration/">Configuration</a>, <a href="environments/">Environments</a></td>
-</tr>
-<tr>
-<td>Core Concepts</td>
-<td><a href="transforms/">Transforms</a>, <a href="pipelines/">Pipelines</a>, <a href="seeds/">Seeds</a>, <a href="sources/">Sources</a></td>
-</tr>
-<tr>
-<td>Data Integration</td>
-<td><a href="connectors/">Connectors</a>, <a href="cdc/">CDC</a></td>
-</tr>
-<tr>
-<td>Data Quality</td>
-<td><a href="quality/">Quality</a>, <a href="contracts/">Contracts</a>, <a href="lineage/">Lineage</a></td>
-</tr>
-<tr>
-<td>Security</td>
-<td><a href="auth/">Auth</a>, <a href="masking/">Masking</a></td>
-</tr>
-<tr>
-<td>Advanced</td>
-<td><a href="scheduler/">Scheduler</a>, <a href="notebooks/">Notebooks</a>, <a href="versioning/">Versioning</a></td>
-</tr>
-<tr>
-<td>Reference</td>
-<td><a href="cli-reference/">CLI Reference</a>, <a href="api-reference/">API Reference</a></td>
-</tr>
-</tbody>
-</table>
 
 
 
@@ -1843,10 +1648,10 @@ havn<span class="w"> </span>serve
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>
