@@ -17,16 +17,16 @@ logger = logging.getLogger("havn.cli")
 @app.command()
 def run(
     script: Annotated[str, typer.Argument(help="Script path (e.g. ingest/customers.py)")],
+    env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use")] = None,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
     force: Annotated[bool, typer.Option("--force", "-f", help="Re-run even if `# @havn: schedule=once` and a prior success exists")] = False,
 ) -> None:
     """Run a single ingest or export script (.py or .dpnb notebook)."""
-    from havn.config import load_project
     from havn.engine.database import open_warehouse
     from havn.engine.runner import run_script
 
     project_dir = _resolve_project(project_dir)
-    config = load_project(project_dir)
+    config = _load_config(project_dir, env)
     script_path = project_dir / script
 
     if not script_path.exists():

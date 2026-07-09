@@ -691,9 +691,22 @@ function FieldTab({ idx, label, min, max, parts, setField }) {
   const [rangeFrom, setRangeFrom] = useState(initial.from ?? min);
   const [rangeTo, setRangeTo] = useState(initial.to ?? max);
 
+  // Inputs keep the raw string while typing (so clearing the field doesn't
+  // snap to a default mid-edit) and clamp on blur; the cron field is always
+  // built from the clamped value so an empty/invalid input can't emit NaN.
+  const clampInt = (value, lo, hi, fallback) => {
+    const num = parseInt(value, 10);
+    if (Number.isNaN(num)) return fallback;
+    return Math.min(hi, Math.max(lo, num));
+  };
+
   useEffect(() => {
     // Rebuild field when any mode control changes
-    const next = buildField(mode, { n: everyN, specific }, { from: rangeFrom, to: rangeTo });
+    const next = buildField(
+      mode,
+      { n: clampInt(everyN, 1, max, 1), specific },
+      { from: clampInt(rangeFrom, min, max, min), to: clampInt(rangeTo, min, max, max) },
+    );
     setField(idx, next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, everyN, specific, rangeFrom, rangeTo]);
@@ -740,7 +753,8 @@ function FieldTab({ idx, label, min, max, parts, setField }) {
             min="1"
             max={max}
             value={everyN}
-            onChange={(e) => setEveryN(parseInt(e.target.value, 10) || 1)}
+            onChange={(e) => setEveryN(e.target.value)}
+            onBlur={() => setEveryN(clampInt(everyN, 1, max, 1))}
             style={{ ...s.input, width: 80 }}
           />
           <span style={{ fontSize: 13, color: "var(--havn-text-dim)" }}>
@@ -784,14 +798,16 @@ function FieldTab({ idx, label, min, max, parts, setField }) {
           <input
             type="number" min={min} max={max}
             value={rangeFrom}
-            onChange={(e) => setRangeFrom(parseInt(e.target.value, 10))}
+            onChange={(e) => setRangeFrom(e.target.value)}
+            onBlur={() => setRangeFrom(clampInt(rangeFrom, min, max, min))}
             style={{ ...s.input, width: 70 }}
           />
           <span style={{ fontSize: 13 }}>to</span>
           <input
             type="number" min={min} max={max}
             value={rangeTo}
-            onChange={(e) => setRangeTo(parseInt(e.target.value, 10))}
+            onChange={(e) => setRangeTo(e.target.value)}
+            onBlur={() => setRangeTo(clampInt(rangeTo, min, max, max))}
             style={{ ...s.input, width: 70 }}
           />
         </div>
@@ -1595,15 +1611,21 @@ function PlanJobsTab({ onSwitchToResults, showConfirm }) {
     setSaving(true);
     setError(null);
     try {
+      // Numeric fields hold the raw string while the user types; coerce and
+      // clamp here so a field cleared at save time falls back to its default.
+      const toInt = (v, lo, hi, fallback) => {
+        const num = parseInt(v, 10);
+        return Number.isNaN(num) ? fallback : Math.min(hi, Math.max(lo, num));
+      };
       const payload = {
         targets: form.targets,
         resolve: form.resolve,
         schedules: form.schedules,
         tags: form.tags,
         enabled: form.enabled,
-        retry: form.retry,
-        retry_delay: form.retry_delay,
-        timeout_minutes: form.timeout_minutes,
+        retry: toInt(form.retry, 0, 10, 0),
+        retry_delay: toInt(form.retry_delay, 0, 3600, 10),
+        timeout_minutes: toInt(form.timeout_minutes, 1, 24 * 60, 60),
         description: form.description,
       };
       if (formMode && formMode.editing) {
@@ -2174,7 +2196,7 @@ function JobFormRow({ form, setForm, editing, saving, onSave, onCancel, onOpenCr
                 type="number" min="0" max="10"
                 style={s.input}
                 value={form.retry}
-                onChange={(e) => setForm({ ...form, retry: parseInt(e.target.value, 10) || 0 })}
+                onChange={(e) => setForm({ ...form, retry: e.target.value })}
               />
             </label>
             <label style={{ ...s.formLabel, flex: "0 0 110px" }}>
@@ -2183,7 +2205,7 @@ function JobFormRow({ form, setForm, editing, saving, onSave, onCancel, onOpenCr
                 type="number" min="0"
                 style={s.input}
                 value={form.retry_delay}
-                onChange={(e) => setForm({ ...form, retry_delay: parseInt(e.target.value, 10) || 0 })}
+                onChange={(e) => setForm({ ...form, retry_delay: e.target.value })}
               />
             </label>
             <label style={{ ...s.formLabel, flex: "0 0 110px" }}>
@@ -2192,7 +2214,7 @@ function JobFormRow({ form, setForm, editing, saving, onSave, onCancel, onOpenCr
                 type="number" min="1"
                 style={s.input}
                 value={form.timeout_minutes}
-                onChange={(e) => setForm({ ...form, timeout_minutes: parseInt(e.target.value, 10) || 60 })}
+                onChange={(e) => setForm({ ...form, timeout_minutes: e.target.value })}
               />
             </label>
             <label style={{ display: "inline-flex", alignItems: "center", gap: 6, paddingBottom: 2, fontSize: 12, cursor: "pointer" }}>

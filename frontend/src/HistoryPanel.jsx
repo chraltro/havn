@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { api } from "./api";
 
 const PAGE_SIZE = 50;
@@ -140,13 +140,19 @@ export default function HistoryPanel({ onOpenFile }) {
     }
   }
 
+  // Tracks which run's detail fetch is current, so a slow response for a
+  // run the user already collapsed (or replaced) can't overwrite the state.
+  const expandRequestRef = useRef(null);
+
   async function toggleExpand(pipelineRunId) {
     if (expandedRun === pipelineRunId) {
+      expandRequestRef.current = null;
       setExpandedRun(null);
       setRunDetail(null);
       setComparison(null);
       return;
     }
+    expandRequestRef.current = pipelineRunId;
     setExpandedRun(pipelineRunId);
     setRunDetail(null);
     setComparison(null);
@@ -155,6 +161,7 @@ export default function HistoryPanel({ onOpenFile }) {
         api.getPipelineRunDetail(pipelineRunId),
         api.getRunComparison(pipelineRunId).catch(() => null),
       ]);
+      if (expandRequestRef.current !== pipelineRunId) return;
       setRunDetail(detail);
       setComparison(comp);
     } catch (e) {

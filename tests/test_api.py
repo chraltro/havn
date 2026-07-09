@@ -573,3 +573,25 @@ def test_validate_endpoint_catches_landing_schema(client, project):
     assert data["passed"] is False
     landing_errors = [e for e in data["errors"] if "landing" in e["message"] and e["severity"] == "error"]
     assert len(landing_errors) >= 1
+
+
+def test_run_query_offset_without_limit(client):
+    """Regression: offset with no limit (and no LIMIT in the SQL) was
+    silently dropped, re-serving page 1 forever."""
+    resp = client.post(
+        "/api/query",
+        json={"sql": "SELECT * FROM range(10) ORDER BY 1", "offset": 5},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert [r[0] for r in data["rows"]] == [5, 6, 7, 8, 9]
+    assert data["row_count"] == 5
+
+
+def test_run_query_offset_with_inner_limit(client):
+    resp = client.post(
+        "/api/query",
+        json={"sql": "SELECT * FROM range(10) ORDER BY 1 LIMIT 8", "offset": 5},
+    )
+    assert resp.status_code == 200, resp.text
+    assert [r[0] for r in resp.json()["rows"]] == [5, 6, 7]

@@ -136,9 +136,13 @@ export function DashboardProvider({ children }) {
     }
   }, [dashboard, _buildFilters, parameters]);
 
-  // Batch query all widgets
+  // Batch query all widgets. Responses can arrive out of order when filters
+  // change mid-flight, so each call takes a sequence number and only the
+  // latest one is allowed to write results.
+  const batchSeqRef = useRef(0);
   const refreshAll = useCallback(async () => {
     if (!dashboard) return;
+    const seq = ++batchSeqRef.current;
     // Mark all as loading
     const loadingState = {};
     for (const w of dashboard.widgets || []) {
@@ -151,6 +155,7 @@ export function DashboardProvider({ children }) {
     const batchStart = Date.now();
     try {
       const batch = await api.queryDashboardBatch(dashboard.id, _buildFilters(), parameters);
+      if (seq !== batchSeqRef.current) return; // a newer refresh owns the state
       const batchDuration = Date.now() - batchStart;
       const results = batch.results || {};
       setWidgetData(prev => {
@@ -162,6 +167,18 @@ export function DashboardProvider({ children }) {
       });
     } catch (e) {
       console.error("Batch query failed:", e);
+      if (seq !== batchSeqRef.current) return;
+      // Clear the spinners and surface the failure — otherwise every widget
+      // stays "loading" forever after a network blip.
+      setWidgetData(prev => {
+        const next = { ...prev };
+        for (const w of dashboard.widgets || []) {
+          if (w.sql_query && next[w.id]) {
+            next[w.id] = { ...next[w.id], loading: false, error: e.message || "Batch query failed" };
+          }
+        }
+        return next;
+      });
     }
   }, [dashboard, _buildFilters, parameters, widgetData]);
 

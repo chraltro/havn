@@ -30,207 +30,29 @@ _SLOW_QUERY_THRESHOLD_MS = 5000
 
 
 # --- SQL safety validation ---
+# The implementation lives in havn.engine.sql_safety so non-HTTP surfaces
+# (MCP server, semantic layer, CLI) share the exact same rules. The names
+# below are kept as thin wrappers/aliases for backward compatibility —
+# other route modules and tests import them from here.
 
-_FORBIDDEN_STATEMENT_KEYWORDS = frozenset({
-    "insert", "update", "delete", "drop", "create", "alter", "truncate", "merge",
-    "copy", "attach", "detach", "install", "load", "export", "import",
-    "grant", "revoke", "set", "reset", "vacuum", "checkpoint", "pragma",
-    "call", "execute",
-})
-
-_DANGEROUS_FUNCTION_NAMES = frozenset({
-    "read_csv_auto", "read_csv", "read_parquet", "read_json_auto", "read_json",
-    "read_json_objects", "read_ndjson", "read_ndjson_auto",
-    "read_blob", "read_text",
-    "write_csv", "write_parquet",
-    "iceberg_scan", "delta_scan", "parquet_scan", "csv_scan",
-    "http_get", "http_post",
-})
-
-
-def _strip_sql_comments_and_strings(sql: str) -> str:
-    """Remove string literals and comments so keyword/function scans cannot
-    be fooled by content inside quotes or comments."""
-    out: list[str] = []
-    i = 0
-    n = len(sql)
-    while i < n:
-        c = sql[i]
-        nx = sql[i + 1] if i + 1 < n else ""
-        if c == "-" and nx == "-":
-            j = sql.find("\n", i)
-            if j < 0:
-                break
-            i = j + 1
-            continue
-        if c == "/" and nx == "*":
-            j = sql.find("*/", i + 2)
-            if j < 0:
-                break
-            i = j + 2
-            continue
-        if c == "'":
-            i += 1
-            while i < n:
-                if sql[i] == "'" and (i + 1 < n and sql[i + 1] == "'"):
-                    i += 2
-                    continue
-                if sql[i] == "'":
-                    i += 1
-                    break
-                i += 1
-            out.append("''")
-            continue
-        if c == '"':
-            j = sql.find('"', i + 1)
-            if j < 0:
-                break
-            out.append(sql[i : j + 1])
-            i = j + 1
-            continue
-        out.append(c)
-        i += 1
-    return "".join(out)
-
-
-_IDENT_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
-_FUNCTION_CALL_RE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)\s*\(')
-_QUOTED_FUNCTION_CALL_RE = re.compile(r'"([A-Za-z_][A-Za-z0-9_]*)"\s*\(')
-
-
-def _split_statements(sql: str) -> list[str]:
-    """Split top-level SQL statements on ;, respecting strings/comments
-    (the input here is already stripped of those)."""
-    parts: list[str] = []
-    buf: list[str] = []
-    depth = 0
-    for c in sql:
-        if c == "(":
-            depth += 1
-        elif c == ")":
-            depth = max(0, depth - 1)
-        if c == ";" and depth == 0:
-            text = "".join(buf).strip()
-            if text:
-                parts.append(text)
-            buf = []
-            continue
-        buf.append(c)
-    text = "".join(buf).strip()
-    if text:
-        parts.append(text)
-    return parts
-
-
-def _leading_statement_keyword(stmt: str) -> str:
-    """Return the lowercased leading keyword of a statement.
-
-    For statements starting with WITH, walks the CTE definitions
-    ``name [AS] (...)``, possibly comma-separated and possibly leading
-    with ``RECURSIVE``, then returns the first keyword after the last
-    CTE body (the real statement verb: SELECT / DELETE / INSERT / ...).
-    """
-    s = stmt.lstrip()
-    m = _IDENT_RE.match(s)
-    if not m:
-        return ""
-    head = m.group(0).lower()
-    if head != "with":
-        return head
-    i = m.end()
-    n = len(s)
-
-    def _skip_ws(j: int) -> int:
-        while j < n and s[j].isspace():
-            j += 1
-        return j
-
-    def _skip_parens(j: int) -> int:
-        if j >= n or s[j] != "(":
-            return j
-        depth = 1
-        j += 1
-        while j < n and depth > 0:
-            if s[j] == "(":
-                depth += 1
-            elif s[j] == ")":
-                depth -= 1
-            j += 1
-        return j
-
-    i = _skip_ws(i)
-    if i < n:
-        rec = _IDENT_RE.match(s, i)
-        if rec and rec.group(0).lower() == "recursive":
-            i = rec.end()
-            i = _skip_ws(i)
-
-    while True:
-        m2 = _IDENT_RE.match(s, i)
-        if not m2:
-            return "with"
-        i = m2.end()
-        i = _skip_ws(i)
-        if i < n:
-            opt_as = _IDENT_RE.match(s, i)
-            if opt_as and opt_as.group(0).lower() == "as":
-                i = opt_as.end()
-                i = _skip_ws(i)
-        if i >= n or s[i] != "(":
-            return m2.group(0).lower()
-        i = _skip_parens(i)
-        i = _skip_ws(i)
-        if i < n and s[i] == ",":
-            i += 1
-            i = _skip_ws(i)
-            continue
-        next_m = _IDENT_RE.match(s, i)
-        if next_m:
-            return next_m.group(0).lower()
-        return "with"
+from havn.engine.sql_safety import (  # noqa: E402
+    ReadOnlyQueryError,
+    leading_statement_keyword as _leading_statement_keyword,  # noqa: F401
+    split_statements as _split_statements,  # noqa: F401
+    strip_sql_comments_and_strings as _strip_sql_comments_and_strings,  # noqa: F401
+    validate_read_only_query,
+)
 
 
 def _validate_query_sql(sql: str) -> None:
-    """Reject SQL that is not a safe read-only query.
+    """Reject SQL that is not a safe read-only query (HTTP flavour).
 
-    Strips strings and comments, splits top-level statements, then rejects:
-      - multi-statement queries
-      - any statement whose leading keyword (after a CTE) is a mutation verb
-      - calls to file-access functions (read_csv, read_parquet, http_*)
-
-    Unknown leading keywords are passed through to DuckDB, which will return
-    a parse error so the caller gets a 400 (not a misleading 403).
+    See :func:`havn.engine.sql_safety.validate_read_only_query` for the rules.
     """
-    cleaned = _strip_sql_comments_and_strings(sql)
-    statements = _split_statements(cleaned)
-    if not statements:
-        raise HTTPException(400, "Empty query.")
-    if len(statements) > 1:
-        raise HTTPException(403, "Multi-statement queries are not allowed.")
-    stmt = statements[0]
-    head = _leading_statement_keyword(stmt)
-    if head in _FORBIDDEN_STATEMENT_KEYWORDS:
-        raise HTTPException(
-            403, "Only SELECT queries are allowed through the query interface."
-        )
-    # Note: at this point string literals are already stripped to '', so we
-    # can scan the cleaned statement directly. We also have to catch quoted
-    # identifiers: DuckDB happily accepts `"read_csv"(...)` and treats the
-    # quoted identifier as the same builtin.
-    for fname in _FUNCTION_CALL_RE.findall(stmt):
-        if fname.lower() in _DANGEROUS_FUNCTION_NAMES:
-            raise HTTPException(
-                403,
-                "File-access functions (read_csv, read_parquet, etc.) are not allowed.",
-            )
-    for fname in _QUOTED_FUNCTION_CALL_RE.findall(stmt):
-        if fname.lower() in _DANGEROUS_FUNCTION_NAMES:
-            raise HTTPException(
-                403,
-                "File-access functions (read_csv, read_parquet, etc.) are not allowed.",
-            )
-    if re.search(r'\bhttpfs_', stmt, re.IGNORECASE):
-        raise HTTPException(403, "HTTPFS access is not allowed through the query interface.")
+    try:
+        validate_read_only_query(sql)
+    except ReadOnlyQueryError as e:
+        raise HTTPException(e.status_code, str(e))
 
 
 # --- Pydantic models ---
@@ -456,14 +278,17 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
                     wrapped = f"SELECT * FROM ({sql_clean}) AS _q LIMIT {effective_limit}"
                 elif not has_limit:
                     # No limit anywhere — inject server cap into the SQL itself
-                    # so DuckDB can optimize and stop scanning early
-                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q LIMIT {SERVER_ROW_CAP}"
+                    # so DuckDB can optimize and stop scanning early. Keep the
+                    # caller's offset: dropping it here silently re-served page 1
+                    # to clients paginating without an explicit limit.
+                    offset_clause = f"OFFSET {req.offset} " if req.offset > 0 else ""
+                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q {offset_clause}LIMIT {SERVER_ROW_CAP}"
                     effective_limit = SERVER_ROW_CAP
+                elif req.offset > 0:
+                    # SQL has its own LIMIT; apply just the offset
+                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q OFFSET {req.offset}"
                 else:
                     wrapped = sql_to_execute
-
-                if req.offset > 0 and effective_limit is None:
-                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q OFFSET {req.offset}"
 
                 result = conn.execute(wrapped, req.params)
                 columns = [desc[0] for desc in result.description]
@@ -476,6 +301,7 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
                     "columns": columns,
                     "column_types": column_types,
                     "rows": [[_serialize(v) for v in row] for row in rows],
+                    "row_count": len(rows),
                     "truncated": effective_limit is not None and len(rows) == effective_limit,
                     "offset": req.offset,
                     "limit": effective_limit,
