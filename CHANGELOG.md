@@ -2,7 +2,7 @@
 
 All notable changes to havn are documented in this file.
 
-## [Unreleased]
+## [0.2.24] - 2026-07-09
 
 ### Added
 
