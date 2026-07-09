@@ -431,8 +431,12 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
             if conn_name in connections:
                 connections[conn_name].params.update(conn_overrides)
             else:
-                conn_type = conn_overrides.pop("type", "") if isinstance(conn_overrides, dict) else ""
-                connections[conn_name] = ConnectionConfig(type=conn_type, params=conn_overrides)
+                # Copy before splitting off "type": conn_overrides is the dict
+                # stored on EnvironmentConfig (and referenced from the raw
+                # YAML), so popping in place would corrupt the config object.
+                params = dict(conn_overrides) if isinstance(conn_overrides, dict) else {}
+                conn_type = params.pop("type", "")
+                connections[conn_name] = ConnectionConfig(type=conn_type, params=params)
 
     # Sources and exposures
     sources = _parse_sources(project_dir)

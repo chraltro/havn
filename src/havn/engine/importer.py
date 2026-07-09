@@ -76,6 +76,12 @@ def preview_file(file_path: str, limit: int = 100) -> dict:
 
 def preview_query(connection_string: str, query: str, limit: int = 100) -> dict:
     """Preview data from an external database using DuckDB's extension system."""
+    from havn.engine.sql_safety import validate_read_only_query
+
+    # The query is embedded in a wrapper statement and runs in a scratch
+    # process-local DuckDB; enforce the platform's read-only rules so it
+    # can't smuggle in extra statements or local file access.
+    validate_read_only_query(query)
     conn = duckdb.connect(":memory:")
     try:
         safe_cs = _sql_literal(connection_string)

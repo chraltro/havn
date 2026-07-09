@@ -84,6 +84,8 @@ from havn.cli import env  # noqa: E402, F401
 from havn.cli.flight import app as flight_app  # noqa: E402
 from havn.cli import jobs  # noqa: E402, F401
 from havn.cli import macros  # noqa: E402, F401
+from havn.cli import mcp  # noqa: E402, F401
+from havn.cli.metrics import metrics_app  # noqa: E402
 from havn.cli import migrate  # noqa: E402, F401
 from havn.cli import models  # noqa: E402, F401
 from havn.cli import pipeline  # noqa: E402, F401
@@ -99,3 +101,4 @@ from havn.cli import streaming  # noqa: E402, F401
 from havn.cli import version  # noqa: E402, F401
 
 app.add_typer(flight_app, name="flight")
+app.add_typer(metrics_app, name="metrics")

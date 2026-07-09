@@ -197,7 +197,10 @@ export default function DashboardWidget({
         if (dashboard) {
           api.queryWidget(dashboard.id, widget.id, { [column]: value }).then(result => {
             setDrillData({ ...result, loading: false, error: result.error || null, _fetchedAt: new Date().toISOString(), _queryDuration: rawData?._queryDuration });
-          }).catch(() => {});
+          }).catch((e) => {
+            // Surface the failure — a swallowed error left the drill-down stuck on its spinner
+            setDrillData({ columns: [], rows: [], row_count: 0, loading: false, error: e.message || "Failed to load drill-down data" });
+          });
         }
       } else {
         setCrossFilter(widget.id, column, value);

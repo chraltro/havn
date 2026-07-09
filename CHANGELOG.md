@@ -2,6 +2,70 @@
 
 All notable changes to havn are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Semantic layer**: declare metrics once in `metrics/*.yml` (model,
+  measure, dimensions, time dimension, filters) and query them
+  consistently everywhere. `havn metrics` lists definitions,
+  `havn metrics sql` shows the compiled SELECT, `havn metrics query`
+  runs it (routing through a live `havn serve` like `havn query` does).
+  API: `GET /api/semantic/metrics`, `POST /api/semantic/compile`,
+  `POST /api/semantic/query` (masking policies apply). The compiler
+  validates dimensions/grains against the declaration and escapes time
+  literals, and every compiled statement passes the same read-only SQL
+  validation as `/api/query`.
+- **MCP server**: `havn mcp` starts a Model Context Protocol stdio
+  server (no SDK dependency) so AI agents like Claude Code can work
+  against the warehouse. Tools: `query` (read-only), `list_tables`,
+  `describe_table`, `list_models`, `get_model`, `model_lineage`,
+  `run_history`, `list_metrics`, `query_metric`, and `run_transform`
+  (omitted with `--read-only`; creates Pipeline Rewind snapshots when
+  enabled). Reads route through a running `havn serve` when it holds
+  the warehouse lock, falling back to a direct read-only connection.
+- The read-only SQL validator moved to `havn.engine.sql_safety` so the
+  query API, dashboards, collaboration cells, semantic layer, and MCP
+  server share one implementation (`routes/query.py` re-exports the old
+  names for compatibility).
+
+- `havn run` now accepts `--env`, matching every other pipeline command.
+
+### Fixed
+
+- `havn tables` and `havn history` crashed with "too many values to
+  unpack" whenever a `havn serve` was running for the project: both
+  unpacked the server-routed result into three variables after a fourth
+  field (`truncated`) was added to `_fetch_via_server`.
+- The dashboard widget cache never cached anything: writes ran on a
+  read-only cursor from the read pool AND used `INTERVAL ? SECOND`,
+  which is a DuckDB parser error — both failures were swallowed by a
+  bare `except`. Cache writes now run on the write connection with the
+  parameterizable interval form, and the cache key includes the
+  widget's SQL so editing a query immediately misses stale entries
+  instead of serving the old result until the TTL expires.
+- `/api/query` silently dropped `offset` when no `limit` was given and
+  the SQL had no LIMIT clause, re-serving page 1 to paginating clients.
+  The response now also includes `row_count` (declared in the client
+  types but never sent).
+- Environment overrides that introduced a *new* connection mutated the
+  parsed YAML in place (`.pop("type")`), stripping the connection type
+  from the stored config object.
+- Dashboards (web): a failed batch query left every widget spinning
+  forever with the error only in the console; out-of-order batch
+  responses could overwrite newer filter results (now sequence-guarded);
+  drill-down fetch errors were swallowed, freezing the drill view; and
+  History run-detail responses arriving after collapse/re-expand could
+  attach to the wrong run.
+- Wiki (web): page prose is now HTML-escaped before rendering (a raw
+  `<` previously parsed as markup), and a failed page load shows a
+  styled error with Retry instead of a fake "Error" page.
+- Orchestration (web): interval/range/retry/timeout number inputs no
+  longer snap to defaults mid-edit; values are clamped on blur and at
+  save, so clearing a field can't emit `NaN` into a cron expression.
+- `importer.preview_query` now enforces the platform's read-only SQL
+  validation before embedding the query in its wrapper statement.
+
 ## [0.2.23] - 2026-06-12
 
 Patch release: macro hot-reload fix.

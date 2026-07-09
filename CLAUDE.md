@@ -38,6 +38,9 @@ havn diff gold.orders           # diff a single model
 havn diff                       # diff changed models + downstream
 havn diff --full                # diff entire database
 havn macros                     # list registered SQL macros
+havn metrics                    # list semantic-layer metrics (metrics/*.yml)
+havn metrics query revenue --by region --grain month   # query a metric
+havn mcp                        # start MCP stdio server for AI agents
 havn backup                     # create verified backup
 havn backup --keep 10           # backup with retention
 havn backup-list                # list tracked backups
@@ -67,8 +70,11 @@ src/havn/                       # Python package (the platform itself)
     write_queue.py            # Write queue + read pool for DuckDB connections
     query_governor.py         # Query timeout enforcement via DuckDB interrupt()
     backup.py                 # Verified backup/restore with integrity checks
+    semantic.py               # Semantic layer (metrics/*.yml → SQL compiler)
+    sql_safety.py             # Shared read-only SQL validation
     notebook/                 # .dpnb notebook execution
     docs.py                   # Markdown doc generator
+  mcp/                          # MCP stdio server for AI agents (havn mcp)
   lint/
     linter.py                 # SQLFluff integration
   server/
@@ -101,6 +107,8 @@ tests/                        # pytest test suite
   test_query_governor.py      # Query timeouts
   test_e2e_api.py             # End-to-end API tests
   test_connectors_warehouse.py # Warehouse migration connectors
+  test_semantic.py            # Semantic layer (metrics)
+  test_mcp_server.py          # MCP server
 ```
 
 ## Architecture
@@ -115,6 +123,7 @@ User project layout (created by `havn init`):
   export/         Python scripts (or .dpnb notebooks)
   notebooks/      .dpnb interactive notebooks
   macros/         Python SQL macros (auto-registered as DuckDB UDFs)
+  metrics/        Semantic-layer metric definitions (YAML)
   project.yml     Config: connections, lint, alerts
   .env            Secrets (never committed)
   .havn-env       Active environment (local, not committed)

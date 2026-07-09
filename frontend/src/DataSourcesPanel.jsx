@@ -166,6 +166,21 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
   const [syncing, setSyncing] = useState(null);
   const [health, setHealth] = useState({});
   const [successBanner, setSuccessBanner] = useState(null);
+  const [setupError, setSetupError] = useState(null);
+
+  // Returns a human-readable message if step-1 required fields are empty,
+  // else null. Gates both "Test Connection" and "Skip Test" so the wizard
+  // can't advance to discovery/setup with a connector that can't connect.
+  const validateStepOne = () => {
+    const missing = [];
+    if (!connectionName.trim()) missing.push("Connection Name");
+    for (const p of selectedType?.params || []) {
+      if (p.required && !String(configValues[p.name] || "").trim()) {
+        missing.push(p.name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()));
+      }
+    }
+    return missing.length ? `Fill in required field${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}.` : null;
+  };
 
   useEffect(() => { loadData(); }, []);
 
@@ -471,11 +486,12 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
                     <input value={schedule} onChange={(e) => setSchedule(e.target.value)} style={st.input} placeholder={selectedType.default_schedule || "e.g. 0 6 * * *"} />
                   </div>
                 </div>
+                {setupError && <div style={{ ...st.testError, marginBottom: "8px" }} role="alert">{setupError}</div>}
                 <div style={st.actions}>
-                  <button onClick={() => { setStep(2); doTest(); }} disabled={testing || !connectionName} style={st.btnPrimary}>
+                  <button onClick={() => { const err = validateStepOne(); if (err) { setSetupError(err); return; } setSetupError(null); setStep(2); doTest(); }} disabled={testing} style={st.btnPrimary}>
                     {testing ? "Testing..." : "Test Connection"}
                   </button>
-                  <button onClick={() => { setStep(3); doDiscover(); }} style={st.btn}>Skip Test</button>
+                  <button onClick={() => { const err = validateStepOne(); if (err) { setSetupError(err); return; } setSetupError(null); setStep(3); doDiscover(); }} style={st.btn}>Skip Test</button>
                 </div>
               </div>
             )}

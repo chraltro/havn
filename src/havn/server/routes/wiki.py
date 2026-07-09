@@ -41,6 +41,8 @@ def _extract_category(slug: str) -> str:
         "auth": "Security",
         "masking": "Security",
         "sentinel": "Data Quality",
+        "semantic-layer": "Core Concepts",
+        "mcp": "Advanced",
         "scheduler": "Advanced",
         "notebooks": "Advanced",
         "versioning": "Advanced",

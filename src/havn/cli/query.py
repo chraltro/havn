@@ -305,7 +305,7 @@ def tables(
     # lock doesn't bounce us out.
     fetched = _fetch_via_server(project_dir, sql)
     if fetched is not None:
-        _columns, rows, server_label = fetched
+        _columns, rows, server_label, _truncated = fetched
         if not rows:
             console.print("[yellow]No tables found.[/yellow]")
             return
@@ -370,7 +370,7 @@ def history(
     server_label: str | None = None
     fetched = _fetch_via_server(project_dir, sql)
     if fetched is not None:
-        _columns, rows, server_label = fetched
+        _columns, rows, server_label, _truncated = fetched
     else:
         if not _warehouse_exists(config, project_dir):
             console.print("[yellow]No warehouse database found.[/yellow]")

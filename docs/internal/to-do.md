@@ -9,17 +9,23 @@ DataSources keyboard-operable cards; showDocs leak; progress-bar/logo theming;
 run-status-dot a11y.
 
 Remaining (lower priority, not yet fixed):
-- [ ] Disabled action buttons give no reason/tooltip (App "Run Model", Masking
-  Edit/Delete disabled while a form is open, Query Explain). Add `title`.
-- [ ] Number inputs in Orchestration interval/range silently coerce invalid
-  values (clear/0 → 1) with no feedback. Clamp on blur + reflect.
-- [ ] DataSources "Skip Test"/Continue advances with empty required fields; no
-  inline required-field validation.
+- [x] Disabled action buttons give no reason/tooltip — fixed 2026-06-13:
+  App Run/Run Model titles explain "a run is in progress"; Masking
+  Add/Edit/Delete titles explain "finish the open form first".
+- [x] Number inputs in Orchestration interval/range silently coerce invalid
+  values — fixed 2026-06-12: raw value while typing, clamp on blur, and the
+  cron builder / job save clamp again so NaN can't leak into schedules.
+- [x] DataSources "Skip Test"/Continue advances with empty required fields —
+  fixed 2026-06-13: both Test Connection and Skip Test now validate the
+  connection name + required params and show an inline error instead of
+  advancing to a connector that can't connect.
 - [ ] DataSources file upload: no progress/loading indicator during upload.
-- [ ] QueryPanel "Query this table" auto-run bypasses limit-wrapping that the
-  normal Run path applies (inconsistent result set).
-- [ ] WikiPanel fetch failure renders a fake "Error" page via dangerouslySet
-  HTML with no retry/styled error; also raw `<` in prose isn't escaped.
+- [x] QueryPanel "Query this table" auto-run limit bypass — verified stale
+  2026-06-12: the 0.2.22 query editor rework routes auto-run through
+  runQuery(), which applies the limit.
+- [x] WikiPanel fetch failure / raw `<` — fixed 2026-06-12: prose is
+  HTML-escaped before dangerouslySetInnerHTML (code blocks extracted first),
+  and fetch failures render a styled error with a Retry button.
 - [ ] Dashboard/Widget/Filter modals aren't FocusTrap-wrapped (no Escape/focus
   mgmt); their close `×` buttons lack aria-label.
 - [ ] SortableTable headers / column-menu / pin items are mouse-only (no
@@ -29,7 +35,9 @@ Remaining (lower priority, not yet fixed):
 - [ ] FileTree per-file delete (×) and dir "+" are hover-only (not focusable).
 - [ ] Color-only status in DiffPanel / connector dots (add glyph/text).
 - [ ] CommandPalette results lack listbox/option roles + aria-activedescendant.
-- [ ] GitPanel hardcoded button text color (#0B0E14) can vanish on some themes.
+- [x] GitPanel hardcoded button text color (#0B0E14) — fixed 2026-06-13:
+  the commit button now uses #fff on the accent like every sibling button,
+  so it no longer vanishes on dark-accent themes.
 
 ## Issue-hunt sweep (2026-06-09) — all resolved
 
