@@ -65,13 +65,19 @@ Issues = "https://github.com/chraltro/havn/issues"
 havn = "havn.cli:app"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/havn", "frontend/dist", "README.md", "LICENSE", "pyproject.toml"]
+include = ["src/havn", "frontend/dist", "README.md", "LICENSE", "pyproject.toml", "hatch_build.py"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/havn"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"frontend/dist" = "havn/static"
+# The built frontend (frontend/dist -> havn/static) is added by this hook for
+# STANDARD wheels only, never for editable installs. A plain force-include here
+# would also run for `pip install -e .` and materialize a top-level havn/static
+# directory in site-packages with no __init__.py, turning `havn` into a
+# namespace package and breaking import resolution under parallel test workers.
+# See hatch_build.py for the full rationale.
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
 
 [tool.hatch.build.targets.sdist.force-include]
 "frontend/dist" = "frontend/dist"
