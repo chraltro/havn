@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from inspect import signature
 from pathlib import Path
 from typing import Any, Callable, get_type_hints
+from weakref import WeakKeyDictionary, WeakSet
 
 import duckdb
 
@@ -490,23 +491,34 @@ def _force_reload_macro_modules(macros_dir: Path) -> None:
 # does not conflict with any previously registered UDF on the same
 # connection object.
 
-# id(conn) → int  — tracks how many times macros have been registered on each conn
-_conn_reload_counters: dict[int, int] = {}
+# conn → int  — tracks how many times macros have been registered on each conn.
+# Keyed by weak reference to the connection, NOT id(conn): a closed connection
+# is garbage-collected and CPython is free to hand its memory address (and thus
+# its id()) to a brand-new connection. A plain ``dict[int, int]`` would then
+# resurrect the dead connection's counter for the new one, poisoning the
+# versioned internal UDF names. WeakKeyDictionary drops the entry automatically
+# when the connection dies, so id reuse can never leak state across connections.
+_conn_reload_counters: "WeakKeyDictionary[duckdb.DuckDBPyConnection, int]" = (
+    WeakKeyDictionary()
+)
 
 
 def _next_reload_id(conn: duckdb.DuckDBPyConnection) -> int:
     """Return and increment the reload counter for this connection."""
-    conn_id = id(conn)
-    n = _conn_reload_counters.get(conn_id, 0)
-    _conn_reload_counters[conn_id] = n + 1
+    n = _conn_reload_counters.get(conn, 0)
+    _conn_reload_counters[conn] = n + 1
     return n
 
 
-# Connections (by id) that have already had macros registered.  We use this
-# to make register_macros() idempotent so multiple call sites during startup
-# don't fight DuckLake's "function already exists" catalog rule. Hot-reload
-# clears the entry for a conn so the next call goes through.
-_conn_macros_registered: set[int] = set()
+# Connections that have already had macros registered.  We use this to make
+# register_macros() idempotent so multiple call sites during startup don't
+# fight DuckLake's "function already exists" catalog rule. Hot-reload clears
+# the entry for a conn so the next call goes through. Held as a WeakSet (not a
+# set of id(conn)) for the same id-reuse reason as _conn_reload_counters above:
+# without it, a fresh connection that reuses a dead one's address would be
+# treated as "already registered" and skip registration entirely, so its
+# macros would never exist (see the get_rows nightly flake).
+_conn_macros_registered: "WeakSet[duckdb.DuckDBPyConnection]" = WeakSet()
 
 
 # Strong references to every Python function we have ever handed to
@@ -623,8 +635,7 @@ def register_macros(
     # and the second module reload makes the *first* registration's function
     # objects GC-eligible — DuckDB's C pointer then dangles into reused
     # memory and queries hit unrelated Python callables.
-    conn_id = id(conn)
-    if not force_reload and conn_id in _conn_macros_registered:
+    if not force_reload and conn in _conn_macros_registered:
         return 0
 
     # Module reload (and __pycache__ eviction) is destructive — only do it
@@ -799,7 +810,7 @@ def register_macros(
     # Mark this connection as having had macros registered so subsequent
     # callers (deps.py post-init, ReadPool slots) skip out instead of
     # fighting the catalog.
-    _conn_macros_registered.add(conn_id)
+    _conn_macros_registered.add(conn)
     return count
 
 
