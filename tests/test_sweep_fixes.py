@@ -104,6 +104,43 @@ def test_validator_blocks_replacement_scan_url():
     assert exc.value.status_code == 403
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        'SELECT * FROM "/etc/passwd"',
+        'SELECT * FROM "C:/Windows/win.ini"',
+        'SELECT * FROM "C:\\Windows\\win.ini"',
+        'SELECT * FROM "https://example.com/data.csv"',
+        'SELECT * FROM "s3://bucket/secret.parquet"',
+        'SELECT * FROM "./relative.csv"',
+        'SELECT * FROM ("/etc/passwd")',
+        'SELECT * FROM gold.x JOIN "/etc/passwd" ON 1=1',
+    ],
+)
+def test_validator_blocks_double_quoted_replacement_scan(sql):
+    # DuckDB resolves a double-quoted path in table position as a replacement
+    # scan too, so the single-quote rule alone left a trivial bypass.
+    with pytest.raises(HTTPException) as exc:
+        _validator()(sql)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        'SELECT * FROM gold."my orders"',
+        'SELECT * FROM "gold"."orders"',
+        'SELECT * FROM "MyTable"',
+        'SELECT "weird col" FROM gold.orders',
+        "SELECT * FROM gold.orders WHERE name = 'a/b'",
+    ],
+)
+def test_validator_allows_plain_quoted_identifiers(sql):
+    # Only path-shaped quoted names are a replacement scan; ordinary quoted
+    # identifiers (and slashes inside string values) must keep working.
+    _validator()(sql)
+
+
 def test_validator_blocks_parenthesised_replacement_scan():
     with pytest.raises(HTTPException) as exc:
         _validator()("SELECT * FROM ('/tmp/secret.parquet')")

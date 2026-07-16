@@ -96,6 +96,15 @@ _QUOTED_FUNCTION_CALL_RE = re.compile(r'"([A-Za-z_][A-Za-z0-9_]*)"\s*\(')
 # after FROM or JOIN, optionally wrapped in one layer of parentheses. This is
 # DuckDB's file replacement-scan syntax.
 _REPLACEMENT_SCAN_RE = re.compile(r"\b(?:from|join)\s*\(?\s*''", re.IGNORECASE)
+# DuckDB also resolves a DOUBLE-quoted path in table position as a replacement
+# scan (FROM "/etc/passwd" reads the file just like FROM '/etc/passwd'). Double
+# quotes are not stripped above because they normally delimit identifiers, so
+# match only path-shaped ones: containing a slash/backslash or a URL scheme.
+# Plain quoted identifiers (FROM "my table", FROM "gold"."orders") stay legal.
+_DQUOTE_PATH_SCAN_RE = re.compile(
+    r'\b(?:from|join)\s*\(?\s*"(?:[a-z][a-z0-9+.-]*://|[^"]*[/\\])[^"]*"',
+    re.IGNORECASE,
+)
 
 
 def split_statements(sql: str) -> list[str]:
@@ -235,7 +244,7 @@ def validate_read_only_query(sql: str) -> None:
     # ``''`` here, and a string literal in table position (directly after FROM or
     # JOIN) is only ever a replacement scan, never valid otherwise. Reject it so
     # the read-only surfaces can't be used to exfiltrate server files or SSRF.
-    if _REPLACEMENT_SCAN_RE.search(stmt):
+    if _REPLACEMENT_SCAN_RE.search(stmt) or _DQUOTE_PATH_SCAN_RE.search(stmt):
         raise ReadOnlyQueryError(
             "Reading files by path (FROM '<path>') is not allowed through the query interface.",
         )

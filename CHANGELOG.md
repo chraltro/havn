@@ -2,6 +2,19 @@
 
 All notable changes to havn are documented in this file.
 
+## [0.2.26] - 2026-07-16
+
+### Security
+
+- **Read-only query surfaces** now also reject DuckDB replacement-scan file
+  reads written with double quotes (`SELECT * FROM "/etc/passwd"`). 0.2.25
+  blocked only the single-quoted form, but DuckDB resolves a double-quoted
+  path in table position as a file read too, so swapping the quote character
+  bypassed the check on `/api/query`, the semantic layer, the importer
+  preview, and the MCP `query` tool. Ordinary quoted identifiers
+  (`FROM "gold"."my orders"`) are unaffected: only path-shaped names
+  (containing a slash, backslash, or URL scheme) are rejected.
+
 ## [0.2.25] - 2026-07-16
 
 ### Security
