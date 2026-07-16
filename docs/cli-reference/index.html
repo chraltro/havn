@@ -1561,6 +1561,84 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#semantic-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Semantic Layer
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Semantic Layer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#havn-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        havn metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#havn-metrics-query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        havn metrics query
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#havn-metrics-sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        havn metrics sql
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ai-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AI Agents
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="AI Agents">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#havn-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        havn mcp
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#data-quality" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2517,6 +2595,84 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#semantic-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Semantic Layer
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Semantic Layer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#havn-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        havn metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#havn-metrics-query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        havn metrics query
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#havn-metrics-sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        havn metrics sql
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ai-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AI Agents
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="AI Agents">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#havn-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        havn mcp
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#data-quality" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3331,7 +3487,7 @@ havn<span class="w"> </span>run<span class="w"> </span>export/daily_report.py
 </table>
 <h3 id="havn-transform">havn transform<a class="headerlink" href="#havn-transform" title="Permanent link">&para;</a></h3>
 <p>Build SQL models in dependency order.</p>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>transform<span class="w"> </span><span class="o">[</span>TARGETS...<span class="o">]</span><span class="w"> </span><span class="o">[</span>--force<span class="o">]</span><span class="w"> </span><span class="o">[</span>--parallel<span class="o">]</span><span class="w"> </span><span class="o">[</span>--workers<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--env<span class="w"> </span>NAME<span class="o">]</span><span class="w"> </span><span class="o">[</span>--skip-check<span class="o">]</span><span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>transform<span class="w"> </span><span class="o">[</span>TARGETS...<span class="o">]</span><span class="w"> </span><span class="o">[</span>--force<span class="o">]</span><span class="w"> </span><span class="o">[</span>--sequential<span class="o">]</span><span class="w"> </span><span class="o">[</span>--workers<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--env<span class="w"> </span>NAME<span class="o">]</span><span class="w"> </span><span class="o">[</span>--skip-check<span class="o">]</span><span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
 </code></pre></div>
 <table>
 <thead>
@@ -3353,9 +3509,9 @@ havn<span class="w"> </span>run<span class="w"> </span>export/daily_report.py
 <td>Rebuild all (ignore change detection)</td>
 </tr>
 <tr>
-<td><code>--parallel</code></td>
+<td><code>--sequential</code></td>
 <td>false</td>
-<td>Run independent models concurrently</td>
+<td>Disable parallel execution; run models one at a time (independent models run concurrently by default)</td>
 </tr>
 <tr>
 <td><code>--workers, -w</code></td>
@@ -3440,6 +3596,99 @@ havn<span class="w"> </span>run<span class="w"> </span>export/daily_report.py
 <p>Show recent run history.</p>
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span><span class="nb">history</span><span class="w"> </span><span class="o">[</span>--limit<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
 </code></pre></div>
+<h2 id="semantic-layer">Semantic Layer<a class="headerlink" href="#semantic-layer" title="Permanent link">&para;</a></h2>
+<p>Metrics are defined as YAML in the project's <code>metrics/</code> directory. See <a href="semantic-layer">Semantic Layer</a> for the definition format.</p>
+<h3 id="havn-metrics">havn metrics<a class="headerlink" href="#havn-metrics" title="Permanent link">&para;</a></h3>
+<p>List the metrics defined in <code>metrics/*.yml</code>.</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>metrics<span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
+havn<span class="w"> </span>metrics<span class="w"> </span>list<span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
+</code></pre></div>
+<h3 id="havn-metrics-query">havn metrics query<a class="headerlink" href="#havn-metrics-query" title="Permanent link">&para;</a></h3>
+<p>Compile a metric to SQL and run it against the warehouse.</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>metrics<span class="w"> </span>query<span class="w"> </span>NAME<span class="w"> </span><span class="o">[</span>--by<span class="w"> </span>DIM<span class="o">]</span><span class="w"> </span><span class="o">[</span>--grain<span class="w"> </span>GRAIN<span class="o">]</span><span class="w"> </span><span class="o">[</span>--start<span class="w"> </span>DATE<span class="o">]</span><span class="w"> </span><span class="o">[</span>--end<span class="w"> </span>DATE<span class="o">]</span><span class="w"> </span><span class="o">[</span>--limit<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--csv<span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span><span class="w"> </span><span class="o">[</span>--env<span class="w"> </span>NAME<span class="o">]</span><span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>NAME</code></td>
+<td>required</td>
+<td>Metric name</td>
+</tr>
+<tr>
+<td><code>--by</code></td>
+<td>none</td>
+<td>Dimension(s) to group by (repeatable)</td>
+</tr>
+<tr>
+<td><code>--grain</code></td>
+<td>none</td>
+<td>Time grain: <code>hour</code>, <code>day</code>, <code>week</code>, <code>month</code>, <code>quarter</code>, <code>year</code></td>
+</tr>
+<tr>
+<td><code>--start</code> / <code>--end</code></td>
+<td>none</td>
+<td>Inclusive lower / exclusive upper bound on the time dimension</td>
+</tr>
+<tr>
+<td><code>--limit, -n</code></td>
+<td>none</td>
+<td>Max rows to return</td>
+</tr>
+<tr>
+<td><code>--csv</code> / <code>--json</code></td>
+<td>false</td>
+<td>Output format</td>
+</tr>
+<tr>
+<td><code>--env, -e</code></td>
+<td>none</td>
+<td>Environment override</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>metrics<span class="w"> </span>query<span class="w"> </span>revenue<span class="w"> </span>--by<span class="w"> </span>region<span class="w"> </span>--grain<span class="w"> </span>month
+</code></pre></div>
+<h3 id="havn-metrics-sql">havn metrics sql<a class="headerlink" href="#havn-metrics-sql" title="Permanent link">&para;</a></h3>
+<p>Print the SQL a metric query compiles to, without executing it.</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>metrics<span class="w"> </span>sql<span class="w"> </span>NAME<span class="w"> </span><span class="o">[</span>--by<span class="w"> </span>DIM<span class="o">]</span><span class="w"> </span><span class="o">[</span>--grain<span class="w"> </span>GRAIN<span class="o">]</span><span class="w"> </span><span class="o">[</span>--start<span class="w"> </span>DATE<span class="o">]</span><span class="w"> </span><span class="o">[</span>--end<span class="w"> </span>DATE<span class="o">]</span><span class="w"> </span><span class="o">[</span>--limit<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
+</code></pre></div>
+<h2 id="ai-agents">AI Agents<a class="headerlink" href="#ai-agents" title="Permanent link">&para;</a></h2>
+<h3 id="havn-mcp">havn mcp<a class="headerlink" href="#havn-mcp" title="Permanent link">&para;</a></h3>
+<p>Start an MCP stdio server exposing the warehouse to AI agents.</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>mcp<span class="w"> </span><span class="o">[</span>--read-only<span class="o">]</span><span class="w"> </span><span class="o">[</span>--env<span class="w"> </span>NAME<span class="o">]</span><span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--read-only</code></td>
+<td>false</td>
+<td>Disable the <code>run_transform</code> tool</td>
+</tr>
+<tr>
+<td><code>--env, -e</code></td>
+<td>none</td>
+<td>Environment override</td>
+</tr>
+</tbody>
+</table>
+<p>Register it with an MCP client, for example:</p>
+<div class="highlight"><pre><span></span><code>claude<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span>havn<span class="w"> </span>--<span class="w"> </span>havn<span class="w"> </span>mcp<span class="w"> </span>-p<span class="w"> </span>/path/to/project
+</code></pre></div>
+<p>Tools exposed: <code>query</code>, <code>list_tables</code>, <code>describe_table</code>, <code>list_models</code>, <code>get_model</code>, <code>model_lineage</code>, <code>run_history</code>, <code>list_metrics</code>, <code>query_metric</code>, <code>run_transform</code>.</p>
 <h2 id="data-quality">Data Quality<a class="headerlink" href="#data-quality" title="Permanent link">&para;</a></h2>
 <h3 id="havn-check">havn check<a class="headerlink" href="#havn-check" title="Permanent link">&para;</a></h3>
 <p>Validate SQL models, run assertions, and run contracts.</p>
@@ -3528,17 +3777,16 @@ havn<span class="w"> </span>run<span class="w"> </span>export/daily_report.py
 <h2 id="diff-and-versioning">Diff and Versioning<a class="headerlink" href="#diff-and-versioning" title="Permanent link">&para;</a></h2>
 <h3 id="havn-diff">havn diff<a class="headerlink" href="#havn-diff" title="Permanent link">&para;</a></h3>
 <p>Compare model SQL output against materialized tables. Three modes:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Single model — diff one specific table</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># Single model: diff one specific table</span>
 havn<span class="w"> </span>diff<span class="w"> </span>gold.orders
 
-<span class="c1"># Changed + downstream (default) — only diff models with SQL changes</span>
+<span class="c1"># Changed + downstream (default): only diff models with SQL changes</span>
 havn<span class="w"> </span>diff
-havn<span class="w"> </span>diff<span class="w"> </span>--changed
 
-<span class="c1"># Full database — diff everything (old behavior)</span>
-havn<span class="w"> </span>diff<span class="w"> </span>--all
+<span class="c1"># Full database: diff everything</span>
+havn<span class="w"> </span>diff<span class="w"> </span>--full
 </code></pre></div>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>diff<span class="w"> </span><span class="o">[</span>TARGETS...<span class="o">]</span><span class="w"> </span><span class="o">[</span>--changed<span class="o">]</span><span class="w"> </span><span class="o">[</span>--all<span class="o">]</span><span class="w"> </span><span class="o">[</span>--target<span class="w"> </span>SCHEMA<span class="o">]</span><span class="w"> </span><span class="o">[</span>--format<span class="w"> </span>FMT<span class="o">]</span><span class="w"> </span><span class="o">[</span>--rows<span class="o">]</span><span class="w"> </span><span class="o">[</span>--full<span class="o">]</span><span class="w"> </span><span class="o">[</span>--against<span class="w"> </span>REF<span class="o">]</span><span class="w"> </span><span class="o">[</span>--snapshot<span class="w"> </span>NAME<span class="o">]</span><span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>diff<span class="w"> </span><span class="o">[</span>TARGETS...<span class="o">]</span><span class="w"> </span><span class="o">[</span>--target<span class="w"> </span>SCHEMA<span class="o">]</span><span class="w"> </span><span class="o">[</span>--format<span class="w"> </span>FMT<span class="o">]</span><span class="w"> </span><span class="o">[</span>--rows<span class="o">]</span><span class="w"> </span><span class="o">[</span>--full<span class="o">]</span><span class="w"> </span><span class="o">[</span>--against<span class="w"> </span>REF<span class="o">]</span><span class="w"> </span><span class="o">[</span>--snapshot<span class="w"> </span>NAME<span class="o">]</span><span class="w"> </span><span class="o">[</span>--exit-nonzero-on-change<span class="o">]</span><span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
 </code></pre></div>
 <table>
 <thead>
@@ -3553,16 +3801,6 @@ havn<span class="w"> </span>diff<span class="w"> </span>--all
 <td><code>TARGETS</code></td>
 <td>none</td>
 <td>Specific models to diff (single mode)</td>
-</tr>
-<tr>
-<td><code>--changed</code></td>
-<td>true</td>
-<td>Only diff models with SQL changes + downstream</td>
-</tr>
-<tr>
-<td><code>--all</code></td>
-<td>false</td>
-<td>Diff all models (full database)</td>
 </tr>
 <tr>
 <td><code>--target, -t</code></td>
@@ -3582,21 +3820,26 @@ havn<span class="w"> </span>diff<span class="w"> </span>--all
 <tr>
 <td><code>--full</code></td>
 <td>false</td>
-<td>Show all changed rows</td>
+<td>Show all changed rows, not just samples</td>
 </tr>
 <tr>
 <td><code>--against</code></td>
 <td>none</td>
-<td>Git-aware: only diff models changed vs a branch</td>
+<td>Git-aware: only diff models changed vs a branch/ref</td>
 </tr>
 <tr>
 <td><code>--snapshot</code></td>
 <td>none</td>
 <td>Compare against a named snapshot</td>
 </tr>
+<tr>
+<td><code>--exit-nonzero-on-change</code></td>
+<td>false</td>
+<td>Exit with code 2 if any model has added/removed/modified rows or schema changes (for CI)</td>
+</tr>
 </tbody>
 </table>
-<p>When no targets or flags are given, <code>--changed</code> is the default — it uses change detection to only diff models whose SQL (or upstream) actually changed, plus their downstream dependents. This is much faster than diffing the entire database.</p>
+<p>When no targets are given, diff uses change detection to only diff models whose SQL (or upstream) actually changed, plus their downstream dependents. This is much faster than diffing the entire database.</p>
 <h2 id="connectors">Connectors<a class="headerlink" href="#connectors" title="Permanent link">&para;</a></h2>
 <h3 id="havn-connect">havn connect<a class="headerlink" href="#havn-connect" title="Permanent link">&para;</a></h3>
 <p>Set up a data connector.</p>
@@ -3711,9 +3954,15 @@ havn<span class="w"> </span>diff<span class="w"> </span>--all
 </code></pre></div>
 <p>Shows all macros discovered from the <code>macros/</code> directory: name, parameters, return type, source file, and docstring.</p>
 <h3 id="havn-version">havn version<a class="headerlink" href="#havn-version" title="Permanent link">&para;</a></h3>
-<p>Show havn version.</p>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>version
+<p>Manage warehouse versions with Parquet-based time travel. <code>havn version</code> (or <code>havn version list</code>) lists tracked versions; other actions create, diff, restore, show a table timeline, or clean up old versions.</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>version<span class="w"> </span>list<span class="w">                          </span><span class="c1"># list tracked versions (default action)</span>
+havn<span class="w"> </span>version<span class="w"> </span>create<span class="w"> </span>--desc<span class="w"> </span><span class="s2">&quot;Before migration&quot;</span>
+havn<span class="w"> </span>version<span class="w"> </span>diff<span class="w"> </span>--from<span class="w"> </span>run-5<span class="w"> </span>--id<span class="w"> </span>run-8
+havn<span class="w"> </span>version<span class="w"> </span>restore<span class="w"> </span>--id<span class="w"> </span>run-5
+havn<span class="w"> </span>version<span class="w"> </span>timeline<span class="w"> </span>--table<span class="w"> </span>gold.customers
+havn<span class="w"> </span>version<span class="w"> </span>cleanup<span class="w"> </span>--keep<span class="w"> </span><span class="m">5</span>
 </code></pre></div>
+<p>To print the installed havn package version instead, use <code>havn --version</code> (or <code>havn -V</code>).</p>
 <h2 id="interactive">Interactive<a class="headerlink" href="#interactive" title="Permanent link">&para;</a></h2>
 <h3 id="havn-shell">havn shell<a class="headerlink" href="#havn-shell" title="Permanent link">&para;</a></h3>
 <p>Open an interactive SQL REPL connected to the warehouse. Supports multi-line
@@ -3766,7 +4015,7 @@ havn<span class="w"> </span>streaming<span class="w"> </span>poll-once<span clas
 <h3 id="havn-migrate">havn migrate<a class="headerlink" href="#havn-migrate" title="Permanent link">&para;</a></h3>
 <p>Convert between backends (DuckDB to DuckLake or vice versa). Reads the
 current backend, writes to the target.</p>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>migrate<span class="w"> </span>--target<span class="w"> </span>ducklake<span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>migrate<span class="w"> </span>--to<span class="w"> </span>ducklake<span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
 </code></pre></div>
 
 
