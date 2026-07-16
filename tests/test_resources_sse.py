@@ -26,8 +26,11 @@ def test_resources_sse_route_exists_and_returns_event_stream(client):
     TestClient's ``stream`` doesn't signal disconnect cleanly against an
     infinite generator, so we only verify the content negotiation here.
     """
-    routes = [r.path for r in client.app.routes if hasattr(r, "path")]
-    assert "/api/resources/stream" in routes
+    # Inspect the OpenAPI schema rather than app.routes: newer FastAPI
+    # versions register included routers lazily, so sub-router routes no
+    # longer appear as objects with a .path attribute in app.routes.
+    paths = client.app.openapi()["paths"]
+    assert "/api/resources/stream" in paths
 
 
 def test_resources_cancel_unknown_returns_404(client):

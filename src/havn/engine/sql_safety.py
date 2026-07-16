@@ -92,6 +92,10 @@ def strip_sql_comments_and_strings(sql: str) -> str:
 _IDENT_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 _FUNCTION_CALL_RE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)\s*\(')
 _QUOTED_FUNCTION_CALL_RE = re.compile(r'"([A-Za-z_][A-Za-z0-9_]*)"\s*\(')
+# A string literal (already normalised to '') in table position — i.e. right
+# after FROM or JOIN, optionally wrapped in one layer of parentheses. This is
+# DuckDB's file replacement-scan syntax.
+_REPLACEMENT_SCAN_RE = re.compile(r"\b(?:from|join)\s*\(?\s*''", re.IGNORECASE)
 
 
 def split_statements(sql: str) -> list[str]:
@@ -225,3 +229,13 @@ def validate_read_only_query(sql: str) -> None:
             )
     if re.search(r'\bhttpfs_', stmt, re.IGNORECASE):
         raise ReadOnlyQueryError("HTTPFS access is not allowed through the query interface.")
+    # DuckDB reads local/remote files via a "replacement scan" on a bare string
+    # path — ``SELECT * FROM '/etc/passwd'`` or ``FROM 'https://…/x.csv'`` — with
+    # no function call to catch above. String literals are already stripped to
+    # ``''`` here, and a string literal in table position (directly after FROM or
+    # JOIN) is only ever a replacement scan, never valid otherwise. Reject it so
+    # the read-only surfaces can't be used to exfiltrate server files or SSRF.
+    if _REPLACEMENT_SCAN_RE.search(stmt):
+        raise ReadOnlyQueryError(
+            "Reading files by path (FROM '<path>') is not allowed through the query interface.",
+        )

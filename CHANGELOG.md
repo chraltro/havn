@@ -2,6 +2,65 @@
 
 All notable changes to havn are documented in this file.
 
+## [Unreleased]
+
+### Security
+
+- **Read-only query surfaces** now reject DuckDB "replacement scan" file
+  reads (`SELECT * FROM '/path/file.csv'` / `FROM 'https://…'`). Previously
+  the read-only validator only blocked file-access *functions*
+  (`read_csv`, `read_parquet`, …), so a bare string path in table position
+  slipped through and could read any server-readable file or reach external
+  URLs. Covers `/api/query`, the semantic layer, the importer preview, and
+  the MCP `query` tool (all share `havn.engine.sql_safety`).
+- **`GET /v1/export/duckdb`** now requires the `execute` permission instead
+  of `read`. Column masking is enforced at query time, so a raw warehouse
+  download let a read-only `viewer` retrieve unmasked PII; editors and
+  admins keep the data-portability path.
+- **Column masking** no longer leaks when a table is referenced without its
+  schema (e.g. `SELECT c.email AS x FROM customers c`). The pre-query
+  rewriter now matches masking policies by table+column for schema-less
+  references, and the masked-column filter/sort/join guard covers them too.
+- **`POST /api/semantic/query`** now applies the same post-query masking
+  backstop as `/api/query`, so a metric surfacing a masked dimension can't
+  return unmasked values when the pre-query rewrite can't be applied.
+
+### Fixed
+
+- **Change detection** now rebuilds an incremental model when only its
+  `@config` settings change (`unique_key`, `incremental_strategy`,
+  `incremental_filter`, `partition_by`, `watermark`) — previously the
+  content hash covered only the query body, so config-only edits were
+  silently skipped.
+- **Parallel transforms**: a severity=`error` `@assert` (or a `@grain`
+  uniqueness check) failing inside a multi-model DAG tier now reports
+  `assertion_failed` and blocks downstream models, matching the sequential
+  path. Previously the parallel worker reported such models as `built` and
+  let bad data cascade.
+- **`@watermark` incremental filter** no longer permanently drops source
+  rows that tie the boundary watermark value. With a `unique_key` the filter
+  is now inclusive (`>=`) so tied late-arriving rows are re-read and
+  upserted; it is also NULL-safe on an empty target and works for integer
+  watermark columns (the old `'1900-01-01'` sentinel forced a string
+  comparison).
+- **Scheduler**: cron-scheduled orchestration jobs no longer fire twice per
+  matching minute (the once-per-minute dedup key was recorded under a key the
+  guard never read). Scheduled streams now honor their configured
+  `retries`/`retry_delay`, consistent with manual and server pipeline runs.
+- **Notebook database ingest** now passes the configured connection
+  parameters instead of the connection object's `__dict__`, which had nested
+  the real settings under `params` and caused every value to fall back to its
+  default (localhost / empty password).
+- **`havn backup`** no longer leaks its write connection (and skips the WAL
+  flush) when `CHECKPOINT` raises; the connection is always closed.
+- **`havn backup-restore`**: the backup-restore command was renamed from
+  `restore` (it was shadowed by the Pipeline Rewind `restore` command, so it
+  was unreachable). The model-restore `havn restore MODEL --run …` is
+  unchanged.
+- Removed a dead, unreachable duplicate `havn validate` command definition
+  (the reachable one lives in the project CLI module; the `havn check`
+  command covers model-level validation).
+
 ## [0.2.24] - 2026-07-09
 
 ### Added

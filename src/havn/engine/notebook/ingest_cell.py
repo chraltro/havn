@@ -122,7 +122,7 @@ def execute_ingest_cell(
                 return _ingest_error(f"Connection '{connection_name}' not found in project.yml.", start)
             from havn.engine.importer import import_from_connection
             result = import_from_connection(
-                conn, conn_config.type, conn_config.__dict__,
+                conn, conn_config.type, conn_config.params,
                 source_path, target_schema, target_table,
             )
             if result.get("error"):

@@ -283,7 +283,7 @@ havn also provides database-level backup and restore:
 havn backup
 
 # Restore from a backup
-havn restore warehouse.duckdb.backup_20250115_060000
+havn backup-restore warehouse.duckdb.backup_20250115_060000
 ```
 
 Backups are full copies of the DuckDB file. The backup command flushes the WAL (Write-Ahead Log) first to ensure consistency.

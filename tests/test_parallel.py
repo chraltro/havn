@@ -161,6 +161,47 @@ class TestParallelExecution:
             )
         conn.close()
 
+    def test_parallel_assertion_failure_blocks_downstream(self, tmp_path, transform_dir):
+        """A severity=error @assert failure in a parallel worker tier must be
+        reported as assertion_failed and block descendants — not silently pass
+        as 'built'. Only reproduces when 2+ models share a tier (so the parallel
+        worker path runs instead of the inline single-model path)."""
+        db_path = tmp_path / "test.duckdb"
+        conn = duckdb.connect(str(db_path))
+        ensure_meta_table(conn)
+        conn.execute("CREATE SCHEMA landing")
+        conn.execute("CREATE TABLE landing.src AS SELECT i AS id FROM range(10) g(i)")
+
+        # Two independent tier-1 models forces the parallel worker path.
+        # bronze.bad has an error-severity assertion that fails.
+        (transform_dir / "bronze" / "bad.sql").write_text(
+            "@config materialized=table, schema=bronze\n"
+            "@assert (SELECT count(*) FROM bronze.bad) = 0\n\n"
+            "SELECT id FROM landing.src\n"
+        )
+        (transform_dir / "bronze" / "ok.sql").write_text(
+            "@config materialized=table, schema=bronze\n\n"
+            "SELECT id FROM landing.src\n"
+        )
+        # Downstream of the failing model — must be blocked.
+        (transform_dir / "silver" / "down.sql").write_text(
+            "@config materialized=table, schema=silver\n"
+            "@depends_on bronze.bad\n\n"
+            "SELECT id FROM bronze.bad\n"
+        )
+
+        results = run_transform(
+            conn, transform_dir,
+            force=True, parallel=True, max_workers=4,
+            db_path=str(db_path),
+        )
+        assert results["bronze.bad"] == "assertion_failed"
+        assert results["bronze.ok"] == "built"
+        assert results.get("silver.down") in (
+            "skipped", "skipped_upstream_blocked", "assertion_failed",
+        )
+        conn.close()
+
     def test_parallel_error_in_tier_blocks_next(self, db, transform_dir):
         """An error in one tier should block downstream tiers in parallel mode."""
         db.execute("CREATE TABLE landing.good AS SELECT 1 AS id")

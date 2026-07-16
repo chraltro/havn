@@ -228,7 +228,7 @@ For complete database recovery, use database-level backup:
 havn backup
 
 # Restore from a backup
-havn restore warehouse.duckdb.backup_20250115_060000
+havn backup-restore warehouse.duckdb.backup_20250115_060000
 ```
 
 Backups are full copies of `warehouse.duckdb`. Use for disaster recovery, not for time travel within a run.

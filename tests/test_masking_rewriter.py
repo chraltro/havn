@@ -194,6 +194,39 @@ class TestRewriter:
         for row in rows:
             assert row[0] == "***"
 
+    def test_schema_less_table_alias_masked(self, conn):
+        """Regression: a masked column selected via an alias off a table
+        referenced WITHOUT its schema must still be masked. Combined with an
+        output alias this previously bypassed both the pre-query rewriter (no
+        schema -> no policy match) and the post-query backstop (alias rename)."""
+        _create_policy(conn)
+        from havn.engine.masking_rewriter import rewrite_query_with_masking
+
+        # DuckDB resolves the unqualified table via the search path.
+        conn.execute("SET search_path = 'gold'")
+        sql = "SELECT c.email AS x FROM customers c"
+        rewritten, ok, handled = rewrite_query_with_masking(sql, "viewer", conn)
+        assert ok, "schema-less table reference left the masked column unmasked"
+        assert len(handled) > 0
+
+        rows = conn.execute(rewritten).fetchall()
+        for row in rows:
+            assert row[0] == "***"
+
+    def test_schema_less_where_on_masked_denied(self, conn):
+        """Filtering on a masked column must be denied even when the table is
+        referenced without its schema."""
+        _create_policy(conn)
+        from havn.engine.masking_rewriter import (
+            MaskedColumnAccessError,
+            rewrite_query_with_masking,
+        )
+
+        conn.execute("SET search_path = 'gold'")
+        sql = "SELECT c.id FROM customers c WHERE c.email = 'x'"
+        with pytest.raises(MaskedColumnAccessError):
+            rewrite_query_with_masking(sql, "viewer", conn)
+
     def test_no_alias(self, conn):
         """SELECT email FROM gold.customers should be masked, column name preserved."""
         _create_policy(conn)

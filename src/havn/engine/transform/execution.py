@@ -49,15 +49,29 @@ def _execute_incremental(
 
     # Build the query, applying incremental_filter if this is not the first run.
     # @watermark sugar: when watermark=col is set and incremental_filter is
-    # absent, synthesize ``WHERE col > (SELECT COALESCE(MAX(col), '1900-01-01') FROM {this})``
-    # so users don't have to write the full filter expression by hand.
+    # absent, synthesize a ``WHERE col <cmp> (SELECT MAX(col) FROM {this})`` filter
+    # so users don't have to write it by hand.
+    #
+    # The comparison operator depends on the strategy. With a unique_key
+    # (delete+insert / merge), we use ``>=`` so rows that tie the current max
+    # watermark — common with second-granularity timestamps or batch IDs that
+    # arrive late within the same tick — are re-read and upserted rather than
+    # silently lost forever; the dedup on unique_key absorbs the re-read. For
+    # append-only loads there is no dedup, so we keep strict ``>`` to avoid
+    # inserting duplicates of the boundary rows.
     query = model.query
     incremental_filter = model.incremental_filter
     if model.watermark and not incremental_filter:
         wm = model.watermark.strip()
         validate_identifier(wm, "watermark column")
+        dedups = bool(model.unique_key) and model.incremental_strategy != "append"
+        cmp = ">=" if dedups else ">"
+        # NULL-safe on an empty target (MAX is NULL -> load everything) and
+        # type-agnostic — unlike a hardcoded '1900-01-01' sentinel, this works
+        # for integer/bigint watermark columns as well as dates/timestamps.
         incremental_filter = (
-            f"WHERE {wm} > (SELECT COALESCE(MAX({wm}), '1900-01-01') FROM {{this}})"
+            f"WHERE (SELECT MAX({wm}) FROM {{this}}) IS NULL "
+            f"OR {wm} {cmp} (SELECT MAX({wm}) FROM {{this}})"
         )
     if exists and incremental_filter:
         # Replace {this} with the target table name. Wrap the user query in
@@ -288,11 +302,24 @@ def _execute_single_model(
         _update_state(conn, model, duration_ms, row_count)
         log_run(conn, "transform", model.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
 
-        # Run assertions
+        # Run assertions (and the synthesised @grain check, if any). A
+        # severity=error failure must surface as "assertion_failed" so the
+        # orchestrator blocks descendants — same contract as the sequential path.
         assertion_results: list[AssertionResult] = []
-        if model.assertions:
+        if model.assertions or model.grain:
             assertion_results = run_assertions(conn, model)
             _save_assertions(conn, model, assertion_results)
+            failed_error = [
+                ar for ar in assertion_results
+                if not ar.passed and (ar.severity or "error") == "error"
+            ]
+            if failed_error:
+                return model.full_name, ModelResult(
+                    status="assertion_failed",
+                    duration_ms=duration_ms,
+                    row_count=row_count,
+                    assertions=assertion_results,
+                )
 
         # Auto-profile
         profile: ProfileResult | None = None

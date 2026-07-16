@@ -174,6 +174,43 @@ def test_change_detection(tmp_path):
     assert results["bronze.data"] == "built"
 
 
+def test_content_hash_reflects_incremental_config(tmp_path):
+    """Changing only @config incremental settings must change content_hash so
+    change detection rebuilds the model (not just changes to the query body)."""
+    from havn.engine.transform.models import SQLModel
+
+    def make(**cfg):
+        return SQLModel(
+            path=tmp_path / "m.sql",
+            name="m",
+            schema="silver",
+            full_name="silver.m",
+            sql="SELECT 1",
+            query="SELECT 1",
+            materialized="incremental",
+            **cfg,
+        )
+
+    base = make(unique_key="id", incremental_strategy="delete+insert")
+    # Same query body, different merge strategy -> must hash differently.
+    changed_strategy = make(unique_key="id", incremental_strategy="merge")
+    assert base.content_hash != changed_strategy.content_hash
+
+    # Changing the unique key must also change the hash.
+    changed_key = make(unique_key="pk", incremental_strategy="delete+insert")
+    assert base.content_hash != changed_key.content_hash
+
+    # Adding a watermark / partition_by / incremental_filter each matters.
+    assert make(watermark="updated_at").content_hash != make().content_hash
+    assert make(partition_by="dt").content_hash != make().content_hash
+    assert make(incremental_filter="WHERE x > 1").content_hash != make().content_hash
+
+    # Identical config -> identical hash (stable, no spurious rebuilds).
+    assert base.content_hash == make(
+        unique_key="id", incremental_strategy="delete+insert"
+    ).content_hash
+
+
 def test_transform_nonexistent_target(tmp_path):
     """Targeting a model that doesn't exist should return empty results."""
     db_path = tmp_path / "test.duckdb"

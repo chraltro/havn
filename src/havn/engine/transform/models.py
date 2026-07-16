@@ -65,7 +65,22 @@ class SQLModel:
     source_freshness: list[dict] = field(default_factory=list)  # @source_freshness specs
 
     def __post_init__(self) -> None:
-        self.content_hash = _hash_content(f"{self.materialized}:{self.query}")
+        # Hash everything that changes build semantics — not just the query —
+        # so editing e.g. @config unique_key or incremental_strategy triggers
+        # a rebuild. Only non-default values are appended, keeping hashes of
+        # models without these settings stable across havn upgrades.
+        parts = [f"{self.materialized}:{self.query}"]
+        if self.unique_key:
+            parts.append(f"unique_key={self.unique_key}")
+        if self.incremental_strategy != "delete+insert":
+            parts.append(f"incremental_strategy={self.incremental_strategy}")
+        if self.incremental_filter:
+            parts.append(f"incremental_filter={self.incremental_filter}")
+        if self.partition_by:
+            parts.append(f"partition_by={self.partition_by}")
+        if self.watermark:
+            parts.append(f"watermark={self.watermark}")
+        self.content_hash = _hash_content("|".join(parts))
 
 
 @dataclass

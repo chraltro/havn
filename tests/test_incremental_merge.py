@@ -84,6 +84,87 @@ class TestIncrementalMerge:
         conn.close()
 
 
+class TestIncrementalWatermark:
+    """Test @watermark incremental filter generation."""
+
+    def _model(self, tmp_path: Path, **cfg):
+        from havn.engine.transform import SQLModel
+
+        return SQLModel(
+            path=tmp_path / "m.sql",
+            name="dest",
+            schema="gold",
+            full_name="gold.dest",
+            sql="",
+            query="SELECT id, ts FROM landing.src",
+            materialized="incremental",
+            **cfg,
+        )
+
+    def test_watermark_dedup_reloads_boundary_ties(self, tmp_path: Path):
+        """With a unique_key, rows tying the max watermark must be re-read on
+        the next run (not permanently dropped) and upserted, not duplicated."""
+        from havn.engine.database import ensure_meta_table
+        from havn.engine.transform import _execute_incremental
+
+        conn = duckdb.connect(str(tmp_path / "test.duckdb"))
+        ensure_meta_table(conn)
+        conn.execute("CREATE SCHEMA IF NOT EXISTS landing")
+
+        # Run 1: two rows, max ts = 100.
+        conn.execute(
+            "CREATE TABLE landing.src AS "
+            "SELECT 1 AS id, 100 AS ts UNION ALL SELECT 2, 100"
+        )
+        model = self._model(
+            tmp_path, unique_key="id", incremental_strategy="merge", watermark="ts"
+        )
+        _execute_incremental(conn, model)
+        assert conn.execute("SELECT count(*) FROM gold.dest").fetchone()[0] == 2
+
+        # A late row arrives with the SAME watermark value (ts=100).
+        conn.execute(
+            "CREATE OR REPLACE TABLE landing.src AS "
+            "SELECT 1 AS id, 100 AS ts "
+            "UNION ALL SELECT 2, 100 "
+            "UNION ALL SELECT 3, 100"
+        )
+        _execute_incremental(conn, model)
+
+        # The tied late row must now be present, and no duplicates of 1/2.
+        rows = conn.execute("SELECT id FROM gold.dest ORDER BY id").fetchall()
+        assert [r[0] for r in rows] == [1, 2, 3]
+        conn.close()
+
+    def test_watermark_integer_column(self, tmp_path: Path):
+        """An integer watermark must not blow up on a NULL/empty-target compare
+        (the old '1900-01-01' sentinel forced a string comparison)."""
+        from havn.engine.database import ensure_meta_table
+        from havn.engine.transform import _execute_incremental
+
+        conn = duckdb.connect(str(tmp_path / "test.duckdb"))
+        ensure_meta_table(conn)
+        conn.execute("CREATE SCHEMA IF NOT EXISTS landing")
+        conn.execute(
+            "CREATE TABLE landing.src AS SELECT 1 AS id, 10 AS ts "
+            "UNION ALL SELECT 2, 20"
+        )
+        model = self._model(
+            tmp_path, unique_key="id", incremental_strategy="delete+insert", watermark="ts"
+        )
+        _execute_incremental(conn, model)
+        assert conn.execute("SELECT count(*) FROM gold.dest").fetchone()[0] == 2
+
+        # Next run with a higher watermark row only picks up the new one.
+        conn.execute(
+            "CREATE OR REPLACE TABLE landing.src AS SELECT 3 AS id, 30 AS ts"
+        )
+        _execute_incremental(conn, model)
+        rows = conn.execute("SELECT id FROM gold.dest ORDER BY id").fetchall()
+        assert [r[0] for r in rows] == [1, 2, 3]
+        conn.close()
+
+
 class TestIncrementalPartition:
     """Test partition_by config for partition-based pruning."""
 

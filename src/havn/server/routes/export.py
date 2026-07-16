@@ -27,7 +27,12 @@ router = APIRouter()
 
 @router.get("/v1/export/duckdb")
 async def export_as_duckdb(request: Request) -> StreamingResponse:
-    _require_permission(request, "read")
+    # A raw warehouse dump contains every table with column masking NOT applied
+    # (masking is enforced at query time, not in the stored data). Gate it behind
+    # "execute" so read-only viewers — who are meant to see only masked values —
+    # can't exfiltrate unmasked PII by downloading the file. Editors and admins,
+    # who can already run arbitrary transforms, keep the data-portability path.
+    _require_permission(request, "execute")
     backend = _get_backend()
     manager = get_resource_manager()
 

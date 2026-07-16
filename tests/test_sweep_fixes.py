@@ -90,6 +90,31 @@ def test_validator_blocks_quoted_read_csv():
     assert exc.value.status_code == 403
 
 
+def test_validator_blocks_replacement_scan_file_read():
+    # DuckDB reads a bare string path as a file via replacement scan — no
+    # function call for the read_csv checks to catch.
+    with pytest.raises(HTTPException) as exc:
+        _validator()("SELECT * FROM '/etc/passwd'")
+    assert exc.value.status_code == 403
+
+
+def test_validator_blocks_replacement_scan_url():
+    with pytest.raises(HTTPException) as exc:
+        _validator()("SELECT * FROM 'https://example.com/data.csv'")
+    assert exc.value.status_code == 403
+
+
+def test_validator_blocks_parenthesised_replacement_scan():
+    with pytest.raises(HTTPException) as exc:
+        _validator()("SELECT * FROM ('/tmp/secret.parquet')")
+    assert exc.value.status_code == 403
+
+
+def test_validator_allows_string_literal_in_projection():
+    # A string literal that is not in table position is fine.
+    _validator()("SELECT 'hello' AS greeting FROM landing.events")
+
+
 def test_validator_passes_unknown_keyword_to_duckdb():
     # Unknown leading keywords are not rejected: DuckDB will produce
     # the correct parse error so the user sees a 400, not a misleading 403.

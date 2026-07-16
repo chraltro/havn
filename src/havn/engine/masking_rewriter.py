@@ -237,6 +237,36 @@ def _resolve_column_table(
     return alias_map.get(table_ref)
 
 
+def _match_policy(
+    fqn: str | None,
+    col_name: str,
+    lookup: dict[tuple[str, str, str], dict],
+) -> dict | None:
+    """Find the masking policy for a column, given its resolved table ref.
+
+    Handles three cases so a masked column can't slip through:
+      * ``schema.table`` FQN  -> exact (schema, table, column) match.
+      * bare ``table`` name (no schema in the SQL, e.g. ``FROM customers c``)
+        -> match any policy on that table name and column, regardless of
+        schema. Over-masking across a same-named table in another schema is
+        the safe direction; leaking unmasked PII is not.
+      * no table qualifier at all -> match by column name only (best effort).
+    """
+    if fqn and "." in fqn:
+        schema, table = fqn.split(".", 1)
+        return lookup.get((schema, table, col_name))
+    if fqn:  # bare table name, no schema resolved
+        for (s, t, c), p in lookup.items():
+            if t == fqn and c == col_name:
+                return p
+        return None
+    # Unqualified column reference.
+    for (s, t, c), p in lookup.items():
+        if c == col_name:
+            return p
+    return None
+
+
 def _mask_expression(col_sql: str, policy: dict) -> str | None:
     """Build the SQL masking expression for a policy.
 
@@ -315,24 +345,12 @@ def _check_masked_column_access(
             col_name = column.name.lower()
             fqn = _resolve_column_table(column, alias_map, cte_names)
 
-            if fqn and "." in fqn:
-                schema, table = fqn.split(".", 1)
-                if (schema, table, col_name) in lookup:
-                    raise MaskedColumnAccessError(
-                        f"Column '{col_name}' is masked. "
-                        f"Filtering, sorting, or joining on masked columns "
-                        f"is not allowed for your role."
-                    )
-
-            # No table qualifier -- check by column name
-            if not fqn:
-                for (s, t, c), p in lookup.items():
-                    if c == col_name:
-                        raise MaskedColumnAccessError(
-                            f"Column '{col_name}' is masked. "
-                            f"Filtering, sorting, or joining on masked "
-                            f"columns is not allowed for your role."
-                        )
+            if _match_policy(fqn, col_name, lookup) is not None:
+                raise MaskedColumnAccessError(
+                    f"Column '{col_name}' is masked. "
+                    f"Filtering, sorting, or joining on masked columns "
+                    f"is not allowed for your role."
+                )
 
 
 def rewrite_query_with_masking(
@@ -463,16 +481,7 @@ def _rewrite_select_expression(
     if isinstance(inner_expr, exp.Column) and not isinstance(inner_expr.this, exp.Star):
         col_name = inner_expr.name.lower()
         fqn = _resolve_column_table(inner_expr, alias_map, cte_names)
-
-        matched_policy = None
-        if fqn and "." in fqn:
-            schema, table = fqn.split(".", 1)
-            matched_policy = lookup.get((schema, table, col_name))
-        if matched_policy is None and not fqn:
-            for (s, t, c), p in lookup.items():
-                if c == col_name:
-                    matched_policy = p
-                    break
+        matched_policy = _match_policy(fqn, col_name, lookup)
 
         if matched_policy and not matched_policy.get("condition_column"):
             col_sql = inner_expr.sql(dialect="duckdb")
@@ -501,16 +510,7 @@ def _rewrite_select_expression(
             continue
         col_name = column.name.lower()
         fqn = _resolve_column_table(column, alias_map, cte_names)
-
-        matched_policy = None
-        if fqn and "." in fqn:
-            schema, table = fqn.split(".", 1)
-            matched_policy = lookup.get((schema, table, col_name))
-        if matched_policy is None and not fqn:
-            for (s, t, c), p in lookup.items():
-                if c == col_name:
-                    matched_policy = p
-                    break
+        matched_policy = _match_policy(fqn, col_name, lookup)
 
         if matched_policy is None:
             continue

@@ -769,8 +769,8 @@ def backup(
             console.print(f"  Cleaned up {len(removed)} old backup(s)")
 
 
-@app.command()
-def restore(
+@app.command(name="backup-restore")
+def backup_restore(
     backup_path: Annotated[Path, typer.Argument(help="Path to the backup file")],
     no_verify: Annotated[bool, typer.Option("--no-verify", help="Skip integrity verification before restore")] = False,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
@@ -787,7 +787,7 @@ def restore(
     config = load_project(project_dir)
     if config.database.backend != "duckdb":
         console.print(
-            f"[red]havn restore only supports the 'duckdb' backend "
+            f"[red]havn backup-restore only supports the 'duckdb' backend "
             f"(current: '{config.database.backend}').[/red]"
         )
         raise typer.Exit(1)

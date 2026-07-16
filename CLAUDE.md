@@ -45,7 +45,7 @@ havn backup                     # create verified backup
 havn backup --keep 10           # backup with retention
 havn backup-list                # list tracked backups
 havn backup-verify <path>       # verify backup integrity
-havn restore <path>             # restore from backup
+havn backup-restore <path>         # restore from backup
 ```
 
 ## Project Structure

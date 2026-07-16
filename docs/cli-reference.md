@@ -90,12 +90,12 @@ Verify the integrity of a backup file against its stored checksum.
 havn backup-verify BACKUP_PATH [--project PATH]
 ```
 
-### havn restore
+### havn backup-restore
 
 Restore the warehouse database from a backup.
 
 ```bash
-havn restore BACKUP_PATH [--project PATH]
+havn backup-restore BACKUP_PATH [--project PATH]
 ```
 
 ## Pipeline Execution

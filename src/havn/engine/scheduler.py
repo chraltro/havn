@@ -47,18 +47,43 @@ def _run_stream_task(project_dir_str: str, stream_name: str) -> dict:
     conn = open_warehouse(config, project_dir)
     step_results = []
 
+    def _run_step(step) -> tuple[dict, bool]:
+        """Run a single step once. Returns (result_entry, ok)."""
+        if step.action == "ingest":
+            results = run_scripts_in_dir(conn, project_dir / "ingest", "ingest", step.targets)
+            statuses = [r["status"] for r in results]
+            return {"action": "ingest", "results": statuses}, all(s != "error" for s in statuses)
+        elif step.action == "transform":
+            targets = step.targets if step.targets != ["all"] else None
+            results = run_transform(conn, project_dir / "transform", targets=targets)
+            ok = all(s not in ("error", "assertion_failed") for s in results.values())
+            return {"action": "transform", "results": results}, ok
+        elif step.action == "export":
+            results = run_scripts_in_dir(conn, project_dir / "export", "export", step.targets)
+            statuses = [r["status"] for r in results]
+            return {"action": "export", "results": statuses}, all(s != "error" for s in statuses)
+        return {"action": step.action, "results": []}, True
+
     try:
         for step in stream_config.steps:
-            if step.action == "ingest":
-                results = run_scripts_in_dir(conn, project_dir / "ingest", "ingest", step.targets)
-                step_results.append({"action": "ingest", "results": [r["status"] for r in results]})
-            elif step.action == "transform":
-                targets = step.targets if step.targets != ["all"] else None
-                results = run_transform(conn, project_dir / "transform", targets=targets)
-                step_results.append({"action": "transform", "results": results})
-            elif step.action == "export":
-                results = run_scripts_in_dir(conn, project_dir / "export", "export", step.targets)
-                step_results.append({"action": "export", "results": [r["status"] for r in results]})
+            entry, ok = _run_step(step)
+            # Honour the stream's retry policy, matching the CLI/server pipeline
+            # paths — a scheduled fire must retry the same way a manual run does.
+            if not ok and stream_config.retries > 0:
+                for attempt in range(1, stream_config.retries + 1):
+                    logger.warning(
+                        "Stream '%s' step '%s' failed; retry %d/%d after %ds",
+                        stream_name, step.action, attempt,
+                        stream_config.retries, stream_config.retry_delay,
+                    )
+                    time.sleep(stream_config.retry_delay)
+                    entry, ok = _run_step(step)
+                    if ok:
+                        break
+            step_results.append(entry)
+            if not ok:
+                logger.error("Stream '%s' step '%s' failed after retries", stream_name, step.action)
+                return {"stream": stream_name, "status": "error", "steps": step_results}
 
         logger.info("Stream '%s' completed: %s", stream_name, step_results)
         return {"stream": stream_name, "status": "success", "steps": step_results}
@@ -306,7 +331,15 @@ class SchedulerThread(threading.Thread):
                             mk = datetime.datetime.now().replace(
                                 second=0, microsecond=0
                             ).timestamp()
-                            self._last_run[f"job:{job.name}"] = mk
+                            # Record under the per-schedule keys _should_run
+                            # reads — for every cron schedule, so a job with
+                            # several schedules matching the same minute still
+                            # fires only once. (Recording a different key left
+                            # the once-per-minute guard permanently disengaged,
+                            # firing the job on each 30s poll.)
+                            for _sched in schedules:
+                                if not is_interval_schedule(_sched):
+                                    self._last_run[f"job:{job.name}:{_sched}"] = mk
                             logger.info("Scheduler triggering job: %s", job.name)
                             console.print(
                                 f"[bold blue]Scheduler:[/bold blue] Running job '{job.name}'"
