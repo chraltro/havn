@@ -2,14 +2,14 @@
 
 All notable changes to havn are documented in this file.
 
-## [Unreleased]
+## [0.2.25] - 2026-07-16
 
 ### Security
 
 - **Read-only query surfaces** now reject DuckDB "replacement scan" file
-  reads (`SELECT * FROM '/path/file.csv'` / `FROM 'https://…'`). Previously
+  reads (`SELECT * FROM '/path/file.csv'` / `FROM 'https://...'`). Previously
   the read-only validator only blocked file-access *functions*
-  (`read_csv`, `read_parquet`, …), so a bare string path in table position
+  (`read_csv`, `read_parquet`, and so on), so a bare string path in table position
   slipped through and could read any server-readable file or reach external
   URLs. Covers `/api/query`, the semantic layer, the importer preview, and
   the MCP `query` tool (all share `havn.engine.sql_safety`).
@@ -29,7 +29,7 @@ All notable changes to havn are documented in this file.
 
 - **Change detection** now rebuilds an incremental model when only its
   `@config` settings change (`unique_key`, `incremental_strategy`,
-  `incremental_filter`, `partition_by`, `watermark`) — previously the
+  `incremental_filter`, `partition_by`, `watermark`): previously the
   content hash covered only the query body, so config-only edits were
   silently skipped.
 - **Parallel transforms**: a severity=`error` `@assert` (or a `@grain`
@@ -55,7 +55,7 @@ All notable changes to havn are documented in this file.
   flush) when `CHECKPOINT` raises; the connection is always closed.
 - **`havn backup-restore`**: the backup-restore command was renamed from
   `restore` (it was shadowed by the Pipeline Rewind `restore` command, so it
-  was unreachable). The model-restore `havn restore MODEL --run …` is
+  was unreachable). The model-restore `havn restore MODEL --run ...` is
   unchanged.
 - Removed a dead, unreachable duplicate `havn validate` command definition
   (the reachable one lives in the project CLI module; the `havn check`
