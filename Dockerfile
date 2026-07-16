@@ -10,7 +10,7 @@ RUN npm run build
 FROM python:3.12-slim
 
 WORKDIR /app
-COPY pyproject.toml README.md LICENSE ./
+COPY pyproject.toml README.md LICENSE hatch_build.py ./
 COPY src/ src/
 COPY --from=frontend /build/frontend/dist /app/frontend/dist
 
