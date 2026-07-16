@@ -134,14 +134,14 @@ havn seed [--force] [--schema NAME] [--env NAME] [--project PATH]
 Build SQL models in dependency order.
 
 ```bash
-havn transform [TARGETS...] [--force] [--parallel] [--workers N] [--env NAME] [--skip-check] [--project PATH]
+havn transform [TARGETS...] [--force] [--sequential] [--workers N] [--env NAME] [--skip-check] [--project PATH]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `TARGETS` | all | Specific models to build |
 | `--force, -f` | false | Rebuild all (ignore change detection) |
-| `--parallel` | false | Run independent models concurrently |
+| `--sequential` | false | Disable parallel execution; run models one at a time (independent models run concurrently by default) |
 | `--workers, -w` | 4 | Max parallel workers |
 | `--env, -e` | none | Environment override |
 | `--skip-check` | false | Skip pre-transform validation |
@@ -198,6 +198,72 @@ Show recent run history.
 ```bash
 havn history [--limit N] [--project PATH]
 ```
+
+## Semantic Layer
+
+Metrics are defined as YAML in the project's `metrics/` directory. See [Semantic Layer](semantic-layer) for the definition format.
+
+### havn metrics
+
+List the metrics defined in `metrics/*.yml`.
+
+```bash
+havn metrics [--project PATH]
+havn metrics list [--project PATH]
+```
+
+### havn metrics query
+
+Compile a metric to SQL and run it against the warehouse.
+
+```bash
+havn metrics query NAME [--by DIM] [--grain GRAIN] [--start DATE] [--end DATE] [--limit N] [--csv] [--json] [--env NAME] [--project PATH]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `NAME` | required | Metric name |
+| `--by` | none | Dimension(s) to group by (repeatable) |
+| `--grain` | none | Time grain: `hour`, `day`, `week`, `month`, `quarter`, `year` |
+| `--start` / `--end` | none | Inclusive lower / exclusive upper bound on the time dimension |
+| `--limit, -n` | none | Max rows to return |
+| `--csv` / `--json` | false | Output format |
+| `--env, -e` | none | Environment override |
+
+```bash
+havn metrics query revenue --by region --grain month
+```
+
+### havn metrics sql
+
+Print the SQL a metric query compiles to, without executing it.
+
+```bash
+havn metrics sql NAME [--by DIM] [--grain GRAIN] [--start DATE] [--end DATE] [--limit N] [--project PATH]
+```
+
+## AI Agents
+
+### havn mcp
+
+Start an MCP stdio server exposing the warehouse to AI agents.
+
+```bash
+havn mcp [--read-only] [--env NAME] [--project PATH]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--read-only` | false | Disable the `run_transform` tool |
+| `--env, -e` | none | Environment override |
+
+Register it with an MCP client, for example:
+
+```bash
+claude mcp add havn -- havn mcp -p /path/to/project
+```
+
+Tools exposed: `query`, `list_tables`, `describe_table`, `list_models`, `get_model`, `model_lineage`, `run_history`, `list_metrics`, `query_metric`, `run_transform`.
 
 ## Data Quality
 
@@ -299,34 +365,32 @@ Creates a `.dpnb` notebook pre-populated with error info, upstream queries, and 
 Compare model SQL output against materialized tables. Three modes:
 
 ```bash
-# Single model — diff one specific table
+# Single model: diff one specific table
 havn diff gold.orders
 
-# Changed + downstream (default) — only diff models with SQL changes
+# Changed + downstream (default): only diff models with SQL changes
 havn diff
-havn diff --changed
 
-# Full database — diff everything (old behavior)
-havn diff --all
+# Full database: diff everything
+havn diff --full
 ```
 
 ```bash
-havn diff [TARGETS...] [--changed] [--all] [--target SCHEMA] [--format FMT] [--rows] [--full] [--against REF] [--snapshot NAME] [--project PATH]
+havn diff [TARGETS...] [--target SCHEMA] [--format FMT] [--rows] [--full] [--against REF] [--snapshot NAME] [--exit-nonzero-on-change] [--project PATH]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `TARGETS` | none | Specific models to diff (single mode) |
-| `--changed` | true | Only diff models with SQL changes + downstream |
-| `--all` | false | Diff all models (full database) |
 | `--target, -t` | none | Diff all models in a schema |
 | `--format, -f` | `table` | Output format: `table` or `json` |
 | `--rows` | false | Include sample rows |
-| `--full` | false | Show all changed rows |
-| `--against` | none | Git-aware: only diff models changed vs a branch |
+| `--full` | false | Show all changed rows, not just samples |
+| `--against` | none | Git-aware: only diff models changed vs a branch/ref |
 | `--snapshot` | none | Compare against a named snapshot |
+| `--exit-nonzero-on-change` | false | Exit with code 2 if any model has added/removed/modified rows or schema changes (for CI) |
 
-When no targets or flags are given, `--changed` is the default — it uses change detection to only diff models whose SQL (or upstream) actually changed, plus their downstream dependents. This is much faster than diffing the entire database.
+When no targets are given, diff uses change detection to only diff models whose SQL (or upstream) actually changed, plus their downstream dependents. This is much faster than diffing the entire database.
 
 ## Connectors
 
@@ -493,11 +557,18 @@ Shows all macros discovered from the `macros/` directory: name, parameters, retu
 
 ### havn version
 
-Show havn version.
+Manage warehouse versions with Parquet-based time travel. `havn version` (or `havn version list`) lists tracked versions; other actions create, diff, restore, show a table timeline, or clean up old versions.
 
 ```bash
-havn version
+havn version list                          # list tracked versions (default action)
+havn version create --desc "Before migration"
+havn version diff --from run-5 --id run-8
+havn version restore --id run-5
+havn version timeline --table gold.customers
+havn version cleanup --keep 5
 ```
+
+To print the installed havn package version instead, use `havn --version` (or `havn -V`).
 
 ## Interactive
 
@@ -590,5 +661,5 @@ Convert between backends (DuckDB to DuckLake or vice versa). Reads the
 current backend, writes to the target.
 
 ```bash
-havn migrate --target ducklake [--project PATH]
+havn migrate --to ducklake [--project PATH]
 ```

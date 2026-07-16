@@ -204,6 +204,66 @@ Show recent run history.
 havn history [--limit N] [--project PATH]
 ```
 
+## Semantic Layer
+
+Metrics are defined as YAML in the project's `metrics/` directory.
+
+### havn metrics
+
+List the metrics defined in `metrics/*.yml`.
+
+```bash
+havn metrics [--project PATH]
+havn metrics list [--project PATH]
+```
+
+### havn metrics query
+
+Compile a metric to SQL and run it against the warehouse.
+
+```bash
+havn metrics query NAME [--by DIM] [--grain GRAIN] [--start DATE] [--end DATE] [--limit N] [--csv] [--json] [--env NAME] [--project PATH]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `NAME` | required | Metric name |
+| `--by` | none | Dimension(s) to group by (repeatable) |
+| `--grain` | none | Time grain: `hour`, `day`, `week`, `month`, `quarter`, `year` |
+| `--start` / `--end` | none | Inclusive lower / exclusive upper bound on the time dimension |
+| `--limit, -n` | none | Max rows to return |
+| `--csv` / `--json` | false | Output format |
+| `--env, -e` | none | Environment override |
+
+```bash
+havn metrics query revenue --by region --grain month
+```
+
+### havn metrics sql
+
+Print the SQL a metric query compiles to, without executing it.
+
+```bash
+havn metrics sql NAME [--by DIM] [--grain GRAIN] [--start DATE] [--end DATE] [--limit N] [--project PATH]
+```
+
+## AI Agents
+
+### havn mcp
+
+Start an MCP stdio server exposing the warehouse to AI agents.
+
+```bash
+havn mcp [--read-only] [--env NAME] [--project PATH]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--read-only` | false | Disable the `run_transform` tool |
+| `--env, -e` | none | Environment override |
+
+Tools exposed: `query`, `list_tables`, `describe_table`, `list_models`, `get_model`, `model_lineage`, `run_history`, `list_metrics`, `query_metric`, `run_transform`.
+
 ## Data Quality
 
 ### havn check
@@ -542,10 +602,10 @@ havn serve [--port PORT] [--host HOST] [--auth] [--watch] [--schedule] [--env NA
 
 ## Version
 
-### havn version
-
-Show havn version.
+To print the installed havn package version, use the top-level flag:
 
 ```bash
-havn version
+havn --version   # or: havn -V
 ```
+
+The `havn version` command is a separate warehouse time-travel tool, documented under [havn version](#havn-version) above.

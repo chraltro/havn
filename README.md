@@ -234,7 +234,8 @@ The warehouse is a single DuckDB file. Copy it, back it up, version it - it's ju
 | `havn watch` | Watch files and auto-rebuild on change |
 | `havn schedule` | Start the cron scheduler |
 | `havn checkpoint` | Smart git commit with auto-generated messages |
-| `havn docs` | Generate markdown documentation from warehouse schema |
+| `havn metrics` | List and query semantic-layer metrics (`metrics/*.yml`) |
+| `havn mcp` | Start the MCP stdio server for AI agents |
 | `havn context` | Generate project summary for AI assistants |
 | `havn ci generate` | Generate GitHub Actions workflow |
 | `havn secrets list/set/delete` | Manage .env secrets |
@@ -260,7 +261,7 @@ havn is the right choice when you want a complete data platform without the infr
 
 - **[CLAUDE.md](CLAUDE.md)** - Full technical reference (architecture, conventions, development workflow)
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - How to contribute
-- `havn docs` - Auto-generate documentation from your warehouse schema
+- Model docs are auto-generated from your warehouse schema and `@description` / `@col` directives, and are browsable in the web UI (`havn serve`)
 - `havn context` - Generate a project summary to paste into any AI assistant
 
 ## Contributing

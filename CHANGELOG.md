@@ -61,6 +61,24 @@ All notable changes to havn are documented in this file.
   (the reachable one lives in the project CLI module; the `havn check`
   command covers model-level validation).
 
+### Documentation
+
+- **CLI reference corrected against the actual CLI.** `havn transform`
+  documented a non-existent `--parallel` flag (the real flag is
+  `--sequential`; parallel is the default). `havn diff` documented
+  non-existent `--changed` / `--all` flags (the real "everything" flag is
+  `--full`; `--exit-nonzero-on-change` was undocumented). `havn migrate`
+  documented `--target` instead of `--to`.
+- **`havn version` is no longer described as "show havn version."** It
+  manages warehouse versions with Parquet-based time travel; the package
+  version is `havn --version` / `-V`. The in-app wiki had two conflicting
+  `havn version` sections; the incorrect duplicate was removed.
+- **Documented `havn metrics` (list/query/sql) and `havn mcp`**, added in
+  0.2.24 but missing from both CLI references.
+- **README** no longer lists a `havn docs` command, which does not exist.
+  Model documentation is generated from the warehouse schema and
+  `@description` / `@col` directives and is browsable in the web UI.
+
 ## [0.2.24] - 2026-07-09
 
 ### Added
@@ -789,7 +807,7 @@ Hotfix on top of 0.2.13. Two of yesterday's fixes were incomplete:
   `400 Bad Request: The 'X' model is not supported when using
   Codex with a ChatGPT account.`
 
-## [0.2.7] -- 2026-04-25
+## [0.2.7] - 2026-04-25
 
 ### Fixed
 
@@ -831,7 +849,7 @@ Hotfix on top of 0.2.13. Two of yesterday's fixes were incomplete:
 - `CLAUDE.md` referenced `havn diff --all`; the actual flag is
   `--full`.
 
-## [0.2.6] -- 2026-04-25
+## [0.2.6] - 2026-04-25
 
 ### Added
 
