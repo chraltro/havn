@@ -1,8 +1,26 @@
 name: Docker
 
+# run-name puts the release tag and commit in the run title, so a failure
+# notification says WHICH build failed. A re-run of an old, superseded commit
+# otherwise sends an email indistinguishable from a fresh failure.
+run-name: Docker ${{ github.event.release.tag_name || github.sha }}
+
 on:
   release:
     types: [published]
+  # Build (without pushing) on main and on Dockerfile/packaging PRs. The image
+  # only ever built at release time, so a Dockerfile break stayed invisible
+  # until the next release: hatch_build.py became a build requirement on
+  # 2026-07-10 and the missing COPY only surfaced at 0.2.25, six days later.
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "pyproject.toml"
+      - "hatch_build.py"
+      - ".github/workflows/docker.yml"
 
 permissions:
   packages: write
@@ -13,7 +31,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Only publish for a real release; other triggers build as a check.
       - name: Log in to GHCR
+        if: github.event_name == 'release'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -28,12 +48,12 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
 
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true
+          push: ${{ github.event_name == 'release' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

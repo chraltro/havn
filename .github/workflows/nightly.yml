@@ -5,6 +5,11 @@ name: Nightly (slow tests)
 # A failure here doesn't block any release; it's a heads-up that something
 # regressed in the slow path (stress, hot-reload, maintenance scheduler).
 
+# run-name puts the commit in the run title, so a failure notification says
+# WHICH commit failed. Without it, an email for an old (or re-run) commit is
+# indistinguishable from a fresh regression on main.
+run-name: Nightly on ${{ github.sha }}
+
 on:
   schedule:
     - cron: "0 3 * * *"
