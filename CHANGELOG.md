@@ -104,10 +104,10 @@ All notable changes to havn are documented in this file.
 ### Changed
 
 - `pip install -e ".[dev]"` now installs both `httpx` and `httpx2`.
-  starlette's `TestClient` imports `httpx` before 1.0 and `httpx2` from 1.0
-  on, and neither is a dependency of starlette itself, so declaring only one
-  made the entire test suite fail at collection as soon as the other was
-  resolved.
+  starlette 1.0 moved its `TestClient` to `httpx2` and deprecated the `httpx`
+  backend; neither is a dependency of starlette itself. Declaring both clears
+  the `StarletteDeprecationWarning` on every test run and keeps the suite
+  working when starlette drops `httpx` support.
 - `CLAUDE.md` corrected where it had drifted: `havn diff --full`, the
   location of API endpoints (`server/routes/`, not `server/app.py`), the
   scheduler implementation, and the frontend's TypeScript usage.
