@@ -110,15 +110,25 @@ def _get_user_name(request: Request) -> str:
     return "anonymous"
 
 
-def _cache_key(widget_id: str, filters: dict, parameters: dict, sql_query: str = "") -> str:
-    """Compute cache key from widget ID + SQL + filter/param state.
+def _cache_key(
+    widget_id: str,
+    filters: dict,
+    parameters: dict,
+    sql_query: str = "",
+    role: str = "",
+) -> str:
+    """Compute cache key from widget ID + SQL + filter/param state + viewer role.
 
     The SQL is part of the key so editing a widget's query immediately
     misses the old cache entry instead of serving stale results until the
     TTL expires; the orphaned entries age out via expires_at.
+
+    The role is part of the key because widget results are masked per role
+    (see _execute_widget_query). Without it, an admin's unmasked rows would be
+    served straight out of the cache to the next viewer who opens the widget.
     """
     payload = json.dumps(
-        {"w": widget_id, "f": filters, "p": parameters, "s": sql_query},
+        {"w": widget_id, "f": filters, "p": parameters, "s": sql_query, "r": role},
         sort_keys=True,
     )
     return hashlib.sha256(payload.encode()).hexdigest()[:32]
@@ -160,6 +170,7 @@ def _execute_widget_query(
     filters: dict,
     parameters: dict,
     timeout: int | None = None,
+    user_role: str = "admin",
 ) -> dict:
     """Execute a widget SQL query with filter injection and parameter substitution.
 
@@ -171,6 +182,22 @@ def _execute_widget_query(
     # Validate the SQL is a safe read-only query
     from havn.server.routes.query import _validate_query_sql
     _validate_query_sql(sql_query)
+
+    # Apply column masking for the viewer's role, the same way /api/query does.
+    # Widgets are a full SQL surface, so without this a viewer could read raw
+    # PII from any masked column simply by putting it in a widget.
+    from havn.engine.masking_rewriter import (
+        MaskedColumnAccessError,
+        rewrite_query_with_masking,
+    )
+    try:
+        rewritten_sql, rewrite_ok, handled_ids = rewrite_query_with_masking(
+            sql_query, user_role, conn,
+        )
+    except MaskedColumnAccessError as e:
+        raise HTTPException(403, str(e))
+    if rewrite_ok:
+        sql_query = rewritten_sql
 
     # Build parameterized filter injection
     base_sql = sql_query.strip().rstrip(";")
@@ -236,24 +263,40 @@ def _execute_widget_query(
     else:
         sql = base_sql
 
-    try:
-        # Set query timeout (per-widget override or global default)
-        effective_timeout = timeout if timeout is not None else _QUERY_TIMEOUT_SECONDS
-        try:
-            conn.execute(f"SET statement_timeout={effective_timeout * 1000}")
-        except Exception:
-            pass  # Older DuckDB versions may not support this
+    # Enforce the per-widget (or default) timeout. `SET statement_timeout` is
+    # not a DuckDB setting -- it always raised, the exception was swallowed, and
+    # WidgetQueryRequest.timeout was a silent no-op. execute_governed applies
+    # the limit for real via conn.interrupt(), the same way /api/query does.
+    from havn.engine.query_governor import QueryTimeoutError, execute_governed
 
-        result = conn.execute(sql, params)
+    effective_timeout = timeout if timeout is not None else _QUERY_TIMEOUT_SECONDS
+    try:
+        result, _duration_ms = execute_governed(conn, sql, effective_timeout, params)
         columns = [desc[0] for desc in result.description] if result.description else []
         rows = result.fetchall()
-        return {
-            "columns": columns,
-            "rows": [[_serialize(v) for v in row] for row in rows],
-            "row_count": len(rows),
-        }
+        serialized = [[_serialize(v) for v in row] for row in rows]
+    except QueryTimeoutError as e:
+        raise HTTPException(408, str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(400, f"Widget query error: {e}")
+
+    # Post-query masking for policies the rewriter couldn't handle (conditional
+    # policies, unsupported methods) — mirrors /api/query.
+    from havn.engine.masking import apply_masking
+    if not rewrite_ok:
+        serialized = apply_masking(columns, serialized, user_role, conn)
+    elif handled_ids:
+        serialized = apply_masking(
+            columns, serialized, user_role, conn, skip_policy_ids=handled_ids,
+        )
+
+    return {
+        "columns": columns,
+        "rows": serialized,
+        "row_count": len(serialized),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -855,7 +898,8 @@ def query_widget(
     conn: DbConnReadOnly,
 ) -> dict:
     """Execute a widget's SQL query with filter injection."""
-    _require_permission(request, "read")
+    user = _require_permission(request, "read")
+    role = user.get("role", "admin")
 
     widget = conn.execute(
         """
@@ -873,7 +917,7 @@ def query_widget(
 
     # Check cache
     if cache_ttl > 0:
-        ck = _cache_key(widget_id, req.filters, req.parameters, sql_query)
+        ck = _cache_key(widget_id, req.filters, req.parameters, sql_query, role)
         cached = conn.execute(
             """
             SELECT result_json, row_count FROM _havn.dashboard_cache
@@ -888,11 +932,17 @@ def query_widget(
             return result
 
     # Execute query (pass per-widget timeout if provided)
-    result = _execute_widget_query(conn, sql_query, req.filters, req.parameters, timeout=req.timeout)
+    result = _execute_widget_query(
+        conn, sql_query, req.filters, req.parameters,
+        timeout=req.timeout, user_role=role,
+    )
 
     # Store in cache
     if cache_ttl > 0:
-        _store_cache(_cache_key(widget_id, req.filters, req.parameters, sql_query), result, cache_ttl)
+        _store_cache(
+            _cache_key(widget_id, req.filters, req.parameters, sql_query, role),
+            result, cache_ttl,
+        )
 
     return result
 
@@ -905,7 +955,8 @@ def query_batch(
     conn: DbConnReadOnly,
 ) -> dict:
     """Execute all widget queries for a dashboard in one call."""
-    _require_permission(request, "read")
+    user = _require_permission(request, "read")
+    role = user.get("role", "admin")
 
     widgets = conn.execute(
         """
@@ -922,7 +973,7 @@ def query_batch(
 
         # Check cache first
         if cache_ttl > 0:
-            ck = _cache_key(w_id, req.filters, req.parameters, sql_query)
+            ck = _cache_key(w_id, req.filters, req.parameters, sql_query, role)
             cached = conn.execute(
                 """
                 SELECT result_json FROM _havn.dashboard_cache
@@ -938,12 +989,17 @@ def query_batch(
                 continue
 
         try:
-            result = _execute_widget_query(conn, sql_query, req.filters, req.parameters)
+            result = _execute_widget_query(
+                conn, sql_query, req.filters, req.parameters, user_role=role,
+            )
             results[w_id] = result
 
             # Cache the result
             if cache_ttl > 0:
-                _store_cache(_cache_key(w_id, req.filters, req.parameters, sql_query), result, cache_ttl)
+                _store_cache(
+                    _cache_key(w_id, req.filters, req.parameters, sql_query, role),
+                    result, cache_ttl,
+                )
         except HTTPException:
             results[w_id] = {"columns": [], "rows": [], "row_count": 0, "error": "Query failed"}
         except Exception as e:

@@ -52,11 +52,19 @@ def test_delete_secret(tmp_path):
 
 
 def test_mask_function():
-    """_mask hides middle of values."""
+    """_mask reveals nothing but the length.
+
+    It used to keep the first and last two characters, which for a short or
+    prefixed secret is a meaningful chunk of the plaintext -- and the result is
+    returned by GET /api/secrets.
+    """
     assert _mask("") == "(empty)"
-    assert _mask("ab") == "**"
-    assert _mask("abcdef") == "ab**ef"
-    assert _mask("abcdefgh") == "ab****gh"
+    for value in ("ab", "abcdef", "abcdefgh", "sk-abc123"):
+        masked = _mask(value)
+        assert str(len(value)) in masked
+        # No two-character run of the plaintext survives.
+        for i in range(len(value) - 1):
+            assert value[i : i + 2] not in masked
 
 
 def test_mask_output(tmp_path):

@@ -576,6 +576,9 @@ export const api = {
     }),
   getMe: () => request<UserInfo>("/auth/me"),
 
+  // Coding agents
+  listAgents: () => request<any[]>("/agents"),
+
   // Users
   listUsers: () => request<UserEntry[]>("/users"),
   createUser: (username: string, password: string, role: string, display_name?: string) =>

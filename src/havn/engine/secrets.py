@@ -117,12 +117,16 @@ def delete_secret(project_dir: Path, key: str) -> bool:
 
 
 def _mask(value: str) -> str:
-    """Mask a secret value for display."""
+    """Mask a secret value for display.
+
+    Reveals nothing but the length. The previous form kept the first and last
+    two characters, which for short or structured secrets (prefixed API keys,
+    PINs, four-character tokens) is a meaningful chunk of the plaintext -- and
+    it is returned by GET /api/secrets.
+    """
     if not value:
         return "(empty)"
-    if len(value) <= 4:
-        return "*" * len(value)
-    return value[:2] + "*" * (len(value) - 4) + value[-2:]
+    return "*" * 8 + f" ({len(value)} chars)"
 
 
 def mask_output(text: str, project_dir: Path) -> str:

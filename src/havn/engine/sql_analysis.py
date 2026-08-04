@@ -115,12 +115,26 @@ def parse_config(sql: str) -> dict[str, str]:
     match = _search_patterns(CONFIG_PATTERN, sql) or _LEGACY_CONFIG_PATTERN.search(sql)
     if not match:
         return {}
+    return _split_config_pairs(match.group(1))
+
+
+# A config value runs until the next ``, key=`` boundary (or the end of the
+# header). Splitting naively on every comma truncates every setting whose value
+# legitimately contains one -- a composite ``unique_key=customer_id, event_date``
+# silently became ``customer_id``, which turns an incremental delete+insert into
+# a destructive partial-key delete. Same for
+# ``incremental_filter=WHERE x IN (1,2)``.
+_CONFIG_PAIR_RE = re.compile(
+    r"(\w+)\s*=\s*(.*?)\s*(?=,\s*\w+\s*=|$)",
+    re.DOTALL,
+)
+
+
+def _split_config_pairs(body: str) -> dict[str, str]:
+    """Parse a ``key=value, key=value`` config body, tolerating commas in values."""
     config: dict[str, str] = {}
-    for pair in match.group(1).split(","):
-        pair = pair.strip()
-        if "=" in pair:
-            key, value = pair.split("=", 1)
-            config[key.strip()] = value.strip()
+    for key, value in _CONFIG_PAIR_RE.findall(body):
+        config[key.strip()] = value.strip().rstrip(",").strip()
     return config
 
 
@@ -403,8 +417,14 @@ def extract_table_refs(
             continue
         if schema in SKIP_SCHEMAS:
             continue
-        # Skip CTE references
-        if name in cte_names or schema in cte_names:
+        # Skip CTE references. A CTE is always referenced *unqualified*, so only
+        # an unqualified ref can be one -- and those are already dropped by the
+        # `not schema` check above. Matching a qualified ref against cte_names
+        # would silently drop a real dependency whenever a CTE happens to share
+        # a name with a model or its schema: `WITH orders AS (...) SELECT ...
+        # FROM orders o JOIN bronze.orders b` must still depend on
+        # bronze.orders. See _is_cte_ref below, which gets this right.
+        if not schema and name in cte_names:
             continue
 
         fqn = f"{schema}.{name}"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from graphlib import TopologicalSorter
+from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
 
 import duckdb
@@ -108,6 +108,30 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
     return models
 
 
+class CircularDependencyError(ValueError):
+    """The model DAG contains a dependency cycle.
+
+    Raised instead of letting graphlib's CycleError escape as a bare traceback
+    through the CLI, the API, and the scheduler.
+    """
+
+
+def _format_cycle(err: CycleError, model_map: dict[str, SQLModel]) -> str:
+    """Turn a graphlib CycleError into a message naming the model files."""
+    cycle = err.args[1] if len(err.args) > 1 else []
+    parts = []
+    for name in cycle:
+        model = model_map.get(name)
+        parts.append(f"{name} ({model.path})" if model else name)
+    chain = " -> ".join(parts) if parts else "unknown"
+    return (
+        "Circular dependency between models: "
+        + chain
+        + ". Break the cycle by removing one of the references "
+        "(check @depends_on lines as well as FROM/JOIN clauses)."
+    )
+
+
 def build_dag(models: list[SQLModel]) -> list[SQLModel]:
     """Sort models in dependency order using topological sort."""
     model_map = {m.full_name: m for m in models}
@@ -119,7 +143,10 @@ def build_dag(models: list[SQLModel]) -> list[SQLModel]:
         known_deps = [d for d in m.depends_on if d in model_map]
         sorter.add(m.full_name, *known_deps)
 
-    ordered = list(sorter.static_order())
+    try:
+        ordered = list(sorter.static_order())
+    except CycleError as e:
+        raise CircularDependencyError(_format_cycle(e, model_map)) from e
     return [model_map[name] for name in ordered if name in model_map]
 
 
@@ -136,7 +163,10 @@ def build_dag_tiers(models: list[SQLModel]) -> list[list[SQLModel]]:
         known_deps = [d for d in m.depends_on if d in model_map]
         sorter.add(m.full_name, *known_deps)
 
-    sorter.prepare()
+    try:
+        sorter.prepare()
+    except CycleError as e:
+        raise CircularDependencyError(_format_cycle(e, model_map)) from e
     tiers: list[list[SQLModel]] = []
 
     while sorter.is_active():

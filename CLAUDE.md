@@ -9,7 +9,7 @@ havn is a self-hosted data platform -- a Nordic alternative to Databricks/Snowfl
 ```bash
 # Install
 pip install -e .              # from source
-pip install -e ".[dev]"       # with test deps (pytest, httpx)
+pip install -e ".[dev]"       # with test deps (pytest, httpx/httpx2)
 
 # Build frontend
 cd frontend && npm install && npm run build
@@ -36,7 +36,7 @@ havn env use prod               # switch environment
 havn env list                   # show all environments
 havn diff gold.orders           # diff a single model
 havn diff                       # diff changed models + downstream
-havn diff --full                # diff entire database
+havn diff --full                # show all changed rows, not just samples
 havn macros                     # list registered SQL macros
 havn metrics                    # list semantic-layer metrics (metrics/*.yml)
 havn metrics query revenue --by region --grain month   # query a metric
@@ -64,7 +64,7 @@ src/havn/                       # Python package (the platform itself)
     diff.py                   # 3-mode diff engine (single/changed/all)
     auth.py                   # Token auth, RBAC (admin/editor/viewer)
     secrets.py                # .env secrets management
-    scheduler.py              # Cron scheduler (Huey) + file watcher
+    scheduler.py              # Cron scheduler (SchedulerThread) + file watcher
     importer.py               # Data import wizard (CSV, Parquet, DB)
     masking_rewriter.py       # Pre-query SQL masking (alias bypass prevention)
     write_queue.py            # Write queue + read pool for DuckDB connections
@@ -78,7 +78,9 @@ src/havn/                       # Python package (the platform itself)
   lint/
     linter.py                 # SQLFluff integration
   server/
-    app.py                    # FastAPI backend (150+ endpoints)
+    app.py                    # FastAPI app assembly, middleware, lifespan
+    deps.py                   # Shared dependencies: auth, permissions, connections
+    routes/                   # 33 route modules, ~250 endpoints
 
 frontend/                     # React + Vite SPA
   src/
@@ -89,12 +91,12 @@ frontend/                     # React + Vite SPA
     QueryPanel.jsx            # Ad-hoc SQL runner
     TablesPanel.jsx           # Table browser
     DAGPanel.jsx              # Model dependency graph
-    ...                       # ~15 components total
+    ...                       # ~60 files total
 
 tests/                        # pytest test suite
   test_transform.py           # SQL DAG + change detection
   test_runner.py              # Script execution
-  test_api.py                 # FastAPI endpoints (uses httpx)
+  test_api.py                 # FastAPI endpoints (TestClient)
   test_auth.py                # Authentication + RBAC
   test_config.py              # Config parsing
   test_secrets.py             # Secrets management
@@ -276,13 +278,13 @@ Tests use temporary DuckDB databases (in-memory or tmp files). No external servi
 1. Source is in `src/havn/`
 2. CLI commands are in `cli/` -- each `@app.command()` function maps to a `havn <command>`
 3. Engine logic is in `engine/` -- transform/ is the core SQL DAG engine
-4. API endpoints are in `server/app.py` -- FastAPI with Pydantic models
+4. API endpoints are in `server/routes/` -- FastAPI with Pydantic models; `server/app.py` only assembles the routers
 5. Run `pytest tests/` after changes
 
 ### Making Frontend Changes
 
 1. Source is in `frontend/src/`
-2. React 19 + Vite, no TypeScript
+2. React 19 + Vite; components are JSX, with TypeScript for api.ts and the contexts
 3. Monaco editor for code editing
 4. API client in `api.ts` (thin fetch wrapper)
 5. Dev server: `cd frontend && npm run dev` (port 5173, proxies /api to 3000)
@@ -294,7 +296,7 @@ Tests use temporary DuckDB databases (in-memory or tmp files). No external servi
 2. Import engine modules lazily (inside the function body)
 3. Use `_resolve_project()` for project dir resolution
 4. Use `rich` Console for output formatting
-5. Add corresponding API endpoint in `server/app.py` if needed
+5. Add corresponding API endpoint in `server/routes/` if needed
 6. Add tests in `tests/`
 
 ### Adding a New SQL Model
@@ -359,7 +361,7 @@ mempalace mine .                             # re-index changed files
 ## Testing Patterns
 
 - Tests use `tmp_path` fixture for temp databases
-- API tests use `httpx.AsyncClient` with FastAPI's `TestClient`
+- API tests use FastAPI's `TestClient` (backed by httpx/httpx2 via starlette)
 - No mocking of DuckDB -- tests use real (temporary) databases
 - Test files mirror source structure: `test_transform.py` tests `engine/transform.py`
 
@@ -373,8 +375,8 @@ mempalace mine .                             # re-index changed files
 5. Test with `havn run ingest/source_name.py` then `havn transform`
 
 ### "Add a new API endpoint"
-1. Add Pydantic request/response models in `server/app.py`
-2. Add `@app.post("/api/...")` or `@app.get("/api/...")` handler
+1. Add Pydantic request/response models in the relevant `server/routes/<area>.py`
+2. Add `@router.post("/api/...")` or `@router.get("/api/...")` handler
 3. Use `_require_permission(request, "read"|"write"|"execute")` for auth
 4. Always use `connect()`/`conn.close()` pattern with try/finally
 5. Add test in `tests/test_api.py`

@@ -1700,7 +1700,15 @@ def get_pipeline_runs(request: Request, conn: DbConn, limit: int = 50) -> list[d
             MIN(run_type) AS run_type,
             MIN(target) AS first_target,
             MIN(started_at) AS started_at,
-            MAX(CASE WHEN status IN ('error', 'failed') THEN status ELSE 'success' END) AS status,
+            -- Roll up to "failed" if ANY step failed. This has to be a numeric
+            -- aggregate: MAX() over the status strings sorts alphabetically, and
+            -- 'success' > 'failed' > 'error', so a run with one successful step
+            -- reported "success" no matter how many steps errored.
+            CASE
+                WHEN SUM(CASE WHEN status IN ('error', 'failed') THEN 1 ELSE 0 END) > 0
+                THEN 'failed'
+                ELSE 'success'
+            END AS status,
             SUM(duration_ms) AS total_duration_ms,
             COUNT(*) AS model_count,
             SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success_count,

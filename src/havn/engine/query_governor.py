@@ -23,7 +23,7 @@ def execute_governed(
     conn: duckdb.DuckDBPyConnection,
     sql: str,
     timeout_s: float = 30,
-    params: dict | None = None,
+    params: dict | list | None = None,
 ) -> tuple[duckdb.DuckDBPyConnection, float]:
     """Execute SQL with a watchdog timer.
 
@@ -37,7 +37,8 @@ def execute_governed(
     conn : DuckDB connection or cursor
     sql : SQL to execute
     timeout_s : maximum seconds before interrupt
-    params : optional named parameters bound to ``$name`` placeholders
+    params : optional parameters -- a dict bound to ``$name`` placeholders, or
+        a list bound to positional ``$1``/``?`` placeholders
 
     Returns
     -------

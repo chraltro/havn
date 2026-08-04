@@ -8,7 +8,7 @@ from typing import Optional
 import typer
 from rich.table import Table
 
-from havn.cli import _load_config, _resolve_project, app, console
+from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, console
 
 pr_app = typer.Typer(
     name="pr",

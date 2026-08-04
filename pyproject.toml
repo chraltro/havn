@@ -44,7 +44,15 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-xdist>=3.0",
+    # starlette's TestClient needs an HTTP client library, and which one
+    # depends on the starlette version resolved alongside fastapi:
+    # starlette <1.0 imports httpx, starlette >=1.0 imports httpx2. Neither
+    # is a dependency of starlette itself, so declaring only one makes the
+    # whole suite fail at collection time the moment the other is resolved.
+    # Both are test-only and small; installing both keeps `pip install -e
+    # ".[dev]"` working across the range.
     "httpx>=0.28.0",
+    "httpx2>=2.0",
 ]
 snowflake = ["snowflake-connector-python>=3.0"]
 bigquery = ["google-cloud-bigquery>=3.0", "google-auth>=2.0"]

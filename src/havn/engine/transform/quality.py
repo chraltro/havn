@@ -162,9 +162,15 @@ def _evaluate_assertion(
     """Evaluate a single assertion expression."""
     table = model.full_name
 
+    # Each builtin below is anchored with \s*$ so a compound expression such as
+    # `row_count > 0 AND amount >= 0` is NOT swallowed by the builtin branch
+    # (which would evaluate only the first conjunct and silently discard the
+    # rest). Anything that isn't exactly one builtin falls through to the
+    # generic SQL evaluator at the bottom.
+
     # row_count > N / row_count >= N / etc.
     # Order alternatives longest-first so `>=` doesn't get split into `>` + `=`.
-    m = re.match(r"row_count\s*(>=|<=|==|!=|>|<|=)\s*(\d+)", expr)
+    m = re.match(r"row_count\s*(>=|<=|==|!=|>|<|=)\s*(\d+)\s*$", expr)
     if m:
         op, val = m.group(1), int(m.group(2))
         if op == "==":
@@ -176,7 +182,7 @@ def _evaluate_assertion(
         return AssertionResult(expression=expr, passed=passed, detail=detail)
 
     # no_nulls(column)
-    m = re.match(r"no_nulls\((\w+)\)", expr)
+    m = re.match(r"no_nulls\((\w+)\)\s*$", expr)
     if m:
         col = m.group(1)
         row = conn.execute(
@@ -192,7 +198,7 @@ def _evaluate_assertion(
         return AssertionResult(expression=expr, passed=passed, detail=detail)
 
     # unique(column)
-    m = re.match(r"unique\((\w+)\)", expr)
+    m = re.match(r"unique\((\w+)\)\s*$", expr)
     if m:
         col = m.group(1)
         row = conn.execute(
@@ -207,12 +213,14 @@ def _evaluate_assertion(
         return AssertionResult(expression=expr, passed=passed, detail=detail)
 
     # accepted_values(column, ['val1', 'val2'])
-    m = re.match(r"accepted_values\((\w+),\s*\[(.+)\]\)", expr)
+    m = re.match(r"accepted_values\((\w+),\s*\[(.+)\]\)\s*$", expr)
     if m:
         col = m.group(1)
         raw_values = m.group(2)
         values = [v.strip().strip("'\"") for v in raw_values.split(",")]
-        placeholders = ", ".join(f"'{v}'" for v in values)
+        # Escape embedded single quotes -- otherwise a value like O'Brien closes
+        # the literal and the rest of it is parsed as SQL.
+        placeholders = ", ".join("'" + v.replace("'", "''") + "'" for v in values)
         bad_count = conn.execute(
             f'SELECT COUNT(*) FROM {table} WHERE "{col}" IS NOT NULL AND "{col}"::VARCHAR NOT IN ({placeholders})'
         ).fetchone()[0]
@@ -229,13 +237,57 @@ def _evaluate_assertion(
             detail = f"{bad_count:,} row(s) with unexpected values: {', '.join(sample_vals)}"
         return AssertionResult(expression=expr, passed=passed, detail=detail)
 
-    # Generic SQL expression — wrap in SELECT and check if true
-    check = conn.execute(
-        f"SELECT CASE WHEN ({expr}) THEN true ELSE false END FROM {table} LIMIT 1"
-    ).fetchone()
-    passed = bool(check[0]) if check else False
-    detail = "expression evaluated to true" if passed else "expression evaluated to false"
-    return AssertionResult(expression=expr, passed=passed, detail=detail)
+    # Generic SQL expression.
+    #
+    # A row-level predicate (`amount >= 0`) has to hold for EVERY row, so count
+    # the rows that violate it. The previous implementation evaluated the
+    # expression against a single arbitrary row (`... FROM t LIMIT 1`), which
+    # reported "pass" for a table whose very next row violated the assertion.
+    #
+    # An aggregate predicate (`sum(amount) > 0`, `count(*) = count(DISTINCT id)`)
+    # is not valid in a WHERE clause, so DuckDB rejects the counting form; fall
+    # back to evaluating it as the single-row aggregate it is.
+    #
+    # Rows where the predicate is NULL are not counted as violations: an
+    # unevaluable predicate is not a demonstrated failure, and treating NULL as a
+    # violation would fail every assertion written over a nullable column.
+    # `row_count` is a havn-provided pseudo-column, not real SQL. The dedicated
+    # branch above handles it alone; here it can still appear inside a compound
+    # expression (`row_count > 0 AND amount >= 0`), so substitute the literal
+    # count -- unless the model actually has a column by that name, which wins.
+    sql_expr = expr
+    if re.search(r"\brow_count\b", expr):
+        has_col = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = ? AND table_name = ? AND lower(column_name) = 'row_count'",
+            [model.schema, model.name],
+        ).fetchone()[0]
+        if not has_col:
+            total_rows = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            sql_expr = re.sub(r"\brow_count\b", str(total_rows), expr)
+
+    try:
+        bad = conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE NOT ({sql_expr})"
+        ).fetchone()
+        bad_count = bad[0] if bad else 0
+        if bad_count == 0:
+            return AssertionResult(
+                expression=expr, passed=True, detail="holds for all rows"
+            )
+        total = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        return AssertionResult(
+            expression=expr,
+            passed=False,
+            detail=f"{bad_count:,} of {total:,} row(s) violate the expression",
+        )
+    except duckdb.Error:
+        check = conn.execute(
+            f"SELECT CASE WHEN ({expr}) THEN true ELSE false END FROM {table}"
+        ).fetchone()
+        passed = bool(check[0]) if check else False
+        detail = "expression evaluated to true" if passed else "expression evaluated to false"
+        return AssertionResult(expression=expr, passed=passed, detail=detail)
 
 
 def profile_model(

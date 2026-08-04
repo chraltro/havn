@@ -80,6 +80,18 @@ class SQLModel:
             parts.append(f"partition_by={self.partition_by}")
         if self.watermark:
             parts.append(f"watermark={self.watermark}")
+        # Assertions and @grain are stripped out of `query` by
+        # strip_config_comments, so without folding them in here, adding an
+        # @assert to a model that is already built leaves content_hash
+        # unchanged -- the model is skipped and the new assertion never runs.
+        if self.assertion_specs:
+            parts.append(
+                "assert=" + ";".join(f"{e}@{s}" for e, s in self.assertion_specs)
+            )
+        elif self.assertions:
+            parts.append("assert=" + ";".join(self.assertions))
+        if self.grain:
+            parts.append("grain=" + ",".join(self.grain))
         self.content_hash = _hash_content("|".join(parts))
 
 

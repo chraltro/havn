@@ -20,15 +20,47 @@ _FORBIDDEN_STATEMENT_KEYWORDS = frozenset({
     "copy", "attach", "detach", "install", "load", "export", "import",
     "grant", "revoke", "set", "reset", "vacuum", "checkpoint", "pragma",
     "call", "execute",
+    # DuckDB accepts a FORCE prefix on INSTALL/CHECKPOINT, which put the verb in
+    # second position where the leading-keyword check can't see it.
+    "force",
+    # Transaction and prepared-statement control. Harmless on their own, but they
+    # let a caller hold a transaction open or stage a statement for later
+    # execution, neither of which a read-only query surface should permit.
+    "begin", "start", "commit", "rollback", "abort", "prepare", "deallocate",
+    # State mutations that aren't DML: USE switches the active catalog/schema,
+    # COMMENT ON writes catalog metadata, ANALYZE rewrites statistics.
+    "use", "comment", "analyze",
 })
 
 _DANGEROUS_FUNCTION_NAMES = frozenset({
     "read_csv_auto", "read_csv", "read_parquet", "read_json_auto", "read_json",
-    "read_json_objects", "read_ndjson", "read_ndjson_auto",
-    "read_blob", "read_text",
+    "read_json_objects", "read_json_objects_auto", "read_ndjson",
+    "read_ndjson_auto", "read_ndjson_objects",
+    "read_blob", "read_text", "read_xlsx",
     "write_csv", "write_parquet",
-    "iceberg_scan", "delta_scan", "parquet_scan", "csv_scan",
+    "iceberg_scan", "iceberg_metadata", "iceberg_snapshots",
+    "delta_scan", "parquet_scan", "csv_scan",
     "http_get", "http_post",
+    # Re-entrant SQL execution. json_serialize_sql turns a string into a plan and
+    # json_execute_serialized_sql runs it, so anything nested in a string literal
+    # bypasses this validator entirely (string literals are stripped before the
+    # scans below ever run).
+    "json_serialize_sql", "json_execute_serialized_sql", "query", "query_table",
+    # Filesystem enumeration and metadata readers. These don't return file
+    # *contents* wholesale, but glob() lists the disk and sniff_csv() /
+    # parquet_schema() leak header rows and column names from arbitrary paths.
+    "glob", "sniff_csv",
+    "parquet_metadata", "parquet_schema", "parquet_file_metadata",
+    "parquet_kv_metadata", "parquet_bloom_probe",
+    "duckdb_external_file_cache", "duckdb_temporary_files",
+    # Whole-database and foreign-database attach/scan paths.
+    "read_duckdb", "sqlite_scan", "sqlite_attach",
+    "postgres_scan", "postgres_scan_pushdown", "postgres_query",
+    "mysql_scan", "mysql_query",
+    # In-process pointer scans and credential helpers.
+    "arrow_scan", "arrow_scan_dumb", "load_aws_credentials",
+    # Spatial extension file readers.
+    "st_read", "st_read_meta", "st_readosm", "shapefile_meta",
 })
 
 
@@ -99,10 +131,22 @@ _REPLACEMENT_SCAN_RE = re.compile(r"\b(?:from|join)\s*\(?\s*''", re.IGNORECASE)
 # DuckDB also resolves a DOUBLE-quoted path in table position as a replacement
 # scan (FROM "/etc/passwd" reads the file just like FROM '/etc/passwd'). Double
 # quotes are not stripped above because they normally delimit identifiers, so
-# match only path-shaped ones: containing a slash/backslash or a URL scheme.
+# match only file-shaped ones. Three shapes count:
+#   - a URL scheme            FROM "https://host/x.csv"
+#   - any slash or backslash  FROM "../secrets/.env"
+#   - a bare filename ending in a data-file extension, which resolves relative
+#     to the server's working directory  ->  FROM "warehouse.duckdb"
 # Plain quoted identifiers (FROM "my table", FROM "gold"."orders") stay legal.
+_DATA_FILE_EXT = (
+    r"csv|tsv|txt|parquet|json|jsonl|ndjson|duckdb|ddb|db|sqlite|sqlite3"
+    r"|xlsx|arrow|feather|avro|orc|env"
+)
 _DQUOTE_PATH_SCAN_RE = re.compile(
-    r'\b(?:from|join)\s*\(?\s*"(?:[a-z][a-z0-9+.-]*://|[^"]*[/\\])[^"]*"',
+    r'\b(?:from|join)\s*\(?\s*"(?:'
+    r"[a-z][a-z0-9+.-]*://"          # URL scheme
+    r'|[^"]*[/\\]'                    # any path separator
+    rf'|[^"]*\.(?:{_DATA_FILE_EXT})(?:\.(?:gz|zst|bz2|br))?'  # bare data file
+    r')[^"]*"',
     re.IGNORECASE,
 )
 

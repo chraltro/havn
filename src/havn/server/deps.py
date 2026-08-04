@@ -529,6 +529,7 @@ def _require_permission(request: Request, permission: str) -> dict:
 # ---------------------------------------------------------------------------
 
 _login_attempts: dict[str, list[float]] = {}
+_login_attempts_lock = threading.Lock()
 _RATE_LIMIT_WINDOW = 60.0
 _RATE_LIMIT_MAX = 5
 _RATE_LIMIT_MAX_KEYS = 10_000
@@ -537,21 +538,28 @@ _RATE_LIMIT_MAX_KEYS = 10_000
 def _check_rate_limit(key: str) -> None:
     """Enforce rate limiting. Raises 429 if too many attempts."""
     now = time.time()
-    attempts = _login_attempts.get(key, [])
-    attempts = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
-    if len(attempts) >= _RATE_LIMIT_MAX:
+    # FastAPI runs sync handlers on a threadpool, so concurrent logins hit this
+    # from several threads at once. Without the lock the read-modify-write below
+    # loses updates (letting attempts past the cap) and the eviction sweep can
+    # raise "dictionary changed size during iteration" out of the login handler.
+    with _login_attempts_lock:
+        attempts = _login_attempts.get(key, [])
+        attempts = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
+        over_limit = len(attempts) >= _RATE_LIMIT_MAX
+        if not over_limit:
+            attempts.append(now)
+        _login_attempts[key] = attempts
+        if len(_login_attempts) > _RATE_LIMIT_MAX_KEYS:
+            stale = [
+                k
+                for k, v in list(_login_attempts.items())
+                if not v or now - v[-1] > _RATE_LIMIT_WINDOW
+            ]
+            for k in stale:
+                del _login_attempts[k]
+    if over_limit:
         logger.warning("Rate limit exceeded for %s", key)
         raise HTTPException(429, "Too many login attempts. Try again later.")
-    attempts.append(now)
-    _login_attempts[key] = attempts
-    if len(_login_attempts) > _RATE_LIMIT_MAX_KEYS:
-        stale = [
-            k
-            for k, v in _login_attempts.items()
-            if not v or now - v[-1] > _RATE_LIMIT_WINDOW
-        ]
-        for k in stale:
-            del _login_attempts[k]
 
 
 # ---------------------------------------------------------------------------

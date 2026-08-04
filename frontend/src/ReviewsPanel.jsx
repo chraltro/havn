@@ -129,6 +129,7 @@ export default function ReviewsPanel({ showConfirm }) {
       <PrDetail
         prId={selectedId}
         onBack={() => { setSelectedId(null); loadPrs(); }}
+        showConfirm={showConfirm}
       />
     );
   }
@@ -426,7 +427,7 @@ function CreatePrRow({ onCancel, onCreated, onError }) {
 
 const DETAIL_TABS = ["Changes", "Data Impact", "Lineage", "Comments"];
 
-function PrDetail({ prId, onBack }) {
+function PrDetail({ prId, onBack, showConfirm }) {
   const [pr, setPr] = useState(null);
   const [build, setBuild] = useState(null);
   const [loading, setLoading] = useState(true);

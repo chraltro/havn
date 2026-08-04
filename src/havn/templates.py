@@ -255,7 +255,9 @@ SAMPLE_BRONZE_SQL = """\
 SELECT
     id AS event_id,
     mag AS magnitude,
-    magType AS mag_type,
+    -- The USGS feed spells this magType. DuckDB matches unquoted identifiers
+    -- case-insensitively, so the lowercase spelling resolves and lints clean.
+    magtype AS mag_type,
     place,
     latitude,
     longitude,

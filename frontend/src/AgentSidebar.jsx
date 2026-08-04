@@ -1,13 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { api } from "./api";
 
 const AGENTS = [
   {
     id: "claude", name: "Claude Code", install: "npm install -g @anthropic-ai/claude-code",
     models: [
       { id: "", label: "Default" },
-      { id: "claude-sonnet-4-5-20250514", label: "Sonnet 4.5" },
-      { id: "claude-opus-4-6", label: "Opus 4.6" },
-      { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
+      { id: "claude-opus-5", label: "Opus 5" },
+      { id: "claude-sonnet-5", label: "Sonnet 5" },
+      { id: "claude-haiku-4-5", label: "Haiku 4.5" },
     ],
   },
   {
@@ -308,8 +309,9 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
   const cur = agentStates[selectedAgent] || { messages: [], isConnected: false, isStreaming: false, permissionMode: "auto", selectedModel: "" };
 
   useEffect(() => {
-    fetch("/api/agents")
-      .then((r) => r.json())
+    // Goes through the api client so the bearer token is attached; a bare
+    // fetch() 401s as soon as the server runs with --auth.
+    api.listAgents()
       .then(setAvailableAgents)
       .catch(() => {});
   }, []);
@@ -322,7 +324,13 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
     }
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/agent`);
+    // WebSockets can't carry an Authorization header, so the server reads the
+    // token from a query parameter (deps.py _authenticate_websocket). Without
+    // it, `havn serve --auth` closes the socket with 4001 and onclose retries
+    // every 3s forever, leaving the sidebar stuck on "Connecting...".
+    const wsToken = api.getToken();
+    const wsQuery = wsToken ? `?token=${encodeURIComponent(wsToken)}` : "";
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/agent${wsQuery}`);
     socketsRef.current[agentId] = ws;
 
     ws.onopen = () => {
@@ -331,7 +339,14 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
     };
 
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        // A malformed frame shouldn't take down message handling for the rest
+        // of the session.
+        return;
+      }
 
       if (data.type === "ready") {
         updateAgent(agentId, (s) => {

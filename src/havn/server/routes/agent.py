@@ -223,6 +223,16 @@ def register_agent_websocket(app) -> None:
                 await websocket.close(code=4001, reason="Authentication required")
                 return
 
+            # ...and authorize. This socket drives a coding agent inside the
+            # project directory with the server process's privileges: it can
+            # write files and run shell commands. Authentication alone would let
+            # any viewer token do that, so require "write" as every other
+            # mutating surface does.
+            from havn.engine.auth import has_permission
+            if not has_permission(ws_user.get("role", ""), "write"):
+                await websocket.close(code=4003, reason="Permission denied")
+                return
+
             await websocket.accept()
             ws_id = id(websocket)
             _active_sessions[ws_id] = {"adapter": None, "streaming": False}

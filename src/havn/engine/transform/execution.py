@@ -41,9 +41,15 @@ def _execute_incremental(
     conn.execute(f"CREATE SCHEMA IF NOT EXISTS {model.schema}")
     start = time.perf_counter()
 
-    # Check if target table exists
+    # A model switched from `view` to `incremental` leaves a VIEW behind at the
+    # target name. Drop it first, then probe for a BASE TABLE specifically --
+    # information_schema.tables counts views too, so without the type filter the
+    # probe reported "exists" and every run failed with
+    # "Binder Error: Can only delete from base table".
+    _drop_conflicting(conn, model.schema, model.name, "incremental")
     exists = conn.execute(
-        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
+        "SELECT COUNT(*) FROM information_schema.tables "
+        "WHERE table_schema = ? AND table_name = ? AND table_type = 'BASE TABLE'",
         [model.schema, model.name],
     ).fetchone()[0] > 0
 
@@ -133,7 +139,13 @@ def _execute_incremental(
         # Get the final column list from staging for explicit INSERT
         staging_col_names = [r[0] for r in staging_cols]
         staging_select = ", ".join(f'"{c}"' for c in staging_col_names)
-        key_cols = ", ".join(f'"{k}"' for k in keys)
+        # NULL-safe key comparison. Plain `=` (and `(a,b) IN (SELECT ...)`)
+        # evaluates to NULL rather than TRUE when a key column is NULL, so rows
+        # with a NULL key were never matched by the DELETE and duplicated on
+        # every single run. IS NOT DISTINCT FROM treats NULL = NULL as a match.
+        key_match = " AND ".join(
+            f'target."{k}" IS NOT DISTINCT FROM staging."{k}"' for k in keys
+        )
 
         if strategy == "merge":
             # True upsert: UPDATE existing rows, INSERT new ones
@@ -142,22 +154,16 @@ def _execute_incremental(
                 set_clause = ", ".join(
                     f'"{c}" = staging."{c}"' for c in non_key_cols
                 )
-                join_cond = " AND ".join(
-                    f'target."{k}" = staging."{k}"' for k in keys
-                )
                 conn.execute(
                     f"UPDATE {model.full_name} AS target SET {set_clause} "
-                    f"FROM {staging_name} AS staging WHERE {join_cond}"
+                    f"FROM {staging_name} AS staging WHERE {key_match}"
                 )
             # Insert rows that don't already exist
-            not_exists_cond = " AND ".join(
-                f'staging."{k}" = target."{k}"' for k in keys
-            )
             insert_cols = ", ".join(f'"{c}"' for c in staging_col_names)
             conn.execute(
                 f"INSERT INTO {model.full_name} ({insert_cols}) "
                 f"SELECT {staging_select} FROM {staging_name} AS staging "
-                f"WHERE NOT EXISTS (SELECT 1 FROM {model.full_name} AS target WHERE {not_exists_cond})"
+                f"WHERE NOT EXISTS (SELECT 1 FROM {model.full_name} AS target WHERE {key_match})"
             )
         elif model.partition_by:
             # Partition-based pruning: delete entire affected partitions, then insert
@@ -175,8 +181,8 @@ def _execute_incremental(
         else:
             # delete+insert strategy: delete by key, insert new
             conn.execute(
-                f"DELETE FROM {model.full_name} "
-                f"WHERE ({key_cols}) IN (SELECT {key_cols} FROM {staging_name})"
+                f"DELETE FROM {model.full_name} AS target "
+                f"WHERE EXISTS (SELECT 1 FROM {staging_name} AS staging WHERE {key_match})"
             )
             insert_cols = ", ".join(f'"{c}"' for c in staging_col_names)
             conn.execute(

@@ -194,12 +194,11 @@ def _fetch_via_server(project_dir: Path, sql: str) -> tuple[list, list, str, boo
         )
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = _json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, ConnectionError, OSError):
-        try:
-            info_path.unlink()
-        except Exception:
-            pass
-        return None
+    # HTTPError must come FIRST: it subclasses URLError (and so OSError), so the
+    # broad clause below would otherwise swallow every server-side error --
+    # deleting a perfectly valid serve.json lockfile and falling back to opening
+    # the warehouse directly, which then fails because the server holds the lock.
+    # A 400 for bad SQL would surface as a confusing lock error.
     except urllib.error.HTTPError as e:
         try:
             err_body = e.read().decode("utf-8")
@@ -207,6 +206,13 @@ def _fetch_via_server(project_dir: Path, sql: str) -> tuple[list, list, str, boo
             err_body = str(e)
         console.print(f"[red]Query error:[/red] {err_body}")
         raise typer.Exit(1)
+    except (urllib.error.URLError, ConnectionError, OSError):
+        # Server genuinely unreachable -> the lockfile is stale, drop it.
+        try:
+            info_path.unlink()
+        except Exception:
+            pass
+        return None
 
     return (
         data.get("columns", []),
