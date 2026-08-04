@@ -2,6 +2,116 @@
 
 All notable changes to havn are documented in this file.
 
+## [0.2.27] - 2026-08-04
+
+### Security
+
+- **Read-only query surfaces** now block four more bypasses of the
+  `sql_safety` validator, each of which let a `viewer` read arbitrary
+  server-readable files through `/api/query`, the semantic layer, the
+  importer preview, and the MCP `query` tool:
+  - `json_execute_serialized_sql(json_serialize_sql('...'))` executes SQL
+    nested inside a string literal. String literals are stripped before the
+    validator's scans run, so the inner query was completely invisible to it.
+  - `glob()`, `sniff_csv()`, `read_duckdb()`, the `parquet_*` metadata
+    readers, `postgres_query()`/`mysql_query()`, `arrow_scan()`, and the
+    spatial file readers were missing from the file-access blocklist.
+  - `FORCE INSTALL` / `FORCE CHECKPOINT` put the real verb in second
+    position, past the leading-keyword check. Transaction and catalog
+    statements (`BEGIN`, `COMMIT`, `USE`, `COMMENT`, `ANALYZE`) are now
+    rejected too.
+  - A bare double-quoted data filename in table position
+    (`FROM "warehouse.duckdb"`) resolves as a replacement scan relative to
+    the server's working directory. 0.2.26 only caught path-shaped names.
+- **Dashboard widget queries** now apply column masking. `/api/dashboards/
+  {id}/widgets/{wid}/query` and `/query-batch` ran raw SQL with no masking at
+  all, so any `viewer` could read unmasked PII by putting the column in a
+  widget. Cached results are now keyed by role as well, so an admin's
+  unmasked rows are never served to the next viewer.
+- **`/ws/agent`** now requires the `write` permission. It authenticated the
+  connection but never authorized it, so a `viewer` token could drive a
+  coding agent inside the project directory with the server process's
+  privileges (arbitrary file write and shell execution).
+- **`GET /api/secrets`** no longer reveals the first and last two characters
+  of every secret. For short or prefixed values that is a meaningful chunk of
+  the plaintext; the masked form is now length-only.
+
+### Fixed
+
+- **Dependency extraction** no longer drops a real dependency when a CTE
+  shares a model's name. `WITH orders AS (...) ... JOIN bronze.orders`
+  resolved to no dependencies at all, which put the model in the wrong DAG
+  position and left it un-rebuilt when its upstream changed.
+- **`@config` parsing** no longer truncates values containing commas. A
+  composite `unique_key=customer_id, event_date` parsed as
+  `customer_id` alone, silently degrading an incremental `delete+insert` to a
+  partial-key delete: loading a new date for an existing customer **deleted
+  that customer's entire history**. `incremental_filter=WHERE x IN (1,2)`
+  was truncated the same way.
+- **Incremental models with NULL unique-key values** no longer duplicate on
+  every run. `=` and `(k) IN (...)` evaluate to NULL rather than TRUE for a
+  NULL key, so those rows were never deleted before the re-insert. Both
+  `delete+insert` and `merge` now compare keys with `IS NOT DISTINCT FROM`.
+- **Switching a model from `view` to `incremental`** no longer wedges it.
+  The "table exists" probe counted views, so every subsequent run failed with
+  `Binder Error: Can only delete from base table` until the view was dropped
+  by hand.
+- **Generic `@assert` expressions** are evaluated against every row instead
+  of one arbitrary row. `@assert amt > 0` reported *pass* on a table
+  containing a negative value. Aggregate predicates (`sum(amt) > 0`) keep
+  their previous single-row semantics, and `row_count` now works inside a
+  compound expression.
+- **Compound assertions** are no longer silently truncated to their first
+  term. `@assert row_count > 0 AND row_count > 99999` matched the `row_count`
+  builtin and discarded everything after it, always reporting *pass*.
+- **Adding an `@assert` or `@grain` to an already-built model** now triggers
+  a rebuild. Both are stripped from the hashed query text, so change
+  detection skipped the model and the new check never ran.
+- **`accepted_values`** escapes embedded single quotes instead of breaking
+  out of the SQL literal.
+- **Dependency cycles** raise a `CircularDependencyError` naming the models
+  and their files, instead of surfacing a bare `graphlib.CycleError`
+  traceback through the CLI, the API, and the scheduler.
+- **Pipeline run history** no longer reports failed runs as successful.
+  `GET /api/history/runs` rolled up status with `MAX()` over the status
+  *strings*, and `'success' > 'failed' > 'error'` alphabetically, so any run
+  with at least one successful step reported success.
+- **Dashboard widget timeouts** are enforced. `SET statement_timeout` is not
+  a DuckDB setting, so it raised on every call, the exception was swallowed,
+  and `WidgetQueryRequest.timeout` was a no-op. Widgets now use the same
+  interrupt-based governor as `/api/query`.
+- **`havn pr show` / `havn pr review`** no longer raise `NameError` on every
+  invocation (a missing import).
+- **`havn query`** against a running `havn serve` now reports server-side
+  errors instead of deleting a valid `.havn/serve.json` and failing with a
+  lock error. `HTTPError` subclasses `URLError`, and the broad clause came
+  first.
+- **Login rate limiting** is guarded by a lock. The unsynchronized
+  read-modify-write let concurrent attempts exceed the cap, and the eviction
+  sweep could raise `dictionary changed size during iteration` out of the
+  login handler as a 500.
+- **The agent sidebar** works under `havn serve --auth`. Neither its
+  `/api/agents` fetch nor its `/ws/agent` connection carried the token, so
+  the panel sat in a permanent 3-second reconnect loop. Its model list was
+  also stale and contained a model ID that does not exist.
+- **Merge and Close on a pull request** no longer throw `ReferenceError`:
+  `PrDetail` used a `showConfirm` prop it was never passed, so both buttons
+  did nothing.
+- **`havn init`** scaffolds a project that passes its own `havn lint`. The
+  sample bronze model referenced the USGS `magType` column with its original
+  camel case, which the scaffolded rule set rejects.
+
+### Changed
+
+- `pip install -e ".[dev]"` now installs both `httpx` and `httpx2`.
+  starlette's `TestClient` imports `httpx` before 1.0 and `httpx2` from 1.0
+  on, and neither is a dependency of starlette itself, so declaring only one
+  made the entire test suite fail at collection as soon as the other was
+  resolved.
+- `CLAUDE.md` corrected where it had drifted: `havn diff --full`, the
+  location of API endpoints (`server/routes/`, not `server/app.py`), the
+  scheduler implementation, and the frontend's TypeScript usage.
+
 ## [0.2.26] - 2026-07-16
 
 ### Security
