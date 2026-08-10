@@ -19,6 +19,7 @@ from havn.engine.transform import (
     discover_models,
     run_transform,
 )
+from havn.engine.transform.discovery import CircularDependencyError
 from havn.engine.transform.quality import run_assertions, profile_model
 from havn.engine.runner import run_script, run_scripts_in_dir
 
@@ -259,10 +260,12 @@ class TestDAGComplexity:
         )
 
         models = discover_models(transform_dir)
-        # graphlib.TopologicalSorter raises CycleError for circular deps
-        from graphlib import CycleError
-        with pytest.raises(CycleError):
+        # build_dag catches graphlib's CycleError and re-raises it as a domain
+        # error naming the models and files in the cycle.
+        with pytest.raises(CircularDependencyError) as exc:
             build_dag(models)
+        message = str(exc.value)
+        assert "bronze.a" in message and "silver.b" in message and "silver.c" in message
 
     def test_dag_tier_grouping_correctness(self, db, transform_dir):
         """Verify tier grouping puts independent models in the same tier."""
