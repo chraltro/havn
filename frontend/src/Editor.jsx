@@ -1392,7 +1392,7 @@ function ColumnReferencesPanel({ result, onClose, onJump }) {
           {result.column
             ? `${result.model ? `${result.model}.` : ""}${result.column}`
             : "Column references"}
-          {result.loading ? " — searching…" : ` — ${sites.length} site${sites.length === 1 ? "" : "s"}`}
+          {result.loading ? ": searching…" : `: ${sites.length} site${sites.length === 1 ? "" : "s"}`}
         </span>
         <button onClick={onClose} style={styles.panelClose} aria-label="Close column references">
           {"×"}

@@ -118,7 +118,9 @@ The Monaco editor in `havn serve`.
 | Live error markers | Supported | Bind diagnostics 400 ms after a keystroke, lint diagnostics on save and after 1.5 s idle, under separate marker owners. Only for `.sql` files under `transform/`. |
 | Go to definition on a model reference | Supported | `F12` or Ctrl/Cmd+Click on `schema.model`. Resolves through the model's own path, so `@config schema=` overrides are followed. Column-level definition is still planned. |
 | Preview a single CTE | Supported | A `Preview` code lens above each CTE, or Ctrl/Cmd+Shift+Enter at the cursor. Capped at 100 rows, like the whole-model preview. |
-| Rename a column across downstream models | Not supported | Deliberately withheld. Today's lineage does not see columns referenced only in `WHERE`, `JOIN`, `GROUP BY` or `ORDER BY`, so an automated rename would silently skip them and report success. It waits on the lineage rewrite. |
+| Rename a column across downstream models | Supported | `F2` on a column, or `havn rename-column`. Built on a reference index that sees `WHERE`, `JOIN`, `GROUP BY`, `ORDER BY`, `HAVING` and `QUALIFY`, not only the SELECT list, and follows the column downstream only while it keeps its name. A downstream `SELECT *` over the column is a blocker, not a silent skip: a star yields no identifier to rewrite. So are `COLUMNS(...)`, `UNION BY NAME`, a relation-position macro call, an unqualified reference two relations could own, and a metrics or contracts YAML that names the column. `--force` renames everything else and leaves those for a person. See [Refactoring](refactoring.md). |
+| Find column references | Supported | Right-click in the editor, or `havn rename-column --dry-run`. Lists every site with the clause it sits in and click-to-jump. |
+| Multi-file write | Supported | `PUT /api/files` writes a batch as one unit, hash-checking every file first and restoring what it wrote if a later write fails. |
 
 ## Reuse
 

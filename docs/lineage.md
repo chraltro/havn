@@ -253,6 +253,7 @@ Returns the SQL source, sample data rows, column lineage, upstream dependencies,
 
 ## Related Pages
 
+- [Refactoring](refactoring.md) -- renaming a column across the models that read it
 - [Transforms](transforms) -- SQL model format and `@depends_on` overrides
 - [Quality](quality) -- Using lineage for data quality
 - [Sources](sources) -- Sources in the DAG

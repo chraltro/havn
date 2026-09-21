@@ -46,6 +46,9 @@ havn env list                   # show all environments
 havn diff gold.orders           # diff a single model
 havn diff                       # diff changed models + downstream
 havn diff --full                # show all changed rows, not just samples
+havn rename-column silver.customers customer_id cust_id   # rename across downstream models
+havn rename-column silver.customers customer_id cust_id --dry-run  # list the sites, write nothing
+havn rename-column silver.customers customer_id cust_id --force    # rename past the blockers
 havn macros                     # list registered SQL macros
 havn test                       # run model unit tests (tests/unit/*.yml)
 havn test --model silver.customers -v   # one model, with row diffs
@@ -78,6 +81,7 @@ src/havn/                       # Python package (the platform itself)
     anomaly.py                # Statistical anomaly detection
     diff.py                   # 3-mode diff engine (single/changed/all)
     selectors.py              # Graph selectors (+x, x+, @x, tag:, state:modified)
+    rename.py                 # Column rename: reference index, edit plan, atomic multi-file write
     auth.py                   # Token auth, RBAC (admin/editor/viewer)
     secrets.py                # .env secrets management
     scheduler.py              # Cron scheduler (SchedulerThread) + file watcher
@@ -132,6 +136,7 @@ tests/                        # pytest test suite
   test_sql_rewrite.py         # Table-reference rewriter
   test_mcp_server.py          # MCP server
   test_selectors.py           # Graph selectors + @config tags
+  test_rename.py              # Column rename index, plan, apply, CLI and API
 ```
 
 ## Architecture
