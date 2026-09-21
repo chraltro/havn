@@ -258,6 +258,8 @@ The warehouse is a single DuckDB file. Copy it, back it up, version it - it's ju
 
 havn is the right choice when you want a complete data platform without the infrastructure overhead. It's not trying to replace Snowflake at 10TB scale - it's the best tool for teams working with data that fits on a single machine (which is most teams).
 
+For the feature-by-feature version of that answer - what works today, what works with caveats, and what isn't built yet - see [What havn Supports](docs/limitations.md).
+
 ## Documentation
 
 - **[CLAUDE.md](CLAUDE.md)** - Full technical reference (architecture, conventions, development workflow)
