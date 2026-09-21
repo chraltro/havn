@@ -14,15 +14,17 @@ from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, con
 @app.command()
 def check(
     targets: Annotated[Optional[list[str]], typer.Argument(help="Specific models to check")] = None,
+    unit_tests: Annotated[bool, typer.Option("--unit-tests/--no-unit-tests", help="Also run model unit tests from tests/unit/")] = True,
     env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use")] = None,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
-    """Validate SQL models, run inline assertions, and run YAML contracts.
+    """Validate SQL models, run inline assertions, contracts, and unit tests.
 
     Checks that SQL parses correctly, referenced tables exist in the DAG,
     sources.yml, the DuckDB catalog, or seeds. Validates column references
     against upstream tables. Then runs inline -- assert: assertions and
-    YAML contracts from contracts/ against live data. Reports all errors.
+    YAML contracts from contracts/ against live data, and finally the unit
+    tests in tests/unit/ (skip them with --no-unit-tests). Reports all errors.
     """
     from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.seeds import discover_seeds
@@ -134,6 +136,16 @@ def check(
                         contract_failures += 1
                 if contract_failures:
                     has_failure = True
+
+        # Unit tests last: they need no warehouse, so they still run (and
+        # still fail the command) on a project that has never been built.
+        if unit_tests:
+            from havn.cli.unit_tests import run_and_report
+
+            console.print()
+            console.print("[bold]Running unit tests...[/bold]")
+            if not run_and_report(project_dir, config, quiet_when_empty=True, conn=conn):
+                has_failure = True
 
         if has_failure:
             raise typer.Exit(1)
