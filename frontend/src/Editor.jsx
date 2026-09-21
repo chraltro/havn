@@ -1326,14 +1326,13 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
   const disableMinimap = contentLen > 500_000;    // > 500KB
   const disableFolding = contentLen > 1_000_000;  // > 1MB
 
-  const editorElement = (
   // Installed package files are still editable -- sometimes you need a quick
   // local patch to find out whether a fix works -- but the next
   // `havn packages install` replaces the whole checkout, so say so up front
   // rather than letting the edit quietly disappear.
   const activePackage = packageOfPath(activeFile);
 
-  const editor = (
+  const editorElement = (
     <MonacoEditor
       height="100%"
       language={language}
@@ -1368,6 +1367,15 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
 
   return (
     <div style={styles.shell}>
+      {activePackage !== null && (
+        <div style={styles.packageBanner} role="status">
+          From installed package
+          {activePackage ? <strong>{` ${activePackage}`}</strong> : null}
+          {". The next "}
+          <code style={styles.code}>havn packages install</code>
+          {" overwrites your edits."}
+        </div>
+      )}
       <div style={styles.editorArea}>{editorElement}</div>
       {columnRefs && (
         <ColumnReferencesPanel
@@ -1460,18 +1468,6 @@ function BlockerDialog({ blocked, onAnswer }) {
           <button style={styles.dialogConfirm} onClick={() => onAnswer(true)}>Rename anyway</button>
         </div>
       </div>
-  if (activePackage === null) return editor;
-
-  return (
-    <div style={styles.packageWrap}>
-      <div style={styles.packageBanner} role="status">
-        From installed package
-        {activePackage ? <strong>{` ${activePackage}`}</strong> : null}
-        {". The next "}
-        <code style={styles.code}>havn packages install</code>
-        {" overwrites your edits."}
-      </div>
-      <div style={styles.packageEditor}>{editor}</div>
     </div>
   );
 }
