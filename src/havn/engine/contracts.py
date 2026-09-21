@@ -27,6 +27,24 @@ Contract YAML format::
         escalate_after: 3
         assertions:
           - row_count > 0
+
+A contract may also declare the shape of the model it guards::
+
+      - name: orders_shape
+        model: gold.orders
+        strict: true          # an undeclared column is an error
+        on_widen: warn        # warn (default) | error | ignore
+        columns:
+          - name: order_id
+            type: BIGINT
+            nullable: false
+            description: "Surrogate key"
+          - name: total_amount
+            type: DOUBLE
+
+Column declarations are checked against the schema the bind pass infers,
+before anything is built, and again against the live table afterwards. See
+:func:`check_contract_schema`.
 """
 
 from __future__ import annotations
@@ -56,6 +74,29 @@ _FRESHNESS_RE = re.compile(
 )
 
 
+ON_WIDEN_POLICIES = ("warn", "error", "ignore")
+
+# A column may not be declared with one of these; every one of them turns a
+# DESCRIBE into something other than a plain column list.
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# The shape a DuckDB type name can take: MAP(VARCHAR, INTEGER), DECIMAL(10,2),
+# STRUCT(a INTEGER), INTEGER[]. Deliberately no quotes, semicolons or dashes:
+# the type text goes into a DESCRIBE unquoted, because there is no other way
+# to say DECIMAL(10,2), so crafted YAML must not reach the parser.
+_TYPE_TEXT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_ ,()\[\]]*")
+
+
+@dataclass
+class ContractColumn:
+    """One column a contract promises the model will have."""
+
+    name: str
+    type: str
+    nullable: bool | None = None  # None: the contract says nothing about nulls
+    description: str = ""
+
+
 @dataclass
 class Contract:
     """A single data contract definition."""
@@ -68,6 +109,34 @@ class Contract:
     path: Path | None = None  # source file
     notify: list[str] = field(default_factory=list)  # ["slack", "webhook", "log"]
     escalate_after: int = 0  # consecutive failures before severity upgrades
+    columns: list[ContractColumn] = field(default_factory=list)
+    strict: bool = False  # a column the contract does not declare is an error
+    on_widen: str = "warn"  # "warn" | "error" | "ignore"
+    errors: list[str] = field(default_factory=list)
+    """Problems with the declaration itself, collected rather than raised.
+
+    A contract file with one malformed column still loads, and its good
+    columns are still checked. The messages surface in ``havn contracts``,
+    ``GET /api/contracts`` and the validation report, so the author sees
+    them without a broken file taking the whole run down.
+    """
+
+
+@dataclass
+class ContractSchemaFinding:
+    """One difference between a contract's declared columns and the real ones."""
+
+    contract_name: str
+    model: str
+    column: str
+    kind: str
+    """``missing_column``, ``extra_column``, ``type_widened``,
+    ``type_narrowed``, ``type_changed`` or ``not_null_violated``."""
+
+    severity: str  # "error" | "warning" | "info"
+    message: str
+    declared: str = ""
+    actual: str = ""
 
 
 @dataclass
@@ -84,32 +153,184 @@ class ContractResult:
     consecutive_failures: int = 0
 
 
+class _TypeChecker:
+    """Answers "is this a DuckDB type name?" the only way that is reliable.
+
+    ``DESCRIBE SELECT CAST(NULL AS <type>)`` on a throwaway in-memory
+    connection makes DuckDB itself parse the type. A hand-written list of type
+    names would be wrong within one release, and would reject perfectly good
+    nested types like ``STRUCT(a INTEGER, b VARCHAR[])``.
+
+    The connection is opened on the first declared column and never if no
+    contract declares any. Results are cached per type string, because a
+    project tends to use the same dozen types everywhere.
+    """
+
+    def __init__(self) -> None:
+        self._conn: duckdb.DuckDBPyConnection | None = None
+        self._cache: dict[str, str] = {}
+        self._broken = False
+
+    def resolve(self, type_text: str) -> tuple[str | None, str]:
+        """``(canonical_type, "")`` for a good type, ``(None, reason)`` for a bad one."""
+        text = (type_text or "").strip()
+        if not text:
+            return None, "type is required"
+        if not _TYPE_TEXT_RE.fullmatch(text):
+            return None, "not a type name"
+        if text in self._cache:
+            return self._cache[text], ""
+        if self._broken:
+            # No connection to ask: accept the text as written rather than
+            # reject a type that is probably fine.
+            return text, ""
+        if self._conn is None:
+            try:
+                self._conn = duckdb.connect(":memory:")
+            except Exception as e:  # pragma: no cover - only under resource limits
+                logger.debug("Contract type checking unavailable: %s", e)
+                self._broken = True
+                return text, ""
+        try:
+            rows = self._conn.execute(
+                f"DESCRIBE SELECT CAST(NULL AS {text}) AS c"
+            ).fetchall()
+        except Exception as e:
+            return None, _first_line(str(e))
+        canonical = str(rows[0][1]) if rows else text
+        self._cache[text] = canonical
+        return canonical, ""
+
+    def close(self) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
+
+
+def _first_line(text: str) -> str:
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return text
+
+
+def _parse_columns(
+    raw: object,
+    contract_name: str,
+    checker: _TypeChecker,
+) -> tuple[list[ContractColumn], list[str]]:
+    """Read a ``columns:`` block, collecting every problem instead of raising.
+
+    A bad entry is dropped and reported; the rest of the block still loads, so
+    one typo does not silently disable the whole contract's schema check.
+    """
+    if raw is None:
+        return [], []
+    if not isinstance(raw, list):
+        return [], [f"contract '{contract_name}': columns: must be a list"]
+
+    columns: list[ContractColumn] = []
+    errors: list[str] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(raw):
+        where = f"contract '{contract_name}', column {index + 1}"
+        if not isinstance(entry, dict):
+            errors.append(f"{where}: each column must be a mapping with a name and a type")
+            continue
+        name = str(entry.get("name", "") or "").strip()
+        if not name:
+            errors.append(f"{where}: name is required")
+            continue
+        if not _IDENTIFIER_RE.match(name):
+            errors.append(
+                f"{where}: '{name}' is not a valid column name. Names must be "
+                "letters, digits and underscores, and must not start with a digit."
+            )
+            continue
+        if name.lower() in seen:
+            errors.append(f"{where}: duplicate column '{name}'")
+            continue
+        seen.add(name.lower())
+
+        canonical, reason = checker.resolve(str(entry.get("type", "") or ""))
+        if canonical is None:
+            errors.append(
+                f"contract '{contract_name}', column '{name}': "
+                f"'{entry.get('type')}' is not a DuckDB type ({reason})"
+            )
+            continue
+
+        nullable = entry.get("nullable")
+        if nullable is not None and not isinstance(nullable, bool):
+            errors.append(
+                f"contract '{contract_name}', column '{name}': "
+                "nullable must be true or false"
+            )
+            nullable = None
+
+        columns.append(ContractColumn(
+            name=name,
+            type=canonical,
+            nullable=nullable,
+            description=str(entry.get("description", "") or ""),
+        ))
+    return columns, errors
+
+
 def discover_contracts(contracts_dir: Path) -> list[Contract]:
     """Discover all contract YAML files in the contracts/ directory.
 
     Each .yml file can contain a ``contracts:`` list with one or more
-    contract definitions.
+    contract definitions. A contract may declare ``columns:``, ``strict:``
+    and ``on_widen:``; problems with those land in ``Contract.errors``
+    rather than raising, so a project with one bad declaration still runs
+    every other contract.
     """
     contracts: list[Contract] = []
     if not contracts_dir.exists():
         return contracts
 
-    for yml_file in sorted(contracts_dir.glob("*.yml")):
-        try:
-            raw = yaml.safe_load(yml_file.read_text()) or {}
-            for c_raw in raw.get("contracts", []):
-                contracts.append(Contract(
-                    name=c_raw.get("name", yml_file.stem),
-                    model=c_raw.get("model", ""),
-                    assertions=c_raw.get("assertions", []),
-                    description=c_raw.get("description", ""),
-                    severity=c_raw.get("severity", "error"),
-                    path=yml_file,
-                    notify=c_raw.get("notify", []),
-                    escalate_after=int(c_raw.get("escalate_after", 0)),
-                ))
-        except Exception as e:
-            logger.warning("Failed to parse contract file %s: %s", yml_file, e)
+    checker = _TypeChecker()
+    try:
+        for yml_file in sorted(contracts_dir.glob("*.yml")):
+            try:
+                raw = yaml.safe_load(yml_file.read_text()) or {}
+                for c_raw in raw.get("contracts", []):
+                    name = c_raw.get("name", yml_file.stem)
+                    columns, errors = _parse_columns(
+                        c_raw.get("columns"), name, checker
+                    )
+                    on_widen = str(c_raw.get("on_widen", "warn") or "warn").lower()
+                    if on_widen not in ON_WIDEN_POLICIES:
+                        errors.append(
+                            f"contract '{name}': unknown on_widen '{on_widen}'. "
+                            f"Supported: {', '.join(ON_WIDEN_POLICIES)}."
+                        )
+                        on_widen = "warn"
+                    for message in errors:
+                        logger.warning("%s: %s", yml_file, message)
+                    contracts.append(Contract(
+                        name=name,
+                        model=c_raw.get("model", ""),
+                        assertions=c_raw.get("assertions", []),
+                        description=c_raw.get("description", ""),
+                        severity=c_raw.get("severity", "error"),
+                        path=yml_file,
+                        notify=c_raw.get("notify", []),
+                        escalate_after=int(c_raw.get("escalate_after", 0)),
+                        columns=columns,
+                        strict=bool(c_raw.get("strict", False)),
+                        on_widen=on_widen,
+                        errors=errors,
+                    ))
+            except Exception as e:
+                logger.warning("Failed to parse contract file %s: %s", yml_file, e)
+    finally:
+        checker.close()
 
     return contracts
 
