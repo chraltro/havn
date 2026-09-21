@@ -29,12 +29,9 @@ Your entire warehouse lives in a single DuckDB file. Transforms are plain SQL. I
 pip install havn && havn init my-project && cd my-project && havn jobs run full-refresh && havn serve
 ```
 
-<!-- Screenshot placeholder: replace with actual screenshot of havn web UI -->
-<!--
 <p align="center">
-  <img src="https://raw.githubusercontent.com/chraltro/havn/main/.github/assets/screenshot.png" width="800" alt="havn web UI" />
+  <img src="https://raw.githubusercontent.com/chraltro/havn/main/.github/assets/screenshot.webp" width="800" alt="havn web UI showing the project overview: pipeline health with running models, warehouse schemas, and live log output" />
 </p>
--->
 
 ## Why havn?
 
