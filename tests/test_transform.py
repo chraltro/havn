@@ -397,6 +397,47 @@ def test_model_ast_none_for_unparseable_sql():
     assert model.parse_error
 
 
+def test_duplicate_model_names_are_rejected(tmp_path):
+    """Two files producing one name used to make build_dag drop one silently."""
+    from havn.engine.transform.discovery import DuplicateModelError
+
+    transform_dir = tmp_path / "transform"
+    (transform_dir / "bronze").mkdir(parents=True)
+    (transform_dir / "silver").mkdir(parents=True)
+    (transform_dir / "bronze" / "orders.sql").write_text(
+        "@config materialized=table, schema=gold\n\nSELECT 1 AS id\n"
+    )
+    (transform_dir / "silver" / "orders.sql").write_text(
+        "@config materialized=table, schema=gold\n\nSELECT 2 AS id\n"
+    )
+
+    with pytest.raises(DuplicateModelError) as exc:
+        discover_models(transform_dir)
+
+    message = str(exc.value)
+    assert "gold.orders" in message
+    assert str(transform_dir / "bronze" / "orders.sql") in message
+    assert str(transform_dir / "silver" / "orders.sql") in message
+
+
+def test_same_name_in_different_schemas_is_fine(tmp_path):
+    transform_dir = tmp_path / "transform"
+    (transform_dir / "bronze").mkdir(parents=True)
+    (transform_dir / "silver").mkdir(parents=True)
+    (transform_dir / "bronze" / "orders.sql").write_text("SELECT 1 AS id\n")
+    (transform_dir / "silver" / "orders.sql").write_text("SELECT 2 AS id\n")
+
+    names = {m.full_name for m in discover_models(transform_dir)}
+    assert names == {"bronze.orders", "silver.orders"}
+
+
+def test_duplicate_model_error_is_a_value_error(tmp_path):
+    """Callers already catching ValueError from discovery keep working."""
+    from havn.engine.transform.discovery import DuplicateModelError
+
+    assert issubclass(DuplicateModelError, ValueError)
+
+
 def test_sql_parsed_once_per_pass(tmp_path, monkeypatch):
     """Discovery, validation and lineage share one parse per model.
 

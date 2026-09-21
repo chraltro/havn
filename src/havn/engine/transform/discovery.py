@@ -27,15 +27,33 @@ from havn.engine.utils import validate_identifier
 from .models import SQLModel
 
 
+class DuplicateModelError(ValueError):
+    """Two SQL files produce the same ``schema.name``.
+
+    Raised rather than reported, because the project has no single answer for
+    what that name means: ``build_dag`` keys models by full name, so one of
+    the two files would be dropped and which one won depended on filename
+    order. Discovery already raises for a model it cannot use (an invalid
+    schema or model identifier), so this follows the same path.
+    """
+
+
 def discover_models(transform_dir: Path) -> list[SQLModel]:
     """Discover all SQL models in the transform directory.
 
     Convention: folder names map to schemas.
     transform/bronze/customers.sql -> schema=bronze, name=customers
+
+    Raises:
+        DuplicateModelError: two files resolve to the same ``schema.name``.
+        ValueError: a file's schema or model name is not a safe identifier.
     """
     models = []
     if not transform_dir.exists():
         return models
+
+    # full_name -> the file that claimed it first
+    claimed: dict[str, Path] = {}
 
     for sql_file in sorted(transform_dir.rglob("*.sql")):
         sql = sql_file.read_text()
@@ -78,6 +96,18 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         # Validate identifiers at discovery time to prevent SQL injection downstream
         validate_identifier(schema, f"schema for {sql_file.name}")
         validate_identifier(name, f"model name for {sql_file.name}")
+
+        full_name = f"{schema}.{name}"
+        previous = claimed.get(full_name)
+        if previous is not None:
+            raise DuplicateModelError(
+                f"Duplicate model '{full_name}': both "
+                f"{previous} and {sql_file} produce it. "
+                "Rename one of the files, or point one at another schema "
+                "with @config schema=."
+            )
+        claimed[full_name] = sql_file
+
         materialized = config.get("materialized", "view")
         unique_key = config.get("unique_key")
         incremental_strategy = config.get("incremental_strategy", "delete+insert")
@@ -89,7 +119,7 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
             path=sql_file,
             name=name,
             schema=schema,
-            full_name=f"{schema}.{name}",
+            full_name=full_name,
             sql=sql,
             query=query,
             materialized=materialized,
