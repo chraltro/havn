@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import MonacoEditor, { loader } from "@monaco-editor/react";
 import { useTheme } from "./ThemeProvider";
 import { COLOR_THEMES } from "./themes";
@@ -236,6 +236,95 @@ async function getColumnsCache(schema, table) {
 // App.jsx fires this event once the pipeline completes.
 if (typeof window !== "undefined") {
   window.addEventListener("havn-data-changed", invalidateSchemaCaches);
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics: bind markers and lint markers
+// ---------------------------------------------------------------------------
+
+/** Marker owner for binder and validator diagnostics from POST /api/bind. */
+export const BIND_MARKER_OWNER = "havn-bind";
+/** Marker owner for SQLFluff violations from POST /api/lint/file. */
+export const LINT_MARKER_OWNER = "havn-lint";
+
+/** Bind is cheap, so it can follow the keyboard. */
+export const BIND_DEBOUNCE_MS = 400;
+/** SQLFluff is ~150 ms per call, so it waits for the typing to stop. */
+export const LINT_DEBOUNCE_MS = 1500;
+
+/**
+ * Drop stale in-flight responses.
+ *
+ * Every request takes a ticket; only the newest ticket may write to the
+ * editor. Without this a slow bind of an older buffer can land after a fast
+ * bind of the current one and paint markers for text that is no longer there.
+ * Same shape as QueryPanel's `acRequestRef`.
+ */
+export function createRequestGuard() {
+  let current = 0;
+  return {
+    next: () => ++current,
+    isStale: (id) => id !== current,
+    current: () => current,
+  };
+}
+
+/**
+ * Map /api/bind diagnostics onto Monaco markers.
+ *
+ * `severity` carries the monaco.MarkerSeverity values, so this stays a pure
+ * function that can be tested without a Monaco instance. An error with no
+ * line is a whole-file error: rather than drop it, put it on line 1 spanning
+ * that line, so the message is still visible.
+ */
+export function bindErrorsToMarkers(errors, severity, wholeFileEndColumn = 2) {
+  return (errors || []).map((err) => {
+    const sev = err.severity === "warning" ? severity.warning : severity.error;
+    const base = { severity: sev, message: err.message, source: err.source || "bind" };
+    if (err.line == null) {
+      return {
+        ...base,
+        startLineNumber: 1,
+        startColumn: 1,
+        endLineNumber: 1,
+        endColumn: Math.max(2, wholeFileEndColumn),
+      };
+    }
+    const startLineNumber = Math.max(1, err.line);
+    const startColumn = Math.max(1, err.col == null ? 1 : err.col);
+    const endLineNumber = Math.max(startLineNumber, err.end_line == null ? startLineNumber : err.end_line);
+    let endColumn;
+    if (err.end_col != null) endColumn = err.end_col;
+    else if (endLineNumber > startLineNumber) endColumn = 1;
+    else endColumn = startColumn + 1;
+    return { ...base, startLineNumber, startColumn, endLineNumber, endColumn };
+  });
+}
+
+/** Map /api/lint/file violations onto Monaco markers. Lint is advisory, so always a warning. */
+export function lintViolationsToMarkers(violations, warningSeverity) {
+  return (violations || []).map((v) => {
+    const line = Math.max(1, v.line || 1);
+    const col = Math.max(1, v.col || 1);
+    return {
+      severity: warningSeverity,
+      message: v.code ? `[${v.code}] ${v.description}` : v.description,
+      source: "havn lint",
+      startLineNumber: line,
+      startColumn: col,
+      endLineNumber: line,
+      endColumn: col + 1,
+    };
+  });
+}
+
+/** Short label for the editor toolbar: "binding...", "3 errors", "ok". */
+export function bindStatusLabel(state) {
+  if (!state) return null;
+  if (state.running) return "binding…";
+  if (state.errorCount > 0) return `${state.errorCount} error${state.errorCount === 1 ? "" : "s"}`;
+  if (state.warningCount > 0) return `${state.warningCount} warning${state.warningCount === 1 ? "" : "s"}`;
+  return "ok";
 }
 
 // Cache for macro metadata
@@ -543,7 +632,7 @@ loader.init().then((monaco) => {
   });
 });
 
-export default function Editor({ content, language, onChange, activeFile, onMount, goToLine, onFormat, onPreview, onOpenModel }) {
+export default function Editor({ content, language, onChange, activeFile, onMount, goToLine, onFormat, onPreview, onOpenModel, onStatus }) {
   const { themeId } = useTheme();
   const monacoTheme = `havn-${themeId}`;
   const editorRef = useRef(null);
@@ -551,6 +640,17 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
   onFormatRef.current = onFormat;
   const onPreviewRef = useRef(onPreview);
   onPreviewRef.current = onPreview;
+
+  const monacoRef = useRef(null);
+  const [monacoReady, setMonacoReady] = useState(false);
+  const bindGuardRef = useRef(createRequestGuard());
+  const lintGuardRef = useRef(createRequestGuard());
+  const onStatusRef = useRef(onStatus);
+  onStatusRef.current = onStatus;
+  const contentRef = useRef(content);
+  contentRef.current = content;
+  const activeFileRef = useRef(activeFile);
+  activeFileRef.current = activeFile;
 
   // Keep the module-level provider context pointed at the file on screen.
   editorContext.activeFile = activeFile || null;
@@ -561,12 +661,127 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
     if (isTransformSql(activeFile)) getModelsCache();
   }, [activeFile]);
 
+  function reportStatus(state) {
+    if (onStatusRef.current) onStatusRef.current(state);
+  }
+
+  /** The Monaco model backing `path`, or null if it is not open. */
+  function modelFor(path) {
+    const monaco = monacoRef.current;
+    if (!monaco || !path) return null;
+    try {
+      return monaco.editor.getModel(monaco.Uri.parse(modelUriFor(path)));
+    } catch {
+      return null;
+    }
+  }
+
+  // --- Bind diagnostics: debounced, follows the keyboard ---
+  useEffect(() => {
+    if (!monacoReady || !isTransformSql(activeFile)) {
+      if (!isTransformSql(activeFile)) reportStatus(null);
+      return undefined;
+    }
+    const timer = setTimeout(async () => {
+      const monaco = monacoRef.current;
+      const guard = bindGuardRef.current;
+      const reqId = guard.next();
+      const path = activeFile;
+      reportStatus({ running: true, errorCount: 0, warningCount: 0 });
+      let result;
+      try {
+        result = await api.bindSql(path, contentRef.current);
+      } catch {
+        if (guard.isStale(reqId)) return;
+        reportStatus(null);
+        return;
+      }
+      if (guard.isStale(reqId)) return;
+      const model = modelFor(path);
+      if (!model) return;
+      editorContext.bindResults.set(path, result);
+      seedColumnsFromBind(result);
+      const errors = result.errors || [];
+      monaco.editor.setModelMarkers(
+        model,
+        BIND_MARKER_OWNER,
+        bindErrorsToMarkers(
+          errors,
+          { error: monaco.MarkerSeverity.Error, warning: monaco.MarkerSeverity.Warning },
+          model.getLineMaxColumn(1),
+        ),
+      );
+      reportStatus({
+        running: false,
+        errorCount: errors.filter((e) => e.severity !== "warning").length,
+        warningCount: errors.filter((e) => e.severity === "warning").length,
+      });
+    }, BIND_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [content, activeFile, monacoReady]);
+
+  // --- Lint diagnostics: on idle and on save, never per keystroke ---
+  const runLintMarkersRef = useRef(null);
+  runLintMarkersRef.current = async function runLintMarkers() {
+    const monaco = monacoRef.current;
+    const path = activeFileRef.current;
+    if (!monaco || !isTransformSql(path)) return;
+    const guard = lintGuardRef.current;
+    const reqId = guard.next();
+    let data;
+    try {
+      data = await api.lintFile(path, false, contentRef.current);
+    } catch {
+      return;
+    }
+    if (guard.isStale(reqId)) return;
+    const model = modelFor(path);
+    if (!model) return;
+    monaco.editor.setModelMarkers(
+      model,
+      LINT_MARKER_OWNER,
+      lintViolationsToMarkers(data.violations, monaco.MarkerSeverity.Warning),
+    );
+  };
+
+  useEffect(() => {
+    if (!monacoReady || !isTransformSql(activeFile)) return undefined;
+    const timer = setTimeout(() => { runLintMarkersRef.current(); }, LINT_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [content, activeFile, monacoReady]);
+
+  useEffect(() => {
+    const onSaved = () => { runLintMarkersRef.current(); };
+    window.addEventListener("havn-file-saved", onSaved);
+    return () => window.removeEventListener("havn-file-saved", onSaved);
+  }, []);
+
+  // --- Clear both marker sets when the file leaves the editor ---
+  useEffect(() => {
+    const path = activeFile;
+    return () => {
+      if (!path) return;
+      const monaco = monacoRef.current;
+      const model = modelFor(path);
+      if (monaco && model) {
+        monaco.editor.setModelMarkers(model, BIND_MARKER_OWNER, []);
+        monaco.editor.setModelMarkers(model, LINT_MARKER_OWNER, []);
+      }
+      editorContext.bindResults.delete(path);
+      // Anything still in flight belongs to a file that is no longer open.
+      bindGuardRef.current.next();
+      lintGuardRef.current.next();
+    };
+  }, [activeFile]);
+
   function handleBeforeMount(monaco) {
     defineHavnThemes(monaco);
   }
 
   function handleEditorMount(editor, monaco) {
     editorRef.current = editor;
+    monacoRef.current = monaco;
+    setMonacoReady(true);
     if (onMount) onMount(editor);
 
     editor.addAction({

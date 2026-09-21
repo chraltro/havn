@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { api } from "./api";
 import FileTree from "./FileTree";
-import Editor from "./Editor";
+import Editor, { bindStatusLabel } from "./Editor";
 import OutputPanel from "./OutputPanel";
 import QueryPanel from "./QueryPanel";
 import TablesPanel from "./TablesPanel";
@@ -479,6 +479,8 @@ function AppContent() {
   const [preview, setPreview] = useState(null);
   const [previewError, setPreviewError] = useState(null);
   const [previewRunning, setPreviewRunning] = useState(false);
+  // Bind diagnostics summary for the editor toolbar ("binding...", "2 errors", "ok")
+  const [bindStatus, setBindStatus] = useState(null);
   // "Run on save" toggle, persisted in localStorage so it survives reloads.
   // When on, saving a transform .sql file triggers `havn transform --target <model>`;
   // saving a script under ingest/ or export/ triggers `havn run <path>`.
@@ -864,6 +866,9 @@ function AppContent() {
       await api.saveFile(activeFile, fileContent);
       setDirty(false);
       addOutput("info", `Saved ${activeFile}`);
+      // Saving is the cue for a lint pass: SQLFluff is too slow to run per
+      // keystroke, so the editor listens for this rather than polling.
+      window.dispatchEvent(new CustomEvent("havn-file-saved", { detail: { path: activeFile } }));
       setHintTrigger("firstFileEdited", true);
       // Run on save: rebuild this single model / re-run this single
       // script after a successful save, if the toggle is on.
@@ -1050,6 +1055,7 @@ function AppContent() {
   }
 
   const isTransformFile = activeFile && activeFile.includes("transform/") && activeFile.endsWith(".sql");
+  const bindStatusText = bindStatusLabel(bindStatus);
 
   return (
     <div style={styles.container}>
@@ -1215,6 +1221,17 @@ function AppContent() {
                     {activeFile}
                     {dirty && <span style={styles.modifiedDot}> *</span>}
                   </span>
+                  {bindStatusText && (
+                    <span
+                      style={{
+                        ...styles.bindStatus,
+                        color: bindStatus?.errorCount > 0 ? "var(--havn-red)" : "var(--havn-text-dim)",
+                      }}
+                      title="Live SQL diagnostics for this model"
+                    >
+                      {bindStatusText}
+                    </span>
+                  )}
                   <button onClick={saveFile} disabled={!dirty} style={styles.btn}>
                     Save
                   </button>
@@ -1290,6 +1307,7 @@ function AppContent() {
                       goToLine={goToLine}
                       onFormat={activeFile?.endsWith(".sql") ? formatCurrentFile : undefined}
                       onPreview={activeFile?.endsWith(".sql") ? previewCurrentFile : undefined}
+                      onStatus={setBindStatus}
                     />
                   </div>
                   {(preview || previewError || previewRunning) && (
@@ -1607,6 +1625,7 @@ const styles = {
   // File actions (inline in sub-tab bar)
   fileActions: { marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px", paddingLeft: "16px" },
   fileName: { fontSize: "11px", color: "var(--havn-text-dim)", fontFamily: "var(--havn-font-mono)", maxWidth: "280px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  bindStatus: { fontSize: "11px", fontFamily: "var(--havn-font-mono)", whiteSpace: "nowrap" },
   modifiedDot: { color: "var(--havn-accent)", fontWeight: 700 },
 
   // Panel
