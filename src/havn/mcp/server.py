@@ -675,6 +675,7 @@ class MCPServer:
         summary = {
             "built": sum(1 for s in results.values() if s == "built"),
             "skipped": sum(1 for s in results.values() if str(s).startswith("skipped")),
+            "inlined": sum(1 for s in results.values() if s == "inlined"),
             "errors": sum(1 for s in results.values() if s == "error"),
         }
         return {"summary": summary, "results": results}

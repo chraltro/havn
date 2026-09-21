@@ -10,6 +10,7 @@ import duckdb
 from havn.engine.sql_analysis import (
     CONFIG_KEYS,
     MATERIALIZATIONS,
+    ON_SCHEMA_CHANGE_POLICIES,
     extract_column_lineage as _extract_column_lineage_impl,
     fetch_column_catalog,
     parse_config,
@@ -82,6 +83,28 @@ def _validate_config_keys(models: list[SQLModel]) -> list[ValidationError]:
                     f"Unknown materialization '{materialized}'."
                     f"{_did_you_mean(materialized, MATERIALIZATIONS)}"
                     f" Supported: {', '.join(sorted(MATERIALIZATIONS))}."
+                ),
+            ))
+
+        policy = config.get("on_schema_change")
+        if policy and policy not in ON_SCHEMA_CHANGE_POLICIES:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown on_schema_change policy '{policy}'."
+                    f"{_did_you_mean(policy, ON_SCHEMA_CHANGE_POLICIES)}"
+                    f" Supported: {', '.join(sorted(ON_SCHEMA_CHANGE_POLICIES))}."
+                ),
+            ))
+        elif policy and config.get("materialized") != "incremental":
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="warning",
+                message=(
+                    "on_schema_change only applies to incremental models; "
+                    f"this model is materialized as "
+                    f"'{config.get('materialized', 'view')}' and the policy is ignored"
                 ),
             ))
     return errors
@@ -301,7 +324,21 @@ def validate_models(
                     ),
                 ))
 
-        # 6. Model must not write to a landing schema
+        # 6. Assertions need a table to query, and an ephemeral model never
+        #    becomes one.
+        if model.materialized == "ephemeral" and (model.assertions or model.grain):
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    "assertions cannot run on ephemeral models; move them to a "
+                    "consumer. An ephemeral model is inlined into its consumers "
+                    "as a CTE and never materialized, so there is nothing to "
+                    "query after the build."
+                ),
+            ))
+
+        # 7. Model must not write to a landing schema
         if model.schema.lower() in _landing:
             errors.append(ValidationError(
                 model=model.full_name,
@@ -312,7 +349,7 @@ def validate_models(
                 ),
             ))
 
-    # 7. Deny-list policies: refuse models in forbidden schemas that
+    # 8. Deny-list policies: refuse models in forbidden schemas that
     #    reference forbidden columns. Catches PII leaks at compile time.
     if deny_rules:
         for model in models:

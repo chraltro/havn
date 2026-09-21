@@ -377,7 +377,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
     from havn.server.deps import _get_db_resource_limits, _get_shared_conn
     from havn.engine.transform import discover_models as _dm, build_dag as _bd, validate_models as _vm
     from havn.engine.transform.discovery import _compute_upstream_hash as _cuh, _has_changed as _hc, _update_state as _us
-    from havn.engine.transform.execution import execute_model as _em
+    from havn.engine.transform.execution import execute_model as _em, _record_ephemeral as _re
     from havn.engine.transform.quality import run_assertions as _ra, _save_assertions as _sa, profile_model as _pm, _save_profile as _sp
 
     # Generate a pipeline_run_id that groups all model executions in this run
@@ -560,6 +560,11 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
                     }))
                 elif info["type"] == "transform":
                     m = info["model"]
+                    if m.materialized == "ephemeral":
+                        # Never built: consumers inline its query as a CTE.
+                        _re(local, m, pipeline_run_id)
+                        result_q.put((node_id, {"status": "inlined"}))
+                        return
                     if not force and not _hc(local, m):
                         # Log the skip too, so `havn history` and external
                         # readers see "12 steps, 12 skipped" instead of an
@@ -570,7 +575,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
                             pass
                         result_q.put((node_id, {"status": "skipped"}))
                         return
-                    duration_ms, row_count = _em(local, m)
+                    duration_ms, row_count = _em(local, m, model_map=model_map)
                     _us(local, m, duration_ms, row_count)
                     _lr(local, "transform", m.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
                     status = "built"
@@ -771,7 +776,7 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
     from havn.server.deps import _get_db_resource_limits, _get_shared_conn
     from havn.engine.transform import discover_models as _dm, build_dag as _bd, validate_models as _vm
     from havn.engine.transform.discovery import _compute_upstream_hash as _cuh, _has_changed as _hc, _update_state as _us
-    from havn.engine.transform.execution import execute_model as _em
+    from havn.engine.transform.execution import execute_model as _em, _record_ephemeral as _re
     from havn.engine.transform.quality import run_assertions as _ra, _save_assertions as _sa, profile_model as _pm, _save_profile as _sp
 
     pipeline_run_id = str(_uuid.uuid4())
@@ -958,6 +963,11 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
                     }))
                 elif info["type"] == "transform":
                     m = info["model"]
+                    if m.materialized == "ephemeral":
+                        # Never built: consumers inline its query as a CTE.
+                        _re(local, m, pipeline_run_id)
+                        result_q.put((node_id, {"status": "inlined"}))
+                        return
                     if not force and not _hc(local, m):
                         # Log the skip too, so `havn history` and external
                         # readers see "12 steps, 12 skipped" instead of an
@@ -968,7 +978,7 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
                             pass
                         result_q.put((node_id, {"status": "skipped"}))
                         return
-                    duration_ms, row_count = _em(local, m)
+                    duration_ms, row_count = _em(local, m, model_map=model_map)
                     _us(local, m, duration_ms, row_count)
                     _lr(local, "transform", m.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
                     status = "built"

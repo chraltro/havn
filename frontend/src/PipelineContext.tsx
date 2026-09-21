@@ -117,6 +117,9 @@ function createEventProcessor(
 
         if (status === "skipped") {
           msg = `${prefix}Skipped ${displayName} (no changes)`;
+        } else if (status === "inlined") {
+          // Ephemeral: never materialized, carried into consumers as a CTE.
+          msg = `${prefix}Inlined ${displayName} (ephemeral)`;
         } else if (status === "error" || status === "assertion_failed") {
           const cleanErr = err?.replace(/[\x00]/g, ".").replace(/\.+/g, ".") || "";
           msg = `${prefix}Failed ${displayName}${cleanErr ? ` — ${cleanErr}` : ""}`;
@@ -126,7 +129,7 @@ function createEventProcessor(
 
         if (rowCount) totalRows += rowCount;
         const level = status === "error" || status === "assertion_failed" ? "error"
-          : status === "skipped" ? "log"
+          : status === "skipped" || status === "inlined" ? "log"
           : "success";
         addOutput(level as OutputEntry["type"], msg, serverTs);
 
