@@ -293,6 +293,7 @@ def init(
 def validate(
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
     bind: Annotated[Optional[bool], typer.Option("--bind/--no-bind", help="Resolve model SQL through the DuckDB binder (default: on when a warehouse exists)")] = None,
+    schema_drift: Annotated[Optional[bool], typer.Option("--schema-drift/--no-schema-drift", help="Warn when a model's output shape has moved since its last build (default: validation.schema_drift in project.yml, off)")] = None,
 ) -> None:
     """Validate project structure, config, and SQL model dependencies.
 
@@ -301,6 +302,12 @@ def validate(
     catalog. That catches wrong arity, unknown functions, operator overload
     failures and missing columns -- including columns on upstream models that
     have never been built -- and reports them with a line number.
+
+    The bind pass also checks any `columns:` block declared in a contract
+    against the schema it infers, so a contract break is reported before the
+    build rather than after it. With --schema-drift, a model whose output
+    shape has moved since its last build is reported too, contract or no
+    contract.
     """
     from havn.config import load_project
     from havn.engine.transform import build_dag, discover_models
@@ -373,7 +380,9 @@ def validate(
 
         conn = open_warehouse(config, project_dir)
         try:
-            bind_errors = _bind_errors(conn, models, project_dir)
+            bind_errors = _bind_errors(
+                conn, models, project_dir, schema_drift=schema_drift
+            )
         finally:
             conn.close()
         failures = 0

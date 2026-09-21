@@ -149,6 +149,7 @@ def validate_models(
     *,
     bind: bool = False,
     project_dir=None,
+    schema_drift: bool | None = None,
 ) -> list[ValidationError]:
     """Validate all models without executing them.
 
@@ -167,6 +168,13 @@ def validate_models(
         known_tables: Additional known table names (e.g. from seeds, sources).
         source_columns: Column sets declared in sources.yml, keyed by table name.
         landing_schemas: Schema names reserved for raw/landing data.
+        bind: Resolve every model through the DuckDB binder as well, which
+            also enables the contract column check and the schema drift
+            warning, both of which need an inferred schema.
+        project_dir: Project root, used to find contracts and settings.
+        schema_drift: Report a model whose output shape has moved since its
+            last build. ``None`` reads ``validation.schema_drift`` from
+            project.yml, where it is off by default.
     """
     from sqlglot import exp
 
@@ -419,7 +427,9 @@ def validate_models(
     # needs a writable connection to attach its throwaway catalog, so it is
     # opt-in rather than on by default.
     if bind and conn is not None:
-        errors.extend(_bind_errors(conn, models, project_dir))
+        errors.extend(
+            _bind_errors(conn, models, project_dir, schema_drift=schema_drift)
+        )
 
     return errors
 
@@ -428,8 +438,17 @@ def _bind_errors(
     conn: duckdb.DuckDBPyConnection,
     models: list[SQLModel],
     project_dir=None,
+    *,
+    schema_drift: bool | None = None,
 ) -> list[ValidationError]:
-    """Run the shadow bind pass and render it as ``ValidationError`` rows."""
+    """Run the shadow bind pass and render it as ``ValidationError`` rows.
+
+    The bind pass produces an inferred schema per model as a side result, so
+    two checks that need one ride along here: contract column declarations,
+    and (when ``schema_drift`` is on) a model whose output shape has moved
+    since its last build. ``schema_drift`` defaults to whatever
+    ``validation.schema_drift`` says in project.yml.
+    """
     from .bind import as_validation_message, bind_models
 
     errors: list[ValidationError] = []
@@ -455,7 +474,90 @@ def _bind_errors(
             ))
 
     errors.extend(_contract_schema_errors(conn, project_dir, result.schemas))
+
+    if schema_drift is None:
+        schema_drift = _schema_drift_enabled(project_dir)
+    if schema_drift:
+        errors.extend(_schema_drift_warnings(conn, models, result.schemas))
     return errors
+
+
+def _schema_drift_enabled(project_dir) -> bool:
+    """Whether ``validation.schema_drift: warn`` is set in project.yml."""
+    if project_dir is None:
+        return False
+    try:
+        from pathlib import Path
+
+        from havn.config import load_project
+
+        config = load_project(Path(project_dir))
+    except Exception as e:  # pragma: no cover - a bad project.yml is reported elsewhere
+        logger.debug("Could not read validation settings: %s", e)
+        return False
+    validation = getattr(config, "validation", None)
+    return str(getattr(validation, "schema_drift", "off") or "off").lower() == "warn"
+
+
+def _schema_drift_warnings(
+    conn: duckdb.DuckDBPyConnection,
+    models: list[SQLModel],
+    schemas: dict[str, list[tuple[str, str]]],
+) -> list[ValidationError]:
+    """Report models whose output shape has moved since their last build.
+
+    This is the contract check without a contract: the schema recorded at the
+    last successful build is the baseline, and the bind pass says what the
+    file would produce now. A column that vanished is a downstream break
+    whether or not anybody wrote it down.
+
+    Off by default. The equivalence rules have not been tuned on a real
+    project yet, and a warning that fires on every model is a warning nobody
+    reads.
+    """
+    from havn.engine.contracts import classify_type_change
+
+    from .columns import load_model_columns
+
+    warnings: list[ValidationError] = []
+    for model in models:
+        bound = schemas.get(model.full_name)
+        if not bound:
+            continue
+        baseline = load_model_columns(conn, model.full_name)
+        if not baseline:
+            # Never built: there is nothing it could have drifted from.
+            continue
+
+        before = {c["name"].lower(): (c["name"], c["type"]) for c in baseline}
+        after = {name.lower(): (name, ctype) for name, ctype in bound}
+
+        added = [after[k][0] for k in after if k not in before]
+        removed = [before[k][0] for k in before if k not in after]
+        retyped = [
+            f"{after[k][0]} {before[k][1]} -> {after[k][1]}"
+            for k in after
+            if k in before
+            and classify_type_change(before[k][1], after[k][1]) != "match"
+        ]
+        if not (added or removed or retyped):
+            continue
+
+        parts: list[str] = []
+        if added:
+            parts.append(f"added {', '.join(added)}")
+        if removed:
+            parts.append(f"removed {', '.join(removed)}")
+        if retyped:
+            parts.append(f"retyped {', '.join(retyped)}")
+        warnings.append(ValidationError(
+            model=model.full_name,
+            severity="warning",
+            message=(
+                f"output schema of {model.full_name} changes: {'; '.join(parts)}"
+            ),
+        ))
+    return warnings
 
 
 def _inferred_schema(

@@ -191,6 +191,13 @@ class PoliciesConfig(BaseModel):
     deny: list[DenyRule] = Field(default_factory=list)
 
 
+class ValidationConfig(BaseModel):
+    """What `havn validate` reports beyond errors, declared under ``validation:``."""
+    model_config = ConfigDict(extra="ignore")
+
+    schema_drift: str = "off"  # "warn" | "off"
+
+
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(extra="ignore", arbitrary_types_allowed=True)
 
@@ -206,6 +213,7 @@ class ProjectConfig(BaseModel):
     rewind: RewindConfig = Field(default_factory=RewindConfig)
     sentinel: SentinelConfig = Field(default_factory=SentinelConfig)
     policies: PoliciesConfig = Field(default_factory=PoliciesConfig)
+    validation: ValidationConfig = Field(default_factory=ValidationConfig)
     environments: dict[str, EnvironmentConfig] = Field(default_factory=dict)
     active_environment: str | None = None
     sources: list[SourceConfig] = Field(default_factory=list)
@@ -455,6 +463,7 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
         rewind=rewind,
         sentinel=sentinel,
         policies=policies,
+        validation=ValidationConfig(schema_drift=str((raw.get("validation") or {}).get("schema_drift", "off") or "off")),
         environments=environments,
         active_environment=active_env if active_env and active_env in environments else None,
         sources=sources,
