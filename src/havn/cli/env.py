@@ -116,6 +116,23 @@ def env(
             console.print("Active environment: [bold]default[/bold]")
             console.print("[dim]No .havn-env file. Use [bold]havn env use <name>[/bold] to set one.[/dim]")
 
+        # The defer target is part of what "which environment am I on" means:
+        # it decides where unbuilt upstreams are read from on the next
+        # transform, and that is easy to forget once it is in project.yml.
+        if active:
+            config_path = project_dir / "project.yml"
+            raw = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
+            env_raw = (raw or {}).get("environments", {}).get(active, {}) or {}
+            target = env_raw.get("defer")
+            if target:
+                target_path = (
+                    ((raw or {}).get("environments", {}).get(target, {}) or {})
+                    .get("database", {})
+                    .get("path")
+                    or (raw or {}).get("database", {}).get("path", "warehouse.duckdb")
+                )
+                console.print(f"Defer target: [bold]{target}[/bold] [dim]({target_path})[/dim]")
+
     elif action == "reset":
         env_path = project_dir / ENV_FILE
         if env_path.exists():

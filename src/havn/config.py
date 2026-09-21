@@ -99,6 +99,10 @@ class EnvironmentConfig(BaseModel):
 
     database: dict[str, Any] = Field(default_factory=dict)  # {"path": "dev.duckdb"}
     connections: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # Name of another environment whose warehouse supplies the models this one
+    # has not built. Read at transform time only (see engine/defer.py); it
+    # never changes what is written, which is always this environment's file.
+    defer: str | None = None
 
 
 class SourceColumn(BaseModel):
@@ -448,7 +452,31 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
         environments[env_name] = EnvironmentConfig(
             database=env_raw.get("database", {}),
             connections=env_raw.get("connections", {}),
+            defer=env_raw.get("defer"),
         )
+
+    # A defer target must name another environment. Both mistakes are caught
+    # here rather than at transform time: an unknown name would otherwise
+    # surface as a missing-file ATTACH error, and an environment deferring to
+    # itself would attach its own warehouse a second time and fail on DuckDB's
+    # unique-file-handle rule. Every environment is checked, not only the
+    # active one, so a typo in a colleague's environment is reported on the
+    # next config load rather than on their next run.
+    for env_name, env_cfg in environments.items():
+        target = env_cfg.defer
+        if target is None:
+            continue
+        if target == env_name:
+            raise ValueError(
+                f"environments.{env_name}.defer points at itself; "
+                "defer must name a different environment"
+            )
+        if target not in environments:
+            known = ", ".join(sorted(n for n in environments if n != env_name))
+            raise ValueError(
+                f"environments.{env_name}.defer: unknown environment "
+                f"'{target}'." + (f" Defined environments: {known}" if known else "")
+            )
 
     # Apply environment overrides
     active_env = env
