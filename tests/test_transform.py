@@ -237,3 +237,103 @@ def test_transform_nonexistent_target(tmp_path):
     conn.close()
 
     conn.close()
+
+
+def _chain_project(tmp_path):
+    """A landing -> bronze -> silver chain, plus a connection to build it in."""
+    db_path = tmp_path / "test.duckdb"
+    conn = duckdb.connect(str(db_path))
+    ensure_meta_table(conn)
+    conn.execute("CREATE SCHEMA IF NOT EXISTS landing")
+    conn.execute("CREATE TABLE landing.src AS SELECT 1 AS id, 'a' AS name")
+
+    transform_dir = tmp_path / "transform"
+    (transform_dir / "bronze").mkdir(parents=True)
+    (transform_dir / "silver").mkdir(parents=True)
+    (transform_dir / "bronze" / "src.sql").write_text(textwrap.dedent("""\
+        @config materialized=table, schema=bronze
+
+        SELECT id, name FROM landing.src
+    """))
+    (transform_dir / "silver" / "enriched.sql").write_text(textwrap.dedent("""\
+        @config materialized=table, schema=silver
+
+        SELECT id, upper(name) AS name FROM bronze.src
+    """))
+    return conn, transform_dir, str(db_path)
+
+
+def _upstream_hash(conn, model_path):
+    row = conn.execute(
+        "SELECT upstream_hash FROM _havn.model_state WHERE model_path = ?",
+        [model_path],
+    ).fetchone()
+    return row[0] if row else None
+
+
+def test_targeted_run_preserves_upstream_hash(tmp_path):
+    """A targeted run must hash against the whole DAG, not the selection.
+
+    Filtering the model list before building the DAG left
+    ``_compute_upstream_hash`` with no upstreams to hash, so it stored
+    sha256("") and the next full run rebuilt an unchanged model.
+    """
+    conn, transform_dir, _ = _chain_project(tmp_path)
+    try:
+        results = run_transform(conn, transform_dir)
+        assert results["silver.enriched"] == "built"
+        before = _upstream_hash(conn, "silver.enriched")
+        assert before
+
+        # Nothing changed, so the targeted run should skip -- and must not
+        # rewrite the stored upstream hash either way.
+        results = run_transform(conn, transform_dir, targets=["silver.enriched"])
+        assert results == {"silver.enriched": "skipped"}
+        assert _upstream_hash(conn, "silver.enriched") == before
+
+        # Forcing the targeted rebuild rewrites state; the hash must survive.
+        run_transform(conn, transform_dir, targets=["silver.enriched"], force=True)
+        assert _upstream_hash(conn, "silver.enriched") == before
+
+        # The next full run has nothing to do.
+        results = run_transform(conn, transform_dir)
+        assert results == {"bronze.src": "skipped", "silver.enriched": "skipped"}
+    finally:
+        conn.close()
+
+
+def test_targeted_run_preserves_upstream_hash_parallel(tmp_path):
+    """Same contract on the parallel path, which hands workers the model map."""
+    conn, transform_dir, db_path = _chain_project(tmp_path)
+    try:
+        run_transform(conn, transform_dir, parallel=True, db_path=db_path)
+        before = _upstream_hash(conn, "silver.enriched")
+        assert before
+
+        run_transform(
+            conn, transform_dir, targets=["silver.enriched"],
+            force=True, parallel=True, db_path=db_path,
+        )
+        assert _upstream_hash(conn, "silver.enriched") == before
+
+        results = run_transform(conn, transform_dir, parallel=True, db_path=db_path)
+        assert results == {"bronze.src": "skipped", "silver.enriched": "skipped"}
+    finally:
+        conn.close()
+
+
+def test_upstream_change_still_rebuilds_downstream(tmp_path):
+    """Hashing the full DAG must not blunt real change propagation."""
+    conn, transform_dir, _ = _chain_project(tmp_path)
+    try:
+        run_transform(conn, transform_dir)
+        (transform_dir / "bronze" / "src.sql").write_text(textwrap.dedent("""\
+            @config materialized=table, schema=bronze
+
+            SELECT id, name, 1 AS version FROM landing.src
+        """))
+        results = run_transform(conn, transform_dir)
+        assert results["bronze.src"] == "built"
+        assert results["silver.enriched"] == "built"
+    finally:
+        conn.close()
