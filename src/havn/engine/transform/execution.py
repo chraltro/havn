@@ -7,6 +7,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Callable
 
 import duckdb
 
@@ -1089,18 +1090,32 @@ def _execute_snapshot(
 def resolve_query(
     model: SQLModel,
     model_map: dict[str, SQLModel] | None,
+    query_rewriter: Callable[[str], str] | None = None,
 ) -> str:
     """The SQL to build ``model`` from, with ephemeral upstreams inlined.
 
     Without a ``model_map`` there is nothing to resolve against, so the model's
     own query is returned and a project with no ephemeral models never pays for
     a sqlglot round trip.
+
+    ``query_rewriter`` is the run's last word on the SQL, applied after
+    inlining so that an inlined ephemeral upstream has already stopped being a
+    table reference. A deferred run installs one (see
+    :mod:`havn.engine.defer`); when the caller passes none, whatever the
+    current run installed is used, and outside a deferred run that is nothing.
     """
     if not model_map:
-        return model.query
-    from .inline import inline_ephemeral
+        query = model.query
+    else:
+        from .inline import inline_ephemeral
 
-    return inline_ephemeral(model, model_map)
+        query = inline_ephemeral(model, model_map)
+
+    if query_rewriter is None:
+        from havn.engine.defer import active_query_rewriter
+
+        query_rewriter = active_query_rewriter()
+    return query_rewriter(query) if query_rewriter is not None else query
 
 
 def _execute_incremental(
