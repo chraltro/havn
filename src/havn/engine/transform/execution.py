@@ -532,7 +532,8 @@ def _execute_microbatch(
     _drop_conflicting(conn, model.schema, model.name, "incremental")
     exists = conn.execute(
         "SELECT COUNT(*) FROM information_schema.tables "
-        "WHERE table_schema = ? AND table_name = ? AND table_type = 'BASE TABLE'",
+        "WHERE table_catalog = current_database() "
+        "AND table_schema = ? AND table_name = ? AND table_type = 'BASE TABLE'",
         [model.schema, model.name],
     ).fetchone()[0] > 0
 
@@ -647,7 +648,8 @@ def _table_columns(
         (str(r[0]), str(r[1]))
         for r in conn.execute(
             "SELECT column_name, data_type FROM information_schema.columns "
-            "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+            "WHERE table_catalog = current_database() "
+            "AND table_schema = ? AND table_name = ? ORDER BY ordinal_position",
             [schema, name],
         ).fetchall()
     ]
@@ -867,7 +869,8 @@ def _execute_snapshot(
     _drop_conflicting(conn, model.schema, model.name, "snapshot")
     exists = conn.execute(
         "SELECT COUNT(*) FROM information_schema.tables "
-        "WHERE table_schema = ? AND table_name = ? AND table_type = 'BASE TABLE'",
+        "WHERE table_catalog = current_database() "
+        "AND table_schema = ? AND table_name = ? AND table_type = 'BASE TABLE'",
         [model.schema, model.name],
     ).fetchone()[0] > 0
 
@@ -974,7 +977,8 @@ def _execute_snapshot(
         (str(r[0]), str(r[1]))
         for r in conn.execute(
             "SELECT column_name, data_type FROM information_schema.columns "
-            "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+            "WHERE table_catalog = current_database() "
+            "AND table_schema = ? AND table_name = ? ORDER BY ordinal_position",
             [model.schema, model.name],
         ).fetchall()
     ]
@@ -1157,7 +1161,8 @@ def _execute_incremental(
     _drop_conflicting(conn, model.schema, model.name, "incremental")
     exists = conn.execute(
         "SELECT COUNT(*) FROM information_schema.tables "
-        "WHERE table_schema = ? AND table_name = ? AND table_type = 'BASE TABLE'",
+        "WHERE table_catalog = current_database() "
+        "AND table_schema = ? AND table_name = ? AND table_type = 'BASE TABLE'",
         [model.schema, model.name],
     ).fetchone()[0] > 0
 
@@ -1237,7 +1242,8 @@ def _execute_incremental(
             (r[0], r[1])
             for r in conn.execute(
                 "SELECT column_name, data_type FROM information_schema.columns "
-                "WHERE table_schema = ? AND table_name = ? "
+                "WHERE table_catalog = current_database() "
+                "AND table_schema = ? AND table_name = ? "
                 "ORDER BY ordinal_position",
                 [model.schema, model.name],
             ).fetchall()
@@ -1347,10 +1353,17 @@ def _drop_conflicting(
     name: str,
     target_type: str,
 ) -> None:
-    """Drop an existing object if it conflicts with the desired materialization type."""
+    """Drop an existing object if it conflicts with the desired materialization type.
+
+    Scoped to the current database: ``information_schema`` spans every
+    attached one, and a deferred run has another warehouse attached. Without
+    the filter this saw the defer target's copy of the model and tried to drop
+    it locally, where it does not exist.
+    """
     row = conn.execute(
         "SELECT table_type FROM information_schema.tables "
-        "WHERE table_schema = ? AND table_name = ?",
+        "WHERE table_catalog = current_database() "
+        "AND table_schema = ? AND table_name = ?",
         [schema, name],
     ).fetchone()
     if not row:
