@@ -34,6 +34,8 @@ havn transform tag:daily        # tag:, path:, config.<key>:, state:modified
 havn transform state:modified+  # what changed, plus downstream
 havn transform -s tag:daily -x tag:expensive   # --select / --exclude
 havn transform gold.events --event-time-start 2024-01-01 --event-time-end 2024-03-01  # microbatch backfill
+havn transform gold.orders --defer   # read unbuilt upstreams from the environment's defer target
+havn transform gold.orders --defer-snapshot   # same, via a copy, when the target is open for writing
 havn ls '+gold.orders'          # dry-run a selector (schema, materialization, tags)
 havn ls state:modified+ --names # bare names, one per line, for piping
 havn query "SELECT 1"           # ad-hoc SQL
@@ -45,6 +47,7 @@ havn jobs run full-refresh      # run full pipeline
 havn history                    # show run log
 havn env use prod               # switch environment
 havn env list                   # show all environments
+havn env show                   # active environment, defer target and whether it is readable
 havn diff gold.orders           # diff a single model
 havn diff                       # diff changed models + downstream
 havn diff --full                # show all changed rows, not just samples
@@ -81,6 +84,7 @@ src/havn/                       # Python package (the platform itself)
     anomaly.py                # Statistical anomaly detection
     diff.py                   # 3-mode diff engine (single/changed/all)
     selectors.py              # Graph selectors (+x, x+, @x, tag:, state:modified)
+    defer.py                  # Defer: attach another environment read-only, rewrite unbuilt refs
     auth.py                   # Token auth, RBAC (admin/editor/viewer)
     secrets.py                # .env secrets management
     scheduler.py              # Cron scheduler (SchedulerThread) + file watcher
@@ -133,6 +137,7 @@ tests/                        # pytest test suite
   test_semantic.py            # Semantic layer (metrics)
   test_unit_tests.py          # Model unit tests (loader, runner, CLI, API)
   test_sql_rewrite.py         # Table-reference rewriter
+  test_defer.py               # Defer (two warehouses, the file lock, snapshot mode)
   test_mcp_server.py          # MCP server
   test_selectors.py           # Graph selectors + @config tags
 ```
