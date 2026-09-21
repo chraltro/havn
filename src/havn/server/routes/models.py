@@ -115,7 +115,7 @@ def run_transform_endpoint(
 
     ``targets`` and ``exclude`` are graph selectors (``+x``, ``x+``, ``@x``,
     ``gold.fct_*``, ``tag:daily``, ``state:modified`` and so on). Body is
-    optional — POSTing with no body runs all models without --force.
+    optional: POSTing with no body runs all models without --force.
     """
     _require_permission(request, "execute")
     logger.info(

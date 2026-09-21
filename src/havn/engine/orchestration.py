@@ -324,11 +324,11 @@ def resolve_execution_plan(
     - ``+schema.name`` — this model plus every upstream dependency
     - ``schema.name+`` — this model plus every downstream consumer
     - ``+schema.name+`` — upstream + this + downstream
-    - ``schema.*`` / ``gold.fct_*`` / ``*.customers`` — fnmatch wildcards
-    - ``2+x`` / ``x+2`` — bounded to N hops
-    - ``@x`` — x, its descendants, and every ancestor of those
+    - ``schema.*`` / ``gold.fct_*`` / ``*.customers`` -- fnmatch wildcards
+    - ``2+x`` / ``x+2`` -- bounded to N hops
+    - ``@x`` -- x, its descendants, and every ancestor of those
     - ``tag:daily``, ``path:transform/gold/``,
-      ``config.materialized:incremental``, ``state:modified`` — selector
+      ``config.materialized:incremental``, ``state:modified`` -- selector
       methods; comma means intersection
     - ``ingest/script.py`` — run that ingest script
     - ``export/script.py`` — run that export script (and its referenced models
