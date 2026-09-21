@@ -509,6 +509,22 @@ def _parse_expect(raw: Any, label: str) -> ExpectedRows:
 # --------------------------------------------------------------------------
 
 
+CATALOG_SQL = (
+    "SELECT lower(table_schema), lower(table_name), column_name, data_type "
+    "FROM information_schema.columns "
+    "WHERE table_schema NOT IN ('information_schema', 'pg_catalog') "
+    "ORDER BY table_schema, table_name, ordinal_position"
+)
+
+
+def catalog_from_rows(rows) -> dict[str, list[tuple[str, str]]]:
+    """Fold :data:`CATALOG_SQL` rows into ``schema.table -> [(column, type)]``."""
+    catalog: dict[str, list[tuple[str, str]]] = {}
+    for schema, table, column, data_type in rows:
+        catalog.setdefault(f"{schema}.{table}", []).append((column, data_type))
+    return catalog
+
+
 def catalog_from_connection(conn: duckdb.DuckDBPyConnection) -> dict[str, list[tuple[str, str]]]:
     """Snapshot ``schema.table -> [(column, type), ...]`` from the warehouse.
 
@@ -517,20 +533,12 @@ def catalog_from_connection(conn: duckdb.DuckDBPyConnection) -> dict[str, list[t
     mock narrower than the real table can be warned about. The unit-test run
     itself never queries the warehouse.
     """
-    catalog: dict[str, list[tuple[str, str]]] = {}
     try:
-        rows = conn.execute(
-            "SELECT lower(table_schema), lower(table_name), column_name, data_type "
-            "FROM information_schema.columns "
-            "WHERE table_schema NOT IN ('information_schema', 'pg_catalog') "
-            "ORDER BY table_schema, table_name, ordinal_position"
-        ).fetchall()
+        rows = conn.execute(CATALOG_SQL).fetchall()
     except Exception as e:  # a locked or missing warehouse must not fail the run
         logger.debug("Could not read catalog for unit tests: %s", e)
-        return catalog
-    for schema, table, column, data_type in rows:
-        catalog.setdefault(f"{schema}.{table}", []).append((column, data_type))
-    return catalog
+        return {}
+    return catalog_from_rows(rows)
 
 
 # --------------------------------------------------------------------------
