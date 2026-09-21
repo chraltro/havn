@@ -637,7 +637,23 @@ List registered Python SQL macros.
 havn macros [--project PATH]
 ```
 
-Shows all macros discovered from the `macros/` directory: name, parameters, return type, source file, and docstring.
+Shows all macros discovered from the `macros/` directory, from installed packages, and from havn's built-in library: name, parameters, return type, origin, source file, and docstring.
+
+### havn packages
+
+Install and inspect shared model and macro packages. See [Packages](packages.md).
+
+```bash
+havn packages                    # list installed packages (default action)
+havn packages install            # install what project.yml declares
+havn packages install --upgrade  # re-resolve each rev instead of using the lock
+havn packages remove crm         # delete a checkout and its lock entry
+```
+
+Packages are declared under `packages:` in `project.yml` as `{name, git, rev}`
+or `{name, path}`, installed into `havn_packages/`, and pinned by
+`havn_packages.lock`. A package's models are namespaced into `<pkg>_<schema>`
+and selectable with `package:<name>`.
 
 ### havn version
 

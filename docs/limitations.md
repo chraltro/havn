@@ -126,8 +126,13 @@ The Monaco editor in `havn serve`.
 |---|---|---|
 | Project macros (`macros/`) | Supported | Python and SQL macros, auto-registered. |
 | Built-in macro library | Supported | Shipped with havn, and a project macro of the same name overrides it. |
-| Shared macro packs (pip-installable) | Planned | The lightweight way to share logic between projects. |
-| Packages (shared models across projects) | Not supported | Deferred. There is no package config, no fetch step and no multi-root model discovery, and a half-built version that works in the CLI but not in the DAG view would be worse than none. Macro packs cover the realistic case first. |
+| Shared macro packs (pip-installable) | Planned | Packages cover the same ground today; this would be the lighter option for sharing macros alone. |
+| Packages (shared models across projects) | Supported | `packages:` in `project.yml`, a git source with a required `rev` or a local path, installed into `havn_packages/` and pinned by `havn_packages.lock`. See [Packages](packages.md). |
+| Package namespacing | Supported | A package's schemas become `<pkg>_<schema>` and its references to its own models are rewritten to match, so a package can never take a name the project was already using. Overridable per schema in the package's `havn_package.yml`. |
+| Package macros | Supported | Registered between the built-in library and your project, so your macros win. Module names are package-scoped, so two packages can both ship `utils.py`. |
+| Package version ranges and resolution | Not supported | One pinned revision per package, no transitive dependencies and no solver. A package that itself needs a package says so in its README and you install both. |
+| Private package authentication | Partial | Whatever the machine's git already has: an SSH key, a credential helper, or a token in the URL. havn stores no credentials of its own. |
+| Linting installed packages | Not supported | `havn lint` walks the project's own `transform/` only. Rewriting a file the next install overwrites would be busywork; lint the package in its own repository. |
 
 ## Testing
 

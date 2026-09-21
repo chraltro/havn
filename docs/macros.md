@@ -97,9 +97,12 @@ curl http://localhost:3000/api/macros
 - Errors in individual macro files are logged but don't prevent other macros from loading
 - Macros are registered before transforms run, so they're available in all SQL models
 - `havn init` creates a `macros/` directory with example functions
+- Precedence runs built-in library, then installed packages, then your project.
+  A name defined twice resolves to the closest copy, and the shadowing is logged
 
 ## Related Pages
 
 - [Transforms](transforms) -- Using macros in SQL models
+- [Packages](packages) -- Sharing macros (and models) between projects
 - [CLI Reference](cli-reference) -- `havn macros` command
 - [Configuration](configuration) -- Project structure

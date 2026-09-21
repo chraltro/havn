@@ -221,6 +221,24 @@ Get the model dependency DAG (nodes and edges).
 
 Get the full DAG including seeds, sources, ingest scripts, and exposures.
 
+Each model node carries `package`: `null` for the project's own models, the
+package name for models that came from `havn_packages/`.
+
+## Packages
+
+### GET /api/packages
+
+Installed packages with their source, rev, resolved commit, manifest version
+and model/macro counts, plus `declared` (the `packages:` block) and `missing`
+(declared but not installed).
+
+### POST /api/packages/install
+
+Install every declared package and rewrite `havn_packages.lock`. Body:
+`{"upgrade": false}`. Requires execute permission. Returns one result per
+package (`status` is `installed`, `unchanged` or `error`) plus the refreshed
+listing.
+
 ## Lineage
 
 ### GET /api/lineage/{model_name}
