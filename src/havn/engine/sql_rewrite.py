@@ -38,20 +38,30 @@ def table_key(table: exp.Table) -> str:
     return f"{schema}.{name}" if schema else name
 
 
-def find_table_refs(sql: str, *, dialect: str = "duckdb") -> list[str]:
+def find_table_refs(
+    sql: str,
+    *,
+    dialect: str = "duckdb",
+    skip_catalog_qualified: bool = False,
+) -> list[str]:
     """List the distinct table references in ``sql``, excluding CTE names.
 
     Returns lowercase ``schema.name`` keys in first-seen order. Useful for
     callers that need to check which references a rewrite mapping covers
     before doing the rewrite.
+
+    ``skip_catalog_qualified`` leaves out references that already name a
+    catalog (``other.bronze.orders``). Defer wants that: a reference the
+    author already pointed at a specific database must not be pointed
+    somewhere else.
     """
     tree = _parse(sql, dialect)
     cte_names = _cte_names(tree)
     seen: list[str] = []
     for table in tree.find_all(exp.Table):
-        key = table_key(table)
-        if "." not in key and key in cte_names:
+        if _skip_table(table, cte_names, skip_catalog_qualified):
             continue
+        key = table_key(table)
         if key not in seen:
             seen.append(key)
     return seen
@@ -62,6 +72,7 @@ def rewrite_table_refs(
     mapping: dict[str, str],
     *,
     dialect: str = "duckdb",
+    skip_catalog_qualified: bool = False,
 ) -> str:
     """Replace table references in ``sql`` according to ``mapping``.
 
@@ -72,6 +83,9 @@ def rewrite_table_refs(
             ``name`` for unqualified references). Values are table names,
             optionally schema-qualified.
         dialect: sqlglot dialect for both parsing and generation.
+        skip_catalog_qualified: leave references that already name a catalog
+            (``other.bronze.orders``) alone, instead of matching them on
+            their ``schema.name`` tail.
 
     Returns:
         The regenerated SQL. Aliases on rewritten references are preserved,
@@ -91,11 +105,9 @@ def rewrite_table_refs(
     lookup = {str(k).lower(): v for k, v in mapping.items()}
 
     for table in tree.find_all(exp.Table):
-        key = table_key(table)
-        # A CTE name shadows a real table, so `WITH orders AS (...)` followed
-        # by `FROM orders` must not be redirected to a mock of `orders`.
-        if "." not in key and key in cte_names:
+        if _skip_table(table, cte_names, skip_catalog_qualified):
             continue
+        key = table_key(table)
         target = lookup.get(key)
         if target is None:
             continue
@@ -120,3 +132,23 @@ def _parse(sql: str, dialect: str):
 
 def _cte_names(tree) -> set[str]:
     return {cte.alias.lower() for cte in tree.find_all(exp.CTE) if cte.alias}
+
+
+def _skip_table(
+    table: exp.Table,
+    cte_names: set[str],
+    skip_catalog_qualified: bool,
+) -> bool:
+    """True when this table node must be left exactly as written.
+
+    Three cases: a table function (``read_csv('x.csv')``, ``range(10)``),
+    which parses as a Table with an empty name; a CTE name, which shadows a
+    real table of the same name; and, for callers that ask, a reference that
+    already names a catalog.
+    """
+    if not table.name:
+        return True
+    if skip_catalog_qualified and table.catalog:
+        return True
+    key = table_key(table)
+    return "." not in key and key in cte_names

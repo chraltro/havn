@@ -155,7 +155,7 @@ havn seed [--force] [--schema NAME] [--env NAME] [--project PATH]
 Build SQL models in dependency order.
 
 ```bash
-havn transform [TARGETS...] [--select SEL] [--exclude SEL] [--force] [--sequential] [--workers N] [--env NAME] [--skip-check] [--event-time-start TS] [--event-time-end TS] [--verbose] [--project PATH]
+havn transform [TARGETS...] [--select SEL] [--exclude SEL] [--force] [--sequential] [--workers N] [--env NAME] [--skip-check] [--event-time-start TS] [--event-time-end TS] [--defer/--no-defer] [--defer-snapshot] [--verbose] [--project PATH]
 ```
 
 | Flag | Default | Description |
@@ -170,6 +170,8 @@ havn transform [TARGETS...] [--select SEL] [--exclude SEL] [--force] [--sequenti
 | `--skip-check` | false | Skip pre-transform validation |
 | `--event-time-start` | none | Backfill microbatch models from this event time (UTC), e.g. `2024-01-01` |
 | `--event-time-end` | none | Backfill microbatch models up to this event time (UTC), exclusive |
+| `--defer / --no-defer` | on when the environment declares `defer:` | Read models this warehouse has not built from the environment's defer target |
+| `--defer-snapshot` | false | Defer to a consistent copy of the target, for when it is open for writing elsewhere |
 | `--verbose, -v` | false | Print the resolved selection and which selector matched what |
 
 ```bash
@@ -189,7 +191,18 @@ havn transform -s tag:daily -x tag:expensive
 
 # backfill a microbatch model over an explicit event-time range
 havn transform gold.events --event-time-start 2024-01-01 --event-time-end 2024-03-01
+
+# build one model in dev, reading its upstreams from prod
+havn transform gold.orders                     # defers if the environment says to
+havn transform gold.orders --no-defer          # build against dev alone
+havn transform gold.orders --defer-snapshot    # prod is busy; read a copy
 ```
+
+`--defer` needs `environments.<name>.defer` in project.yml, and reads the
+other environment's warehouse file directly, so that file must not be open
+for writing anywhere else. When it is, the run stops with the holder's PID
+and `--defer-snapshot` is the way through. See
+[Environments: Defer](environments#defer).
 
 `--event-time-start` / `--event-time-end` process exactly that range of
 windows instead of resuming from recorded state; either may be given alone,
@@ -666,7 +679,8 @@ havn env ACTION [NAME]
 Actions:
 - `list` — Show all environments, mark active with star
 - `use <name>` — Set active environment (writes `.havn-env`)
-- `show` — Show current active environment
+- `show` — Show current active environment, plus its defer target and whether
+  that target's file can be opened right now
 - `reset` — Clear active environment
 
 ### havn macros

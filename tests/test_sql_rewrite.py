@@ -105,6 +105,35 @@ def test_unparseable_sql_raises():
     assert "parse" in str(exc.value).lower()
 
 
+def test_three_part_target_is_generated_verbatim():
+    out = rewrite_table_refs(
+        "SELECT c.id FROM bronze.customers c",
+        {"bronze.customers": "havn_defer.bronze.customers"},
+    )
+    assert _norm(out) == "select c.id from havn_defer.bronze.customers as c"
+
+
+def test_skip_catalog_qualified_leaves_three_part_refs_alone():
+    sql = "SELECT * FROM other.bronze.customers"
+    mapping = {"bronze.customers": "havn_defer.bronze.customers"}
+    assert "havn_defer" in rewrite_table_refs(sql, mapping)
+    out = rewrite_table_refs(sql, mapping, skip_catalog_qualified=True)
+    assert _norm(out) == "select * from other.bronze.customers"
+
+
+def test_find_table_refs_skips_table_functions():
+    refs = find_table_refs(
+        "SELECT * FROM read_csv('a.csv') UNION ALL SELECT * FROM bronze.x"
+    )
+    assert refs == ["bronze.x"]
+
+
+def test_find_table_refs_skip_catalog_qualified():
+    sql = "SELECT * FROM bronze.a JOIN other.bronze.b ON true"
+    assert find_table_refs(sql) == ["bronze.a", "bronze.b"]
+    assert find_table_refs(sql, skip_catalog_qualified=True) == ["bronze.a"]
+
+
 def test_find_table_refs_excludes_ctes():
     sql = """
     WITH recent AS (SELECT * FROM bronze.orders)

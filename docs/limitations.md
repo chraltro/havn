@@ -110,8 +110,10 @@ source mapping against a written-out expectation. See
 | Selector methods (`tag:`, `path:`, `config.<key>:`, `state:modified`) | Supported | `state:modified` reads the same content and upstream hashes change detection uses. Comma intersects, e.g. `tag:daily,gold.*`. |
 | Selectors on the API and MCP | Supported | `POST /api/transform` takes `targets` and `exclude`; `GET /api/models?select=` filters the listing; the MCP `run_transform` and `list_models` tools take `select`. |
 | `result:` and `source_status:` selectors | Not supported | These need a stored result set from the previous run, which havn does not keep per model beyond its status. |
-| Environments | Supported | `havn env use <name>` switches the database path and connection overrides declared in `project.yml`. |
-| Defer to another environment | Planned | Will attach a prod warehouse read-only so a dev run reads models it has not built. DuckDB's file lock means it cannot attach while another process holds that file open for writing; that constraint is not removable. |
+| Environments | Supported | `havn env use <name>` switches the database path, connection overrides and defer target declared in `project.yml`. |
+| Defer to another environment | Partial | `environments.<name>.defer: <other>` plus `havn transform --defer` attaches that environment's warehouse read-only, so a dev run reads every model it has not built from there and writes only locally. The limitation is DuckDB's file lock: the attach fails whenever another process holds the target open for writing, which is whenever a run against it is going. Not removable, so `--defer-snapshot` defers to a consistent copy instead (`COPY FROM DATABASE`, or the newest verified backup when the target is locked). Unlike dbt, no manifest or `--state` is involved; what havn needs is the other environment's file. |
+| Defer on the DuckLake backend | Not supported | DuckLake already occupies the ATTACH slot defer would use. A deferred run on it stops with that message rather than half-working. |
+| Defer across machines | Not supported | The defer target is a warehouse file this machine can open. A remote environment would need a copy on local disk. |
 | Scheduler | Supported | Cron schedules in job files, run by `havn schedule`, plus `havn watch` for rebuild on file change. |
 | Parallel execution | Supported | Independent models run concurrently by default; `--sequential` turns it off. |
 

@@ -116,6 +116,37 @@ def env(
             console.print("Active environment: [bold]default[/bold]")
             console.print("[dim]No .havn-env file. Use [bold]havn env use <name>[/bold] to set one.[/dim]")
 
+        # The defer target is part of what "which environment am I on" means:
+        # it decides where unbuilt upstreams are read from on the next
+        # transform, and that is easy to forget once it is in project.yml.
+        if active:
+            config_path = project_dir / "project.yml"
+            raw = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
+            env_raw = (raw or {}).get("environments", {}).get(active, {}) or {}
+            target = env_raw.get("defer")
+            if target:
+                from havn.engine.defer import target_lockable
+
+                target_path = (
+                    ((raw or {}).get("environments", {}).get(target, {}) or {})
+                    .get("database", {})
+                    .get("path")
+                    or (raw or {}).get("database", {}).get("path", "warehouse.duckdb")
+                )
+                resolved = Path(target_path)
+                if not resolved.is_absolute():
+                    resolved = project_dir / resolved
+                console.print(f"Defer target: [bold]{target}[/bold] [dim]({target_path})[/dim]")
+                # Whether a deferred run would start right now is the question
+                # people actually have, and it is answered by opening the file
+                # read-only and closing it again. It is a reading, not a
+                # promise: another process can take the lock a moment later.
+                ok, reason = target_lockable(resolved)
+                if ok:
+                    console.print("Defer target readable: [green]yes[/green]")
+                else:
+                    console.print(f"Defer target readable: [yellow]no[/yellow] [dim]({reason})[/dim]")
+
     elif action == "reset":
         env_path = project_dir / ENV_FILE
         if env_path.exists():

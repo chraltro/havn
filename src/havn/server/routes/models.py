@@ -41,6 +41,11 @@ class TransformRequest(BaseModel):
     # `havn transform --event-time-start/--event-time-end`. UTC.
     event_time_start: str | None = Field(default=None, max_length=64)
     event_time_end: str | None = Field(default=None, max_length=64)
+    # Tri-state, like `havn transform --defer/--no-defer`: null defers when
+    # the active environment declares a target, true insists on it, false
+    # builds against this warehouse alone.
+    defer: bool | None = None
+    defer_snapshot: bool = False
 
 
 class DiffRequest(BaseModel):
@@ -138,6 +143,20 @@ def run_transform_endpoint(
             )
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
+
+    # Defer is resolved here rather than inside run_transform because it is a
+    # project-config question (which environment, which file), and the
+    # config is a server dependency.
+    from havn.engine.defer import DeferError, resolve_defer
+
+    try:
+        defer_spec = resolve_defer(
+            _get_config(), _get_project_dir(),
+            enabled=req.defer, snapshot=req.defer_snapshot,
+        )
+    except DeferError as e:
+        raise HTTPException(400, str(e)) from e
+
     try:
         results = run_transform(
             conn,
@@ -146,6 +165,7 @@ def run_transform_endpoint(
             exclude=req.exclude,
             force=req.force,
             batch_range=batch_range,
+            defer=defer_spec,
         )
         return {"results": results}
     except Exception as e:

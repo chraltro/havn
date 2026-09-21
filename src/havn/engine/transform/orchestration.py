@@ -55,6 +55,7 @@ def run_transform(
     db_config: object | None = None,
     exclude: list[str] | None = None,
     batch_range: BatchRange | None = None,
+    defer: object | None = None,
 ) -> dict[str, str]:
     """Run the full transformation pipeline.
 
@@ -80,6 +81,12 @@ def run_transform(
             process exactly these windows instead of resuming from recorded
             state; every other model ignores it, except that an
             ``incremental_filter`` may use ``{start}`` and ``{end}``.
+        defer: A ``havn.engine.defer.DeferSpec`` from
+            ``havn.engine.defer.resolve_defer``, or None for an ordinary run.
+            When given, the other environment's warehouse is attached
+            read-only for the length of the run and every model reference
+            this warehouse cannot satisfy is read from there instead. Writes
+            are unaffected: they always land in this warehouse.
 
     Returns:
         Dict of model_name -> status ("built", "skipped", "error")
@@ -133,19 +140,40 @@ def run_transform(
                 console.print(f"[dim]Available models: {', '.join(all_names)}[/dim]")
             return {}
 
-    if parallel:
-        return _run_transform_parallel(
-            conn, models, force, max_workers, db_path=db_path,
+    # Defer: attach the other environment before the first model and detach in
+    # the context manager's finally, so a crash mid-run still releases it.
+    # Parallel workers open their own connections to this same file, which
+    # DuckDB serves from one shared instance, so they inherit the attach.
+    with _defer_context(conn, defer, models):
+        if parallel:
+            return _run_transform_parallel(
+                conn, models, force, max_workers, db_path=db_path,
+                project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
+                pipeline_run_id=pipeline_run_id, db_config=db_config,
+                all_models=all_models, batch_range=batch_range,
+            )
+        return _run_transform_sequential(
+            conn, models, force,
             project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
-            pipeline_run_id=pipeline_run_id, db_config=db_config,
-            all_models=all_models, batch_range=batch_range,
+            pipeline_run_id=pipeline_run_id, all_models=all_models,
+            batch_range=batch_range,
         )
-    return _run_transform_sequential(
-        conn, models, force,
-        project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
-        pipeline_run_id=pipeline_run_id, all_models=all_models,
-        batch_range=batch_range,
-    )
+
+
+def _defer_context(
+    conn: duckdb.DuckDBPyConnection,
+    defer: object | None,
+    models: list[SQLModel],
+):
+    """The defer session for this run, or a no-op context when not deferring."""
+    if defer is None:
+        from contextlib import nullcontext
+
+        return nullcontext()
+    from havn.engine.defer import defer_session
+
+    defer.local_models = {m.full_name for m in models}
+    return defer_session(conn, defer, on_message=lambda msg: console.print(f"  [dim]{msg}[/dim]"))
 
 
 def _hash_full_dag(

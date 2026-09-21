@@ -158,6 +158,7 @@ environments:
   dev:
     database:
       path: dev_warehouse.duckdb
+    defer: prod            # read models dev has not built from prod
   prod:
     database:
       path: prod_warehouse.duckdb
@@ -165,6 +166,12 @@ environments:
     database:
       path: ":memory:"
 ```
+
+`defer:` names another environment whose warehouse supplies the models this
+one has not built. It is read-only and applies to `havn transform`; writes
+always land in this environment. The target's file must not be open for
+writing elsewhere, or the run needs `--defer-snapshot`. See
+[Environments: Defer](environments#defer).
 
 Switch environments with `--env`:
 

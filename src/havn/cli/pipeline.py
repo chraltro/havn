@@ -277,6 +277,8 @@ def transform(
     skip_check: Annotated[bool, typer.Option("--skip-check", help="Skip pre-transform validation")] = False,
     event_time_start: Annotated[Optional[str], typer.Option("--event-time-start", help="Backfill microbatch models from this event time (UTC), e.g. 2024-01-01")] = None,
     event_time_end: Annotated[Optional[str], typer.Option("--event-time-end", help="Backfill microbatch models up to this event time (UTC), exclusive")] = None,
+    defer: Annotated[Optional[bool], typer.Option("--defer/--no-defer", help="Read models this warehouse has not built from the environment's defer target (default: on when one is configured)")] = None,
+    defer_snapshot: Annotated[bool, typer.Option("--defer-snapshot", help="Defer to a consistent copy of the target, for when it is locked by a running job")] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Print the resolved selection and which selector matched what")] = False,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
@@ -302,6 +304,11 @@ def transform(
     To backfill an explicit range instead:
 
       havn transform gold.events --event-time-start 2024-01-01 --event-time-end 2024-03-01
+
+    When the active environment declares `defer: <other env>`, models this
+    warehouse has not built are read from that environment's warehouse and
+    everything still writes here. Its file must not be open for writing
+    anywhere else; if it is, --defer-snapshot reads a consistent copy instead.
 
     Supports incremental models, data quality assertions, auto-profiling,
     and parallel execution of independent models.
@@ -330,6 +337,17 @@ def transform(
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir, env)
     transform_dir = project_dir / "transform"
+
+    from havn.engine.defer import DeferError, resolve_defer
+
+    try:
+        defer_spec = resolve_defer(
+            config, project_dir,
+            enabled=defer, snapshot=defer_snapshot, verbose=verbose,
+        )
+    except DeferError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from e
 
     selectors = list(targets or []) + list(select or [])
     exclusions = list(exclude or [])
@@ -456,6 +474,7 @@ def transform(
             db_config=config.database,
             project_dir=project_dir, rewind_config=config.rewind, run_id=run_id,
             batch_range=batch_range,
+            defer=defer_spec,
         )
         if not results:
             return
