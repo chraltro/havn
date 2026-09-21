@@ -27,6 +27,7 @@ nav:
   - Seeds: seeds.md
   - Sources: sources.md
   - Data Quality: quality.md
+  - Unit Tests: unit-tests.md
   - Contracts: contracts.md
   - Macros: macros.md
   - Semantic Layer: semantic-layer.md

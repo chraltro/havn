@@ -63,6 +63,9 @@ my-project/
     magnitude_scale.csv
   contracts/            # YAML data quality contracts
     quality.yml
+  tests/
+    unit/               # Model unit tests (fixtures in, expected rows out)
+      top_earthquakes.yml
   notebooks/            # Interactive .dpnb notebooks
     explore.dpnb
   project.yml           # Project configuration

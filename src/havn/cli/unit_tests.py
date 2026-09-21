@@ -1,4 +1,4 @@
-"""CLI: ``havn test`` — run model unit tests from ``tests/unit/*.yml``."""
+"""CLI: ``havn test``, running model unit tests from ``tests/unit/*.yml``."""
 
 from __future__ import annotations
 

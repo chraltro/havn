@@ -38,6 +38,9 @@ havn diff gold.orders           # diff a single model
 havn diff                       # diff changed models + downstream
 havn diff --full                # show all changed rows, not just samples
 havn macros                     # list registered SQL macros
+havn test                       # run model unit tests (tests/unit/*.yml)
+havn test --model silver.customers -v   # one model, with row diffs
+havn check                      # validate + assertions + contracts + unit tests
 havn metrics                    # list semantic-layer metrics (metrics/*.yml)
 havn metrics query revenue --by region --grain month   # query a metric
 havn mcp                        # start MCP stdio server for AI agents
@@ -71,6 +74,8 @@ src/havn/                       # Python package (the platform itself)
     query_governor.py         # Query timeout enforcement via DuckDB interrupt()
     backup.py                 # Verified backup/restore with integrity checks
     semantic.py               # Semantic layer (metrics/*.yml → SQL compiler)
+    unit_tests.py             # Model unit tests (tests/unit/*.yml loader + runner)
+    sql_rewrite.py            # Table-reference rewriter (mocks, ephemeral, defer)
     sql_safety.py             # Shared read-only SQL validation
     notebook/                 # .dpnb notebook execution
     docs.py                   # Markdown doc generator
@@ -110,6 +115,8 @@ tests/                        # pytest test suite
   test_e2e_api.py             # End-to-end API tests
   test_connectors_warehouse.py # Warehouse migration connectors
   test_semantic.py            # Semantic layer (metrics)
+  test_unit_tests.py          # Model unit tests (loader, runner, CLI, API)
+  test_sql_rewrite.py         # Table-reference rewriter
   test_mcp_server.py          # MCP server
 ```
 
@@ -126,6 +133,7 @@ User project layout (created by `havn init`):
   notebooks/      .dpnb interactive notebooks
   macros/         Python SQL macros (auto-registered as DuckDB UDFs)
   metrics/        Semantic-layer metric definitions (YAML)
+  tests/unit/     Model unit tests (fixture rows in, expected rows out)
   project.yml     Config: connections, lint, alerts
   .env            Secrets (never committed)
   .havn-env       Active environment (local, not committed)

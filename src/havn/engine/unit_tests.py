@@ -636,7 +636,7 @@ def _run_case(
         return finish(
             "error",
             "no mock for upstream " + ", ".join(sorted(missing_mocks))
-            + " — every upstream must be mocked, unit tests never read the warehouse",
+            + ": every upstream must be mocked, unit tests never read the warehouse",
         )
 
     declared_deps = {d.lower() for d in sql_model.depends_on}

@@ -263,19 +263,33 @@ Register it with an MCP client, for example:
 claude mcp add havn -- havn mcp -p /path/to/project
 ```
 
-Tools exposed: `query`, `list_tables`, `describe_table`, `list_models`, `get_model`, `model_lineage`, `run_history`, `list_metrics`, `query_metric`, `run_transform`.
+Tools exposed: `query`, `list_tables`, `describe_table`, `list_models`, `get_model`, `model_lineage`, `run_history`, `list_metrics`, `query_metric`, `run_unit_tests`, `run_transform`.
 
 ## Data Quality
 
 ### havn check
 
-Validate SQL models, run assertions, and run contracts.
+Validate SQL models, run assertions, contracts, and unit tests.
 
 ```bash
-havn check [TARGETS...] [--env NAME] [--project PATH]
+havn check [TARGETS...] [--unit-tests/--no-unit-tests] [--env NAME] [--project PATH]
 ```
 
-Runs model validation, inline assertions, and YAML contracts.
+Runs model validation, inline assertions, YAML contracts, and the unit tests
+in `tests/unit/`. Pass `--no-unit-tests` to skip the last step.
+
+### havn test
+
+Run model unit tests: fixture rows in, expected rows out.
+
+```bash
+havn test [--model NAME] [-v] [--env NAME] [--project PATH]
+```
+
+Each test runs its model against the mock rows declared in `tests/unit/*.yml`
+on a throwaway in-memory DuckDB, so nothing is read from or written to the
+warehouse. `-v` prints the rows that differ. Exits 1 if any test fails.
+See [Unit Tests](unit-tests).
 
 ### havn freshness
 

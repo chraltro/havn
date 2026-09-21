@@ -395,6 +395,19 @@ Run all data contracts.
 
 Get contract evaluation history.
 
+### GET /api/unit-tests
+
+List the model unit tests declared in `tests/unit/*.yml`, plus any load errors.
+
+### POST /api/unit-tests/run
+
+Run the unit tests, optionally filtered to one model. Requires `execute`
+permission; the tests themselves run in memory and never touch the warehouse.
+
+```json
+{"model": "silver.customers"}
+```
+
 ## Masking
 
 ### GET /api/masking/policies

@@ -902,6 +902,7 @@ havn diff gold.orders       # diff a single model
 havn serve                  # start web UI on :3000
 havn history                # show run log
 havn contracts              # evaluate data quality contracts
+havn test                   # run model unit tests (tests/unit/*.yml)
 havn snapshot create "name" # create warehouse snapshot
 havn validate               # check project structure and DAG
 havn context                # generate AI-friendly project summary
@@ -921,6 +922,7 @@ export/           Python scripts that export data out
 macros/           Python SQL macros — functions callable directly in SQL queries
 seeds/            CSV reference data (loaded with havn seed)
 contracts/        YAML data quality rules (evaluated with havn contracts)
+tests/unit/       Model unit tests: fixture rows in, expected rows out (havn test)
 notebooks/        Interactive .dpnb notebooks for exploration
 project.yml       Streams, connections, schedules, alerts
 .env              Secrets (never committed)
