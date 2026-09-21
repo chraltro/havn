@@ -470,6 +470,8 @@ function AppContent() {
   const [activeFile, setActiveFile] = useState(null);
   const [sidebarFilter, setSidebarFilter] = useState("");
   const activeFileRef = useRef(null);
+  // /api/models result, cached for model-path resolution (see resolveModelPath)
+  const modelsCacheRef = useRef(null);
   const [fileContent, setFileContent] = useState("");
   const [fileLang, setFileLang] = useState("sql");
   const [dirty, setDirty] = useState(false);
@@ -758,13 +760,33 @@ function AppContent() {
     }
   }
 
-  function resolveFilePath(ref) {
+  // Resolve "schema.name" to the file that declares the model. The folder is
+  // only the *default* schema: `@config schema=` can point a model at another
+  // one, so transform/{schema}/{name}.sql is a guess. /api/models knows the
+  // real path; the convention stays as the fallback for models it doesn't list
+  // (unsaved file, API error, stale cache).
+  async function resolveModelPath(fullName) {
+    const [schema, name] = fullName.split(".");
+    const byConvention = `transform/${schema}/${name}.sql`;
+    if (!schema || !name) return byConvention;
+    try {
+      let match = (modelsCacheRef.current || []).find((m) => m.full_name === fullName);
+      if (!match) {
+        modelsCacheRef.current = await api.listModels();
+        match = (modelsCacheRef.current || []).find((m) => m.full_name === fullName);
+      }
+      return match && match.path ? match.path : byConvention;
+    } catch {
+      return byConvention;
+    }
+  }
+
+  async function resolveFilePath(ref) {
     const normalized = ref.replace(/\\/g, "/");
     const hasExtension = /\.(sql|py|yml|yaml|json|csv|md|txt|dpnb)$/i.test(normalized);
 
     if (!hasExtension && !normalized.includes("/") && /^\w+\.\w+$/.test(normalized)) {
-      const [schema, model] = normalized.split(".");
-      return `transform/${schema}/${model}.sql`;
+      return resolveModelPath(normalized);
     }
 
     if (!normalized.includes("/")) {
@@ -784,7 +806,7 @@ function AppContent() {
   }
 
   async function openFileAtLine(ref, line, col) {
-    const path = resolveFilePath(ref);
+    const path = await resolveFilePath(ref);
     if (activeFile === path) {
       setGoToLine({ line, col: col || 1 });
       setActiveTab("Editor");
@@ -1293,7 +1315,7 @@ function AppContent() {
               </ErrorBoundary>
               )
             )}
-            {activeTab === "Query" && <ErrorBoundary name="Query"><QueryPanel addOutput={addOutput} onOpenModel={(key) => { const [s, t] = key.split("."); openFile(`transform/${s}/${t}.sql`); }} /></ErrorBoundary>}
+            {activeTab === "Query" && <ErrorBoundary name="Query"><QueryPanel addOutput={addOutput} onOpenModel={async (key) => { openFile(await resolveModelPath(key)); }} /></ErrorBoundary>}
             {activeTab === "Tables" && <ErrorBoundary name="Tables"><TablesPanel selectedTable={selectedTable} onQueryTable={queryTable} tables={tables} onSelectTable={handleSelectTable} /></ErrorBoundary>}
             {activeTab === "Data Sources" && <ErrorBoundary name="Data Sources"><DataSourcesPanel addOutput={addOutput} showConfirm={showConfirm} onDataChanged={refreshAll} /></ErrorBoundary>}
 

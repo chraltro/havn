@@ -26,15 +26,12 @@
 Your entire warehouse lives in a single DuckDB file. Transforms are plain SQL. Ingest and export scripts are Python. There's no Jinja, no compilation step, no profiles.yml, and no YAML spaghetti.
 
 ```
-git clone https://github.com/chraltro/havn.git && cd havn && pip install -e . && cd frontend && npm install && npm run build && cd .. && havn init my-project && cd my-project && havn jobs run full-refresh && havn serve
+pip install havn && havn init my-project && cd my-project && havn jobs run full-refresh && havn serve
 ```
 
-<!-- Screenshot placeholder: replace with actual screenshot of havn web UI -->
-<!--
 <p align="center">
-  <img src="https://raw.githubusercontent.com/chraltro/havn/main/.github/assets/screenshot.png" width="800" alt="havn web UI" />
+  <img src="https://raw.githubusercontent.com/chraltro/havn/main/.github/assets/screenshot.webp" width="800" alt="havn web UI showing the project overview: pipeline health with running models, warehouse schemas, and live log output" />
 </p>
--->
 
 ## Why havn?
 
@@ -47,7 +44,7 @@ havn gives you the analytical power of a modern data stack in something you can 
 | Cloud costs spiraling | **Runs locally.** DuckDB on your machine. $0/month. |
 | Data leaving your infrastructure | **Self-hosted.** Your data stays on your hardware. Full stop. |
 | Jinja-templated SQL nobody understands | **Plain SQL.** A one-line `@config` directive, dependencies auto-derived from your `FROM` and `JOIN` clauses, no templating. SQL is just SQL. |
-| 30-minute onboarding | **30-second onboarding.** Install from source and `havn init` gives you a working pipeline with sample data. |
+| 30-minute onboarding | **30-second onboarding.** One `pip install`, then `havn init` gives you a working pipeline with sample data. |
 | Separate tools for ingest, transform, orchestration, UI | **One tool does it all.** CLI, web UI, scheduler, connectors - included. |
 | LLMs can't write your DSL | **AI-native.** Plain SQL + simple conventions = LLMs write correct transforms on the first try. |
 
@@ -139,6 +136,9 @@ From PyPI:
 pip install havn
 ```
 
+The wheel ships the built web UI, so that is everything you need. Node and npm
+are only for working on havn itself.
+
 From source (for development):
 
 ```bash
@@ -146,6 +146,7 @@ git clone https://github.com/chraltro/havn.git
 cd havn
 pip install -e ".[dev]"
 cd frontend && npm install && npm run build && cd ..
+havn init my-project && cd my-project && havn jobs run full-refresh && havn serve
 ```
 
 #### Adding Python libraries
@@ -256,6 +257,8 @@ The warehouse is a single DuckDB file. Copy it, back it up, version it - it's ju
 | Data stays on your machine | Yes | Depends | No | No |
 
 havn is the right choice when you want a complete data platform without the infrastructure overhead. It's not trying to replace Snowflake at 10TB scale - it's the best tool for teams working with data that fits on a single machine (which is most teams).
+
+For the feature-by-feature version of that answer - what works today, what works with caveats, and what isn't built yet - see [What havn Supports](docs/limitations.md).
 
 ## Documentation
 
