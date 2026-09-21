@@ -359,6 +359,36 @@ export function resolveColumnType({ word, qualifier, bind, tableRefs = [] }) {
   return col ? { name: col.name, type: col.type, source: bind.model || null } : null;
 }
 
+/**
+ * Find the model a `schema.name` reference points at.
+ *
+ * Always resolves through the model's own `path`. The
+ * transform/{schema}/{name}.sql layout is only a default: `@config schema=`
+ * can point a model at another schema, and jumping to a file that does not
+ * exist is worse than not jumping at all.
+ */
+export function findModelDefinition(models, schema, name) {
+  if (!schema || !name) return null;
+  const full = `${schema}.${name}`.toLowerCase();
+  const hit = (models || []).find((m) => String(m.full_name || "").toLowerCase() === full);
+  return hit && hit.path ? hit : null;
+}
+
+/**
+ * Read a `schema.name` reference around the cursor, whichever half it sits on.
+ * `line` is the line text, `word` the Monaco word at the position.
+ */
+export function qualifiedRefAt(line, word) {
+  if (!word) return null;
+  const before = line.substring(0, word.startColumn - 1);
+  const dotBefore = before.match(/(\w+)\.\s*$/);
+  if (dotBefore) return { schema: dotBefore[1], name: word.word };
+  const after = line.substring(word.endColumn - 1);
+  const dotAfter = after.match(/^\s*\.(\w+)/);
+  if (dotAfter) return { schema: word.word, name: dotAfter[1] };
+  return null;
+}
+
 /** Short label for the editor toolbar: "binding...", "3 errors", "ok". */
 export function bindStatusLabel(state) {
   if (!state) return null;
@@ -668,6 +698,42 @@ loader.init().then((monaco) => {
       }
 
       return { range: hoverRange, contents: [{ value: lines.join("\n") }] };
+    },
+  });
+
+  // --- Definition provider ---
+  // Ctrl/Cmd+click and F12 on a `schema.name` reference jump to the file that
+  // declares that model.
+  monaco.languages.registerDefinitionProvider("sql", {
+    provideDefinition: async (model, position) => {
+      const word = model.getWordAtPosition(position);
+      if (!word) return null;
+      const ref = qualifiedRefAt(model.getLineContent(position.lineNumber), word);
+      if (!ref) return null;
+      const hit = findModelDefinition(await getModelsCache(), ref.schema, ref.name);
+      if (!hit) return null;
+      return {
+        uri: monaco.Uri.parse(modelUriFor(hit.path)),
+        range: new monaco.Range(1, 1, 1, 1),
+      };
+    },
+  });
+
+  // The editor holds one file at a time and the surrounding app owns which
+  // file that is, so opening another model is the app's job, not Monaco's.
+  // Handlers registered here run before Monaco's own, which would otherwise
+  // swap the model out from under App.jsx's editor state.
+  monaco.editor.registerEditorOpener({
+    openCodeEditor: (_source, resource, selectionOrPosition) => {
+      const path = pathFromUri(resource);
+      if (!path || !editorContext.openModel) return false;
+      // Same file: let Monaco reveal the position in place.
+      if (path === editorContext.activeFile) return false;
+      const line = selectionOrPosition
+        ? selectionOrPosition.lineNumber || selectionOrPosition.startLineNumber || 1
+        : 1;
+      editorContext.openModel(path, line);
+      return true;
     },
   });
 });
