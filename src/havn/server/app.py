@@ -179,6 +179,7 @@ from havn.server.routes.semantic import router as semantic_router  # noqa: E402
 from havn.server.routes.sql_api import router as sql_api_router  # noqa: E402
 from havn.server.routes.export import router as export_router  # noqa: E402
 from havn.server.routes.streaming import router as streaming_router  # noqa: E402
+from havn.server.routes.unit_tests import router as unit_tests_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(files_router)
@@ -212,6 +213,7 @@ app.include_router(semantic_router)
 app.include_router(sql_api_router)
 app.include_router(export_router)
 app.include_router(streaming_router)
+app.include_router(unit_tests_router)
 
 # Register WebSocket endpoints (can't use APIRouter for WebSocket)
 register_websocket(app)
