@@ -129,6 +129,8 @@ def check(
                         for ar in cr.results:
                             if not ar["passed"]:
                                 console.print(f"         [red]FAIL[/red]  {ar['expression']} ({ar['detail']})")
+                            elif ar.get("severity") == "warning":
+                                console.print(f"         [yellow]warn[/yellow]  {ar['expression']} ({ar['detail']})")
                         if not cr.passed:
                             contract_failures += 1
                     except Exception as e:
@@ -466,10 +468,12 @@ def contracts(
                     desc = f"  [dim]{col.description}[/dim]" if col.description else ""
                     console.print(f"           {col.name} {col.type}{null_note}{desc}")
             for ar in cr.results:
-                if ar["passed"]:
-                    console.print(f"         [green]pass[/green]  {ar['expression']}")
-                else:
+                if not ar["passed"]:
                     console.print(f"         [red]FAIL[/red]  {ar['expression']} ({ar['detail']})")
+                elif ar.get("severity") == "warning":
+                    console.print(f"         [yellow]warn[/yellow]  {ar['expression']} ({ar['detail']})")
+                else:
+                    console.print(f"         [green]pass[/green]  {ar['expression']}")
             if not cr.passed:
                 all_passed = False
             if cr.error:

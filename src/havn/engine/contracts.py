@@ -877,6 +877,9 @@ def evaluate_contract(
                 "expression": f"column {finding.column} ({finding.kind})",
                 "passed": finding.severity != "error",
                 "detail": finding.message,
+                # A widening passes but is not nothing. Surfaces that only
+                # know pass and fail would otherwise print it as "pass".
+                "severity": finding.severity,
             })
             if finding.severity == "error":
                 all_passed = False
