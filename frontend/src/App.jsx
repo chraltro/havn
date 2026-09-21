@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { api } from "./api";
 import FileTree from "./FileTree";
-import Editor, { bindStatusLabel } from "./Editor";
+import Editor, { bindStatusLabel, stripModelDirectives } from "./Editor";
 import OutputPanel from "./OutputPanel";
 import QueryPanel from "./QueryPanel";
 import TablesPanel from "./TablesPanel";
@@ -46,6 +46,9 @@ import { WarehouseProvider, useWarehouse } from "./WarehouseContext";
 import { schemaCompare } from "./schemaOrder";
 import { PipelineProvider, usePipeline } from "./PipelineContext";
 
+
+/** Row cap for the editor preview pane (whole model and single CTE alike). */
+const PREVIEW_LIMIT = 100;
 
 /* ------------------------------------------------------------------ */
 /* Section-based navigation                                            */
@@ -1003,30 +1006,14 @@ function AppContent() {
     }
   }
 
-  async function previewCurrentFile() {
-    if (!activeFile || !activeFile.endsWith(".sql")) return;
-    const lines = fileContent.split("\n");
-    let start = 0;
-    for (const line of lines) {
-      const s = line.trim();
-      // Strip both the canonical @-prefixed directives and the legacy
-      // SQL-comment form, plus any leading blank lines, so the preview
-      // sends only executable SQL to DuckDB.
-      const isDirective =
-        s.startsWith("@config") || s.startsWith("@depends_on") ||
-        s.startsWith("@description") || s.startsWith("@col") ||
-        s.startsWith("@assert") ||
-        s.startsWith("-- config:") || s.startsWith("-- depends_on:") ||
-        s.startsWith("-- description:") || s.startsWith("-- col:") ||
-        s.startsWith("-- assert:");
-      if (isDirective || s === "") { start++; } else break;
-    }
-    const sql = lines.slice(start).join("\n").trim();
-    if (!sql) return;
+  /** Run SQL and show it in the editor's preview pane. */
+  async function previewSql(sql, label) {
+    if (!sql || !sql.trim()) return;
     setPreviewRunning(true);
     setPreviewError(null);
+    if (label) addOutput("info", `Previewing ${label}...`);
     try {
-      const data = await api.runQuery(sql);
+      const data = await api.runQuery(sql, undefined, { limit: PREVIEW_LIMIT });
       setPreview(data);
     } catch (e) {
       setPreviewError(e.message);
@@ -1034,6 +1021,11 @@ function AppContent() {
     } finally {
       setPreviewRunning(false);
     }
+  }
+
+  async function previewCurrentFile() {
+    if (!activeFile || !activeFile.endsWith(".sql")) return;
+    await previewSql(stripModelDirectives(fileContent));
   }
 
   function handleSelectTable(schema, name) {
@@ -1309,6 +1301,7 @@ function AppContent() {
                       onPreview={activeFile?.endsWith(".sql") ? previewCurrentFile : undefined}
                       onStatus={setBindStatus}
                       onOpenModel={(path, line) => openFileAtLine(path, line || 1, 1)}
+                      onPreviewCte={(sql, name) => previewSql(sql, name ? `CTE ${name}` : "CTE")}
                     />
                   </div>
                   {(preview || previewError || previewRunning) && (

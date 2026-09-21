@@ -121,6 +121,8 @@ export const editorContext = {
   bindResults: new Map(),
   /** App navigation hook: (path, line, col) => void. Set by the component. */
   openModel: null,
+  /** App preview hook: (sql, label) => void. Set by the component. */
+  previewSql: null,
 };
 
 /** Monaco model URI for a project file, so every open file gets its own model. */
@@ -387,6 +389,67 @@ export function qualifiedRefAt(line, word) {
   const dotAfter = after.match(/^\s*\.(\w+)/);
   if (dotAfter) return { schema: word.word, name: dotAfter[1] };
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Model directives
+// ---------------------------------------------------------------------------
+
+/** Legacy SQL-comment directive forms, kept in step with the backend's _META_PREFIXES. */
+const LEGACY_DIRECTIVE_PREFIXES = [
+  "-- config:", "-- depends_on:", "-- description:", "-- col:", "-- assert:",
+];
+
+/**
+ * Blank out every directive line in a model, keeping the line count.
+ *
+ * Directives can sit anywhere in the file, not just at the top: an @assert
+ * after the SELECT is normal and DuckDB would choke on it. Blanking rather
+ * than deleting keeps the remaining line numbers matching the file, so an
+ * error from a preview still points at the right line in the editor.
+ */
+export function stripModelDirectives(text) {
+  return (text || "")
+    .split("\n")
+    .map((line) => {
+      const s = line.trim();
+      const isDirective = s.startsWith("@") || LEGACY_DIRECTIVE_PREFIXES.some((p) => s.startsWith(p));
+      return isDirective ? "" : line;
+    })
+    .join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// CTE preview
+// ---------------------------------------------------------------------------
+
+/** Monaco command the "Preview" code lens invokes. */
+export const PREVIEW_CTE_COMMAND = "havn.previewCte";
+
+/**
+ * Pick the CTE to preview from a /api/sql/ctes response.
+ *
+ * The server flags the CTE containing the requested line as `active`. With
+ * the cursor outside every CTE there is still a sensible answer: the last
+ * one, which is what a `WITH` chain builds up to.
+ */
+export function pickActiveCte(result) {
+  const ctes = (result && result.ctes) || [];
+  if (ctes.length === 0) return null;
+  const active = result.active;
+  if (active != null && ctes[active]) return ctes[active];
+  return ctes[ctes.length - 1];
+}
+
+// Last /api/sql/ctes response, so the code lens provider does not re-ask for
+// a buffer it has already parsed.
+let cteMemo = { content: null, result: null };
+
+async function getCtes(content, line) {
+  if (line == null && cteMemo.content === content) return cteMemo.result;
+  const result = await api.listCtes(content, line);
+  if (line == null) cteMemo = { content, result };
+  return result;
 }
 
 /** Short label for the editor toolbar: "binding...", "3 errors", "ok". */
@@ -719,6 +782,35 @@ loader.init().then((monaco) => {
     },
   });
 
+  // --- CTE preview ---
+  // A "Preview" lens above each CTE runs just that CTE, so a long WITH chain
+  // can be checked a step at a time instead of only end to end.
+  monaco.editor.registerCommand(PREVIEW_CTE_COMMAND, (_accessor, sql, name) => {
+    if (editorContext.previewSql && sql) editorContext.previewSql(sql, name);
+  });
+
+  monaco.languages.registerCodeLensProvider("sql", {
+    provideCodeLenses: async (model) => {
+      if (!isTransformSql(pathFromUri(model.uri))) return { lenses: [], dispose: () => {} };
+      let result;
+      try {
+        result = await getCtes(model.getValue(), null);
+      } catch {
+        return { lenses: [], dispose: () => {} };
+      }
+      const lenses = (result.ctes || []).map((cte, i) => ({
+        range: new monaco.Range(Math.max(1, cte.start_line), 1, Math.max(1, cte.start_line), 1),
+        id: `havn-cte-${i}`,
+        command: {
+          id: PREVIEW_CTE_COMMAND,
+          title: "Preview",
+          arguments: [cte.preview_sql, cte.name],
+        },
+      }));
+      return { lenses, dispose: () => {} };
+    },
+  });
+
   // The editor holds one file at a time and the surrounding app owns which
   // file that is, so opening another model is the app's job, not Monaco's.
   // Handlers registered here run before Monaco's own, which would otherwise
@@ -738,7 +830,7 @@ loader.init().then((monaco) => {
   });
 });
 
-export default function Editor({ content, language, onChange, activeFile, onMount, goToLine, onFormat, onPreview, onOpenModel, onStatus }) {
+export default function Editor({ content, language, onChange, activeFile, onMount, goToLine, onFormat, onPreview, onOpenModel, onPreviewCte, onStatus }) {
   const { themeId } = useTheme();
   const monacoTheme = `havn-${themeId}`;
   const editorRef = useRef(null);
@@ -758,9 +850,13 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
   const activeFileRef = useRef(activeFile);
   activeFileRef.current = activeFile;
 
+  const onPreviewCteRef = useRef(onPreviewCte);
+  onPreviewCteRef.current = onPreviewCte;
+
   // Keep the module-level provider context pointed at the file on screen.
   editorContext.activeFile = activeFile || null;
   editorContext.openModel = onOpenModel || null;
+  editorContext.previewSql = onPreviewCte || null;
 
   // Warm the model list so go-to-definition resolves on the first try.
   useEffect(() => {
@@ -907,6 +1003,30 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
       keybindingContext: null,
       run: () => { if (onPreviewRef.current) onPreviewRef.current(); },
     });
+
+    editor.addAction({
+      id: "havn-preview-cte",
+      label: "Preview CTE at cursor",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter],
+      precondition: null,
+      keybindingContext: null,
+      run: (ed) => { previewCteAtCursor(ed); },
+    });
+  }
+
+  /** Preview the CTE the cursor sits in, falling back to the last one. */
+  async function previewCteAtCursor(ed) {
+    const path = activeFileRef.current;
+    if (!isTransformSql(path) || !onPreviewCteRef.current) return;
+    const position = ed.getPosition();
+    let result;
+    try {
+      result = await getCtes(contentRef.current, position ? position.lineNumber : null);
+    } catch {
+      return;
+    }
+    const cte = pickActiveCte(result);
+    if (cte) onPreviewCteRef.current(cte.preview_sql, cte.name);
   }
 
   useEffect(() => {
