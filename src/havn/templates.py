@@ -639,6 +639,50 @@ contracts:
 """
 
 # ---------------------------------------------------------------------------
+# Unit test — fixed input rows in, expected rows out, no warehouse involved
+# ---------------------------------------------------------------------------
+
+SAMPLE_UNIT_TEST_YML = """\
+# Unit tests run the model against these rows on a throwaway in-memory
+# database: no warehouse, no ingest, no network. Run them with `havn test`.
+# Docs: https://chraltro.github.io/db/unit-tests/
+model: gold.top_earthquakes
+
+tests:
+  - name: keeps only magnitude 4.5 and above
+    description: The M4.5 cutoff is the whole point of this model.
+    given:
+      # Every upstream the model reads must be mocked. Declaring column types
+      # is optional but recommended: it pins the fixture to the real shape.
+      silver.earthquake_events:
+        columns:
+          event_id: VARCHAR
+          event_time: TIMESTAMP
+          magnitude: DOUBLE
+          magnitude_class: VARCHAR
+          place: VARCHAR
+          region: VARCHAR
+          latitude: DOUBLE
+          longitude: DOUBLE
+          depth_km: DOUBLE
+          depth_class: VARCHAR
+          felt_reports: BIGINT
+          tsunami_alert: BOOLEAN
+          significance: BIGINT
+        format: csv
+        csv: |
+          event_id,event_time,magnitude,magnitude_class,place,region,latitude,longitude,depth_km,depth_class,felt_reports,tsunami_alert,significance
+          us1000,2026-01-02 03:04:05,5.2,Moderate,10km N of Reykjavik,Reykjavik,64.1,-21.9,10.0,Shallow,12,false,420
+          us2000,2026-01-02 06:07:08,2.1,Minor,5km S of Bergen,Bergen,60.4,5.3,8.0,Shallow,0,false,60
+    expect:
+      # Row order is not compared unless you set `ordered: true`.
+      format: csv
+      csv: |
+        event_id,event_time,magnitude,magnitude_class,place,region,latitude,longitude,depth_km,depth_class,felt_reports,tsunami_alert,significance
+        us1000,2026-01-02 03:04:05,5.2,Moderate,10km N of Reykjavik,Reykjavik,64.1,-21.9,10.0,Shallow,12,false,420
+"""
+
+# ---------------------------------------------------------------------------
 # Interactive notebook — explore the data after a pipeline run
 # ---------------------------------------------------------------------------
 

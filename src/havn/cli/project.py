@@ -173,6 +173,7 @@ def init(
         SAMPLE_SEED_CSV,
         SAMPLE_SILVER_DAILY_SQL,
         SAMPLE_SILVER_EVENTS_SQL,
+        SAMPLE_UNIT_TEST_YML,
     )
 
     if backend not in ("duckdb", "ducklake"):
@@ -186,6 +187,7 @@ def init(
     dirs = [
         "ingest", "transform/bronze", "transform/silver", "transform/gold",
         "export", "seeds", "contracts", "notebooks", "macros", "orchestration",
+        "tests/unit",
     ]
     for d in dirs:
         (target / d).mkdir(parents=True, exist_ok=True)
@@ -217,6 +219,7 @@ def init(
         (target / "macros" / "geo.py").write_text(SAMPLE_MACRO_GEO, encoding="utf-8")
         (target / "seeds" / "magnitude_scale.csv").write_text(SAMPLE_SEED_CSV)
         (target / "contracts" / "quality.yml").write_text(SAMPLE_CONTRACTS_YML)
+        (target / "tests" / "unit" / "top_earthquakes.yml").write_text(SAMPLE_UNIT_TEST_YML)
         (target / "notebooks" / "explore.dpnb").write_text(SAMPLE_EXPLORE_NOTEBOOK)
         # Starter orchestration jobs
         (target / "orchestration" / "full-refresh.yml").write_text(SAMPLE_FULL_REFRESH_JOB)
@@ -278,6 +281,7 @@ def init(
         console.print("  havn macros                 # see Python functions usable in SQL")
         console.print("  havn serve                  # open web UI")
         console.print("  havn contracts              # check data quality")
+        console.print("  havn test                   # run model unit tests")
         console.print()
         console.print(
             "[dim]Need a Python library (e.g. pandas) in your scripts? "
