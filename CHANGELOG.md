@@ -150,6 +150,27 @@ in `docs/internal/dbt-v2-gap-plan.md`.
 - The `sqlglot` floor is now 26.17, the first version carrying token
   positions.
 
+### Reuse
+
+- **Packages.** Share models and macros between projects. Declare them under
+  `packages:` in `project.yml` as `{name, git, rev}` or `{name, path}`, then
+  `havn packages install`. Sources are cloned into `havn_packages/` and
+  pinned by `havn_packages.lock`, which is committed; a later install
+  reproduces the locked commit unless you pass `--upgrade`. A branch `rev`
+  is accepted but warns, because it is not a pin.
+- **Package namespacing.** A package's schemas become `<pkg>_<schema>` and
+  its references to its own models are rewritten to match, so a package
+  author writes plain `silver.customers` and a host project can never lose a
+  name to one. Override per schema in the package's `havn_package.yml`; a
+  real collision raises `DuplicateModelError`.
+- **Package macros** register between the built-in library and the project,
+  so project macros win, with package-scoped module names so two packages
+  can both ship `macros/utils.py`.
+- `havn packages install|list|remove`, a `package:` selector, `GET
+  /api/packages`, `POST /api/packages/install`; package models are labelled
+  in the DAG panel and the file tree, and the editor warns that the next
+  install overwrites edits to an installed file.
+
 ### First impression
 
 - README leads with `pip install havn`; the clone-and-npm chain moved to the
