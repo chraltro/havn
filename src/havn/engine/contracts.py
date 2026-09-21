@@ -151,6 +151,13 @@ class ContractResult:
     duration_ms: int = 0
     error: str | None = None
     consecutive_failures: int = 0
+    schema_findings: list[ContractSchemaFinding] = field(default_factory=list)
+    """Column-contract differences, checked against the live table.
+
+    The same check runs at validate time against the bind pass, before
+    anything is built. It is repeated here so the post-build report is
+    complete on its own, whether or not a validate ran.
+    """
 
 
 class _TypeChecker:
@@ -333,6 +340,247 @@ def discover_contracts(contracts_dir: Path) -> list[Contract]:
         checker.close()
 
     return contracts
+
+
+# ---------------------------------------------------------------------------
+# Column contracts
+# ---------------------------------------------------------------------------
+
+
+def _base_type(type_text: str) -> str:
+    """A type name with its parameters stripped, ``DECIMAL(38,1)`` to ``DECIMAL``.
+
+    List suffixes survive, because ``VARCHAR[]`` really is a different thing
+    from ``VARCHAR`` and must not be classified as a harmless widening.
+    """
+    text = re.sub(r"\s+", " ", (type_text or "").strip().upper())
+    suffix = ""
+    while text.endswith("[]"):
+        text = text[:-2].strip()
+        suffix += "[]"
+    head = text.split("(", 1)[0].strip()
+    return (head or text) + suffix
+
+
+def classify_type_change(declared: str, actual: str) -> str:
+    """``match``, ``type_widened``, ``type_narrowed`` or ``type_changed``.
+
+    Reuses the type groups the sentinel already classifies source-schema
+    changes with, so a contract and a source-schema alert say the same thing
+    about the same change. Parameters are stripped first, which is what makes
+    ``DOUBLE`` to ``DECIMAL(38,1)`` -- the shape a ``SUM`` of a double takes
+    once DuckDB has resolved it -- read as a widening rather than a break.
+    """
+    from havn.engine.sentinel import _TYPE_GROUPS, _TYPE_WIDTH
+
+    if re.sub(r"\s+", "", (declared or "").upper()) == re.sub(
+        r"\s+", "", (actual or "").upper()
+    ):
+        return "match"
+
+    declared_base = _base_type(declared)
+    actual_base = _base_type(actual)
+    if declared_base == actual_base:
+        # Same type, different parameters: DECIMAL(10,2) to DECIMAL(38,2).
+        return "match"
+
+    declared_group = _TYPE_GROUPS.get(declared_base, declared_base)
+    actual_group = _TYPE_GROUPS.get(actual_base, actual_base)
+    if declared_group != actual_group:
+        return "type_changed"
+
+    declared_width = _TYPE_WIDTH.get(declared_base)
+    actual_width = _TYPE_WIDTH.get(actual_base)
+    if declared_width is None or actual_width is None:
+        return "type_changed"
+    if actual_width > declared_width:
+        return "type_widened"
+    if actual_width < declared_width:
+        return "type_narrowed"
+    return "match"
+
+
+def check_contract_schema(
+    contract: Contract,
+    inferred: list[tuple[str, str]],
+    *,
+    nullability: dict[str, bool] | None = None,
+) -> list[ContractSchemaFinding]:
+    """Compare a contract's declared columns to a model's real ones.
+
+    ``inferred`` is ``[(column, type), ...]``, from the bind pass before the
+    build, from ``_havn.model_columns`` for a model the bind pass did not
+    cover, or from a live ``DESCRIBE`` afterwards. All three are the same
+    shape on purpose: the check does not care which one it got, so the
+    pre-build and post-build reports cannot disagree.
+
+    Severities:
+
+    - missing column: error. The contract promised it and it is not there.
+    - extra column: error when ``strict``, otherwise informational. A
+      contract that declares three of a model's twenty columns is a normal
+      way to use this.
+    - widening (``INTEGER`` to ``BIGINT``, ``DOUBLE`` to ``DECIMAL``):
+      whatever ``on_widen`` says, warn by default. Nothing downstream
+      breaks, but the author should know.
+    - narrowing or a change of category: error.
+    - nullability: error when the contract declares ``nullable: false`` and
+      the column admits nulls. Only checked when ``nullability`` is given;
+      a plain ``DESCRIBE`` of a CTAS-built table reports every column as
+      nullable, so the caller decides whether its source is meaningful.
+
+    Args:
+        contract: The contract whose ``columns`` block to check.
+        inferred: The model's real ``(column, type)`` pairs, in order.
+        nullability: ``{column: admits_nulls}`` when the caller knows.
+
+    Returns:
+        One finding per difference, declared columns first in declaration
+        order, then extra columns in the order the model has them.
+    """
+    if not contract.columns:
+        return []
+
+    findings: list[ContractSchemaFinding] = []
+    actual_by_name = {str(name).lower(): str(ctype) for name, ctype in inferred}
+    nulls_by_name = {k.lower(): v for k, v in (nullability or {}).items()}
+
+    def add(column: str, kind: str, severity: str, message: str, **extra: str) -> None:
+        findings.append(ContractSchemaFinding(
+            contract_name=contract.name,
+            model=contract.model,
+            column=column,
+            kind=kind,
+            severity=severity,
+            message=message,
+            **extra,
+        ))
+
+    for declared in contract.columns:
+        key = declared.name.lower()
+        if key not in actual_by_name:
+            add(
+                declared.name,
+                "missing_column",
+                "error",
+                f"{contract.model} does not have the declared column "
+                f"'{declared.name}' ({declared.type})",
+                declared=declared.type,
+            )
+            continue
+
+        actual = actual_by_name[key]
+        verdict = classify_type_change(declared.type, actual)
+        if verdict == "type_widened":
+            severity = {"warn": "warning", "error": "error", "ignore": ""}.get(
+                contract.on_widen, "warning"
+            )
+            if severity:
+                add(
+                    declared.name,
+                    "type_widened",
+                    severity,
+                    f"{contract.model}.{declared.name} widened from the declared "
+                    f"{declared.type} to {actual}",
+                    declared=declared.type,
+                    actual=actual,
+                )
+        elif verdict == "type_narrowed":
+            add(
+                declared.name,
+                "type_narrowed",
+                "error",
+                f"{contract.model}.{declared.name} narrowed from the declared "
+                f"{declared.type} to {actual}",
+                declared=declared.type,
+                actual=actual,
+            )
+        elif verdict == "type_changed":
+            add(
+                declared.name,
+                "type_changed",
+                "error",
+                f"{contract.model}.{declared.name} is {actual}, the contract "
+                f"declares {declared.type}",
+                declared=declared.type,
+                actual=actual,
+            )
+
+        if declared.nullable is False and nulls_by_name.get(key) is True:
+            add(
+                declared.name,
+                "not_null_violated",
+                "error",
+                f"{contract.model}.{declared.name} admits nulls, the contract "
+                "declares nullable: false",
+                declared=declared.type,
+                actual=actual,
+            )
+
+    declared_names = {c.name.lower() for c in contract.columns}
+    for name, ctype in inferred:
+        if str(name).lower() in declared_names:
+            continue
+        if contract.strict:
+            add(
+                str(name),
+                "extra_column",
+                "error",
+                f"{contract.model} has an undeclared column '{name}' ({ctype}) "
+                "and the contract is strict",
+                actual=str(ctype),
+            )
+        else:
+            add(
+                str(name),
+                "extra_column",
+                "info",
+                f"{contract.model} has a column the contract does not declare: "
+                f"'{name}' ({ctype})",
+                actual=str(ctype),
+            )
+    return findings
+
+
+def describe_with_nullability(
+    conn: duckdb.DuckDBPyConnection,
+    model: str,
+) -> tuple[list[tuple[str, str]], dict[str, bool]]:
+    """``([(column, type)], {column: admits_nulls})`` for a built object.
+
+    DuckDB's ``DESCRIBE`` carries a ``null`` column of ``YES``/``NO``, but a
+    table built by ``CREATE TABLE AS`` -- which is every havn model -- reports
+    ``YES`` for every column, whether or not the data has a null in it. An
+    all-``YES`` answer therefore says nothing, and taking it at face value
+    would fail every ``nullable: false`` declaration in every project.
+
+    So the nullability map comes back empty unless at least one column
+    reports ``NO``, which only happens when the object really does carry a
+    NOT NULL constraint. Where DuckDB does not distinguish, the check is
+    skipped rather than guessed.
+    """
+    parts = model.split(".")
+    if len(parts) != 2:
+        return [], {}
+    try:
+        validate_identifier(parts[0], "contract model schema")
+        validate_identifier(parts[1], "contract model name")
+        rows = conn.execute(f'DESCRIBE "{parts[0]}"."{parts[1]}"').fetchall()
+    except Exception as e:
+        logger.debug("Could not describe %s for its contract: %s", model, e)
+        return [], {}
+
+    columns: list[tuple[str, str]] = []
+    nullability: dict[str, bool] = {}
+    for row in rows:
+        name = str(row[0])
+        columns.append((name, str(row[1])))
+        flag = str(row[2]).strip().upper() if len(row) > 2 and row[2] is not None else ""
+        if flag in ("YES", "NO"):
+            nullability[name] = flag == "YES"
+    if not any(value is False for value in nullability.values()):
+        return columns, {}
+    return columns, nullability
 
 
 def _resolve_previous(
@@ -606,6 +854,33 @@ def evaluate_contract(
             })
             all_passed = False
 
+    # Column declarations, checked against the built object. The same check
+    # runs before the build against the bind pass; repeating it here keeps
+    # the post-build report complete on its own.
+    schema_findings: list[ContractSchemaFinding] = []
+    for message in contract.errors:
+        results.append({
+            "expression": "columns:",
+            "passed": False,
+            "detail": message,
+        })
+        all_passed = False
+    if contract.columns:
+        columns, nullability = describe_with_nullability(conn, contract.model)
+        schema_findings = check_contract_schema(
+            contract, columns, nullability=nullability
+        )
+        for finding in schema_findings:
+            if finding.severity == "info":
+                continue
+            results.append({
+                "expression": f"column {finding.column} ({finding.kind})",
+                "passed": finding.severity != "error",
+                "detail": finding.message,
+            })
+            if finding.severity == "error":
+                all_passed = False
+
     duration_ms = int((time.perf_counter() - start) * 1000)
 
     # Determine consecutive failures and effective severity
@@ -637,6 +912,7 @@ def evaluate_contract(
         results=results,
         duration_ms=duration_ms,
         consecutive_failures=consecutive_failures,
+        schema_findings=schema_findings,
     )
 
 

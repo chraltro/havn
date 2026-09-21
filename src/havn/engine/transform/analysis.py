@@ -453,6 +453,85 @@ def _bind_errors(
                 message=as_validation_message(err),
                 line=err.line,
             ))
+
+    errors.extend(_contract_schema_errors(conn, project_dir, result.schemas))
+    return errors
+
+
+def _inferred_schema(
+    conn: duckdb.DuckDBPyConnection,
+    model: str,
+    schemas: dict[str, list[tuple[str, str]]],
+) -> list[tuple[str, str]]:
+    """The best (column, type) list available for ``model`` before the build.
+
+    The bind pass is the first choice: it reflects the file as it is written
+    now, not the last build. A model outside the chain that was bound falls
+    back to the schema recorded at its last build, which is at least real.
+    Neither available means the shape is unknown and the caller must not
+    invent a finding from it.
+    """
+    bound = schemas.get(model)
+    if bound:
+        return bound
+    from .columns import load_model_columns
+
+    return [(c["name"], c["type"]) for c in load_model_columns(conn, model)]
+
+
+def _contract_schema_errors(
+    conn: duckdb.DuckDBPyConnection,
+    project_dir,
+    schemas: dict[str, list[tuple[str, str]]],
+) -> list[ValidationError]:
+    """Check every contract's declared columns against the inferred schema.
+
+    This is the whole point of putting columns in a contract: a break is
+    reported before the build, on a warehouse where the table may not exist
+    at all, rather than after a model has already replaced good data with
+    the wrong shape.
+    """
+    if project_dir is None:
+        return []
+    from pathlib import Path
+
+    from havn.engine.contracts import check_contract_schema, discover_contracts
+
+    contracts_dir = Path(project_dir) / "contracts"
+    if not contracts_dir.exists():
+        return []
+    try:
+        contracts = discover_contracts(contracts_dir)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug("Could not read contracts for validation: %s", e)
+        return []
+
+    errors: list[ValidationError] = []
+    for contract in contracts:
+        for message in contract.errors:
+            errors.append(ValidationError(
+                model=contract.model,
+                severity="error",
+                message=message,
+            ))
+        if not contract.columns:
+            continue
+        inferred = _inferred_schema(conn, contract.model, schemas)
+        if not inferred:
+            # Never bound, never built: the shape is unknown, and a guess
+            # here would be a false break on a fresh checkout.
+            continue
+        for finding in check_contract_schema(contract, inferred):
+            if finding.severity == "info":
+                # An undeclared column on a non-strict contract is the normal
+                # way to cover three columns of twenty. It belongs in the
+                # contract report, not in every validate run.
+                continue
+            errors.append(ValidationError(
+                model=contract.model,
+                severity=finding.severity,
+                message=f"contract '{contract.name}': {finding.message}",
+            ))
     return errors
 
 
