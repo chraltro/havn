@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import difflib
 import logging
 
 import duckdb
 
-from havn.engine.sql_analysis import extract_column_lineage as _extract_column_lineage_impl
+from havn.engine.sql_analysis import (
+    CONFIG_KEYS,
+    MATERIALIZATIONS,
+    extract_column_lineage as _extract_column_lineage_impl,
+    fetch_column_catalog,
+    parse_config,
+)
 
 from .models import SQLModel, ValidationError
 
@@ -16,17 +23,68 @@ logger = logging.getLogger("havn.transform")
 def extract_column_lineage(
     model: SQLModel,
     conn: duckdb.DuckDBPyConnection | None = None,
+    column_catalog: dict[str, list[str]] | None = None,
 ) -> dict[str, list[dict[str, str]]]:
     """Extract column-level lineage from a SQL model using sqlglot AST parsing.
 
     Returns a mapping of output_column -> list of {source_table, source_column}.
     Delegates to the shared sql_analysis module for AST-based lineage tracing.
+
+    Tracing several models in one pass? Call
+    :func:`havn.engine.sql_analysis.fetch_column_catalog` once and pass the
+    result as ``column_catalog`` so the catalog is not re-read per model.
     """
     return _extract_column_lineage_impl(
         query=model.query,
         depends_on=model.depends_on,
         conn=conn,
+        column_catalog=column_catalog,
+        ast=model.ast,
     )
+
+
+def _did_you_mean(value: str, options: set[str] | frozenset[str]) -> str:
+    """A ``Did you mean 'x'?`` clause for a near miss, or "" when there is none."""
+    close = difflib.get_close_matches(value.lower(), sorted(options), n=1, cutoff=0.6)
+    return f" Did you mean '{close[0]}'?" if close else ""
+
+
+def _validate_config_keys(models: list[SQLModel]) -> list[ValidationError]:
+    """Report `@config` keys and materializations that mean nothing.
+
+    Discovery reads a fixed set of keys off the config dict and ignores the
+    rest, so `materialised=table` used to build a view without a word of
+    complaint, and any key from a newer version of havn (or a plain typo)
+    did the same.
+    """
+    errors: list[ValidationError] = []
+    for model in models:
+        config = parse_config(model.sql)
+        for key in config:
+            if key in CONFIG_KEYS:
+                continue
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown @config key '{key}'."
+                    f"{_did_you_mean(key, CONFIG_KEYS)}"
+                    f" Known keys: {', '.join(sorted(CONFIG_KEYS))}."
+                ),
+            ))
+
+        materialized = config.get("materialized")
+        if materialized and materialized not in MATERIALIZATIONS:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown materialization '{materialized}'."
+                    f"{_did_you_mean(materialized, MATERIALIZATIONS)}"
+                    f" Supported: {', '.join(sorted(MATERIALIZATIONS))}."
+                ),
+            ))
+    return errors
 
 
 def validate_models(
@@ -55,7 +113,6 @@ def validate_models(
         source_columns: Column sets declared in sources.yml, keyed by table name.
         landing_schemas: Schema names reserved for raw/landing data.
     """
-    import sqlglot
     from sqlglot import exp
 
     model_names = {m.full_name for m in models}
@@ -82,26 +139,19 @@ def validate_models(
                 c.lower() for c in cols
             )
     if conn:
-        try:
-            rows = conn.execute(
-                "SELECT table_schema || '.' || table_name, column_name "
-                "FROM information_schema.columns"
-            ).fetchall()
-            for table_fqn, col_name in rows:
-                table_fqn = table_fqn.lower()
-                column_catalog.setdefault(table_fqn, set()).add(col_name.lower())
-        except Exception as e:
-            logger.debug("Could not describe table columns: %s", e)
+        for table_fqn, cols in fetch_column_catalog(conn).items():
+            column_catalog.setdefault(table_fqn, set()).update(
+                c.lower() for c in cols
+            )
 
     for model in models:
-        # 1. Parse check
-        try:
-            parsed = sqlglot.parse_one(model.query, read="duckdb")
-        except sqlglot.errors.ParseError as e:
+        # 1. Parse check. ``model.ast`` is the tree discovery already parsed.
+        parsed = model.ast
+        if parsed is None:
             errors.append(ValidationError(
                 model=model.full_name,
                 severity="error",
-                message=f"SQL parse error: {e}",
+                message=f"SQL parse error: {model.parse_error}",
             ))
             continue
 
@@ -223,6 +273,8 @@ def validate_models(
 
     # --- Additional pre-build validations ---
 
+    errors.extend(_validate_config_keys(models))
+
     # Default landing schemas if not provided
     _landing = {s.lower() for s in landing_schemas} if landing_schemas else {"landing"}
 
@@ -264,9 +316,8 @@ def validate_models(
     #    reference forbidden columns. Catches PII leaks at compile time.
     if deny_rules:
         for model in models:
-            try:
-                parsed = sqlglot.parse_one(model.query, read="duckdb")
-            except sqlglot.errors.ParseError:
+            parsed = model.ast
+            if parsed is None:
                 continue  # Already reported above
             schema_lower = model.schema.lower()
             referenced_columns: set[str] = set()
@@ -355,11 +406,13 @@ def impact_analysis(
     # Column-level impact if a column is specified
     if column and conn:
         affected_columns: list[dict[str, str]] = []
+        # One catalog read for the whole downstream set, not one per model.
+        catalog = fetch_column_catalog(conn)
         for ds_name in downstream:
             ds_model = model_map.get(ds_name)
             if not ds_model:
                 continue
-            lineage = extract_column_lineage(ds_model, conn)
+            lineage = extract_column_lineage(ds_model, conn, column_catalog=catalog)
             for out_col, sources in lineage.items():
                 for src in sources:
                     if src["source_table"] == target and src["source_column"] == column:

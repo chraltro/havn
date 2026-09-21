@@ -7,7 +7,36 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
+from havn.engine.sql_analysis import _META_PREFIXES, strip_config_comments
+
 console = Console()
+
+
+def _header_line_count(lines: list[str]) -> int:
+    """Length of the leading run of blank and directive lines.
+
+    Used only to split a file for ``--fix``: the header is set aside, SQLFluff
+    rewrites the body, and the two are joined back together.
+    """
+    count = 0
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "" or any(stripped.startswith(p) for p in _META_PREFIXES):
+            count += 1
+        else:
+            break
+    return count
+
+
+def _lint_text(sql: str) -> str:
+    """The text to hand SQLFluff: the file with its directive lines blanked.
+
+    ``strip_config_comments`` blanks directives in place, so SQLFluff's line
+    numbers are the file's line numbers with no offset to add back, and a
+    directive that sits below the SQL (a trailing ``@assert``, say) no longer
+    shows up as an unparsable section.
+    """
+    return strip_config_comments(sql)
 
 # `havn lint` separates correctness from style.
 #
@@ -107,39 +136,29 @@ def lint(
     for sql_file in sql_files:
         sql = sql_file.read_text()
 
-        # Strip directive lines before linting (they're not SQL). Recognises
-        # both the canonical @-prefixed form and the legacy SQL-comment form.
-        # Count how many header lines to skip, then take the rest -- so
-        # SQLFluff line numbers can be adjusted back via header_count.
-        from havn.engine.sql_analysis import _META_PREFIXES
-        lines = sql.split("\n")
-        header_count = 0
-        for line in lines:
-            stripped = line.strip()
-            if stripped == "" or any(stripped.startswith(p) for p in _META_PREFIXES):
-                header_count += 1
-            else:
-                break
-        clean_sql = "\n".join(lines[header_count:])
-
-        result = linter.lint_string(clean_sql, fix=fix)
-        violations_before = len(result.get_violations())
-
         if fix:
-            fixed_sql, changed = result.fix_string()
+            # Fixing rewrites the SQL, so the directive header is set aside
+            # and joined back on afterwards rather than blanked.
+            lines = sql.split("\n")
+            header_count = _header_line_count(lines)
+            body = "\n".join(lines[header_count:])
+            fix_result = linter.lint_string(body, fix=True)
+            violations_before = len(fix_result.get_violations())
+            fixed_sql, changed = fix_result.fix_string()
             if changed:
-                # Re-insert config comment header
-                header_lines = lines[:header_count]
-                sql_file.write_text("\n".join(header_lines) + "\n" + fixed_sql)
-                # Re-lint to report only remaining (unfixable) violations
-                result = linter.lint_string(fixed_sql)
-                total_fixed += violations_before - len(result.get_violations())
+                sql = "\n".join(lines[:header_count]) + "\n" + fixed_sql
+                sql_file.write_text(sql)
+                total_fixed += violations_before - len(
+                    linter.lint_string(fixed_sql).get_violations()
+                )
+
+        result = linter.lint_string(_lint_text(sql))
 
         rel_path = sql_file.relative_to(transform_dir.parent)
         for violation in result.get_violations():
             all_violations.append({
                 "file": str(rel_path),
-                "line": violation.line_no + header_count,
+                "line": violation.line_no,
                 "col": violation.line_pos,
                 "code": violation.rule_code(),
                 "description": violation.desc(),
@@ -185,31 +204,26 @@ def lint_file(
     linter = Linter(config=config)
 
     sql = content if content is not None else sql_file.read_text()
-    lines = sql.split("\n")
-    header_count = 0
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("-- config:") or stripped.startswith("-- depends_on:") or stripped.startswith("-- assert:") or stripped == "":
-            header_count += 1
-        else:
-            break
-    clean_sql = "\n".join(lines[header_count:])
-
-    result = linter.lint_string(clean_sql, fix=fix)
-    violations_before = len(result.get_violations())
     total_fixed = 0
     final_content = sql
 
     if fix:
-        fixed_sql, changed = result.fix_string()
+        # Only the leading header is set aside for the round-trip; the rest of
+        # the file is what SQLFluff rewrites.
+        lines = sql.split("\n")
+        header_count = _header_line_count(lines)
+        body = "\n".join(lines[header_count:])
+        fix_result = linter.lint_string(body, fix=True)
+        violations_before = len(fix_result.get_violations())
+        fixed_sql, changed = fix_result.fix_string()
         if changed:
-            header_lines = lines[:header_count]
-            final_content = "\n".join(header_lines) + "\n" + fixed_sql
+            final_content = "\n".join(lines[:header_count]) + "\n" + fixed_sql
             sql_file.write_text(final_content)
-            result = linter.lint_string(fixed_sql)
-            total_fixed = violations_before - len(result.get_violations())
-        else:
-            final_content = sql
+            total_fixed = violations_before - len(
+                linter.lint_string(fixed_sql).get_violations()
+            )
+
+    result = linter.lint_string(_lint_text(final_content))
 
     transform_dir = project_dir / "transform"
     try:
@@ -221,7 +235,7 @@ def lint_file(
     for violation in result.get_violations():
         all_violations.append({
             "file": str(rel_path),
-            "line": violation.line_no + header_count,
+            "line": violation.line_no,
             "col": violation.line_pos,
             "code": violation.rule_code(),
             "description": violation.desc(),

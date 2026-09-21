@@ -70,18 +70,23 @@ def run_transform(
         pipeline_run_id = str(uuid.uuid4())
 
     ensure_meta_table(conn)
-    models = discover_models(transform_dir)
+    # The full project is always needed for change detection: upstream hashes
+    # are computed over the whole DAG, even when only a subset is executed.
+    all_models = discover_models(transform_dir)
 
-    if not models:
+    if not all_models:
         console.print("[yellow]No SQL models found in transform/[/yellow]")
         return {}
 
-    # Filter to targets if specified
+    # Filter to targets if specified. `models` is the execution set; the
+    # entries are the same objects as in `all_models`, so hashes computed
+    # against the full map are visible here too.
+    models = all_models
     if targets and targets != ["all"]:
         target_set = set(targets)
-        models = [m for m in models if m.full_name in target_set or m.name in target_set]
+        models = [m for m in all_models if m.full_name in target_set or m.name in target_set]
         if not models:
-            all_names = [m.full_name for m in discover_models(transform_dir)]
+            all_names = [m.full_name for m in all_models]
             console.print(f"[yellow]No models matched targets: {', '.join(targets)}[/yellow]")
             if all_names:
                 console.print(f"[dim]Available models: {', '.join(all_names)}[/dim]")
@@ -92,12 +97,42 @@ def run_transform(
             conn, models, force, max_workers, db_path=db_path,
             project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
             pipeline_run_id=pipeline_run_id, db_config=db_config,
+            all_models=all_models,
         )
     return _run_transform_sequential(
         conn, models, force,
         project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
-        pipeline_run_id=pipeline_run_id,
+        pipeline_run_id=pipeline_run_id, all_models=all_models,
     )
+
+
+def _hash_full_dag(
+    models: list[SQLModel],
+    all_models: list[SQLModel] | None,
+) -> tuple[list[SQLModel], dict[str, SQLModel]]:
+    """Set ``upstream_hash`` across the whole project, return what to execute.
+
+    Change detection has to see the full DAG. Targeted runs used to filter the
+    model list before the DAG was built, so ``_compute_upstream_hash`` found
+    none of a model's upstreams in the map and stored ``sha256("")`` as its
+    upstream hash. A later full run then read a different hash for the same
+    unchanged model and rebuilt it.
+
+    Hashing walks every model in topological order (dependencies must have
+    their own ``upstream_hash`` set before it is read), while the returned
+    list holds only the models that were selected for execution. Both lists
+    reference the same ``SQLModel`` objects, so the hashes are visible to the
+    caller either way.
+    """
+    full = all_models if all_models is not None else models
+    full_ordered = build_dag(full)
+    full_map = {m.full_name: m for m in full_ordered}
+    for model in full_ordered:
+        model.upstream_hash = _compute_upstream_hash(model, full_map)
+
+    selected = {m.full_name for m in models}
+    ordered = [m for m in full_ordered if m.full_name in selected]
+    return ordered, full_map
 
 
 def _evaluate_deny_rules(
@@ -124,14 +159,12 @@ def _evaluate_deny_rules(
     if not deny_rules:
         return {}
 
-    import sqlglot
     from sqlglot import exp as _exp
 
     out: dict[str, str] = {}
     for model in models:
-        try:
-            parsed = sqlglot.parse_one(model.query, read="duckdb")
-        except Exception:
+        parsed = model.ast
+        if parsed is None:
             continue  # parse errors surface elsewhere
         schema_lower = model.schema.lower()
         referenced: set[str] = set()
@@ -161,16 +194,17 @@ def _run_transform_sequential(
     rewind_config: object | None = None,
     run_id: str | None = None,
     pipeline_run_id: str | None = None,
+    all_models: list[SQLModel] | None = None,
 ) -> dict[str, str]:
-    """Run models sequentially (original behavior + assertions + profiling)."""
-    ordered = build_dag(models)
-    model_map = {m.full_name: m for m in ordered}
+    """Run models sequentially (original behavior + assertions + profiling).
+
+    ``all_models`` is the full project; ``models`` is the subset to execute.
+    Upstream hashes are computed over the former so a targeted run does not
+    corrupt change detection.
+    """
+    ordered, _model_map = _hash_full_dag(models, all_models)
     # Collect profiles for anomaly detection at end of run
     _run_profiles: dict[str, object] = {}
-
-    # Compute upstream hashes
-    for model in ordered:
-        model.upstream_hash = _compute_upstream_hash(model, model_map)
 
     results: dict[str, str] = {}
     # Track models that errored or had a severity=error assertion failure
@@ -376,20 +410,22 @@ def _run_transform_parallel(
     run_id: str | None = None,
     pipeline_run_id: str | None = None,
     db_config: object | None = None,
+    all_models: list[SQLModel] | None = None,
 ) -> dict[str, str]:
     """Run models in parallel by DAG tiers.
 
     Models within the same tier are independent and can execute concurrently.
     Each tier must complete before the next one starts.
     Assertion failures in a tier block the next tier.
-    """
-    tiers = build_dag_tiers(models)
-    model_map = {m.full_name: m for m in models}
 
-    # Compute upstream hashes
-    ordered = build_dag(models)
-    for model in ordered:
-        model.upstream_hash = _compute_upstream_hash(model, model_map)
+    ``all_models`` is the full project; ``models`` is the subset to execute.
+    Tiers are built from the subset, hashes from the full DAG.
+    """
+    # ``model_map`` covers the whole project: workers re-derive each model's
+    # upstream hash from it, so a targeted run must not hand them a map that
+    # is missing the upstreams.
+    _ordered, model_map = _hash_full_dag(models, all_models)
+    tiers = build_dag_tiers(models)
 
     # Pre-create every target schema on the main connection BEFORE any
     # parallel worker starts. Without this, two workers in the same tier
@@ -414,7 +450,7 @@ def _run_transform_parallel(
             return _run_transform_sequential(
                 conn, models, force,
                 project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
-                pipeline_run_id=pipeline_run_id,
+                pipeline_run_id=pipeline_run_id, all_models=all_models,
             )
 
     # Resolve database path explicitly (only used when db_config is None).
@@ -431,7 +467,7 @@ def _run_transform_parallel(
         return _run_transform_sequential(
             conn, models, force,
             project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
-            pipeline_run_id=pipeline_run_id,
+            pipeline_run_id=pipeline_run_id, all_models=all_models,
         )
 
     results: dict[str, str] = {}

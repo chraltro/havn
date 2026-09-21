@@ -19,6 +19,7 @@ from havn.engine.sql_analysis import (
     parse_grain,
     parse_owner,
     parse_source_freshness,
+    parse_sql,
     strip_config_comments,
 )
 from havn.engine.utils import validate_identifier
@@ -26,15 +27,33 @@ from havn.engine.utils import validate_identifier
 from .models import SQLModel
 
 
+class DuplicateModelError(ValueError):
+    """Two SQL files produce the same ``schema.name``.
+
+    Raised rather than reported, because the project has no single answer for
+    what that name means: ``build_dag`` keys models by full name, so one of
+    the two files would be dropped and which one won depended on filename
+    order. Discovery already raises for a model it cannot use (an invalid
+    schema or model identifier), so this follows the same path.
+    """
+
+
 def discover_models(transform_dir: Path) -> list[SQLModel]:
     """Discover all SQL models in the transform directory.
 
     Convention: folder names map to schemas.
     transform/bronze/customers.sql -> schema=bronze, name=customers
+
+    Raises:
+        DuplicateModelError: two files resolve to the same ``schema.name``.
+        ValueError: a file's schema or model name is not a safe identifier.
     """
     models = []
     if not transform_dir.exists():
         return models
+
+    # full_name -> the file that claimed it first
+    claimed: dict[str, Path] = {}
 
     for sql_file in sorted(transform_dir.rglob("*.sql")):
         sql = sql_file.read_text()
@@ -48,11 +67,15 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         owner = parse_owner(sql)
         source_freshness = parse_source_freshness(sql)
         query = strip_config_comments(sql)
+        # Parsed once here and handed to the model below, so validation, the
+        # deny-rule check and column lineage reuse this tree instead of
+        # parsing the same SQL again.
+        ast = parse_sql(query)
         folder_schema_tmp = sql_file.relative_to(transform_dir).parent.name or "public"
         own_schema_tmp = config.get("schema", folder_schema_tmp)
         own_name_tmp = sql_file.stem
         auto_refs = extract_table_refs(
-            query, exclude=f"{own_schema_tmp}.{own_name_tmp}"
+            query, exclude=f"{own_schema_tmp}.{own_name_tmp}", ast=ast
         )
         if depends:
             merged = list(depends)
@@ -73,6 +96,18 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         # Validate identifiers at discovery time to prevent SQL injection downstream
         validate_identifier(schema, f"schema for {sql_file.name}")
         validate_identifier(name, f"model name for {sql_file.name}")
+
+        full_name = f"{schema}.{name}"
+        previous = claimed.get(full_name)
+        if previous is not None:
+            raise DuplicateModelError(
+                f"Duplicate model '{full_name}': both "
+                f"{previous} and {sql_file} produce it. "
+                "Rename one of the files, or point one at another schema "
+                "with @config schema=."
+            )
+        claimed[full_name] = sql_file
+
         materialized = config.get("materialized", "view")
         unique_key = config.get("unique_key")
         incremental_strategy = config.get("incremental_strategy", "delete+insert")
@@ -80,30 +115,31 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         partition_by = config.get("partition_by")
         watermark = config.get("watermark")
 
-        models.append(
-            SQLModel(
-                path=sql_file,
-                name=name,
-                schema=schema,
-                full_name=f"{schema}.{name}",
-                sql=sql,
-                query=query,
-                materialized=materialized,
-                depends_on=depends,
-                description=description,
-                column_docs=column_docs,
-                assertions=assertions,
-                assertion_specs=assertion_specs,
-                unique_key=unique_key,
-                incremental_strategy=incremental_strategy,
-                incremental_filter=incremental_filter,
-                partition_by=partition_by,
-                watermark=watermark,
-                grain=grain,
-                owner=owner,
-                source_freshness=source_freshness,
-            )
+        model = SQLModel(
+            path=sql_file,
+            name=name,
+            schema=schema,
+            full_name=full_name,
+            sql=sql,
+            query=query,
+            materialized=materialized,
+            depends_on=depends,
+            description=description,
+            column_docs=column_docs,
+            assertions=assertions,
+            assertion_specs=assertion_specs,
+            unique_key=unique_key,
+            incremental_strategy=incremental_strategy,
+            incremental_filter=incremental_filter,
+            partition_by=partition_by,
+            watermark=watermark,
+            grain=grain,
+            owner=owner,
+            source_freshness=source_freshness,
         )
+        if ast is not None:
+            model.ast = ast
+        models.append(model)
 
     return models
 

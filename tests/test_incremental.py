@@ -184,3 +184,93 @@ class TestIncrementalModels:
         run_transform(db, transform_dir, force=True)
         count = db.execute("SELECT COUNT(*) FROM silver.dupes").fetchone()[0]
         assert count == 2  # Both rows are inserted on first load
+
+
+class TestIncrementalTransaction:
+    """The staging branch must be all-or-nothing.
+
+    ALTER / DELETE / UPDATE / INSERT used to run as separate auto-commit
+    statements, so a failing INSERT landed after an already-committed DELETE
+    and the target lost the rows the run was meant to replace.
+    """
+
+    def test_failed_insert_does_not_lose_rows(self, db, transform_dir):
+        db.execute(
+            "CREATE TABLE landing.orders AS "
+            "SELECT 1 AS id, 100 AS amount UNION ALL SELECT 2, 200"
+        )
+        (transform_dir / "silver" / "orders.sql").write_text(textwrap.dedent("""\
+            @config materialized=incremental, schema=silver, unique_key=id
+            @depends_on landing.orders
+
+            SELECT id, amount FROM landing.orders
+        """))
+        run_transform(db, transform_dir, force=True)
+        assert db.execute("SELECT COUNT(*) FROM silver.orders").fetchone()[0] == 2
+
+        # Retype the source column to VARCHAR with a value that cannot be cast
+        # back to the target's INTEGER column. The DELETE matches id=1, the
+        # INSERT that should put it back then fails.
+        db.execute("DROP TABLE landing.orders")
+        db.execute(
+            "CREATE TABLE landing.orders AS SELECT 1 AS id, 'not-a-number' AS amount"
+        )
+
+        results = run_transform(db, transform_dir, force=True)
+        assert results["silver.orders"] == "error"
+
+        rows = db.execute("SELECT id, amount FROM silver.orders ORDER BY id").fetchall()
+        assert rows == [(1, 100), (2, 200)]
+
+    def test_failed_insert_rolls_back_added_column(self, db, transform_dir):
+        """Schema-evolution ALTERs belong to the same unit of work."""
+        db.execute("CREATE TABLE landing.events AS SELECT 1 AS id, 10 AS qty")
+        (transform_dir / "silver" / "events.sql").write_text(textwrap.dedent("""\
+            @config materialized=incremental, schema=silver, unique_key=id
+            @depends_on landing.events
+
+            SELECT id, qty FROM landing.events
+        """))
+        run_transform(db, transform_dir, force=True)
+        assert db.execute("SELECT COUNT(*) FROM silver.events").fetchone()[0] == 1
+
+        # The new `note` column triggers an ALTER; `qty` turns into an
+        # uncastable string so the INSERT after the ALTER fails.
+        db.execute("DROP TABLE landing.events")
+        db.execute(
+            "CREATE TABLE landing.events AS "
+            "SELECT 1 AS id, 'many' AS qty, 'hello' AS note"
+        )
+        results = run_transform(db, transform_dir, force=True)
+        assert results["silver.events"] == "error"
+
+        cols = {
+            r[0]
+            for r in db.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'silver' AND table_name = 'events'"
+            ).fetchall()
+        }
+        assert "note" not in cols
+        assert db.execute("SELECT id, qty FROM silver.events").fetchall() == [(1, 10)]
+
+    def test_successful_incremental_still_commits(self, db, transform_dir):
+        """The happy path must still land its writes."""
+        db.execute("CREATE TABLE landing.sales AS SELECT 1 AS id, 100 AS amount")
+        (transform_dir / "silver" / "sales.sql").write_text(textwrap.dedent("""\
+            @config materialized=incremental, schema=silver, unique_key=id
+            @depends_on landing.sales
+
+            SELECT id, amount FROM landing.sales
+        """))
+        run_transform(db, transform_dir, force=True)
+
+        db.execute("DROP TABLE landing.sales")
+        db.execute(
+            "CREATE TABLE landing.sales AS "
+            "SELECT 1 AS id, 150 AS amount UNION ALL SELECT 2, 300"
+        )
+        results = run_transform(db, transform_dir, force=True)
+        assert results["silver.sales"] == "built"
+        rows = db.execute("SELECT id, amount FROM silver.sales ORDER BY id").fetchall()
+        assert rows == [(1, 150), (2, 300)]

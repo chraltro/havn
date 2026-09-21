@@ -194,14 +194,19 @@ def get_all_lineage(
 ) -> list[dict]:
     """Get column-level lineage for all models."""
     _require_permission(request, "read")
+    from havn.engine.sql_analysis import fetch_column_catalog
     from havn.engine.transform import extract_column_lineage
 
     transform_dir = _get_project_dir() / "transform"
     models = _discover_models_cached(transform_dir)
 
+    # Read the column catalog once for the whole project rather than once per
+    # model (and, before that, once per dependency of every model).
+    catalog = fetch_column_catalog(conn) if conn else None
+
     results = []
     for model in models:
-        lineage = extract_column_lineage(model, conn)
+        lineage = extract_column_lineage(model, conn, column_catalog=catalog)
         results.append(
             {
                 "model": model.full_name,

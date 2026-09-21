@@ -9,9 +9,11 @@ import duckdb
 import pytest
 
 from havn.engine.database import ensure_meta_table
+from havn.engine.sql_analysis import fetch_column_catalog
 from havn.engine.transform import (
     SQLModel,
     extract_column_lineage,
+    impact_analysis,
 )
 
 
@@ -250,3 +252,94 @@ class TestColumnLineage:
         for col in ("id", "kind", "amount"):
             assert col in lineage, lineage
             assert lineage[col][0]["source_table"] == "silver.fact_transactions"
+
+
+class _CountingConn:
+    """Wraps a real DuckDB connection and counts ``execute`` calls."""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self.executes = 0
+
+    def execute(self, *args, **kwargs):
+        self.executes += 1
+        return self._conn.execute(*args, **kwargs)
+
+
+class TestLineageCatalogFetch:
+    def test_catalog_read_once_per_model(self, db):
+        """Resolution must not scan information_schema once per dependency."""
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        for name in ("a", "b", "c", "d"):
+            db.execute(f"CREATE TABLE bronze.{name} AS SELECT 1 AS id, 2 AS val_{name}")
+        model = SQLModel(
+            path=Path("test.sql"), name="joined", schema="silver",
+            full_name="silver.joined", sql="",
+            query=(
+                "SELECT a.id, a.val_a, b.val_b, c.val_c, d.val_d "
+                "FROM bronze.a a "
+                "JOIN bronze.b b ON a.id = b.id "
+                "JOIN bronze.c c ON a.id = c.id "
+                "JOIN bronze.d d ON a.id = d.id"
+            ),
+            materialized="view",
+            depends_on=["bronze.a", "bronze.b", "bronze.c", "bronze.d"],
+        )
+        counting = _CountingConn(db)
+        lineage = extract_column_lineage(model, conn=counting)
+        assert counting.executes == 1
+        assert lineage["val_c"][0]["source_table"] == "bronze.c"
+
+    def test_shared_catalog_avoids_all_queries(self, db):
+        """A caller-supplied catalog means no catalog query at all."""
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        db.execute("CREATE TABLE bronze.src AS SELECT 1 AS id, 'x' AS name")
+        catalog = fetch_column_catalog(db)
+
+        models = [
+            SQLModel(
+                path=Path(f"m{i}.sql"), name=f"m{i}", schema="silver",
+                full_name=f"silver.m{i}", sql="",
+                query="SELECT * FROM bronze.src",
+                materialized="view",
+                depends_on=["bronze.src"],
+            )
+            for i in range(5)
+        ]
+        counting = _CountingConn(db)
+        for model in models:
+            lineage = extract_column_lineage(model, conn=counting, column_catalog=catalog)
+            assert set(lineage) == {"id", "name"}
+        assert counting.executes == 0
+
+    def test_fetch_column_catalog_preserves_ordinal_position(self, db):
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        db.execute("CREATE TABLE bronze.ordered AS SELECT 1 AS zeta, 2 AS alpha, 3 AS mid")
+        catalog = fetch_column_catalog(db)
+        assert catalog["bronze.ordered"] == ["zeta", "alpha", "mid"]
+
+    def test_impact_analysis_reads_catalog_once(self, db):
+        """Column-level impact walks many downstream models on one catalog."""
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        db.execute("CREATE TABLE bronze.src AS SELECT 1 AS id, 'x' AS name")
+        models = [
+            SQLModel(
+                path=Path("src.sql"), name="src", schema="bronze",
+                full_name="bronze.src", sql="",
+                query="SELECT id, name FROM landing.src",
+                materialized="table", depends_on=["landing.src"],
+            )
+        ]
+        models += [
+            SQLModel(
+                path=Path(f"d{i}.sql"), name=f"d{i}", schema="silver",
+                full_name=f"silver.d{i}", sql="",
+                query="SELECT id, name FROM bronze.src",
+                materialized="view", depends_on=["bronze.src"],
+            )
+            for i in range(6)
+        ]
+        counting = _CountingConn(db)
+        result = impact_analysis(models, "bronze.src", column="name", conn=counting)
+        assert len(result["affected_columns"]) == 6
+        assert counting.executes == 1

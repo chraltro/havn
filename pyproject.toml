@@ -35,7 +35,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "uvicorn[standard]>=0.34.0",
     "huey>=2.5",
-    "sqlglot>=26.0",
+    "sqlglot>=26.17",
     "prometheus_client>=0.20",
     "pyarrow>=18",
 ]

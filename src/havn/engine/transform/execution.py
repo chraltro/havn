@@ -22,6 +22,24 @@ from .quality import (
 logger = logging.getLogger("havn.transform")
 
 
+def _begin_transaction(conn: duckdb.DuckDBPyConnection) -> bool:
+    """Open a transaction on ``conn``, returning True when we opened it.
+
+    DuckDB refuses a nested ``BEGIN TRANSACTION``. Connections are shared with
+    the parallel runner (one connection per worker) and with the DuckLake
+    ``_update_state`` path, which opens its own transaction, so an outer
+    transaction may already be active. In that case we join it instead of
+    starting a second one, and the caller must not commit or roll back work
+    that it does not own.
+    """
+    try:
+        conn.execute("BEGIN TRANSACTION")
+        return True
+    except duckdb.TransactionException as e:
+        logger.debug("Transaction already active, joining the outer one: %s", e)
+        return False
+
+
 def _execute_incremental(
     conn: duckdb.DuckDBPyConnection,
     model: SQLModel,
@@ -130,12 +148,6 @@ def _execute_incremental(
             [staging_name],
         ).fetchall()
 
-        for col_name, col_type in staging_cols:
-            if col_name not in target_cols:
-                conn.execute(
-                    f'ALTER TABLE {model.full_name} ADD COLUMN "{col_name}" {col_type}'
-                )
-
         # Get the final column list from staging for explicit INSERT
         staging_col_names = [r[0] for r in staging_cols]
         staging_select = ", ".join(f'"{c}"' for c in staging_col_names)
@@ -147,48 +159,74 @@ def _execute_incremental(
             f'target."{k}" IS NOT DISTINCT FROM staging."{k}"' for k in keys
         )
 
-        if strategy == "merge":
-            # True upsert: UPDATE existing rows, INSERT new ones
-            non_key_cols = [c for c in staging_col_names if c not in keys]
-            if non_key_cols:
-                set_clause = ", ".join(
-                    f'"{c}" = staging."{c}"' for c in non_key_cols
-                )
+        # Everything from here on is a dependent write: the schema-evolution
+        # ALTERs, the DELETE/UPDATE that clears the rows being replaced, and
+        # the INSERT that puts them back. Run under one transaction so a
+        # failure part-way through cannot leave the target mangled. Without
+        # it, an INSERT that failed to bind (e.g. a column retyped to VARCHAR
+        # holding non-numeric values) landed after an already-committed
+        # DELETE and the model lost every row it was supposed to keep.
+        owns_tx = _begin_transaction(conn)
+        try:
+            for col_name, col_type in staging_cols:
+                if col_name not in target_cols:
+                    conn.execute(
+                        f'ALTER TABLE {model.full_name} ADD COLUMN "{col_name}" {col_type}'
+                    )
+
+            if strategy == "merge":
+                # True upsert: UPDATE existing rows, INSERT new ones
+                non_key_cols = [c for c in staging_col_names if c not in keys]
+                if non_key_cols:
+                    set_clause = ", ".join(
+                        f'"{c}" = staging."{c}"' for c in non_key_cols
+                    )
+                    conn.execute(
+                        f"UPDATE {model.full_name} AS target SET {set_clause} "
+                        f"FROM {staging_name} AS staging WHERE {key_match}"
+                    )
+                # Insert rows that don't already exist
+                insert_cols = ", ".join(f'"{c}"' for c in staging_col_names)
                 conn.execute(
-                    f"UPDATE {model.full_name} AS target SET {set_clause} "
-                    f"FROM {staging_name} AS staging WHERE {key_match}"
+                    f"INSERT INTO {model.full_name} ({insert_cols}) "
+                    f"SELECT {staging_select} FROM {staging_name} AS staging "
+                    f"WHERE NOT EXISTS (SELECT 1 FROM {model.full_name} AS target WHERE {key_match})"
                 )
-            # Insert rows that don't already exist
-            insert_cols = ", ".join(f'"{c}"' for c in staging_col_names)
-            conn.execute(
-                f"INSERT INTO {model.full_name} ({insert_cols}) "
-                f"SELECT {staging_select} FROM {staging_name} AS staging "
-                f"WHERE NOT EXISTS (SELECT 1 FROM {model.full_name} AS target WHERE {key_match})"
-            )
-        elif model.partition_by:
-            # Partition-based pruning: delete entire affected partitions, then insert
-            part_col = model.partition_by.strip()
-            # Validate partition column is a safe identifier
-            validate_identifier(part_col, "partition_by column")
-            conn.execute(
-                f'DELETE FROM {model.full_name} '
-                f'WHERE "{part_col}" IN (SELECT DISTINCT "{part_col}" FROM {staging_name})'
-            )
-            insert_cols = ", ".join(f'"{c}"' for c in staging_col_names)
-            conn.execute(
-                f"INSERT INTO {model.full_name} ({insert_cols}) SELECT {staging_select} FROM {staging_name}"
-            )
-        else:
-            # delete+insert strategy: delete by key, insert new
-            conn.execute(
-                f"DELETE FROM {model.full_name} AS target "
-                f"WHERE EXISTS (SELECT 1 FROM {staging_name} AS staging WHERE {key_match})"
-            )
-            insert_cols = ", ".join(f'"{c}"' for c in staging_col_names)
-            conn.execute(
-                f"INSERT INTO {model.full_name} ({insert_cols}) SELECT {staging_select} FROM {staging_name}"
-            )
-        conn.execute(f"DROP TABLE IF EXISTS {staging_name}")
+            elif model.partition_by:
+                # Partition-based pruning: delete entire affected partitions, then insert
+                part_col = model.partition_by.strip()
+                # Validate partition column is a safe identifier
+                validate_identifier(part_col, "partition_by column")
+                conn.execute(
+                    f'DELETE FROM {model.full_name} '
+                    f'WHERE "{part_col}" IN (SELECT DISTINCT "{part_col}" FROM {staging_name})'
+                )
+                insert_cols = ", ".join(f'"{c}"' for c in staging_col_names)
+                conn.execute(
+                    f"INSERT INTO {model.full_name} ({insert_cols}) SELECT {staging_select} FROM {staging_name}"
+                )
+            else:
+                # delete+insert strategy: delete by key, insert new
+                conn.execute(
+                    f"DELETE FROM {model.full_name} AS target "
+                    f"WHERE EXISTS (SELECT 1 FROM {staging_name} AS staging WHERE {key_match})"
+                )
+                insert_cols = ", ".join(f'"{c}"' for c in staging_col_names)
+                conn.execute(
+                    f"INSERT INTO {model.full_name} ({insert_cols}) SELECT {staging_select} FROM {staging_name}"
+                )
+            conn.execute(f"DROP TABLE IF EXISTS {staging_name}")
+            if owns_tx:
+                conn.execute("COMMIT")
+        except Exception:
+            if owns_tx:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception as rb_err:
+                    logger.debug(
+                        "Rollback after failed incremental write failed: %s", rb_err
+                    )
+            raise
 
     duration_ms = int((time.perf_counter() - start) * 1000)
     result = conn.execute(f"SELECT count(*) FROM {model.full_name}").fetchone()

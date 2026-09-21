@@ -73,6 +73,13 @@ Sets materialization, schema, and per-model engine settings:
 | `incremental_strategy`  | `delete+insert`, `merge`, `append`      | `delete+insert`                               |
 | `incremental_filter`    | SQL expression (e.g. `event_time >= ...`) | none                                        |
 | `partition_by`          | column name                             | none                                          |
+| `watermark`             | column name                             | none                                          |
+
+Keys outside this table are rejected by `havn check`, rather than being read as nothing: `@config materialised=table` used to build a view without complaining. An unrecognised key, and an unsupported value of `materialized`, are both validation errors, with a suggestion when the name is a near miss:
+
+```
+error  gold.orders  Unknown @config key 'materialised'. Did you mean 'materialized'? Known keys: ...
+```
 
 #### `@depends_on` (optional)
 
@@ -218,6 +225,8 @@ Creates a persistent table using `CREATE OR REPLACE TABLE ... AS SELECT ...`. Da
 ```
 
 Builds the table incrementally: on first run, it materialises the full result; on subsequent runs, only new rows (filtered by `incremental_filter` if provided) are appended or merged. See `incremental_strategy` in the `@config` table above.
+
+Incremental runs that use a `unique_key` (the `delete+insert` and `merge` strategies) apply all their writes in a single transaction: the schema-evolution `ALTER`s that add newly appeared columns, the `DELETE`/`UPDATE` that clears the rows being replaced, and the `INSERT` that writes the new ones. If any of them fails, the whole run is rolled back and the target keeps exactly the data it had before. A source column whose type changed underneath you (say an integer that arrived as text) now fails the run cleanly instead of leaving the model with the deleted rows missing.
 
 ## Plain SQL -- No Templating
 
