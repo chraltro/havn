@@ -692,7 +692,7 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
       const isSelected = selectedNode === n.id;
       const isSearchMatch = dagSearch && n.id.toLowerCase().includes(dagSearch.toLowerCase());
       const isTable = n.type === "table";
-      // Ephemeral models are never materialized — they are inlined into their
+      // Ephemeral models are never materialized: they are inlined into their
       // consumers as a CTE. A dashed outline says "nothing on disk here".
       const isEphemeral = n.type === "ephemeral";
       const snap = rewindMode ? currentSnaps[n.id] : null;

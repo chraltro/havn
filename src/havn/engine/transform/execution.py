@@ -207,7 +207,7 @@ def _plan_schema_change(
         plan.retype = retyped
         return plan
 
-    # append_new_columns — the historical behavior for added columns, and a
+    # append_new_columns: the historical behavior for added columns, and a
     # hard stop for the two changes that used to corrupt data silently.
     if removed:
         raise SchemaChangeError(
