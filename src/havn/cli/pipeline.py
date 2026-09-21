@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import TYPE_CHECKING, Annotated, Optional
 
 import typer
 from rich.table import Table
 
 from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, console
+
+if TYPE_CHECKING:
+    from havn.engine.selectors import SelectionResult
 
 logger = logging.getLogger("havn.cli")
 
@@ -162,28 +165,22 @@ def seed(
         conn.close()
 
 
-def _report_selection(selection: object, *, verbose: bool) -> None:
+def _report_selection(selection: SelectionResult, *, verbose: bool) -> None:
     """Print what a set of selectors resolved to.
 
     Always loud about a selector that matched nothing, since a typo in a
     selector otherwise looks exactly like a project where everything is
     already up to date. Quiet about the rest unless ``-v`` asked.
     """
-    warnings = getattr(selection, "warnings", [])
-    matched = getattr(selection, "matched", {})
-    selected = getattr(selection, "selected", [])
-
-    for warning in warnings:
+    for warning in selection.warnings:
         console.print(f"[yellow]warning: {warning}[/yellow]")
 
     if not verbose:
         return
-    for selector, names in matched.items():
-        if names:
-            console.print(f"  [dim]{selector} -> {', '.join(names)}[/dim]")
-        else:
-            console.print(f"  [dim]{selector} -> (nothing)[/dim]")
-    console.print(f"  [dim]{len(selected)} model(s) selected[/dim]")
+    for selector, names in selection.matched.items():
+        rendered = ", ".join(names) if names else "(nothing)"
+        console.print(f"  [dim]{selector} -> {rendered}[/dim]")
+    console.print(f"  [dim]{len(selection.selected)} model(s) selected[/dim]")
 
 
 @app.command(name="ls")
