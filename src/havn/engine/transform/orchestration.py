@@ -95,7 +95,10 @@ def run_transform(
             targets,
             all_models,
             conn=conn,
-            project_dir=project_dir,
+            # ``path:`` selectors are written relative to the project root,
+            # which is transform/'s parent whether or not the caller bothered
+            # to pass project_dir (the API does not).
+            project_dir=project_dir or transform_dir.parent,
             exclude=exclude,
         )
         chosen = set(selection.selected)
