@@ -117,6 +117,24 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         watermark = config.get("watermark")
         on_schema_change = config.get("on_schema_change", "append_new_columns")
         tags = [t.strip() for t in config.get("tags", "").split(",") if t.strip()]
+        # Snapshot (SCD2) settings. Read for every model so `validate_models`
+        # can complain about them on a model that is not a snapshot; execution
+        # only looks at them when materialized=snapshot.
+        strategy = config.get("strategy", "check")
+        updated_at = config.get("updated_at")
+        check_cols = config.get("check_cols")
+        hard_deletes = config.get("hard_deletes", "ignore")
+        # Microbatch settings. `lookback` is kept as an int here so the model
+        # carries a usable value; a non-numeric one is reported by
+        # `validate_models` rather than crashing discovery.
+        event_time = config.get("event_time")
+        batch_size = config.get("batch_size")
+        begin = config.get("begin")
+        raw_lookback = config.get("lookback")
+        try:
+            lookback = int(raw_lookback) if raw_lookback is not None else 1
+        except ValueError:
+            lookback = 1
 
         model = SQLModel(
             path=sql_file,
@@ -137,6 +155,14 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
             partition_by=partition_by,
             watermark=watermark,
             on_schema_change=on_schema_change,
+            strategy=strategy,
+            updated_at=updated_at,
+            check_cols=check_cols,
+            hard_deletes=hard_deletes,
+            event_time=event_time,
+            batch_size=batch_size,
+            begin=begin,
+            lookback=lookback,
             grain=grain,
             owner=owner,
             source_freshness=source_freshness,

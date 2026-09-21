@@ -787,7 +787,7 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
         }
       } else if (!rewindMode) {
         // Type badge
-        const badge = n.type === "ingest" ? "I" : n.type === "import" ? "\u2191" : n.type === "source" ? "S" : n.type === "seed" ? "D" : n.type === "exposure" ? "E" : n.type === "table" ? "T" : n.type === "ephemeral" ? "\u25ca" : "V";
+        const badge = n.type === "ingest" ? "I" : n.type === "import" ? "\u2191" : n.type === "source" ? "S" : n.type === "seed" ? "D" : n.type === "exposure" ? "E" : n.type === "table" ? "T" : n.type === "ephemeral" ? "\u25ca" : n.type === "snapshot" ? "\u29d6" : "V";
         ctx.fillStyle = color;
         ctx.font = `bold 9px ${monoFamily}`;
         ctx.textAlign = "right";

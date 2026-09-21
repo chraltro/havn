@@ -115,11 +115,38 @@ CONFIG_KEYS = frozenset({
     "watermark",
     "on_schema_change",
     "tags",
+    # Snapshot (SCD2) keys. Named exactly as dbt names them so a migration is
+    # a search and replace rather than a translation table.
+    "strategy",
+    "updated_at",
+    "check_cols",
+    "hard_deletes",
+    # Microbatch keys, named exactly as dbt names them.
+    "event_time",
+    "batch_size",
+    "begin",
+    "lookback",
 })
 
 # Accepted values of `materialized`, checked at validation time rather than
 # only when execution reaches "Unknown materialization".
-MATERIALIZATIONS = frozenset({"view", "table", "incremental", "ephemeral"})
+MATERIALIZATIONS = frozenset(
+    {"view", "table", "incremental", "ephemeral", "snapshot"}
+)
+
+# How a snapshot model decides that a source row changed.
+SNAPSHOT_STRATEGIES = frozenset({"check", "timestamp"})
+
+# What a snapshot model does with a key that vanished from its source.
+HARD_DELETE_POLICIES = frozenset({"ignore", "invalidate", "new_record"})
+
+# How an incremental model gets its rows into the target.
+INCREMENTAL_STRATEGIES = frozenset(
+    {"delete+insert", "merge", "append", "microbatch"}
+)
+
+# The window a microbatch model processes at a time. UTC boundaries.
+BATCH_SIZES = frozenset({"hour", "day", "month", "year"})
 
 # Accepted values of `on_schema_change`, the policy an incremental model
 # applies when its query's columns no longer line up with the target table.

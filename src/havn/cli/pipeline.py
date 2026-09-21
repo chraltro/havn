@@ -273,6 +273,8 @@ def transform(
     workers: Annotated[int, typer.Option("--workers", "-w", help="Max parallel workers")] = 4,
     env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use (e.g. dev, prod)")] = None,
     skip_check: Annotated[bool, typer.Option("--skip-check", help="Skip pre-transform validation")] = False,
+    event_time_start: Annotated[Optional[str], typer.Option("--event-time-start", help="Backfill microbatch models from this event time (UTC), e.g. 2024-01-01")] = None,
+    event_time_end: Annotated[Optional[str], typer.Option("--event-time-end", help="Backfill microbatch models up to this event time (UTC), exclusive")] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Print the resolved selection and which selector matched what")] = False,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
@@ -294,11 +296,34 @@ def transform(
       havn transform 'tag:daily,gold.*'     comma intersects
       havn transform -s tag:daily -x gold.experimental
 
+    Microbatch models normally resume from their own recorded window state.
+    To backfill an explicit range instead:
+
+      havn transform gold.events --event-time-start 2024-01-01 --event-time-end 2024-03-01
+
     Supports incremental models, data quality assertions, auto-profiling,
     and parallel execution of independent models.
     """
     from havn.engine.database import open_warehouse
-    from havn.engine.transform import run_transform
+    from havn.engine.transform import BatchRange, parse_event_time, run_transform
+
+    batch_range = None
+    if event_time_start or event_time_end:
+        try:
+            batch_range = BatchRange(
+                start=parse_event_time(event_time_start, "--event-time-start")
+                if event_time_start else None,
+                end=parse_event_time(event_time_end, "--event-time-end")
+                if event_time_end else None,
+            )
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1) from e
+        if batch_range.start and batch_range.end and batch_range.start >= batch_range.end:
+            console.print(
+                "[red]--event-time-start must be before --event-time-end.[/red]"
+            )
+            raise typer.Exit(1)
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir, env)
@@ -428,6 +453,7 @@ def transform(
             parallel=parallel, max_workers=workers,
             db_config=config.database,
             project_dir=project_dir, rewind_config=config.rewind, run_id=run_id,
+            batch_range=batch_range,
         )
         if not results:
             return

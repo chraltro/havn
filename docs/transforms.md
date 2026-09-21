@@ -67,15 +67,23 @@ Sets materialization, schema, and per-model engine settings:
 
 | Key                     | Values                                  | Default                                       |
 |-------------------------|-----------------------------------------|-----------------------------------------------|
-| `materialized`          | `table`, `view`, `incremental`, `ephemeral` | `view`                                    |
+| `materialized`          | `table`, `view`, `incremental`, `ephemeral`, `snapshot` | `view`                        |
 | `schema`                | any valid schema name                   | folder name (e.g. `bronze` for `transform/bronze/`) |
 | `unique_key`            | column name                             | none (required for incremental merges)        |
-| `incremental_strategy`  | `delete+insert`, `merge`, `append`      | `delete+insert`                               |
+| `incremental_strategy`  | `delete+insert`, `merge`, `append`, `microbatch` | `delete+insert`                      |
 | `incremental_filter`    | SQL expression (e.g. `event_time >= ...`) | none                                        |
 | `partition_by`          | column name                             | none                                          |
 | `watermark`             | column name                             | none                                          |
 | `on_schema_change`      | `append_new_columns`, `ignore`, `fail`, `sync_all_columns` | `append_new_columns`       |
 | `tags`                  | comma-separated labels                  | none                                          |
+| `strategy`              | `check`, `timestamp` (snapshot only)    | `check`                                       |
+| `updated_at`            | column name (snapshot, `strategy=timestamp`) | none                                     |
+| `check_cols`            | `all` or comma-separated columns (snapshot, `strategy=check`) | `all`                   |
+| `hard_deletes`          | `ignore`, `invalidate`, `new_record` (snapshot only) | `ignore`                         |
+| `event_time`            | column name (microbatch only)           | none                                          |
+| `batch_size`            | `hour`, `day`, `month`, `year` (microbatch only) | none                                 |
+| `begin`                 | date or timestamp, UTC (microbatch only) | none                                         |
+| `lookback`              | whole number of windows (microbatch only) | `1`                                         |
 
 `tags` labels a model for the `tag:` selector:
 
@@ -424,6 +432,161 @@ Two limits:
 - **`{this}`, `@watermark` and `incremental_filter` are rejected.** They all name a target table, and an ephemeral model has none.
 
 The trade, which dbt makes too: a DuckDB error inside a three-level inlined query reports a line the user never wrote. Naming each CTE after the model it came from is what makes the message readable.
+
+### Microbatch incremental models
+
+```sql
+@config materialized=incremental, incremental_strategy=microbatch, event_time=event_at, batch_size=day, begin=2024-01-01
+```
+
+An ordinary incremental model runs its query once and writes whatever comes back. A microbatch model runs it once per time window and writes each window separately. That is what makes a three-year backfill survivable: it is a thousand small transactions instead of one enormous one, each window is recorded, and a failure at window 700 leaves 699 windows committed and resumes there next time.
+
+The model does its own filtering, exactly as in dbt. `{start}` and `{end}` are substituted per window with typed timestamp literals:
+
+```sql
+-- transform/gold/events.sql
+@config materialized=incremental, incremental_strategy=microbatch, event_time=event_at, batch_size=day, begin=2024-01-01
+
+SELECT
+    event_at,
+    user_id,
+    COUNT(*) AS events
+FROM silver.events
+WHERE event_at >= {start}
+  AND event_at < {end}
+GROUP BY 1, 2
+```
+
+havn does not append a `WHERE` clause for you. An event-time predicate pushed into the wrong place in a query with a `GROUP BY`, a window function or a join to a dimension changes the answer, and only the model's author knows where it belongs. `havn check` warns about a microbatch model whose SQL never mentions `{start}`, because every window would then read the whole source and the last one would win.
+
+| Key | Values | Default |
+|---|---|---|
+| `event_time` | column name, the one windows are cut on | required |
+| `batch_size` | `hour`, `day`, `month`, `year` | required |
+| `begin` | first window, `2024-01-01` or `2024-01-01 06:00:00` | required |
+| `lookback` | whole number of finished windows to redo each run | `1` |
+
+All boundaries are UTC, and all of them are naive timestamps: a window is a range compared against the `event_time` column, and mixing an aware boundary with a naive column is a comparison DuckDB refuses rather than one it guesses at. `begin` is rounded down to its window, so `begin=2024-01-15` with `batch_size=month` starts at 2024-01-01.
+
+#### What a run does
+
+Per window, inside its own transaction: run the query, `DELETE` that window's rows from the target on `event_time`, `INSERT` the new ones, record the window as `done`. Because the window is deleted before it is written, re-running a window is a replace rather than a duplicate, which is also how a late-arriving row lands.
+
+Between runs, the windows live in `_havn.batch_state`:
+
+```bash
+havn query "SELECT window_start, status, \"rows\" FROM _havn.batch_state WHERE model_path = 'gold.events' ORDER BY window_start"
+```
+
+The next ordinary run starts at the first window that is not `done`, or at the window after the last one recorded, and then goes `lookback` windows further back so rows that arrived late for a finished window are picked up. `lookback=1` is the default because an hourly or daily feed almost always has stragglers; `lookback=0` is the right setting when the source is genuinely immutable once written.
+
+#### Backfilling an explicit range
+
+```bash
+havn transform gold.events --event-time-start 2024-01-01 --event-time-end 2024-03-01
+```
+
+Windows in that range are processed regardless of what state says, and `--event-time-end` is exclusive. Either flag may be given alone: an open start falls back to the model's `begin`, an open end to now. The same two fields exist on `POST /api/transform` as `event_time_start` and `event_time_end`.
+
+`havn transform gold.events --force` reprocesses every window from `begin`.
+
+An explicit range also substitutes `{start}` and `{end}` inside an `incremental_filter` on models that are *not* microbatch, which is a way to scope one ordinary incremental run to a date range without editing the model. Without the flags the placeholders are left alone rather than guessed at.
+
+#### What to expect
+
+- **The window holding "now" is processed too**, even though it is not over. The alternative is that data written in the last hour waits for the hour to turn.
+- **Columns evolve per window** under the model's `on_schema_change` policy, the same as any incremental model. A column added part-way through a backfill is `NULL` for the windows already written.
+- **`incremental_filter` and `@watermark` are rejected.** The batch window is already the filter; a second one would narrow every window and leave gaps nothing refills.
+- **A window count above 100,000 is refused** rather than attempted. `begin=1970-01-01` with `batch_size=hour` is close to half a million windows and is almost always a typo.
+- **Failures name the window.** The error says which window of how many failed, how many are committed, and that re-running resumes there.
+
+### Snapshot models (SCD2)
+
+```sql
+@config materialized=snapshot, unique_key=customer_id, strategy=check
+```
+
+A snapshot model keeps the history of a source table instead of its current state. Every run compares what the query returns now against what the history table already holds, and writes a new row version for anything that changed. Rows are never updated in place except to close them, so yesterday's answer to "what tier was this customer on?" stays answerable forever.
+
+**Two features share the word "snapshot", and they are not the same thing.** *Snapshot models* (this section) keep row-level history of one table inside the warehouse: a type 2 slowly changing dimension, built by `havn transform` like any other model. `havn snapshot` and `havn rewind` (see `docs/versioning.md`) are the other thing: whole-warehouse restore points that let you put the entire project back the way it was after a bad run. One is a modeling pattern, the other is an undo button.
+
+#### What the table looks like
+
+The target holds the query's own columns plus four meta columns:
+
+| Column | Type | Meaning |
+|---|---|---|
+| `valid_from` | `TIMESTAMP` | when this version became the truth |
+| `valid_to` | `TIMESTAMP` | when it stopped, `NULL` while it is current |
+| `is_current` | `BOOLEAN` | the one live version per key |
+| `row_hash` | `VARCHAR` | hash of the tracked columns, used for change detection |
+
+With `hard_deletes=new_record` a fifth column, `is_deleted`, marks tombstone rows.
+
+Rename any of them project-wide in `project.yml`, which is what a project migrating from dbt wants:
+
+```yaml
+snapshots:
+  meta_columns:
+    valid_from: dbt_valid_from
+    valid_to: dbt_valid_to
+    is_current: dbt_is_current
+    row_hash: dbt_scd_id
+    is_deleted: dbt_is_deleted
+  valid_to_current: "'9999-12-31'::TIMESTAMP"
+```
+
+`valid_to_current` puts a sentinel date in the open row's `valid_to` instead of `NULL`. BI tools filter `valid_to > today` more comfortably than they handle a three-valued comparison against `NULL`.
+
+#### Strategies
+
+`strategy=check` (the default) hashes the tracked columns and compares the hash. `check_cols` narrows what counts as a change:
+
+```sql
+@config materialized=snapshot, unique_key=customer_id, check_cols=tier,region
+```
+
+Only `tier` and `region` are watched; a new `last_seen_at` on every run does not manufacture a version. The default, `check_cols=all`, hashes every non-key column.
+
+`strategy=timestamp` trusts the source's own change clock:
+
+```sql
+@config materialized=snapshot, unique_key=order_id, strategy=timestamp, updated_at=modified_at
+```
+
+A row is a new version when its `updated_at` is later than the stored `valid_from`, and the version is dated from `updated_at` rather than from the moment of the run. Replaying an old extract therefore lands the version where it belongs in history instead of at the top. `row_hash` is still written under this strategy, so the content of every version is on record even though the decision was made on the clock.
+
+#### Hard deletes
+
+`hard_deletes` decides what happens to a key that stopped appearing in the source:
+
+- `ignore` (default): the last version stays current. Absence is treated as "no news", which is the right reading when the query is filtered or the extract is partial.
+- `invalidate`: the current version is closed, with `valid_to` set to the run timestamp and `is_current` false. The key has no current row until it comes back.
+- `new_record`: the current version is closed and a tombstone row is appended with the same values, `is_deleted = true` and `is_current = true`. Downstream models can then see *that* a key was deleted and when, not merely that it stopped being current.
+
+A key that returns after a delete opens a fresh live version under every policy.
+
+#### Running them
+
+```bash
+havn transform silver.dim_customer
+```
+
+- **Replaying is free.** A run whose source has not changed writes nothing. A to B and back to A produces three versions, because coming back is a change like any other.
+- **Duplicate keys are refused before any write.** If the query returns a key more than once, the run fails, names the key, and leaves history exactly as it was. DuckDB's `UPDATE ... FROM` picks an arbitrary row when the source matches more than once, so the alternative is silently storing whichever version the scan reached first. The usual fix is a `QUALIFY row_number() OVER (PARTITION BY key ORDER BY ...) = 1` in the query.
+- **`--force` re-runs the merge; it never drops history.** Forcing a rebuild must not be a way to lose years of versions by accident. If you really do want to start over, drop the table: `havn query "DROP TABLE silver.dim_customer"`, then run the model again.
+- **New source columns are appended**, `NULL` for every row already in history, exactly as an incremental model does it. A removed or retyped column is an error, because a snapshot cannot rewrite what it already wrote.
+- **`@assert`, `@grain` and profiling work** the same as for a `table` model; they run against the history table after the merge, so an assertion can talk about `is_current` directly.
+- **`incremental_filter` and `@watermark` are rejected.** A snapshot has to read the source's current state in full: filtering the read would look exactly like a hard delete of every filtered-out row.
+- **All timestamps are the warehouse's `current_timestamp`** unless `strategy=timestamp` dates them from the source.
+
+#### Coming from dbt
+
+The config names and values are the same ones dbt uses, so a migration is a search and replace rather than a translation table: `unique_key`, `strategy` (`check` / `timestamp`), `updated_at`, `check_cols`, `hard_deletes` (`ignore` / `invalidate` / `new_record`). Three differences worth knowing:
+
+- Snapshots live in `transform/` with every other model rather than in their own `snapshots/` directory, and they are selected, tagged and scheduled like any model.
+- The meta columns are called `valid_from`, `valid_to`, `is_current` and `row_hash` by default. `snapshots.meta_columns` in `project.yml` is the equivalent of dbt's `snapshot_meta_column_names`, and `valid_to_current` is the equivalent of `dbt_valid_to_current`.
+- There is no `dbt_updated_at` column. Under `strategy=timestamp` the source's `updated_at` is `valid_from`, which is the value that column held anyway.
 
 ## Plain SQL -- No Templating
 

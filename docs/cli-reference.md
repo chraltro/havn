@@ -155,7 +155,7 @@ havn seed [--force] [--schema NAME] [--env NAME] [--project PATH]
 Build SQL models in dependency order.
 
 ```bash
-havn transform [TARGETS...] [--select SEL] [--exclude SEL] [--force] [--sequential] [--workers N] [--env NAME] [--skip-check] [--verbose] [--project PATH]
+havn transform [TARGETS...] [--select SEL] [--exclude SEL] [--force] [--sequential] [--workers N] [--env NAME] [--skip-check] [--event-time-start TS] [--event-time-end TS] [--verbose] [--project PATH]
 ```
 
 | Flag | Default | Description |
@@ -168,6 +168,8 @@ havn transform [TARGETS...] [--select SEL] [--exclude SEL] [--force] [--sequenti
 | `--workers, -w` | 4 | Max parallel workers |
 | `--env, -e` | none | Environment override |
 | `--skip-check` | false | Skip pre-transform validation |
+| `--event-time-start` | none | Backfill microbatch models from this event time (UTC), e.g. `2024-01-01` |
+| `--event-time-end` | none | Backfill microbatch models up to this event time (UTC), exclusive |
 | `--verbose, -v` | false | Print the resolved selection and which selector matched what |
 
 ```bash
@@ -184,7 +186,16 @@ havn transform config.materialized:incremental
 havn transform state:modified+          # what changed, plus downstream
 havn transform 'tag:daily,gold.*'       # comma intersects
 havn transform -s tag:daily -x tag:expensive
+
+# backfill a microbatch model over an explicit event-time range
+havn transform gold.events --event-time-start 2024-01-01 --event-time-end 2024-03-01
 ```
+
+`--event-time-start` / `--event-time-end` process exactly that range of
+windows instead of resuming from recorded state; either may be given alone,
+and the end is exclusive. `--force` on a microbatch model reprocesses every
+window from its `begin`. See
+[Microbatch incremental models](transforms#microbatch-incremental-models).
 
 A selector that matched nothing is a warning; a run that selected nothing at
 all exits non-zero. Full grammar: [Selecting models](transforms#selecting-models).

@@ -9,15 +9,19 @@ import re
 import duckdb
 
 from havn.engine.sql_analysis import (
+    BATCH_SIZES,
     CONFIG_KEYS,
+    HARD_DELETE_POLICIES,
     MATERIALIZATIONS,
     ON_SCHEMA_CHANGE_POLICIES,
+    SNAPSHOT_STRATEGIES,
     extract_column_lineage as _extract_column_lineage_impl,
     extract_column_references,
     fetch_column_catalog,
     parse_config,
 )
 
+from .execution import parse_event_time
 from .models import SQLModel, ValidationError
 
 logger = logging.getLogger("havn.transform")
@@ -134,6 +138,217 @@ def _validate_tags(models: list[SQLModel]) -> list[ValidationError]:
                         f"Invalid tag '{tag}' in @config tags=. Tags must be "
                         "identifiers (letters, digits, underscore, hyphen; "
                         "not starting with a digit) and separated by commas."
+                    ),
+                ))
+    return errors
+
+
+_SNAPSHOT_ONLY_KEYS = ("strategy", "updated_at", "check_cols", "hard_deletes")
+
+
+def _validate_snapshot_config(models: list[SQLModel]) -> list[ValidationError]:
+    """Check that a `materialized=snapshot` model can actually be merged.
+
+    Every one of these is caught at execution time too, because the engine
+    refuses to write history it cannot reason about. Catching them here means
+    `havn check` says so before a run, rather than after the first table has
+    already been built.
+    """
+    errors: list[ValidationError] = []
+    for model in models:
+        config = parse_config(model.sql)
+        is_snapshot = model.materialized == "snapshot"
+
+        if not is_snapshot:
+            for key in _SNAPSHOT_ONLY_KEYS:
+                if key in config:
+                    errors.append(ValidationError(
+                        model=model.full_name,
+                        severity="warning",
+                        message=(
+                            f"@config {key}= only applies to a snapshot model; "
+                            f"this model is materialized as '{model.materialized}' "
+                            "and the setting is ignored"
+                        ),
+                    ))
+            continue
+
+        if not model.unique_key:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    "Snapshot models need @config unique_key=<column> so a "
+                    "source row can be matched against its own history."
+                ),
+            ))
+        if model.strategy not in SNAPSHOT_STRATEGIES:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown snapshot strategy '{model.strategy}'."
+                    f"{_did_you_mean(model.strategy, SNAPSHOT_STRATEGIES)}"
+                    f" Supported: {', '.join(sorted(SNAPSHOT_STRATEGIES))}."
+                ),
+            ))
+        elif model.strategy == "timestamp" and not model.updated_at:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    "strategy=timestamp needs @config updated_at=<column>: the "
+                    "engine compares that column against the stored valid_from "
+                    "to decide whether a row changed."
+                ),
+            ))
+        if model.updated_at and model.strategy != "timestamp":
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="warning",
+                message=(
+                    "updated_at only applies to strategy=timestamp; this "
+                    f"snapshot uses strategy={model.strategy} and the column "
+                    "is ignored"
+                ),
+            ))
+        if model.check_cols and model.strategy != "check":
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    "check_cols only applies to strategy=check. Drop "
+                    "check_cols, or switch the snapshot to strategy=check."
+                ),
+            ))
+        if model.hard_deletes not in HARD_DELETE_POLICIES:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown hard_deletes policy '{model.hard_deletes}'."
+                    f"{_did_you_mean(model.hard_deletes, HARD_DELETE_POLICIES)}"
+                    f" Supported: {', '.join(sorted(HARD_DELETE_POLICIES))}."
+                ),
+            ))
+        for key in ("incremental_filter", "watermark"):
+            if key in config:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=(
+                        f"@config {key}= is not supported on a snapshot model. "
+                        "A snapshot always reads the source's current state in "
+                        "full and compares it against the history it already "
+                        "holds; filtering the read would silently look like a "
+                        "hard delete of every row that got filtered out."
+                    ),
+                ))
+    return errors
+
+
+_MICROBATCH_ONLY_KEYS = ("event_time", "batch_size", "begin", "lookback")
+
+
+def _validate_microbatch_config(models: list[SQLModel]) -> list[ValidationError]:
+    """Check that a microbatch model can be cut into windows.
+
+    The engine refuses to run one it cannot window, so everything here is a
+    pre-flight of the same rules. The point is that `havn check` answers
+    before a backfill starts rather than after the first window.
+    """
+    errors: list[ValidationError] = []
+    for model in models:
+        config = parse_config(model.sql)
+        is_microbatch = (
+            model.materialized == "incremental"
+            and model.incremental_strategy == "microbatch"
+        )
+
+        if not is_microbatch:
+            for key in _MICROBATCH_ONLY_KEYS:
+                if key in config:
+                    errors.append(ValidationError(
+                        model=model.full_name,
+                        severity="warning",
+                        message=(
+                            f"@config {key}= only applies to "
+                            "incremental_strategy=microbatch; this model uses "
+                            f"'{model.incremental_strategy}' and the setting "
+                            "is ignored"
+                        ),
+                    ))
+            continue
+
+        for key, what in (
+            ("event_time", "the column each window is cut on"),
+            ("batch_size", "one of hour, day, month, year"),
+            ("begin", "the first window to process, as a date"),
+        ):
+            if not getattr(model, key):
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=(
+                        f"incremental_strategy=microbatch needs @config "
+                        f"{key}=: {what}."
+                    ),
+                ))
+        if model.batch_size and model.batch_size not in BATCH_SIZES:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown batch_size '{model.batch_size}'."
+                    f"{_did_you_mean(model.batch_size, BATCH_SIZES)}"
+                    f" Supported: {', '.join(sorted(BATCH_SIZES))}."
+                ),
+            ))
+        if model.begin:
+            try:
+                parse_event_time(model.begin, "begin=")
+            except Exception as e:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=str(e),
+                ))
+        raw_lookback = config.get("lookback")
+        if raw_lookback is not None:
+            try:
+                if int(raw_lookback) < 0:
+                    raise ValueError
+            except ValueError:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=(
+                        f"lookback must be a whole number of windows, not "
+                        f"'{raw_lookback}'."
+                    ),
+                ))
+        for key in ("incremental_filter", "watermark"):
+            if key in config:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=(
+                        f"@config {key}= cannot be combined with "
+                        "incremental_strategy=microbatch. The batch window is "
+                        "already the filter; a second one would silently "
+                        "narrow every window and leave gaps nothing refills."
+                    ),
+                ))
+        for placeholder in ("{start}", "{end}"):
+            if placeholder not in model.query:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="warning",
+                    message=(
+                        f"Microbatch model does not use {placeholder}. havn "
+                        "does not add an event-time filter for you, so every "
+                        "window would read the whole source and the last "
+                        "window would win."
                     ),
                 ))
     return errors
@@ -338,6 +553,8 @@ def validate_models(
 
     errors.extend(_validate_config_keys(models))
     errors.extend(_validate_tags(models))
+    errors.extend(_validate_snapshot_config(models))
+    errors.extend(_validate_microbatch_config(models))
 
     # Default landing schemas if not provided
     _landing = {s.lower() for s in landing_schemas} if landing_schemas else {"landing"}
