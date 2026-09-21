@@ -538,368 +538,437 @@ def fetch_column_catalog(conn: Any) -> dict[str, list[str]]:
         catalog.setdefault(table_fqn.lower(), []).append(col_name)
     return catalog
 
-
 def extract_column_lineage(
     query: str,
     depends_on: list[str] | None = None,
     conn: Any | None = None,
     column_catalog: dict[str, list[str]] | None = None,
     ast: exp.Expression | None = None,
+    schema: dict[str, list[tuple[str, str]]] | None = None,
 ) -> dict[str, list[dict[str, str]]]:
-    """Extract column-level lineage from SQL using sqlglot AST parsing.
+    """Extract column-level lineage from SQL.
 
-    Traces column references through CTEs, subqueries, CASE expressions,
-    window functions, and UNION ALL queries.
+    The tracing itself is ``sqlglot.lineage`` over a scope built from
+    ``sqlglot.optimizer.qualify``, fed with whatever column schema we can get
+    hold of. That is what resolves the constructs a hand-rolled walker keeps
+    getting wrong: a subquery in ``FROM`` (the subquery's alias is not a
+    source table), every branch of a ``UNION``, a ``LATERAL``, and stars with
+    ``EXCLUDE`` or ``REPLACE``. A statement-level ``PIVOT`` / ``UNPIVOT`` is
+    not a ``SELECT`` at all and is handled separately, from the pivoted
+    columns.
 
     Args:
         query: The SQL query to analyze (config comments should be stripped).
         depends_on: List of upstream ``schema.table`` dependencies.
-        conn: Optional DuckDB connection for resolving ``SELECT *``.
+        conn: Optional DuckDB connection. Used to read the column catalog when
+            one was not supplied, and to enumerate the output columns of a
+            ``PIVOT`` or ``COLUMNS('regex')``, which only the database knows.
         column_catalog: Pre-fetched ``{"schema.table": [column, ...]}`` map,
             as returned by :func:`fetch_column_catalog`. Supply it when
             tracing many models so the catalog is read once for the whole
             pass instead of once per model.
         ast: Pre-parsed AST for ``query``, when the caller already has one.
+            It is never mutated: qualification runs on a copy.
+        schema: Inferred schemas, ``{"schema.table": [(column, type), ...]}``,
+            for tables a bind pass knows about but the catalog does not (an
+            upstream that has never been built). Takes precedence over
+            ``column_catalog`` for any table present in both.
 
     Returns:
         Mapping of output_column -> list of {source_table, source_column}.
+        A source that could not be resolved to a real column (an unexpandable
+        star) carries ``"resolved": False`` and a ``source_column`` of ``*``.
     """
     depends_on = depends_on or []
-    lineage: dict[str, list[dict[str, str]]] = {}
 
     parsed = ast if ast is not None else parse_sql(query)
     if parsed is None:
-        return lineage
+        return {}
 
-    # Discover CTE names first so they can be filtered out of the table map.
-    # CTE references look identical to plain table refs in the AST.
-    cte_names: set[str] = {
-        (cte.alias or "").lower()
-        for cte in parsed.find_all(exp.CTE)
-        if cte.alias
-    }
-    cte_names.discard("")
-
-    def _is_cte_ref(table: exp.Table) -> bool:
-        return (table.name or "").lower() in cte_names and not (table.db or "")
-
-    # Build alias -> fully-qualified table map (excluding CTE refs)
-    alias_map: dict[str, str] = {}
-    # Aliases pointing to CTE names: e.g. `FROM filtered f` -> {"f": "filtered"}.
-    cte_alias_map: dict[str, str] = {}
-    for table in parsed.find_all(exp.Table):
-        if _is_cte_ref(table):
-            cte_name = (table.name or "").lower()
-            alias = (table.alias or "").lower()
-            cte_alias_map[cte_name] = cte_name
-            if alias:
-                cte_alias_map[alias] = cte_name
-            continue
-        db = (table.db or "").lower()
-        name = (table.name or "").lower()
-        alias = (table.alias or "").lower()
-        if db and name:
-            fqn = f"{db}.{name}"
-        elif name:
-            fqn = name
-        else:
-            continue
-        if alias:
-            alias_map[alias] = fqn
-        alias_map[fqn] = fqn
-
-    # Resolve column lists for any real table we may need (for SELECT *
-    # expansion and per-scope unqualified-column resolution). This used to run
-    # one information_schema query per dependency, which is the dominant cost
-    # of a full-project lineage pass; the catalog is now read once, either by
-    # the caller (for a whole-project pass) or here.
     catalog = column_catalog
     if catalog is None and conn is not None:
         catalog = fetch_column_catalog(conn)
 
-    table_columns: dict[str, list[str]] = {}
-    if catalog:
-        candidates = set(depends_on) | set(alias_map.values())
-        for dep in candidates:
-            cols = catalog.get(dep.lower())
-            if cols is not None:
-                table_columns[dep] = list(cols)
+    mapping = _mapping_schema(parsed, depends_on, catalog, schema)
 
-    # Build per-CTE lineage in declaration order so later CTEs can resolve
-    # through earlier ones.
-    cte_column_map: dict[str, dict[str, list[dict[str, str]]]] = {}
-    for cte in parsed.find_all(exp.CTE):
-        cte_alias = (cte.alias or "").lower()
-        if not cte_alias:
-            continue
-        cte_select = cte.this
-        if isinstance(cte_select, exp.Select):
-            cte_lineage = _trace_select_lineage(
-                cte_select,
-                alias_map,
-                cte_names,
-                cte_column_map,
-                depends_on,
-                table_columns,
-            )
-            cte_column_map[cte_alias] = cte_lineage
+    # `PIVOT tbl ON ...` as a whole statement parses to exp.Pivot, which has
+    # no projections to trace. Never memoized: a pivot's output columns are
+    # values in the data, so the answer can change without the SQL or the
+    # schema changing.
+    if isinstance(parsed, exp.Pivot):
+        return _pivot_lineage(parsed, query, mapping, conn)
 
-    # Find the outermost SELECT
-    main_select = _find_main_select(parsed)
-    if not main_select:
-        return lineage
+    memo_key = _memo_key(query, mapping)
+    cached = _LINEAGE_MEMO.get(memo_key)
+    if cached is not None:
+        return _copy_lineage(cached)
 
-    # Process each SELECT expression
-    for select_expr in main_select.expressions:
-        if isinstance(select_expr, exp.Alias):
-            out_col = select_expr.alias.lower()
-            inner = select_expr.this
-        elif isinstance(select_expr, exp.Column):
-            out_col = select_expr.name.lower()
-            inner = select_expr
-        elif isinstance(select_expr, exp.Star):
-            # Unqualified `SELECT *` — expand from real tables in scope, then CTEs.
-            for source_fqn in _scope_real_tables(main_select, alias_map, cte_names):
-                if source_fqn in table_columns:
-                    for col_name in table_columns[source_fqn]:
-                        lineage[col_name.lower()] = [
-                            {"source_table": source_fqn, "source_column": col_name.lower()}
-                        ]
-            for cte_alias in _scope_cte_refs(main_select, cte_names):
-                for col_name, sources in cte_column_map.get(cte_alias, {}).items():
-                    if col_name not in lineage:
-                        lineage[col_name] = sources
-            continue
-        else:
-            out_col = (
-                select_expr.output_name.lower()
-                if hasattr(select_expr, "output_name") and select_expr.output_name
-                else "?"
-            )
-            inner = select_expr
+    try:
+        from sqlglot.optimizer import build_scope, qualify
+    except ImportError as e:  # pragma: no cover - sqlglot always ships it
+        logger.debug("sqlglot optimizer unavailable: %s", e)
+        return {}
 
-        # Detect a `b.*` pattern — sqlglot wraps it as Column(this=Star(), table=b).
-        target_node = inner if inner else select_expr
-        star_table = _star_table_alias(target_node)
-        if star_table is not None:
-            cte_resolved = cte_alias_map.get(star_table)
-            if cte_resolved and cte_resolved in cte_column_map:
-                for col_name, sources in cte_column_map[cte_resolved].items():
-                    lineage[col_name] = sources
-                continue
-            resolved = alias_map.get(star_table, star_table)
-            if resolved in table_columns:
-                for col_name in table_columns[resolved]:
-                    lineage[col_name.lower()] = [
-                        {"source_table": resolved, "source_column": col_name.lower()}
-                    ]
-            continue
-
-        sources = _extract_sources(
-            target_node,
-            alias_map,
-            cte_names,
-            cte_column_map,
-            depends_on,
-            table_columns,
-            scope=main_select,
-            cte_alias_map=cte_alias_map,
+    try:
+        qualified = qualify.qualify(
+            parsed.copy(),
+            dialect=_LINEAGE_DIALECT,
+            schema=mapping,
+            infer_schema=True,
+            validate_qualify_columns=False,
+            quote_identifiers=False,
+            identify=False,
         )
+        scope = build_scope(qualified)
+    except Exception as e:
+        logger.debug("Could not qualify for lineage: %s", e)
+        return {}
 
-        # Deduplicate
-        seen: set[tuple[str, str]] = set()
-        unique: list[dict[str, str]] = []
-        for s in sources:
-            key = (s["source_table"], s["source_column"])
-            if key not in seen:
-                seen.add(key)
-                unique.append(s)
+    if scope is None or not isinstance(scope.expression, exp.Query):
+        return {}
 
-        lineage[out_col] = unique
+    selects = scope.expression.selects
+    if not selects:
+        return {}
 
+    # `COLUMNS('regex')` picks its columns out of the catalog at bind time;
+    # sqlglot leaves it as a single opaque projection. Ask the database.
+    if conn is not None and any(sel.find(exp.Columns) for sel in selects):
+        described = _describe_lineage(query, conn, qualified, mapping)
+        if described is not None:
+            return described
+
+    lineage = _trace_selects(scope, selects, qualified)
+    _memoize(memo_key, lineage)
     return lineage
 
 
-def _find_main_select(parsed: exp.Expression) -> exp.Select | None:
-    """Find the outermost SELECT in a parsed expression."""
-    if isinstance(parsed, exp.Union):
-        return parsed.find(exp.Select)
-    if hasattr(parsed, "this") and isinstance(parsed.this, exp.Select):
-        return parsed.this
-    if isinstance(parsed, exp.Select):
-        return parsed
-    return parsed.find(exp.Select)
+def _trace_selects(scope: Any, selects: list[exp.Expression], qualified: exp.Expression):
+    """Run sqlglot's lineage walk over every projection of the outer scope."""
+    from sqlglot.lineage import to_node
 
+    alias_map = _table_alias_map(qualified)
+    cache: dict[tuple, Any] = {}
+    scope_meta: dict[int, Any] = {}
 
-def _trace_select_lineage(
-    select: exp.Select,
-    alias_map: dict[str, str],
-    cte_names: set[str],
-    cte_column_map: dict[str, dict[str, list[dict[str, str]]]],
-    depends_on: list[str],
-    table_columns: dict[str, list[str]] | None = None,
-    cte_alias_map: dict[str, str] | None = None,
-) -> dict[str, list[dict[str, str]]]:
-    """Trace column lineage within a SELECT expression (used for CTEs)."""
     lineage: dict[str, list[dict[str, str]]] = {}
-    # Build a CTE alias map specific to this SELECT's FROM/JOIN clauses,
-    # falling back to the parent map for outer-scope references.
-    local_cte_alias_map: dict[str, str] = dict(cte_alias_map or {})
-    for table in select.find_all(exp.Table):
-        if table.find_ancestor(exp.Select) is not select:
-            continue
-        name = (table.name or "").lower()
-        db = (table.db or "").lower()
-        if name in cte_names and not db:
-            alias = (table.alias or "").lower()
-            local_cte_alias_map[name] = name
-            if alias:
-                local_cte_alias_map[alias] = name
-    for select_expr in select.expressions:
-        if isinstance(select_expr, exp.Alias):
-            out_col = select_expr.alias.lower()
-            inner = select_expr.this
-        elif isinstance(select_expr, exp.Column):
-            out_col = select_expr.name.lower()
-            inner = select_expr
+    for index, select in enumerate(selects):
+        name = (select.alias_or_name or "").lower() or f"_col_{index}"
+        try:
+            # By index, not by name: two projections can share a name
+            # (`SELECT *` over a join with a shared key) and both of them
+            # have lineage worth keeping.
+            node = to_node(
+                index,
+                scope,
+                _LINEAGE_DIALECT,
+                # trim_selects exists to give a node a pretty label, and it
+                # deep-copies the enclosing SELECT per column to build one.
+                # Nothing here reads labels.
+                trim_selects=False,
+                _cache=cache,
+                _scope_meta=scope_meta,
+            )
+        except Exception as e:
+            logger.debug("Lineage failed for column %s: %s", name, e)
+            sources: list[dict[str, str]] = []
         else:
-            continue
-
-        sources = _extract_sources(
-            inner,
-            alias_map,
-            cte_names,
-            cte_column_map,
-            depends_on,
-            table_columns or {},
-            scope=select,
-            cte_alias_map=local_cte_alias_map,
-        )
-        lineage[out_col] = sources
+            sources = _leaf_sources(node, alias_map)
+        lineage[_disambiguate(name, lineage)] = sources
     return lineage
 
 
-def _scope_real_tables(
-    select: exp.Select,
-    alias_map: dict[str, str],
-    cte_names: set[str],
-) -> list[str]:
-    """Real (non-CTE) tables referenced in a SELECT's FROM/JOIN clauses."""
-    out: list[str] = []
-    seen: set[str] = set()
-    for table in select.find_all(exp.Table):
-        # Only consider tables in this SELECT's own FROM/JOIN scope.
-        if table.find_ancestor(exp.Select) is not select:
-            continue
-        name = (table.name or "").lower()
-        db = (table.db or "").lower()
-        if name in cte_names and not db:
-            continue
-        fqn = alias_map.get(name) if not db else alias_map.get(f"{db}.{name}", f"{db}.{name}")
-        if not fqn:
-            continue
-        if fqn not in seen:
-            seen.add(fqn)
-            out.append(fqn)
-    return out
+def _disambiguate(name: str, taken: dict[str, Any]) -> str:
+    """The key DuckDB would give a duplicated output name.
+
+    ``SELECT * FROM a JOIN b`` over a shared key materializes as
+    ``customer_id`` and ``customer_id_1``, so those are the keys: they are
+    the column names the built model actually has, which is what the UI
+    matches against and what a downstream model has to select by.
+    """
+    if name not in taken:
+        return name
+    suffix = 1
+    while f"{name}_{suffix}" in taken:
+        suffix += 1
+    return f"{name}_{suffix}"
 
 
-def _scope_cte_refs(
-    select: exp.Select,
-    cte_names: set[str],
-) -> list[str]:
-    """CTE names referenced from a SELECT's FROM/JOIN clauses."""
-    out: list[str] = []
-    seen: set[str] = set()
-    for table in select.find_all(exp.Table):
-        if table.find_ancestor(exp.Select) is not select:
-            continue
-        name = (table.name or "").lower()
-        db = (table.db or "").lower()
-        if name in cte_names and not db and name not in seen:
-            seen.add(name)
-            out.append(name)
-    return out
-
-
-def _star_table_alias(node: exp.Expression) -> str | None:
-    """If node is a `b.*` expansion, return `b` (lowercased). Else None."""
-    if isinstance(node, exp.Column) and isinstance(node.this, exp.Star):
-        return (node.table or "").lower() or None
-    return None
-
-
-def _extract_sources(
-    node: exp.Expression,
-    alias_map: dict[str, str],
-    cte_names: set[str],
-    cte_column_map: dict[str, dict[str, list[dict[str, str]]]],
-    depends_on: list[str],
-    table_columns: dict[str, list[str]] | None = None,
-    scope: exp.Select | None = None,
-    cte_alias_map: dict[str, str] | None = None,
-) -> list[dict[str, str]]:
-    """Walk an expression and collect all column references, tracing through CTEs."""
+def _leaf_sources(node: Any, alias_map: dict[str, str]) -> list[dict[str, str]]:
+    """The real table columns at the leaves of one lineage graph."""
     sources: list[dict[str, str]] = []
-    table_columns = table_columns or {}
-    cte_alias_map = cte_alias_map or {}
+    seen: set[tuple[str, str]] = set()
 
-    for col in node.find_all(exp.Column):
-        col_name = (col.name or "").lower()
-        if not col_name or col_name == "*":
-            continue
-        table_ref = (col.table or "").lower()
-
-        if table_ref:
-            # CTE-qualified (or aliased CTE-qualified) reference?
-            cte_resolved = cte_alias_map.get(table_ref)
-            if cte_resolved:
-                cte_lineage = cte_column_map.get(cte_resolved, {})
-                if col_name in cte_lineage:
-                    sources.extend(cte_lineage[col_name])
-                continue
-
-            resolved = alias_map.get(table_ref, table_ref)
-            if resolved in cte_names and resolved in cte_column_map:
-                cte_lineage = cte_column_map[resolved]
-                if col_name in cte_lineage:
-                    sources.extend(cte_lineage[col_name])
-                    continue
-            elif resolved in cte_names:
-                continue
-            sources.append({"source_table": resolved, "source_column": col_name})
+    for leaf in node.walk():
+        if leaf.downstream:
             continue
 
-        # Unqualified — try to attribute to a table actually visible in this
-        # SELECT's scope rather than blindly defaulting to depends_on[0].
-        attributed = False
-        if scope is not None:
-            real_in_scope = _scope_real_tables(scope, alias_map, cte_names)
-            cte_in_scope = _scope_cte_refs(scope, cte_names)
+        table = ""
+        source = leaf.source
+        if isinstance(source, exp.Table):
+            table = _table_fqn(source)
+        else:
+            # sqlglot could not attach the column to a source (a LATERAL
+            # subquery is its own scope). The qualified alias still names a
+            # real table often enough to be worth resolving by hand.
+            qualifier, _, _ = leaf.name.rpartition(".")
+            table = alias_map.get(_unquote(qualifier), "") if qualifier else ""
 
-            # Single real-table scope: easy attribution.
-            if len(real_in_scope) == 1 and not cte_in_scope:
-                sources.append({"source_table": real_in_scope[0], "source_column": col_name})
-                attributed = True
-            else:
-                # Multi-source: prefer a CTE whose lineage knows the column.
-                for cte_alias in cte_in_scope:
-                    cte_lineage = cte_column_map.get(cte_alias, {})
-                    if col_name in cte_lineage:
-                        sources.extend(cte_lineage[col_name])
-                        attributed = True
-                        break
-                if not attributed:
-                    # Fall back to information_schema — pick the first real
-                    # table that actually has this column.
-                    for fqn in real_in_scope:
-                        cols = table_columns.get(fqn, [])
-                        if col_name in {c.lower() for c in cols}:
-                            sources.append({"source_table": fqn, "source_column": col_name})
-                            attributed = True
-                            break
+        column = _unquote(leaf.name.rpartition(".")[2])
+        if not table or not column:
+            continue
+        if table.split(".", 1)[0] in SKIP_SCHEMAS:
+            continue
 
-        if not attributed and depends_on:
-            sources.append({"source_table": depends_on[0].lower(), "source_column": col_name})
+        key = (table, column)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        entry = {"source_table": table, "source_column": column}
+        if column == "*":
+            # An unexpandable star: the upstream is right, the column is not
+            # known. Consumers that only read source_table/source_column are
+            # unaffected; the flag is there for the ones that care.
+            entry["resolved"] = False  # type: ignore[assignment]
+        sources.append(entry)
 
     return sources
+
+
+# --- Memoization ---
+#
+# Tracing a model costs about a millisecond: qualification and scope
+# resolution, where the walker this replaced did a couple of AST scans. The
+# result is a pure function of the SQL text and the columns of the tables it
+# reads, so a whole-project pass that runs again (every /api/lineage request,
+# every impact analysis) pays for nothing it has already worked out. The key
+# carries the upstream column lists, so a rebuilt or altered upstream misses.
+
+_LINEAGE_MEMO: dict[tuple, dict[str, list[dict[str, str]]]] = {}
+_LINEAGE_MEMO_MAX = 2048
+
+
+def _memo_key(query: str, mapping: dict[str, dict[str, dict[str, str]]]) -> tuple:
+    schema_signature = tuple(
+        (f"{db}.{table}", tuple(columns))
+        for db in sorted(mapping)
+        for table, columns in sorted(mapping[db].items())
+    )
+    return (query, schema_signature)
+
+
+def _copy_lineage(
+    lineage: dict[str, list[dict[str, str]]],
+) -> dict[str, list[dict[str, str]]]:
+    """A caller-owned copy, so a consumer mutating its result cannot poison the memo."""
+    return {col: [dict(source) for source in sources] for col, sources in lineage.items()}
+
+
+def _memoize(key: tuple, lineage: dict[str, list[dict[str, str]]]) -> None:
+    if len(_LINEAGE_MEMO) >= _LINEAGE_MEMO_MAX:
+        for stale in list(_LINEAGE_MEMO)[: _LINEAGE_MEMO_MAX // 2]:
+            del _LINEAGE_MEMO[stale]
+    _LINEAGE_MEMO[key] = _copy_lineage(lineage)
+
+
+def clear_lineage_cache() -> None:
+    """Drop every memoized lineage result (tests, and after a schema change)."""
+    _LINEAGE_MEMO.clear()
+
+
+# --- Schema plumbing ---
+
+
+_LINEAGE_DIALECT = "duckdb"
+
+
+def _unquote(identifier: str) -> str:
+    return identifier.strip().strip('"').strip("`").lower()
+
+
+def _table_fqn(table: exp.Table) -> str:
+    """``schema.table`` for a table node, or just the name when unqualified."""
+    db = (table.db or "").lower()
+    name = (table.name or "").lower()
+    if not name:
+        return ""
+    return f"{db}.{name}" if db else name
+
+
+def _table_alias_map(expression: exp.Expression) -> dict[str, str]:
+    """``{alias or name: schema.table}`` for every qualified table in a query."""
+    alias_map: dict[str, str] = {}
+    for table in expression.find_all(exp.Table):
+        if not table.db:
+            continue
+        fqn = _table_fqn(table)
+        if not fqn:
+            continue
+        alias = (table.alias or "").lower()
+        if alias:
+            alias_map[alias] = fqn
+        alias_map[(table.name or "").lower()] = fqn
+        alias_map[fqn] = fqn
+    return alias_map
+
+
+def _safe_type(type_name: str) -> str:
+    """A type string sqlglot can build, or ``UNKNOWN``.
+
+    Inferred schemas come from DuckDB, whose type spellings sqlglot does not
+    all parse. Lineage does not read types, so an unparseable one must not
+    take the whole trace down with it.
+    """
+    if not type_name:
+        return "UNKNOWN"
+    try:
+        exp.DataType.build(type_name, dialect=_LINEAGE_DIALECT)
+    except Exception:
+        return "UNKNOWN"
+    return type_name
+
+
+def _mapping_schema(
+    parsed: exp.Expression,
+    depends_on: list[str],
+    catalog: dict[str, list[str]] | None,
+    schema: dict[str, list[tuple[str, str]]] | None,
+) -> dict[str, dict[str, dict[str, str]]]:
+    """``{schema: {table: {column: type}}}`` for the tables this query reads.
+
+    Only the tables in play, not the whole warehouse: sqlglot walks what it
+    is given, and a project-wide catalog would be rebuilt per model.
+    """
+    inferred = {name.lower(): cols for name, cols in (schema or {}).items()}
+
+    wanted: set[str] = {dep.lower() for dep in depends_on}
+    for table in parsed.find_all(exp.Table):
+        fqn = _table_fqn(table)
+        if "." in fqn:
+            wanted.add(fqn)
+
+    mapping: dict[str, dict[str, dict[str, str]]] = {}
+    for fqn in wanted:
+        db, _, name = fqn.partition(".")
+        if not db or not name or db in SKIP_SCHEMAS:
+            continue
+        columns: dict[str, str] = {}
+        if fqn in inferred:
+            # An inferred schema wins: it describes the model as it will be,
+            # the catalog describes it as it was last built.
+            columns = {col.lower(): _safe_type(type_name) for col, type_name in inferred[fqn]}
+        elif catalog and fqn in catalog:
+            columns = {col.lower(): "UNKNOWN" for col in catalog[fqn]}
+        if columns:
+            mapping.setdefault(db, {})[name] = columns
+    return mapping
+
+
+def _schema_columns(mapping: dict[str, dict[str, dict[str, str]]], fqn: str) -> list[str]:
+    """The known columns of ``schema.table`` in a mapping schema, in order."""
+    db, _, name = fqn.partition(".")
+    return list(mapping.get(db, {}).get(name, {}))
+
+
+# --- Constructs sqlglot cannot expand on its own ---
+
+
+def _describe_outputs(query: str, conn: Any) -> list[str] | None:
+    """The output column names DuckDB gives ``query``, or None."""
+    try:
+        rows = conn.execute(f"DESCRIBE {query}").fetchall()
+    except Exception as e:
+        logger.debug("DESCRIBE for lineage failed: %s", e)
+        return None
+    return [str(row[0]) for row in rows]
+
+
+def _describe_lineage(
+    query: str,
+    conn: Any,
+    qualified: exp.Expression,
+    mapping: dict[str, dict[str, dict[str, str]]],
+) -> dict[str, list[dict[str, str]]] | None:
+    """Map DESCRIBE-derived outputs onto same-named source columns.
+
+    The fallback for ``COLUMNS('regex')``: it is a star with a filter, so an
+    output column keeps the name of the source column it came from.
+    """
+    outputs = _describe_outputs(query, conn)
+    if outputs is None:
+        return None
+
+    tables = sorted({_table_fqn(t) for t in qualified.find_all(exp.Table) if t.db})
+    lineage: dict[str, list[dict[str, str]]] = {}
+    for out in outputs:
+        name = out.lower()
+        sources = [
+            {"source_table": fqn, "source_column": name}
+            for fqn in tables
+            if name in _schema_columns(mapping, fqn)
+        ]
+        lineage[_disambiguate(name, lineage)] = sources
+    return lineage
+
+
+def _pivot_columns(pivot: exp.Pivot) -> list[str]:
+    """Columns the pivot consumes: the ON list and the USING aggregates."""
+    columns: list[str] = []
+    for key in ("expressions", "using"):
+        for expression in pivot.args.get(key) or []:
+            for column in expression.find_all(exp.Column):
+                name = (column.name or "").lower()
+                if name and name not in columns:
+                    columns.append(name)
+    return columns
+
+
+def _pivot_lineage(
+    pivot: exp.Pivot,
+    query: str,
+    mapping: dict[str, dict[str, dict[str, str]]],
+    conn: Any | None,
+) -> dict[str, list[dict[str, str]]]:
+    """Lineage for a statement-level PIVOT or UNPIVOT.
+
+    A pivot's output columns are values in the data, not names in the SQL, so
+    DuckDB is asked what they are. A column that passes through keeps its own
+    source; every generated column maps to the pivoted columns as a group.
+    Per-column precision through a pivot is not worth chasing.
+    """
+    source = next((t for t in pivot.find_all(exp.Table) if t.db), None)
+    if source is None:
+        return {}
+    fqn = _table_fqn(source)
+    known = _schema_columns(mapping, fqn)
+    pivoted = _pivot_columns(pivot)
+
+    outputs: list[str] | None = None
+    if conn is not None:
+        outputs = _describe_outputs(query, conn)
+    if outputs is None and pivot.args.get("unpivot") and known:
+        # UNPIVOT is enumerable without the data: everything not consumed,
+        # plus the name and value columns.
+        into = pivot.args.get("into")
+        generated = []
+        if into is not None:
+            generated = [(c.name or "").lower() for c in into.find_all(exp.Column)]
+        outputs = [c for c in known if c not in pivoted] + generated
+    if outputs is None:
+        return {}
+
+    group = [
+        (column.name or "").lower()
+        for column in (pivot.args.get("group").expressions if pivot.args.get("group") else [])
+    ]
+
+    lineage: dict[str, list[dict[str, str]]] = {}
+    for out in outputs:
+        name = out.lower()
+        if name in group or (name in known and name not in pivoted):
+            sources = [{"source_table": fqn, "source_column": name}]
+        else:
+            sources = [{"source_table": fqn, "source_column": col} for col in pivoted]
+        lineage[_disambiguate(name, lineage)] = sources
+    return lineage
