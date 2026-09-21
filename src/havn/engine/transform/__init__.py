@@ -41,6 +41,7 @@ from .quality import (
 
 # Execution
 from .execution import (
+    SchemaChangeError,
     _execute_incremental,
     _execute_single_model,
     execute_model,
@@ -74,6 +75,7 @@ __all__ = [
     "profile_model",
     "run_assertions",
     # Execution
+    "SchemaChangeError",
     "execute_model",
     "run_transform",
     # Analysis

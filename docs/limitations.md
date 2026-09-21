@@ -49,7 +49,7 @@ Set with `@config materialized=...` at the top of a model.
 | `incremental`, `delete+insert` | Supported | Default strategy. Needs `unique_key`. |
 | `incremental`, `merge` | Supported | Needs `unique_key`. Updates every matched row rather than only changed ones. |
 | `incremental`, `append` | Supported | No `unique_key` needed and no dedup. |
-| `on_schema_change` policy | Planned | Today a column added upstream is added to the target automatically, but a removed column and a retyped column are not handled: the build either diverges silently or fails partway. The `fail` / `ignore` / `append_new_columns` / `sync_all_columns` policy is designed and queued. |
+| `on_schema_change` policy | Supported | `append_new_columns` (default), `ignore`, `fail`, `sync_all_columns`, set with `@config on_schema_change=`. Staging and target are compared on name and type in both directions before any write, so a policy that refuses the change leaves the target untouched. No option backfills old rows for a newly added column, and only top-level columns are tracked: a field inside a `STRUCT`, `MAP` or `LIST` is invisible to the comparison. |
 | `ephemeral` | Planned | Will inline the model into its consumers as a CTE rather than materializing it. |
 | `snapshot` (SCD2 history) | Planned | Will add `valid_from` / `valid_to` / `is_current` tracking with timestamp and check strategies. Note `havn snapshot` today is a different feature: it saves a whole-project state you can rewind to. |
 | `microbatch` | Not supported | Deferred. The batch loop, per-batch state and backfill CLI are all missing, and no user has asked for them yet. Incremental models with an `incremental_filter` cover the common case. |

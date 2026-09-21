@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass, field
 
 import duckdb
 
@@ -40,9 +41,240 @@ def _begin_transaction(conn: duckdb.DuckDBPyConnection) -> bool:
         return False
 
 
+class SchemaChangeError(ValueError):
+    """An incremental model's columns no longer match its target table.
+
+    Raised before any write to the target, so the table still holds exactly
+    the rows it held before the run. The message names the column, both
+    types where a type is involved, and the ``on_schema_change`` policy that
+    would accept the change.
+    """
+
+
+@dataclass
+class _SchemaPlan:
+    """What an incremental run must do to the target before it writes.
+
+    ``columns`` is the column list the INSERT/UPDATE uses, in staging order.
+    Under ``ignore`` it is the intersection of staging and target; under every
+    other policy it is every staging column, because the ALTERs below make the
+    target match.
+    """
+
+    add: list[tuple[str, str]] = field(default_factory=list)
+    drop: list[str] = field(default_factory=list)
+    retype: list[tuple[str, str, str]] = field(default_factory=list)
+    columns: list[str] = field(default_factory=list)
+
+    def describe(self) -> list[str]:
+        """One human-readable line per action, for the log and the run log."""
+        out = [f"added column {n} {t}" for n, t in self.add]
+        out += [f"retyped column {n} from {old} to {new}" for n, old, new in self.retype]
+        out += [f"dropped column {n}" for n in self.drop]
+        return out
+
+
+# Type families and relative widths, used to decide whether writing a staging
+# column into a differently typed target column is lossless. Imported from
+# the schema sentinel, which owns the same table for upstream schema diffs;
+# that module pulls in nothing but the standard library and duckdb, so the
+# import is free of side effects.
+def _type_family_tables() -> tuple[dict[str, str], dict[str, int]]:
+    from havn.engine.sentinel import _TYPE_GROUPS, _TYPE_WIDTH
+
+    return _TYPE_GROUPS, _TYPE_WIDTH
+
+
+def _base_type(sql_type: str) -> str:
+    """``DECIMAL(18,3)`` -> ``DECIMAL``, for family and width lookups."""
+    return sql_type.split("(")[0].strip().upper()
+
+
+def _normalize_type(sql_type: str) -> str:
+    """Compare types on a single normalized spelling."""
+    return " ".join(sql_type.upper().split())
+
+
+def _is_lossless_cast(from_type: str, to_type: str) -> bool:
+    """Can every value of ``from_type`` be stored in ``to_type`` unchanged?
+
+    True only for a widening step inside one type family: INTEGER into BIGINT
+    keeps every value, DOUBLE into INTEGER does not (20.5 becomes 21), and
+    INTEGER into VARCHAR crosses families so it is not treated as safe even
+    though DuckDB would accept it.
+    """
+    groups, widths = _type_family_tables()
+    src, dst = _base_type(from_type), _base_type(to_type)
+    if src == dst:
+        return True
+    if groups.get(src) != groups.get(dst) or groups.get(src) is None:
+        return False
+    src_w, dst_w = widths.get(src), widths.get(dst)
+    if src_w is None or dst_w is None:
+        return False
+    return dst_w >= src_w
+
+
+def _plan_schema_change(
+    model: SQLModel,
+    target_cols: list[tuple[str, str]],
+    staging_cols: list[tuple[str, str]],
+    keys: list[str],
+) -> _SchemaPlan:
+    """Diff staging against target in both directions and apply the policy.
+
+    Pure: it reads nothing and writes nothing, so a policy that refuses the
+    change raises before the caller has touched the target table.
+    """
+    policy = model.on_schema_change
+    target_by_name = {n.lower(): (n, t) for n, t in target_cols}
+    staging_by_name = {n.lower(): (n, t) for n, t in staging_cols}
+    key_set = {k.lower() for k in keys}
+
+    added = [(n, t) for n, t in staging_cols if n.lower() not in target_by_name]
+    removed = [n for n, _ in target_cols if n.lower() not in staging_by_name]
+    retyped: list[tuple[str, str, str]] = []
+    for name, staging_type in staging_cols:
+        entry = target_by_name.get(name.lower())
+        if entry is None:
+            continue
+        target_type = entry[1]
+        if _normalize_type(target_type) != _normalize_type(staging_type):
+            retyped.append((name, target_type, staging_type))
+
+    plan = _SchemaPlan(columns=[n for n, _ in staging_cols])
+    if not added and not removed and not retyped:
+        return plan
+
+    where = f"Model {model.full_name}"
+    hint_tail = (
+        " Set @config on_schema_change=... to choose a policy "
+        "(append_new_columns, ignore, fail, sync_all_columns)."
+    )
+
+    if policy == "fail":
+        parts = []
+        if added:
+            parts.append("added " + ", ".join(f"{n} {t}" for n, t in added))
+        if removed:
+            parts.append("removed " + ", ".join(removed))
+        if retyped:
+            parts.append(
+                "retyped "
+                + ", ".join(f"{n} from {old} to {new}" for n, old, new in retyped)
+            )
+        raise SchemaChangeError(
+            f"{where}: on_schema_change=fail and the query's columns no longer "
+            f"match the target table ({'; '.join(parts)}). "
+            "Nothing was written. Rebuild the model with `havn transform --force`, "
+            "or pick a policy that accepts the change."
+        )
+
+    if policy == "ignore":
+        for name, target_type, staging_type in retyped:
+            if not _is_lossless_cast(staging_type, target_type):
+                raise SchemaChangeError(
+                    f"{where}: column '{name}' is {target_type} in the target "
+                    f"table but {staging_type} in the query, and writing "
+                    f"{staging_type} into {target_type} is not lossless "
+                    f"(a DOUBLE 20.5 written into an INTEGER column becomes 21). "
+                    "on_schema_change=ignore keeps the target type, so nothing "
+                    "was written. Use on_schema_change=sync_all_columns to alter "
+                    "the column instead, or rebuild with `havn transform --force`."
+                )
+        # No ALTER at all: write only the columns both sides agree on.
+        plan.columns = [n for n, _ in staging_cols if n.lower() in target_by_name]
+        missing_keys = [k for k in keys if k.lower() not in {c.lower() for c in plan.columns}]
+        if missing_keys:
+            raise SchemaChangeError(
+                f"{where}: unique_key column(s) {', '.join(missing_keys)} are not "
+                "in both the query and the target table, so rows cannot be matched. "
+                "Add the column back to the query, or rebuild with "
+                "`havn transform --force`."
+            )
+        return plan
+
+    if policy == "sync_all_columns":
+        for name in removed:
+            if name.lower() in key_set:
+                raise SchemaChangeError(
+                    f"{where}: column '{name}' is the unique_key but is missing "
+                    "from the query, so rows could not be matched after the drop. "
+                    "Add the column back to the query, or change unique_key."
+                )
+        plan.add = added
+        plan.drop = removed
+        plan.retype = retyped
+        return plan
+
+    # append_new_columns — the historical behavior for added columns, and a
+    # hard stop for the two changes that used to corrupt data silently.
+    if removed:
+        raise SchemaChangeError(
+            f"{where}: column(s) {', '.join(removed)} exist in the target table "
+            "but not in the query. havn refuses the write because the column "
+            "would diverge without a word: rows written from now on get NULL "
+            "while every older row keeps its stale value. Use "
+            "on_schema_change=sync_all_columns to drop the column, "
+            "on_schema_change=ignore to leave it alone and write only the "
+            "shared columns, or rebuild with `havn transform --force`."
+            + hint_tail
+        )
+    if retyped:
+        name, target_type, staging_type = retyped[0]
+        raise SchemaChangeError(
+            f"{where}: column '{name}' is {target_type} in the target table but "
+            f"{staging_type} in the query. havn refuses the write because the "
+            "values are cast into the old type without a word: a DOUBLE 20.5 "
+            "written into an INTEGER column becomes 21. Use "
+            "on_schema_change=sync_all_columns to alter the column to "
+            f"{staging_type}, on_schema_change=ignore to keep {target_type} when "
+            "the cast is a lossless widening, or rebuild with "
+            "`havn transform --force`."
+            + hint_tail
+        )
+    plan.add = added
+    return plan
+
+
+def _apply_schema_plan(
+    conn: duckdb.DuckDBPyConnection,
+    model: SQLModel,
+    plan: _SchemaPlan,
+) -> None:
+    """Run the plan's ALTERs. Called inside the incremental transaction."""
+    for name, col_type in plan.add:
+        conn.execute(f'ALTER TABLE {model.full_name} ADD COLUMN "{name}" {col_type}')
+    for name, old_type, new_type in plan.retype:
+        try:
+            conn.execute(
+                f'ALTER TABLE {model.full_name} ALTER COLUMN "{name}" TYPE {new_type}'
+            )
+        except Exception as e:
+            raise SchemaChangeError(
+                f"Model {model.full_name}: could not change column '{name}' from "
+                f"{old_type} to {new_type}. DuckDB refuses to alter a column that "
+                f"a constraint or an index depends on ({e}). Drop the index or "
+                "constraint, or rebuild the model with `havn transform --force`."
+            ) from e
+    for name in plan.drop:
+        try:
+            conn.execute(f'ALTER TABLE {model.full_name} DROP COLUMN "{name}"')
+        except Exception as e:
+            raise SchemaChangeError(
+                f"Model {model.full_name}: could not drop column '{name}'. DuckDB "
+                f"refuses to drop a column that a constraint or an index depends "
+                f"on ({e}). Drop the index or constraint, or rebuild the model "
+                "with `havn transform --force`."
+            ) from e
+    for line in plan.describe():
+        logger.info("%s: %s", model.full_name, line)
+
+
 def _execute_incremental(
     conn: duckdb.DuckDBPyConnection,
     model: SQLModel,
+    actions: list[str] | None = None,
 ) -> tuple[int, int]:
     """Execute an incremental model.
 
@@ -129,15 +361,21 @@ def _execute_incremental(
         # Create staging table with new data
         conn.execute(f"CREATE OR REPLACE TEMP TABLE {staging_name} AS\n{query}")
 
-        # Handle schema evolution: detect new columns in staging that don't exist in target
-        target_cols = {
-            r[0]
+        # Schema evolution: diff staging against target on name AND type, in
+        # both directions, and resolve the difference with the model's
+        # on_schema_change policy. The diff is computed here, before the
+        # transaction below opens and before a single byte of the target is
+        # touched, so a policy that refuses the change leaves the table with
+        # exactly the rows it had.
+        target_cols = [
+            (r[0], r[1])
             for r in conn.execute(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = ? AND table_name = ? ",
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_schema = ? AND table_name = ? "
+                "ORDER BY ordinal_position",
                 [model.schema, model.name],
             ).fetchall()
-        }
+        ]
         staging_cols = conn.execute(
             "SELECT column_name, data_type FROM information_schema.columns "
             # table_catalog = 'temp' isolates the TEMP staging table so a
@@ -148,8 +386,12 @@ def _execute_incremental(
             [staging_name],
         ).fetchall()
 
-        # Get the final column list from staging for explicit INSERT
-        staging_col_names = [r[0] for r in staging_cols]
+        plan = _plan_schema_change(model, target_cols, staging_cols, keys)
+
+        # The column list the INSERT/UPDATE writes. Under `ignore` this is the
+        # intersection of staging and target; otherwise every staging column,
+        # because the plan's ALTERs make the target match.
+        staging_col_names = list(plan.columns)
         staging_select = ", ".join(f'"{c}"' for c in staging_col_names)
         # NULL-safe key comparison. Plain `=` (and `(a,b) IN (SELECT ...)`)
         # evaluates to NULL rather than TRUE when a key column is NULL, so rows
@@ -168,11 +410,9 @@ def _execute_incremental(
         # DELETE and the model lost every row it was supposed to keep.
         owns_tx = _begin_transaction(conn)
         try:
-            for col_name, col_type in staging_cols:
-                if col_name not in target_cols:
-                    conn.execute(
-                        f'ALTER TABLE {model.full_name} ADD COLUMN "{col_name}" {col_type}'
-                    )
+            _apply_schema_plan(conn, model, plan)
+            if actions is not None:
+                actions.extend(plan.describe())
 
             if strategy == "merge":
                 # True upsert: UPDATE existing rows, INSERT new ones
@@ -260,8 +500,14 @@ def _drop_conflicting(
 def execute_model(
     conn: duckdb.DuckDBPyConnection,
     model: SQLModel,
+    actions: list[str] | None = None,
 ) -> tuple[int, int]:
-    """Execute a single model. Returns (duration_ms, row_count)."""
+    """Execute a single model. Returns (duration_ms, row_count).
+
+    ``actions`` collects human-readable schema-evolution lines ("added column
+    region VARCHAR") when the caller wants them for the run log. Passing None
+    discards them.
+    """
     from havn.engine.observability import ROWS_PROCESSED, TRANSFORM_DURATION
     from havn.engine.resource_manager import get_resource_manager
 
@@ -270,7 +516,7 @@ def execute_model(
         manager_task_register_cancel(manager, conn)
 
         if model.materialized == "incremental":
-            duration_ms, row_count = _execute_incremental(conn, model)
+            duration_ms, row_count = _execute_incremental(conn, model, actions)
         else:
             conn.execute(f"CREATE SCHEMA IF NOT EXISTS {model.schema}")
             start = time.perf_counter()
@@ -342,9 +588,14 @@ def _execute_single_model(
                 pass
             return model.full_name, ModelResult(status="skipped")
 
-        duration_ms, row_count = execute_model(conn, model)
+        schema_changes: list[str] = []
+        duration_ms, row_count = execute_model(conn, model, schema_changes)
         _update_state(conn, model, duration_ms, row_count)
-        log_run(conn, "transform", model.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
+        log_run(
+            conn, "transform", model.full_name, "success", duration_ms, row_count,
+            log_output="; ".join(schema_changes) or None,
+            pipeline_run_id=pipeline_run_id,
+        )
 
         # Run assertions (and the synthesised @grain check, if any). A
         # severity=error failure must surface as "assertion_failed" so the
@@ -363,6 +614,7 @@ def _execute_single_model(
                     duration_ms=duration_ms,
                     row_count=row_count,
                     assertions=assertion_results,
+                    schema_changes=schema_changes,
                 )
 
         # Auto-profile
@@ -377,6 +629,7 @@ def _execute_single_model(
             row_count=row_count,
             assertions=assertion_results,
             profile=profile,
+            schema_changes=schema_changes,
         )
 
     except Exception as e:

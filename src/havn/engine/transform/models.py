@@ -86,6 +86,10 @@ class SQLModel:
     incremental_strategy: str = "delete+insert"  # "delete+insert", "append", or "merge"
     incremental_filter: str | None = None  # e.g. "WHERE updated_at > (SELECT MAX(updated_at) FROM {this})"
     partition_by: str | None = None  # e.g. "event_date" — enables partition-based pruning
+    # What an incremental model does when its query's columns no longer line
+    # up with the target table: "append_new_columns" (default), "ignore",
+    # "fail" or "sync_all_columns".
+    on_schema_change: str = "append_new_columns"
     watermark: str | None = None  # @watermark column for incremental models — auto-generates incremental_filter
     grain: list[str] = field(default_factory=list)  # @grain columns; auto-asserts uniqueness post-build
     owner: str = ""  # @owner label for alert routing
@@ -107,6 +111,8 @@ class SQLModel:
             parts.append(f"partition_by={self.partition_by}")
         if self.watermark:
             parts.append(f"watermark={self.watermark}")
+        if self.on_schema_change != "append_new_columns":
+            parts.append(f"on_schema_change={self.on_schema_change}")
         # Assertions and @grain are stripped out of `query` by
         # strip_config_comments, so without folding them in here, adding an
         # @assert to a model that is already built leaves content_hash
@@ -175,6 +181,10 @@ class ModelResult:
     error: str | None = None
     assertions: list[AssertionResult] = field(default_factory=list)
     profile: ProfileResult | None = None
+    # Human-readable schema-evolution actions applied by an incremental run,
+    # e.g. ["added column region VARCHAR", "dropped column legacy_id"]. Empty
+    # for every other materialization and for runs that changed nothing.
+    schema_changes: list[str] = field(default_factory=list)
 
 
 @dataclass

@@ -74,6 +74,7 @@ Sets materialization, schema, and per-model engine settings:
 | `incremental_filter`    | SQL expression (e.g. `event_time >= ...`) | none                                        |
 | `partition_by`          | column name                             | none                                          |
 | `watermark`             | column name                             | none                                          |
+| `on_schema_change`      | `append_new_columns`, `ignore`, `fail`, `sync_all_columns` | `append_new_columns`       |
 
 Keys outside this table are rejected by `havn check`, rather than being read as nothing: `@config materialised=table` used to build a view without complaining. An unrecognised key, and an unsupported value of `materialized`, are both validation errors, with a suggestion when the name is a near miss:
 
@@ -227,6 +228,37 @@ Creates a persistent table using `CREATE OR REPLACE TABLE ... AS SELECT ...`. Da
 Builds the table incrementally: on first run, it materialises the full result; on subsequent runs, only new rows (filtered by `incremental_filter` if provided) are appended or merged. See `incremental_strategy` in the `@config` table above.
 
 Incremental runs that use a `unique_key` (the `delete+insert` and `merge` strategies) apply all their writes in a single transaction: the schema-evolution `ALTER`s that add newly appeared columns, the `DELETE`/`UPDATE` that clears the rows being replaced, and the `INSERT` that writes the new ones. If any of them fails, the whole run is rolled back and the target keeps exactly the data it had before. A source column whose type changed underneath you (say an integer that arrived as text) now fails the run cleanly instead of leaving the model with the deleted rows missing.
+
+#### Schema changes: `on_schema_change`
+
+Before it writes anything, an incremental run compares its query's columns against the target table on name **and** type, in both directions. What happens next is the model's `on_schema_change` policy:
+
+```sql
+@config materialized=incremental, unique_key=event_id, on_schema_change=sync_all_columns
+```
+
+| Policy | Added column | Removed column | Retyped column |
+|---|---|---|---|
+| `append_new_columns` (default) | `ALTER TABLE ADD COLUMN`, then written | Error, nothing written | Error, nothing written |
+| `ignore` | Not added, not written | Left in place, not written | Error unless the cast is a lossless widening inside one type family |
+| `fail` | Error, nothing written | Error, nothing written | Error, nothing written |
+| `sync_all_columns` | `ALTER TABLE ADD COLUMN` | `ALTER TABLE DROP COLUMN` | `ALTER TABLE ALTER COLUMN ... TYPE` |
+
+Two of those cells used to be silent data loss, which is why the default refuses them rather than carrying on:
+
+- A **removed column** left the target diverging without a word. Rows written from then on got `NULL` while every older row kept its stale value.
+- A **retyped column** was cast back into the target's old type on the way in. A `DOUBLE` of `20.5` written into an `INTEGER` column became `21`.
+
+The error message names the column, both types, and the policy that would accept the change. Nothing is written when a policy refuses, so the target still holds exactly the rows it held before the run. To take the new shape wholesale instead, rebuild with `havn transform --force`.
+
+Two limits worth stating plainly, both shared with dbt:
+
+- **No option backfills old rows.** A column added to the target is `NULL` for every row that was already there; only rows written from this run on carry a value.
+- **Only top-level columns are tracked.** A field that appears, disappears or changes type inside a `STRUCT`, `MAP` or `LIST` column is invisible to the comparison, because the column's own type is what is compared.
+
+`sync_all_columns` depends on DuckDB accepting the `ALTER`. DuckDB refuses to drop or retype a column that a constraint or an index depends on; havn reports that as an error naming the column, and the run leaves the table untouched.
+
+The policy is folded into the model's content hash, so changing it rebuilds the model's change-detection state on the next run rather than being picked up silently on the run after.
 
 ## Plain SQL -- No Templating
 

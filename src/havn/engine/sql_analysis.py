@@ -112,11 +112,21 @@ CONFIG_KEYS = frozenset({
     "incremental_filter",
     "partition_by",
     "watermark",
+    "on_schema_change",
 })
 
 # Accepted values of `materialized`, checked at validation time rather than
 # only when execution reaches "Unknown materialization".
 MATERIALIZATIONS = frozenset({"view", "table", "incremental"})
+
+# Accepted values of `on_schema_change`, the policy an incremental model
+# applies when its query's columns no longer line up with the target table.
+ON_SCHEMA_CHANGE_POLICIES = frozenset({
+    "append_new_columns",
+    "ignore",
+    "fail",
+    "sync_all_columns",
+})
 
 
 def parse_config(sql: str) -> dict[str, str]:

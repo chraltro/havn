@@ -397,11 +397,11 @@ class TestConfigKeyValidation:
         assert "Did you mean 'materialized'?" in unknown[0].message
 
     def test_unknown_key_without_a_near_match(self, tmp_path):
-        models = self._discover(tmp_path, "@config schema=gold, on_schema_change=append")
+        models = self._discover(tmp_path, "@config schema=gold, cluster_by=region")
         errors = validate_models(None, models)
         unknown = [e for e in errors if "Unknown @config key" in e.message]
         assert len(unknown) == 1
-        assert "'on_schema_change'" in unknown[0].message
+        assert "'cluster_by'" in unknown[0].message
         assert "Did you mean" not in unknown[0].message
         assert "Known keys:" in unknown[0].message
 
@@ -409,7 +409,8 @@ class TestConfigKeyValidation:
         models = self._discover(
             tmp_path,
             "@config materialized=incremental, schema=gold, unique_key=id, "
-            "incremental_strategy=merge, partition_by=id, watermark=id",
+            "incremental_strategy=merge, partition_by=id, watermark=id, "
+            "on_schema_change=sync_all_columns",
         )
         errors = validate_models(None, models)
         assert not [e for e in errors if "@config" in e.message]

@@ -114,6 +114,7 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         incremental_filter = config.get("incremental_filter")
         partition_by = config.get("partition_by")
         watermark = config.get("watermark")
+        on_schema_change = config.get("on_schema_change", "append_new_columns")
 
         model = SQLModel(
             path=sql_file,
@@ -133,6 +134,7 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
             incremental_filter=incremental_filter,
             partition_by=partition_by,
             watermark=watermark,
+            on_schema_change=on_schema_change,
             grain=grain,
             owner=owner,
             source_freshness=source_freshness,

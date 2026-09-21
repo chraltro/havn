@@ -302,12 +302,19 @@ def _run_transform_sequential(
                 continue
 
         try:
-            duration_ms, row_count = execute_model(conn, model)
+            schema_changes: list[str] = []
+            duration_ms, row_count = execute_model(conn, model, schema_changes)
             _update_state(conn, model, duration_ms, row_count)
-            log_run(conn, "transform", model.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
+            log_run(
+                conn, "transform", model.full_name, "success", duration_ms, row_count,
+                log_output="; ".join(schema_changes) or None,
+                pipeline_run_id=pipeline_run_id,
+            )
 
             suffix = f" ({row_count:,} rows, {duration_ms}ms)" if row_count else f" ({duration_ms}ms)"
             console.print(f"  [green]done[/green]  {label}{suffix}")
+            for change in schema_changes:
+                console.print(f"         [cyan]schema[/cyan]  {change}")
 
             # Capture snapshot for Pipeline Rewind
             if project_dir and run_id:
@@ -563,9 +570,16 @@ def _run_transform_parallel(
                 continue
 
             try:
-                duration_ms, row_count = execute_model(conn, model)
+                schema_changes: list[str] = []
+                duration_ms, row_count = execute_model(conn, model, schema_changes)
                 _update_state(conn, model, duration_ms, row_count)
-                log_run(conn, "transform", model.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
+                log_run(
+                    conn, "transform", model.full_name, "success", duration_ms, row_count,
+                    log_output="; ".join(schema_changes) or None,
+                    pipeline_run_id=pipeline_run_id,
+                )
+                for change in schema_changes:
+                    console.print(f"         [cyan]schema[/cyan]  {change}")
 
                 # Assertions (and synthesised @grain check, if any)
                 if model.assertions or model.grain:
@@ -641,6 +655,8 @@ def _run_transform_parallel(
                     else:
                         suffix = f" ({model_result.duration_ms}ms)"
                     console.print(f"  [green]done[/green]  {label}{suffix}")
+                    for change in model_result.schema_changes:
+                        console.print(f"         [cyan]schema[/cyan]  {change}")
                 elif model_result.status == "assertion_failed":
                     console.print(f"  [red]FAIL[/red]  {label}: assertion(s) failed")
                 else:
