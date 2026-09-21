@@ -19,6 +19,7 @@ from havn.engine.sql_analysis import (
     parse_grain,
     parse_owner,
     parse_source_freshness,
+    parse_sql,
     strip_config_comments,
 )
 from havn.engine.utils import validate_identifier
@@ -48,11 +49,15 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         owner = parse_owner(sql)
         source_freshness = parse_source_freshness(sql)
         query = strip_config_comments(sql)
+        # Parsed once here and handed to the model below, so validation, the
+        # deny-rule check and column lineage reuse this tree instead of
+        # parsing the same SQL again.
+        ast = parse_sql(query)
         folder_schema_tmp = sql_file.relative_to(transform_dir).parent.name or "public"
         own_schema_tmp = config.get("schema", folder_schema_tmp)
         own_name_tmp = sql_file.stem
         auto_refs = extract_table_refs(
-            query, exclude=f"{own_schema_tmp}.{own_name_tmp}"
+            query, exclude=f"{own_schema_tmp}.{own_name_tmp}", ast=ast
         )
         if depends:
             merged = list(depends)
@@ -80,30 +85,31 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         partition_by = config.get("partition_by")
         watermark = config.get("watermark")
 
-        models.append(
-            SQLModel(
-                path=sql_file,
-                name=name,
-                schema=schema,
-                full_name=f"{schema}.{name}",
-                sql=sql,
-                query=query,
-                materialized=materialized,
-                depends_on=depends,
-                description=description,
-                column_docs=column_docs,
-                assertions=assertions,
-                assertion_specs=assertion_specs,
-                unique_key=unique_key,
-                incremental_strategy=incremental_strategy,
-                incremental_filter=incremental_filter,
-                partition_by=partition_by,
-                watermark=watermark,
-                grain=grain,
-                owner=owner,
-                source_freshness=source_freshness,
-            )
+        model = SQLModel(
+            path=sql_file,
+            name=name,
+            schema=schema,
+            full_name=f"{schema}.{name}",
+            sql=sql,
+            query=query,
+            materialized=materialized,
+            depends_on=depends,
+            description=description,
+            column_docs=column_docs,
+            assertions=assertions,
+            assertion_specs=assertion_specs,
+            unique_key=unique_key,
+            incremental_strategy=incremental_strategy,
+            incremental_filter=incremental_filter,
+            partition_by=partition_by,
+            watermark=watermark,
+            grain=grain,
+            owner=owner,
+            source_freshness=source_freshness,
         )
+        if ast is not None:
+            model.ast = ast
+        models.append(model)
 
     return models
 

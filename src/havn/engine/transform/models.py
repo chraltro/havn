@@ -6,6 +6,17 @@ import hashlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sqlglot import exp
+
+
+class _Unparsed:
+    """Marker for "this model's SQL has not been parsed yet"."""
+
+
+_UNPARSED = _Unparsed()
 
 
 def _hash_content(content: str) -> str:
@@ -93,6 +104,49 @@ class SQLModel:
         if self.grain:
             parts.append("grain=" + ",".join(self.grain))
         self.content_hash = _hash_content("|".join(parts))
+
+        # Plain attributes, deliberately not dataclass fields: the AST must
+        # stay out of __eq__/__repr__ and out of the content hash above.
+        self._ast_cache: object = _UNPARSED
+        self._parse_error: str = ""
+
+    @property
+    def ast(self) -> exp.Expression | None:
+        """The parsed ``query``, or None when it does not parse.
+
+        Parsed once and kept. Discovery, validation, the deny-rule check and
+        column lineage all want the same tree, and each used to call
+        ``sqlglot.parse_one`` on the same SQL again -- four parses per model
+        per pass, which dominates the cost of a full-project check.
+
+        Assigning to it seeds the cache, which discovery does with the AST it
+        already parsed to extract table references. ``query`` is never
+        rewritten after construction, so the cache cannot go stale.
+        """
+        if isinstance(self._ast_cache, _Unparsed):
+            from havn.engine.sql_analysis import parse_sql_with_error
+
+            parsed, error = parse_sql_with_error(self.query)
+            self._ast_cache = parsed
+            self._parse_error = error
+        return self._ast_cache  # type: ignore[return-value]
+
+    @ast.setter
+    def ast(self, value: exp.Expression) -> None:
+        """Seed the cache with a tree the caller already parsed.
+
+        Only successful parses are seeded; a model whose SQL did not parse is
+        left alone so the failure message is captured on first access.
+        """
+        self._ast_cache = value
+        self._parse_error = ""
+
+    @property
+    def parse_error(self) -> str:
+        """Why ``query`` failed to parse, or "" when it parsed."""
+        if isinstance(self._ast_cache, _Unparsed):
+            _ = self.ast
+        return self._parse_error
 
 
 @dataclass

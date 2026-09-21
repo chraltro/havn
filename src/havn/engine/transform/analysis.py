@@ -35,6 +35,7 @@ def extract_column_lineage(
         depends_on=model.depends_on,
         conn=conn,
         column_catalog=column_catalog,
+        ast=model.ast,
     )
 
 
@@ -64,7 +65,6 @@ def validate_models(
         source_columns: Column sets declared in sources.yml, keyed by table name.
         landing_schemas: Schema names reserved for raw/landing data.
     """
-    import sqlglot
     from sqlglot import exp
 
     model_names = {m.full_name for m in models}
@@ -97,14 +97,13 @@ def validate_models(
             )
 
     for model in models:
-        # 1. Parse check
-        try:
-            parsed = sqlglot.parse_one(model.query, read="duckdb")
-        except sqlglot.errors.ParseError as e:
+        # 1. Parse check. ``model.ast`` is the tree discovery already parsed.
+        parsed = model.ast
+        if parsed is None:
             errors.append(ValidationError(
                 model=model.full_name,
                 severity="error",
-                message=f"SQL parse error: {e}",
+                message=f"SQL parse error: {model.parse_error}",
             ))
             continue
 
@@ -267,9 +266,8 @@ def validate_models(
     #    reference forbidden columns. Catches PII leaks at compile time.
     if deny_rules:
         for model in models:
-            try:
-                parsed = sqlglot.parse_one(model.query, read="duckdb")
-            except sqlglot.errors.ParseError:
+            parsed = model.ast
+            if parsed is None:
                 continue  # Already reported above
             schema_lower = model.schema.lower()
             referenced_columns: set[str] = set()

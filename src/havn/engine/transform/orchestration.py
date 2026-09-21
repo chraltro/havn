@@ -159,14 +159,12 @@ def _evaluate_deny_rules(
     if not deny_rules:
         return {}
 
-    import sqlglot
     from sqlglot import exp as _exp
 
     out: dict[str, str] = {}
     for model in models:
-        try:
-            parsed = sqlglot.parse_one(model.query, read="duckdb")
-        except Exception:
+        parsed = model.ast
+        if parsed is None:
             continue  # parse errors surface elsewhere
         schema_lower = model.schema.lower()
         referenced: set[str] = set()

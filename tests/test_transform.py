@@ -337,3 +337,68 @@ def test_upstream_change_still_rebuilds_downstream(tmp_path):
         assert results["silver.enriched"] == "built"
     finally:
         conn.close()
+
+
+# --- Cached AST ---------------------------------------------------------
+
+
+def _make_model(query="SELECT id FROM bronze.src", **kwargs):
+    defaults = dict(
+        path=Path("m.sql"), name="m", schema="silver", full_name="silver.m",
+        sql="", query=query, materialized="view", depends_on=["bronze.src"],
+    )
+    defaults.update(kwargs)
+    return SQLModel(**defaults)
+
+
+def test_model_ast_is_cached():
+    model = _make_model()
+    assert model.ast is not None
+    assert model.ast is model.ast
+
+
+def test_model_ast_stays_out_of_equality_and_hash():
+    """The AST must not leak into dataclass equality or the content hash."""
+    a = _make_model()
+    b = _make_model()
+    _ = a.ast  # populate one side's cache only
+    assert a == b
+    assert a.content_hash == b.content_hash
+
+
+def test_model_ast_none_for_unparseable_sql():
+    model = _make_model(query="THIS IS NOT VALID SQL AT ALL")
+    assert model.ast is None
+    assert model.parse_error
+
+
+def test_sql_parsed_once_per_pass(tmp_path, monkeypatch):
+    """Discovery, validation and lineage share one parse per model.
+
+    Each of them used to call ``sqlglot.parse_one`` on the same SQL.
+    """
+    import sqlglot
+
+    from havn.engine.transform import extract_column_lineage, validate_models
+
+    bronze = tmp_path / "transform" / "bronze"
+    bronze.mkdir(parents=True)
+    (bronze / "src.sql").write_text(
+        "@config materialized=view, schema=bronze\n\n"
+        "SELECT id, name FROM landing.src\n"
+    )
+
+    calls = []
+    real_parse_one = sqlglot.parse_one
+
+    def counting_parse_one(sql, *args, **kwargs):
+        calls.append(sql)
+        return real_parse_one(sql, *args, **kwargs)
+
+    monkeypatch.setattr(sqlglot, "parse_one", counting_parse_one)
+
+    models = discover_models(tmp_path / "transform")
+    assert len(models) == 1
+    validate_models(None, models)
+    extract_column_lineage(models[0])
+    assert len(calls) == 1, calls

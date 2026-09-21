@@ -380,10 +380,29 @@ def strip_config_comments(sql: str) -> str:
 # --- AST-based table reference extraction ---
 
 
+def parse_sql(sql: str) -> exp.Expression | None:
+    """Parse ``sql`` with the DuckDB dialect, returning None when it will not parse.
+
+    The single place that decides which sqlglot failures count as "this is not
+    parseable SQL". Callers that need the message use
+    :func:`parse_sql_with_error`.
+    """
+    return parse_sql_with_error(sql)[0]
+
+
+def parse_sql_with_error(sql: str) -> tuple[exp.Expression | None, str]:
+    """Like :func:`parse_sql`, but also returns the failure message (or "")."""
+    try:
+        return sqlglot.parse_one(sql, read="duckdb"), ""
+    except sqlglot.errors.SqlglotError as e:
+        return None, str(e)
+
+
 def extract_table_refs(
     sql: str,
     *,
     exclude: str | None = None,
+    ast: exp.Expression | None = None,
 ) -> list[str]:
     """Extract schema-qualified table references from SQL using sqlglot AST.
 
@@ -393,13 +412,15 @@ def extract_table_refs(
     Args:
         sql: The SQL query to analyze (config comments should be stripped first).
         exclude: A ``schema.table`` name to exclude (e.g. the model's own name).
+        ast: Pre-parsed AST for ``sql``, when the caller already has one.
+            Callers holding only SQL text can leave this out and the text is
+            parsed here as before.
 
     Returns:
         Sorted list of unique ``schema.table`` references.
     """
-    try:
-        parsed = sqlglot.parse_one(sql, read="duckdb")
-    except sqlglot.errors.ParseError:
+    parsed = ast if ast is not None else parse_sql(sql)
+    if parsed is None:
         return _fallback_extract_table_refs(sql, exclude=exclude)
 
     # Collect CTE names so we can skip them
@@ -495,6 +516,7 @@ def extract_column_lineage(
     depends_on: list[str] | None = None,
     conn: Any | None = None,
     column_catalog: dict[str, list[str]] | None = None,
+    ast: exp.Expression | None = None,
 ) -> dict[str, list[dict[str, str]]]:
     """Extract column-level lineage from SQL using sqlglot AST parsing.
 
@@ -509,6 +531,7 @@ def extract_column_lineage(
             as returned by :func:`fetch_column_catalog`. Supply it when
             tracing many models so the catalog is read once for the whole
             pass instead of once per model.
+        ast: Pre-parsed AST for ``query``, when the caller already has one.
 
     Returns:
         Mapping of output_column -> list of {source_table, source_column}.
@@ -516,9 +539,8 @@ def extract_column_lineage(
     depends_on = depends_on or []
     lineage: dict[str, list[dict[str, str]]] = {}
 
-    try:
-        parsed = sqlglot.parse_one(query, read="duckdb")
-    except sqlglot.errors.ParseError:
+    parsed = ast if ast is not None else parse_sql(query)
+    if parsed is None:
         return lineage
 
     # Discover CTE names first so they can be filtered out of the table map.
