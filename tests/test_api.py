@@ -595,3 +595,281 @@ def test_run_query_offset_with_inner_limit(client):
     )
     assert resp.status_code == 200, resp.text
     assert [r[0] for r in resp.json()["rows"]] == [5, 6, 7]
+
+
+# --- Editor intelligence: /api/bind and /api/sql/ctes ------------------------
+
+
+@pytest.fixture
+def bind_project(project):
+    """The base project plus a silver model over the landing table."""
+    (project / "transform" / "silver").mkdir(parents=True, exist_ok=True)
+    (project / "transform" / "gold").mkdir(parents=True, exist_ok=True)
+    (project / "transform" / "silver" / "orders.sql").write_text(
+        "@config materialized=table, schema=silver\n\n"
+        "SELECT order_id, amount FROM landing.orders\n"
+    )
+    conn = duckdb.connect(str(project / "warehouse.duckdb"))
+    conn.execute("CREATE SCHEMA IF NOT EXISTS landing")
+    conn.execute("CREATE TABLE landing.orders (order_id INTEGER, amount DOUBLE)")
+    conn.close()
+    return project
+
+
+@pytest.fixture
+def bind_client(bind_project):
+    import havn.server.app as server_app
+
+    server_app.PROJECT_DIR = bind_project
+    return TestClient(server_app.app)
+
+
+@pytest.fixture
+def viewer(monkeypatch):
+    """Make every request authenticate as a viewer (read permission only)."""
+    import havn.server.deps as deps
+
+    monkeypatch.setattr(
+        deps,
+        "_get_user",
+        lambda request: {"username": "v", "role": "viewer", "display_name": "V"},
+    )
+
+
+def test_bind_endpoint_returns_schema_and_upstream(bind_client):
+    resp = bind_client.post("/api/bind", json={
+        "path": "transform/gold/summary.sql",
+        "content": (
+            "@config materialized=table, schema=gold\n\n"
+            "SELECT order_id, amount * 2 AS doubled FROM silver.orders\n"
+        ),
+    })
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["model"] == "gold.summary"
+    assert data["ok"] is True
+    assert data["errors"] == []
+    assert data["columns"] == [
+        {"name": "order_id", "type": "INTEGER"},
+        {"name": "doubled", "type": "DOUBLE"},
+    ]
+    assert data["upstream"]["silver.orders"] == [
+        {"name": "order_id", "type": "INTEGER"},
+        {"name": "amount", "type": "DOUBLE"},
+    ]
+    assert isinstance(data["duration_ms"], int)
+
+
+def test_bind_endpoint_reports_a_positioned_bind_error(bind_client):
+    resp = bind_client.post("/api/bind", json={
+        "path": "transform/gold/summary.sql",
+        "content": (
+            "@config materialized=table, schema=gold\n"
+            "\n"
+            "SELECT\n"
+            "  no_such_column\n"
+            "FROM silver.orders\n"
+        ),
+    })
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is False
+    bind_errors = [e for e in data["errors"] if e["source"] == "bind"]
+    assert len(bind_errors) == 1
+    err = bind_errors[0]
+    assert err["severity"] == "error"
+    assert err["message"].startswith("bind error: ")
+    assert (err["line"], err["col"]) == (4, 3)
+    assert (err["end_line"], err["end_col"]) == (4, 3 + len("no_such_column"))
+
+
+def test_bind_endpoint_reports_name_level_findings_with_source_validate(bind_client):
+    resp = bind_client.post("/api/bind", json={
+        "path": "transform/gold/summary.sql",
+        "content": (
+            "@config materialized=table, schema=gold, nonsense=1\n\n"
+            "SELECT order_id FROM silver.orders\n"
+        ),
+    })
+    assert resp.status_code == 200, resp.text
+    assert "validate" in {e["source"] for e in resp.json()["errors"]}
+
+
+def test_bind_endpoint_returns_landing_table_columns(bind_client):
+    """A base table is not a model, so it comes from the catalog."""
+    resp = bind_client.post("/api/bind", json={
+        "path": "transform/silver/other.sql",
+        "content": "@config schema=silver\n\nSELECT order_id FROM landing.orders\n",
+    })
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["upstream"]["landing.orders"] == [
+        {"name": "order_id", "type": "INTEGER"},
+        {"name": "amount", "type": "DOUBLE"},
+    ]
+
+
+def test_bind_endpoint_accepts_a_pathless_buffer(bind_client):
+    resp = bind_client.post("/api/bind", json={
+        "path": None,
+        "content": "SELECT order_id FROM silver.orders\n",
+    })
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["model"] is None
+    assert data["columns"] == [{"name": "order_id", "type": "INTEGER"}]
+
+
+def test_bind_endpoint_rejects_a_path_outside_the_project(bind_client):
+    resp = bind_client.post(
+        "/api/bind", json={"path": "../escape.sql", "content": "SELECT 1\n"}
+    )
+    assert resp.status_code == 400
+
+
+def test_bind_endpoint_allows_a_viewer(bind_client, viewer):
+    resp = bind_client.post("/api/bind", json={
+        "path": "transform/gold/summary.sql",
+        "content": "@config schema=gold\n\nSELECT order_id FROM silver.orders\n",
+    })
+    assert resp.status_code == 200, resp.text
+
+
+def test_ctes_endpoint_lists_and_previews(bind_client):
+    resp = bind_client.post("/api/sql/ctes", json={
+        "content": (
+            "WITH base AS (\n"
+            "    SELECT order_id FROM silver.orders\n"
+            "),\n"
+            "agg AS (\n"
+            "    SELECT COUNT(*) AS n FROM base\n"
+            ")\n"
+            "SELECT * FROM agg\n"
+        ),
+        "line": 5,
+    })
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert [c["name"] for c in data["ctes"]] == ["base", "agg"]
+    assert data["active"] == 1
+    assert data["ctes"][0]["start_line"] == 1
+    assert data["ctes"][0]["end_line"] == 3
+    assert data["ctes"][0]["preview_sql"].endswith("SELECT * FROM base")
+    assert "LIMIT" not in data["ctes"][1]["preview_sql"]
+
+
+def test_ctes_endpoint_refuses_recursive(bind_client):
+    resp = bind_client.post("/api/sql/ctes", json={
+        "content": "WITH RECURSIVE t AS (SELECT 1 AS n) SELECT * FROM t",
+        "line": None,
+    })
+    assert resp.status_code == 400
+    assert "recursive" in resp.json()["detail"].lower()
+
+
+def test_ctes_endpoint_on_a_buffer_without_ctes(bind_client):
+    resp = bind_client.post(
+        "/api/sql/ctes", json={"content": "@config schema=gold\n\nSELECT 1 AS x\n", "line": 3}
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"ctes": [], "active": None}
+
+
+def test_model_columns_endpoint(bind_client, bind_project):
+    from havn.engine.database import ensure_meta_table
+    from havn.engine.transform import run_transform
+
+    conn = duckdb.connect(str(bind_project / "warehouse.duckdb"))
+    ensure_meta_table(conn)
+    run_transform(conn, bind_project / "transform", project_dir=bind_project)
+    conn.close()
+
+    resp = bind_client.get("/api/models/silver.orders/columns")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["columns"] == [
+        {"name": "order_id", "type": "INTEGER"},
+        {"name": "amount", "type": "DOUBLE"},
+    ]
+
+
+def test_lint_file_check_allows_a_viewer(bind_client, viewer):
+    resp = bind_client.post("/api/lint/file", json={
+        "path": "transform/silver/orders.sql",
+        "fix": False,
+        "content": "SELECT 1 AS x\n",
+    })
+    assert resp.status_code == 200, resp.text
+
+
+def test_prebuild_gate_runs_after_ingest_and_blocks_the_transform(tmp_path):
+    """A run with ingest used to skip the gate entirely.
+
+    The landing tables do not exist before ingest, which is why the gate was
+    skipped, so it now runs between ingest and the first transform instead.
+    """
+    import havn.server.app as server_app
+    from havn.server.routes.pipeline import (
+        _pipeline_state,
+        _run_selective_pipeline_thread,
+    )
+
+    (tmp_path / "project.yml").write_text(
+        "name: gate\ndatabase:\n  path: warehouse.duckdb\n"
+    )
+    (tmp_path / "ingest").mkdir()
+    (tmp_path / "transform" / "silver").mkdir(parents=True)
+    (tmp_path / "ingest" / "load.py").write_text(
+        "db.execute('CREATE SCHEMA IF NOT EXISTS landing')\n"
+        "db.execute(\"CREATE OR REPLACE TABLE landing.orders AS "
+        "SELECT 1 AS order_id, 2.0 AS amount\")\n"
+    )
+    (tmp_path / "transform" / "silver" / "bad.sql").write_text(
+        "@config materialized=table, schema=silver\n"
+        "\n"
+        "SELECT\n"
+        "  no_such_column\n"
+        "FROM landing.orders\n"
+    )
+    server_app.PROJECT_DIR = tmp_path
+    _pipeline_state["events"] = []
+
+    _run_selective_pipeline_thread(
+        ["ingest", "transform"], False, tmp_path, {"username": "local"}
+    )
+    events = list(_pipeline_state["events"])
+    kinds = [e["event"] for e in events]
+
+    # Ingest ran first, so the gate had real landing tables to bind against.
+    ingest_end = next(
+        i for i, e in enumerate(events)
+        if e["event"] == "model_end" and e["data"]["action"] == "ingest"
+    )
+    gate = next(i for i, e in enumerate(events) if e["event"] == "validation")
+    assert ingest_end < gate
+    assert events[gate]["data"]["severity"] == "error"
+    assert events[gate]["data"]["message"].startswith("bind error: ")
+    assert events[gate]["data"]["line"] == 4
+
+    # The transform never started, and the run reports failure.
+    assert not any(
+        e["event"] == "model_start" and e["data"]["action"] == "transform"
+        for e in events
+    )
+    assert kinds[-1] == "complete"
+    assert events[-1]["data"]["status"] == "failed"
+
+    conn = duckdb.connect(str(tmp_path / "warehouse.duckdb"))
+    built = conn.execute(
+        "SELECT count(*) FROM information_schema.tables "
+        "WHERE table_schema = 'silver'"
+    ).fetchone()[0]
+    conn.close()
+    assert built == 0
+
+
+def test_lint_file_fix_denies_a_viewer(bind_client, viewer):
+    resp = bind_client.post("/api/lint/file", json={
+        "path": "transform/silver/orders.sql",
+        "fix": True,
+        "content": "SELECT 1 AS x\n",
+    })
+    assert resp.status_code == 403
