@@ -134,17 +134,66 @@ havn seed [--force] [--schema NAME] [--env NAME] [--project PATH]
 Build SQL models in dependency order.
 
 ```bash
-havn transform [TARGETS...] [--force] [--sequential] [--workers N] [--env NAME] [--skip-check] [--project PATH]
+havn transform [TARGETS...] [--select SEL] [--exclude SEL] [--force] [--sequential] [--workers N] [--env NAME] [--skip-check] [--verbose] [--project PATH]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `TARGETS` | all | Specific models to build |
+| `TARGETS` | all | Graph selectors picking what to build |
+| `--select, -s` | none | Graph selector, repeatable; the same grammar as `TARGETS`, for people coming from dbt |
+| `--exclude, -x` | none | Graph selector whose matches are removed from the selection |
 | `--force, -f` | false | Rebuild all (ignore change detection) |
 | `--sequential` | false | Disable parallel execution; run models one at a time (independent models run concurrently by default) |
 | `--workers, -w` | 4 | Max parallel workers |
 | `--env, -e` | none | Environment override |
 | `--skip-check` | false | Skip pre-transform validation |
+| `--verbose, -v` | false | Print the resolved selection and which selector matched what |
+
+```bash
+havn transform                          # everything
+havn transform gold.orders              # one model
+havn transform +gold.orders             # and its upstream
+havn transform gold.orders+             # and its downstream
+havn transform 2+gold.orders            # two hops of upstream
+havn transform @silver.customers        # it, its downstream, and their upstream
+havn transform 'gold.fct_*'             # wildcard (quote it)
+havn transform tag:daily                # by tag
+havn transform path:transform/gold/     # by path
+havn transform config.materialized:incremental
+havn transform state:modified+          # what changed, plus downstream
+havn transform 'tag:daily,gold.*'       # comma intersects
+havn transform -s tag:daily -x tag:expensive
+```
+
+A selector that matched nothing is a warning; a run that selected nothing at
+all exits non-zero. Full grammar: [Selecting models](transforms#selecting-models).
+
+### havn ls
+
+List the models a selector resolves to, without building anything. A dry run
+for the selector grammar `havn transform` takes.
+
+```bash
+havn ls [TARGETS...] [--select SEL] [--exclude SEL] [--names] [--env NAME] [--project PATH]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `TARGETS` | all | Graph selectors to resolve |
+| `--select, -s` | none | Graph selector, repeatable |
+| `--exclude, -x` | none | Graph selector whose matches are removed |
+| `--names, -n` | false | Print bare model names, one per line, for piping |
+| `--env, -e` | none | Environment override |
+
+```bash
+havn ls                          # every model, with schema, materialization and tags
+havn ls '+gold.orders'           # what a build of gold.orders would touch
+havn ls state:modified+ --names  # what `havn transform` would rebuild
+```
+
+The warehouse is only opened when a `state:` selector needs it, so `havn ls`
+works in a project that has never been built. Exits non-zero when nothing
+matched.
 
 ### havn jobs run
 

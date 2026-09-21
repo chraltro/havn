@@ -75,6 +75,19 @@ Sets materialization, schema, and per-model engine settings:
 | `partition_by`          | column name                             | none                                          |
 | `watermark`             | column name                             | none                                          |
 | `on_schema_change`      | `append_new_columns`, `ignore`, `fail`, `sync_all_columns` | `append_new_columns`       |
+| `tags`                  | comma-separated labels                  | none                                          |
+
+`tags` labels a model for the `tag:` selector:
+
+```sql
+@config materialized=table, tags=daily,finance
+```
+
+Tags are not part of the model's content hash, so retagging a hundred models
+labels them rather than rebuilding a hundred tables. Each tag must be an
+identifier (letters, digits, underscore, hyphen, not starting with a digit);
+`havn check` reports anything else, which catches `tags = daily finance`
+written with a space instead of a comma.
 
 Keys outside this table are rejected by `havn check`, rather than being read as nothing: `@config materialised=table` used to build a view without complaining. An unrecognised key, and an unsupported value of `materialized`, are both validation errors, with a suggestion when the name is a near miss:
 
@@ -183,7 +196,8 @@ Ignores change detection and rebuilds all models.
 havn transform gold.customer_summary silver.dim_customer
 ```
 
-Builds only the specified models (and their upstream dependencies if needed).
+Builds only the named models. See [Selecting models](#selecting-models) for
+everything else the argument accepts.
 
 ### Parallel Execution
 
@@ -200,6 +214,110 @@ havn transform --env prod
 ```
 
 Uses the database path and settings from the `prod` environment. See [Environments](environments).
+
+## Selecting models
+
+Everywhere havn takes a set of models -- the positional argument to `havn
+transform`, `--select`, `havn ls`, `targets:` in a job file, `targets` on
+`POST /api/transform`, `?select=` on `GET /api/models`, the MCP tools -- it
+takes the same grammar. One implementation, so a selector that works in one
+place works in all of them.
+
+### Names and wildcards
+
+| Selector | Selects |
+|---|---|
+| `gold.orders` | exactly that model |
+| `orders` | the model named `orders`, whatever schema it lives in |
+| `gold.*` | every model in the `gold` schema |
+| `gold.fct_*` | every `gold` model whose name starts with `fct_` |
+| `*.customers` | every `customers` model, in any schema |
+| `*` | every model |
+
+Wildcards are fnmatch patterns and work anywhere in the name, in either half.
+
+### Graph operators
+
+| Selector | Selects |
+|---|---|
+| `+gold.orders` | the model and everything it depends on, transitively |
+| `gold.orders+` | the model and everything that depends on it, transitively |
+| `+gold.orders+` | both directions |
+| `2+gold.orders` | the model and two hops of upstream |
+| `gold.orders+1` | the model and one hop of downstream |
+| `@silver.customers` | the model, its downstream, and every upstream of those |
+
+`@x` is the "make this runnable from scratch" selector: it pulls in whatever
+else the downstream models need, so the whole selection can be built in one
+pass against an empty warehouse.
+
+The operators combine with wildcards and methods: `+gold.*`, `tag:daily+`,
+`@path:transform/silver/`.
+
+### Methods
+
+| Selector | Selects |
+|---|---|
+| `tag:daily` | models carrying `@config tags=daily` |
+| `path:transform/gold/` | models whose file lives under that path |
+| `path:transform/**/fct_*.sql` | a path glob, when a prefix is not enough |
+| `config.materialized:incremental` | any `@config` key, matched by value |
+| `config.unique_key:customer_id` | ... including the incremental settings |
+| `state:modified` | models whose SQL or upstream hash changed since the last run |
+| `state:modified+` | ... plus everything downstream of them |
+
+`state:` compares against the same `_havn.model_state` hashes that change
+detection uses, so `havn transform state:modified+` builds exactly what a
+plain `havn transform` would build, and `havn ls state:modified+` tells you
+in advance what that is. It needs a warehouse; in a project that has never
+been built, everything counts as modified.
+
+### Combining
+
+A comma intersects. Each piece is resolved in full, operators and all, and
+only models in every piece survive:
+
+```bash
+havn transform 'tag:daily,gold.*'          # daily models in gold
+havn transform 'state:modified,tag:daily'  # daily models that changed
+```
+
+Several selectors union. Repeat the positional argument, or `--select`:
+
+```bash
+havn transform gold.orders silver.customers
+havn transform -s tag:daily -s tag:hourly
+```
+
+`--exclude/-x` subtracts a second selection from the first:
+
+```bash
+havn transform 'gold.*' -x tag:expensive
+havn transform state:modified+ -x 'gold.experimental_*'
+```
+
+Quote anything containing `*`, or the shell expands it first.
+
+### Dry-running a selector
+
+`havn ls` resolves a selector and prints what it matched, without building
+anything:
+
+```bash
+$ havn ls '@silver.customers'
+                    4 model(s)
+ model               schema   materialized   tags
+ bronze.customers    bronze   table          daily
+ silver.customers    silver   table          daily
+ gold.fct_orders     gold     incremental    finance
+ gold.dim_customer   gold     table          -
+```
+
+`havn ls --names` prints bare names one per line for piping. A selector that
+matched nothing is a warning and a non-zero exit, on both `havn ls` and
+`havn transform`, so a typo does not look like a project that was already up
+to date. `havn transform -v` prints which selector matched what before it
+starts.
 
 ## Materialization
 

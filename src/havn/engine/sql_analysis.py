@@ -113,6 +113,7 @@ CONFIG_KEYS = frozenset({
     "partition_by",
     "watermark",
     "on_schema_change",
+    "tags",
 })
 
 # Accepted values of `materialized`, checked at validation time rather than

@@ -93,6 +93,9 @@ class SQLModel:
     watermark: str | None = None  # @watermark column for incremental models — auto-generates incremental_filter
     grain: list[str] = field(default_factory=list)  # @grain columns; auto-asserts uniqueness post-build
     owner: str = ""  # @owner label for alert routing
+    # @config tags=daily,finance -- labels for `tag:` selectors. Deliberately
+    # left out of content_hash below: retagging a model must not rebuild it.
+    tags: list[str] = field(default_factory=list)
     source_freshness: list[dict] = field(default_factory=list)  # @source_freshness specs
 
     def __post_init__(self) -> None:

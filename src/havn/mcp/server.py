@@ -305,8 +305,20 @@ class MCPServer:
             ),
             (
                 "list_models",
-                "List all SQL transform models with materialization, schema, and dependencies.",
-                {"type": "object", "properties": {}},
+                "List SQL transform models with materialization, schema, tags and "
+                "dependencies. Pass a graph selector to narrow the list.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "select": {
+                            "type": "string",
+                            "description": (
+                                "Optional graph selector, e.g. 'tag:daily', "
+                                "'+gold.orders', 'gold.fct_*', 'path:transform/gold/'"
+                            ),
+                        },
+                    },
+                },
                 self._tool_list_models,
             ),
             (
@@ -405,7 +417,20 @@ class MCPServer:
                         "properties": {
                             "select": {
                                 "type": "string",
-                                "description": "Build only this model (and its upstreams)",
+                                "description": (
+                                    "Graph selector for what to build. 'gold.orders' is "
+                                    "that model alone; '+gold.orders' adds its upstreams, "
+                                    "'gold.orders+' its downstream, '@x' both directions, "
+                                    "'gold.fct_*' a wildcard, 'tag:daily' a tag, "
+                                    "'path:transform/gold/' a path, "
+                                    "'config.materialized:incremental' a config key, "
+                                    "'state:modified+' what changed plus downstream, and "
+                                    "a comma intersects. Omit to build everything."
+                                ),
+                            },
+                            "exclude": {
+                                "type": "string",
+                                "description": "Selector whose matches are removed from the selection",
                             },
                             "force": {"type": "boolean", "description": "Rebuild even if unchanged"},
                         },
@@ -489,6 +514,17 @@ class MCPServer:
         return discover_models(self.project_dir / "transform")
 
     def _tool_list_models(self, args: dict) -> dict:
+        models = self._models()
+        select = args.get("select")
+        if select:
+            from havn.engine.selectors import select_models
+
+            chosen = set(
+                select_models(
+                    [str(select)], models, project_dir=self.project_dir
+                ).selected
+            )
+            models = [m for m in models if m.full_name in chosen]
         return {
             "models": [
                 {
@@ -496,9 +532,10 @@ class MCPServer:
                     "materialized": m.materialized,
                     "depends_on": m.depends_on,
                     "description": m.description,
+                    "tags": list(getattr(m, "tags", []) or []),
                     "path": str(m.path.relative_to(self.project_dir)),
                 }
-                for m in self._models()
+                for m in models
             ]
         }
 
@@ -636,8 +673,10 @@ class MCPServer:
 
         config = self._config()
         select = args.get("select")
+        exclude = args.get("exclude")
         force = bool(args.get("force", False))
         targets = [str(select)] if select else None
+        exclusions = [str(exclude)] if exclude else None
 
         run_id = None
         if config.rewind.enabled:
@@ -651,6 +690,7 @@ class MCPServer:
                 conn,
                 self.project_dir / "transform",
                 targets=targets,
+                exclude=exclusions,
                 force=force,
                 project_dir=self.project_dir,
                 db_config=config.database,

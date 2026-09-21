@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from havn.server.deps import (
@@ -32,7 +32,11 @@ router = APIRouter()
 
 
 class TransformRequest(BaseModel):
+    # Graph selectors, same grammar as `havn transform`. A plain
+    # ``schema.name`` still means exactly that model, which is what the UI's
+    # "run model" button sends.
     targets: list[str] | None = Field(default=None, max_length=500)
+    exclude: list[str] | None = Field(default=None, max_length=500)
     force: bool = False
 
 
@@ -58,11 +62,31 @@ class CreateModelRequest(BaseModel):
 
 
 @router.get("/api/models")
-def list_models(request: Request) -> list[dict]:
-    """List all SQL transformation models."""
+def list_models(
+    request: Request,
+    select: str | None = Query(
+        default=None,
+        max_length=1000,
+        description=(
+            "Graph selector filtering the list, e.g. 'tag:daily', '+gold.orders', "
+            "'gold.fct_*'. Omit to list everything."
+        ),
+    ),
+) -> list[dict]:
+    """List SQL transformation models, optionally filtered by a graph selector."""
     _require_permission(request, "read")
-    transform_dir = _get_project_dir() / "transform"
+    project_dir = _get_project_dir()
+    transform_dir = project_dir / "transform"
     models = _discover_models_cached(transform_dir)
+    if select:
+        from havn.engine.selectors import select_models as _select_models
+
+        # No connection is passed: ``state:`` needs write-ish access to the
+        # warehouse and this is a read-only listing endpoint.
+        chosen = set(
+            _select_models([select], models, project_dir=project_dir).selected
+        )
+        models = [m for m in models if m.full_name in chosen]
     return [
         {
             "name": m.name,
@@ -70,8 +94,9 @@ def list_models(request: Request) -> list[dict]:
             "full_name": m.full_name,
             "materialized": m.materialized,
             "depends_on": m.depends_on,
-            "path": str(m.path.relative_to(_get_project_dir())),
+            "path": str(m.path.relative_to(project_dir)),
             "content_hash": m.content_hash,
+            "tags": list(getattr(m, "tags", []) or []),
         }
         for m in models
     ]
@@ -88,15 +113,21 @@ def run_transform_endpoint(
 ) -> dict:
     """Run the SQL transformation pipeline.
 
-    Body is optional — POSTing with no body runs all models without --force.
+    ``targets`` and ``exclude`` are graph selectors (``+x``, ``x+``, ``@x``,
+    ``gold.fct_*``, ``tag:daily``, ``state:modified`` and so on). Body is
+    optional: POSTing with no body runs all models without --force.
     """
     _require_permission(request, "execute")
-    logger.info("Transform requested: targets=%s force=%s", req.targets, req.force)
+    logger.info(
+        "Transform requested: targets=%s exclude=%s force=%s",
+        req.targets, req.exclude, req.force,
+    )
     try:
         results = run_transform(
             conn,
             _get_project_dir() / "transform",
             targets=req.targets,
+            exclude=req.exclude,
             force=req.force,
         )
         return {"results": results}

@@ -34,13 +34,18 @@ Options:
 | `query` | Read-only SQL (mutations and file-access functions are rejected) |
 | `list_tables` | Tables and views, optionally filtered by schema |
 | `describe_table` | Columns, types, and row count |
-| `list_models` | Transform models with materialization and dependencies |
+| `list_models` | Transform models with materialization, tags and dependencies; takes a `select` graph selector |
 | `get_model` | A model's SQL source, config, and dependencies |
 | `model_lineage` | Direct + transitive upstreams and downstreams |
 | `run_history` | Recent pipeline runs from `_havn.run_log` |
 | `list_metrics` | Semantic-layer metrics from `metrics/*.yml` |
 | `query_metric` | Query a metric by dimensions / grain / time range |
-| `run_transform` | Build models (omitted with `--read-only`) |
+| `run_transform` | Build models; `select` and `exclude` take graph selectors (omitted with `--read-only`) |
+
+`select` and `exclude` take the same grammar as `havn transform`: `+x`, `x+`,
+`@x`, `gold.fct_*`, `tag:daily`, `path:transform/gold/`,
+`config.materialized:incremental`, `state:modified+`, and a comma to
+intersect. See [Selecting models](transforms#selecting-models).
 
 ## How it coexists with `havn serve`
 

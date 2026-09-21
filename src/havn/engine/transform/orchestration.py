@@ -46,13 +46,18 @@ def run_transform(
     run_id: str | None = None,
     pipeline_run_id: str | None = None,
     db_config: object | None = None,
+    exclude: list[str] | None = None,
 ) -> dict[str, str]:
     """Run the full transformation pipeline.
 
     Args:
         conn: DuckDB connection
         transform_dir: Path to transform/ directory
-        targets: Specific models to run (None = all)
+        targets: Graph selectors picking what to run (None or ["all"] = every
+            model). See :func:`havn.engine.selectors.select_models` for the
+            grammar: ``+x``, ``x+``, ``@x``, ``gold.fct_*``, ``tag:daily``,
+            ``state:modified`` and so on. Plain ``schema.name`` still means
+            exactly that model.
         force: Force rebuild even if unchanged
         parallel: Enable parallel execution of independent models
         max_workers: Max number of parallel workers
@@ -61,6 +66,7 @@ def run_transform(
         rewind_config: RewindConfig from project settings
         run_id: Pipeline run ID (for snapshot tagging)
         pipeline_run_id: Shared ID grouping all model executions in this pipeline run
+        exclude: Selectors whose matches are subtracted from ``targets``.
 
     Returns:
         Dict of model_name -> status ("built", "skipped", "error")
@@ -78,16 +84,31 @@ def run_transform(
         console.print("[yellow]No SQL models found in transform/[/yellow]")
         return {}
 
-    # Filter to targets if specified. `models` is the execution set; the
-    # entries are the same objects as in `all_models`, so hashes computed
+    # Filter to the selection if one was given. `models` is the execution set;
+    # the entries are the same objects as in `all_models`, so hashes computed
     # against the full map are visible here too.
     models = all_models
-    if targets and targets != ["all"]:
-        target_set = set(targets)
-        models = [m for m in all_models if m.full_name in target_set or m.name in target_set]
+    if (targets and targets != ["all"]) or exclude:
+        from havn.engine.selectors import select_models
+
+        selection = select_models(
+            targets,
+            all_models,
+            conn=conn,
+            # ``path:`` selectors are written relative to the project root,
+            # which is transform/'s parent whether or not the caller bothered
+            # to pass project_dir (the API does not).
+            project_dir=project_dir or transform_dir.parent,
+            exclude=exclude,
+        )
+        chosen = set(selection.selected)
+        models = [m for m in all_models if m.full_name in chosen]
         if not models:
             all_names = [m.full_name for m in all_models]
-            console.print(f"[yellow]No models matched targets: {', '.join(targets)}[/yellow]")
+            asked = ", ".join(targets or ["all"])
+            console.print(f"[yellow]No models matched targets: {asked}[/yellow]")
+            for warning in selection.warnings:
+                console.print(f"[yellow]{warning}[/yellow]")
             if all_names:
                 console.print(f"[dim]Available models: {', '.join(all_names)}[/dim]")
             return {}

@@ -115,6 +115,7 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         partition_by = config.get("partition_by")
         watermark = config.get("watermark")
         on_schema_change = config.get("on_schema_change", "append_new_columns")
+        tags = [t.strip() for t in config.get("tags", "").split(",") if t.strip()]
 
         model = SQLModel(
             path=sql_file,
@@ -138,6 +139,7 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
             grain=grain,
             owner=owner,
             source_freshness=source_freshness,
+            tags=tags,
         )
         if ast is not None:
             model.ast = ast

@@ -119,7 +119,8 @@ def preview(
         ensure_meta_table(conn)
     try:
         plan = preview_plan(
-            job.targets or [job.target], dag, project_dir, conn=conn, resolve=job.resolve
+            job.targets or [job.target], dag, project_dir, conn=conn,
+            resolve=job.resolve, exclude=job.exclude or None,
         )
     finally:
         if conn:
@@ -171,7 +172,8 @@ def run(
         models = discover_models(project_dir / "transform")
         dag = build_dag(models)
         plan = resolve_execution_plan(
-            job.targets or [job.target], dag, project_dir, conn=conn, resolve=job.resolve
+            job.targets or [job.target], dag, project_dir, conn=conn,
+            resolve=job.resolve, exclude=job.exclude or None,
         )
         console.print(f"[bold]Running {job.name}[/bold] \u2014 {len(plan.steps)} steps")
         result = execute_job(job, plan, conn, project_dir, trigger="manual")

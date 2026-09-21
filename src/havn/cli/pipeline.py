@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import TYPE_CHECKING, Annotated, Optional
 
 import typer
 from rich.table import Table
 
 from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, console
+
+if TYPE_CHECKING:
+    from havn.engine.selectors import SelectionResult
 
 logger = logging.getLogger("havn.cli")
 
@@ -162,17 +165,134 @@ def seed(
         conn.close()
 
 
+def _report_selection(selection: SelectionResult, *, verbose: bool) -> None:
+    """Print what a set of selectors resolved to.
+
+    Always loud about a selector that matched nothing, since a typo in a
+    selector otherwise looks exactly like a project where everything is
+    already up to date. Quiet about the rest unless ``-v`` asked.
+    """
+    for warning in selection.warnings:
+        console.print(f"[yellow]warning: {warning}[/yellow]")
+
+    if not verbose:
+        return
+    for selector, names in selection.matched.items():
+        rendered = ", ".join(names) if names else "(nothing)"
+        console.print(f"  [dim]{selector} -> {rendered}[/dim]")
+    console.print(f"  [dim]{len(selection.selected)} model(s) selected[/dim]")
+
+
+@app.command(name="ls")
+def ls(
+    targets: Annotated[Optional[list[str]], typer.Argument(help="Graph selectors (default: every model)")] = None,
+    select: Annotated[Optional[list[str]], typer.Option("--select", "-s", help="Graph selector, repeatable")] = None,
+    exclude: Annotated[Optional[list[str]], typer.Option("--exclude", "-x", help="Graph selector whose matches are removed")] = None,
+    names_only: Annotated[bool, typer.Option("--names", "-n", help="Print bare model names, one per line, for piping")] = False,
+    env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use (e.g. dev, prod)")] = None,
+    project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
+) -> None:
+    """List the models a selector resolves to, without building anything.
+
+    A dry run for the selector grammar that `havn transform` takes, so an
+    `@`, a `state:modified+` or a wildcard can be checked before it drives a
+    build. Prints schema, materialization and tags for each match.
+    """
+    from havn.engine.database import open_warehouse
+    from havn.engine.selectors import select_models
+    from havn.engine.transform import discover_models
+
+    project_dir = _resolve_project(project_dir)
+    config = _load_config(project_dir, env)
+    transform_dir = project_dir / "transform"
+
+    selectors = list(targets or []) + list(select or [])
+    exclusions = list(exclude or [])
+
+    models = discover_models(transform_dir)
+    by_name = {m.full_name: m for m in models}
+
+    # Only `state:` selectors need the warehouse; opening it otherwise would
+    # make `havn ls` fail in a project that has never been built.
+    conn = None
+    if any("state:" in s for s in selectors + exclusions):
+        if not _warehouse_exists(config, project_dir):
+            console.print(
+                "[yellow]No warehouse yet; state: selectors match every model.[/yellow]"
+            )
+        else:
+            conn = open_warehouse(config, project_dir)
+
+    try:
+        selection = select_models(
+            selectors or ["all"],
+            models,
+            conn=conn,
+            project_dir=project_dir,
+            exclude=exclusions or None,
+        )
+    finally:
+        if conn is not None:
+            conn.close()
+
+    for warning in selection.warnings:
+        console.print(f"[yellow]warning: {warning}[/yellow]")
+
+    if not selection.selected:
+        console.print("[dim]No models selected.[/dim]")
+        raise typer.Exit(1)
+
+    if names_only:
+        for name in selection.selected:
+            print(name)
+        return
+
+    table = Table(title=f"{len(selection.selected)} model(s)")
+    table.add_column("model", style="bold")
+    table.add_column("schema")
+    table.add_column("materialized")
+    table.add_column("tags")
+    for name in selection.selected:
+        model = by_name[name]
+        table.add_row(
+            name,
+            model.schema,
+            model.materialized,
+            ", ".join(getattr(model, "tags", []) or []) or "[dim]-[/dim]",
+        )
+    console.print(table)
+
+
 @app.command()
 def transform(
-    targets: Annotated[Optional[list[str]], typer.Argument(help="Specific models to run")] = None,
+    targets: Annotated[Optional[list[str]], typer.Argument(help="Graph selectors picking what to build (default: everything)")] = None,
+    select: Annotated[Optional[list[str]], typer.Option("--select", "-s", help="Graph selector, repeatable; same grammar as the positional argument")] = None,
+    exclude: Annotated[Optional[list[str]], typer.Option("--exclude", "-x", help="Graph selector whose matches are removed from the selection")] = None,
     force: Annotated[bool, typer.Option("--force", "-f", help="Force rebuild all models")] = False,
     sequential: Annotated[bool, typer.Option("--sequential", help="Disable parallel execution; run models one at a time")] = False,
     workers: Annotated[int, typer.Option("--workers", "-w", help="Max parallel workers")] = 4,
     env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use (e.g. dev, prod)")] = None,
     skip_check: Annotated[bool, typer.Option("--skip-check", help="Skip pre-transform validation")] = False,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Print the resolved selection and which selector matched what")] = False,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
     """Parse SQL models, resolve DAG, execute in dependency order.
+
+    Targets are dbt-style graph selectors:
+
+      havn transform                        every model
+      havn transform gold.orders            exactly that model
+      havn transform +gold.orders           it and everything it depends on
+      havn transform gold.orders+           it and everything downstream
+      havn transform 1+gold.orders          one hop of upstream only
+      havn transform @silver.customers      it, its downstream, and their upstream
+      havn transform 'gold.fct_*'           fnmatch wildcards
+      havn transform tag:daily              models tagged daily
+      havn transform path:transform/gold/   models under a path
+      havn transform config.materialized:incremental
+      havn transform state:modified+        what changed, plus downstream
+      havn transform 'tag:daily,gold.*'     comma intersects
+      havn transform -s tag:daily -x gold.experimental
 
     Supports incremental models, data quality assertions, auto-profiling,
     and parallel execution of independent models.
@@ -184,11 +304,36 @@ def transform(
     config = _load_config(project_dir, env)
     transform_dir = project_dir / "transform"
 
+    selectors = list(targets or []) + list(select or [])
+    exclusions = list(exclude or [])
+
     parallel = not sequential
     mode = "parallel" if parallel else "sequential"
     console.print(f"[bold]Transform[/bold] [dim]({mode})[/dim]:")
 
     conn = open_warehouse(config, project_dir)
+
+    # Resolve the selection up front so the user is told what will run (and
+    # which selector matched nothing) before any of the work starts.
+    resolved: Optional[list[str]] = None
+    if selectors or exclusions:
+        from havn.engine.selectors import select_models
+        from havn.engine.transform import discover_models
+
+        all_models = discover_models(transform_dir)
+        selection = select_models(
+            selectors or ["all"],
+            all_models,
+            conn=conn,
+            project_dir=project_dir,
+            exclude=exclusions or None,
+        )
+        _report_selection(selection, verbose=verbose)
+        if not selection.selected:
+            console.print("[red]Nothing selected; nothing to build.[/red]")
+            conn.close()
+            raise typer.Exit(1)
+        resolved = selection.selected
 
     # Register Python SQL macros (macros/ directory) so they're available in transforms
     macros_dir = project_dir / "macros"
@@ -279,7 +424,7 @@ def transform(
 
     try:
         results = run_transform(
-            conn, transform_dir, targets=targets, force=force,
+            conn, transform_dir, targets=resolved, force=force,
             parallel=parallel, max_workers=workers,
             db_config=config.database,
             project_dir=project_dir, rewind_config=config.rewind, run_id=run_id,
