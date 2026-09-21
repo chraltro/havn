@@ -6,7 +6,10 @@ import logging
 
 import duckdb
 
-from havn.engine.sql_analysis import extract_column_lineage as _extract_column_lineage_impl
+from havn.engine.sql_analysis import (
+    extract_column_lineage as _extract_column_lineage_impl,
+    fetch_column_catalog,
+)
 
 from .models import SQLModel, ValidationError
 
@@ -16,16 +19,22 @@ logger = logging.getLogger("havn.transform")
 def extract_column_lineage(
     model: SQLModel,
     conn: duckdb.DuckDBPyConnection | None = None,
+    column_catalog: dict[str, list[str]] | None = None,
 ) -> dict[str, list[dict[str, str]]]:
     """Extract column-level lineage from a SQL model using sqlglot AST parsing.
 
     Returns a mapping of output_column -> list of {source_table, source_column}.
     Delegates to the shared sql_analysis module for AST-based lineage tracing.
+
+    Tracing several models in one pass? Call
+    :func:`havn.engine.sql_analysis.fetch_column_catalog` once and pass the
+    result as ``column_catalog`` so the catalog is not re-read per model.
     """
     return _extract_column_lineage_impl(
         query=model.query,
         depends_on=model.depends_on,
         conn=conn,
+        column_catalog=column_catalog,
     )
 
 
@@ -82,16 +91,10 @@ def validate_models(
                 c.lower() for c in cols
             )
     if conn:
-        try:
-            rows = conn.execute(
-                "SELECT table_schema || '.' || table_name, column_name "
-                "FROM information_schema.columns"
-            ).fetchall()
-            for table_fqn, col_name in rows:
-                table_fqn = table_fqn.lower()
-                column_catalog.setdefault(table_fqn, set()).add(col_name.lower())
-        except Exception as e:
-            logger.debug("Could not describe table columns: %s", e)
+        for table_fqn, cols in fetch_column_catalog(conn).items():
+            column_catalog.setdefault(table_fqn, set()).update(
+                c.lower() for c in cols
+            )
 
     for model in models:
         # 1. Parse check
@@ -355,11 +358,13 @@ def impact_analysis(
     # Column-level impact if a column is specified
     if column and conn:
         affected_columns: list[dict[str, str]] = []
+        # One catalog read for the whole downstream set, not one per model.
+        catalog = fetch_column_catalog(conn)
         for ds_name in downstream:
             ds_model = model_map.get(ds_name)
             if not ds_model:
                 continue
-            lineage = extract_column_lineage(ds_model, conn)
+            lineage = extract_column_lineage(ds_model, conn, column_catalog=catalog)
             for out_col, sources in lineage.items():
                 for src in sources:
                     if src["source_table"] == target and src["source_column"] == column:
