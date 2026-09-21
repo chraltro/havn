@@ -39,6 +39,124 @@ Each YAML file can contain multiple contracts under the `contracts:` key.
 | `description` | string | no | `""` | Human-readable description |
 | `severity` | string | no | `error` | `error` or `warn` |
 | `assertions` | list | yes | -- | List of assertion expressions |
+| `columns` | list | no | -- | Declared column shape, see [Column contracts](#column-contracts) |
+| `strict` | bool | no | `false` | An undeclared column is an error |
+| `on_widen` | string | no | `warn` | `warn`, `error` or `ignore` for a widening type change |
+
+## Column contracts
+
+Assertions say what the data must look like. A `columns:` block says what the
+*shape* must look like, and unlike an assertion it is checked before the build,
+against the schema the bind pass infers, on a warehouse where the table may not
+exist yet.
+
+```yaml
+# contracts/orders.yml
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    strict: true          # an undeclared column is an error
+    on_widen: warn        # warn (default) | error | ignore
+    columns:
+      - name: order_id
+        type: BIGINT
+        nullable: false
+        description: "Surrogate key, one row per order"
+      - name: status
+        type: VARCHAR
+      - name: total_amount
+        type: DECIMAL(38,2)
+    assertions:
+      - row_count > 0
+```
+
+| Column property | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Must be a plain identifier: letters, digits, underscores, not starting with a digit |
+| `type` | string | yes | Any DuckDB type name, including nested ones like `STRUCT(a INTEGER)` or `VARCHAR[]` |
+| `nullable` | bool | no | `false` asserts the column does not admit nulls. Omitted means the contract says nothing about nulls |
+| `description` | string | no | Documentation for the column |
+
+Type names are checked by DuckDB itself when the contract loads, so a typo is
+reported where you wrote it rather than becoming a mysterious mismatch later.
+
+A declaration problem -- an unknown type, a name that is not an identifier, a
+duplicate column -- is collected rather than raised. The rest of the contract
+still loads and still runs, and the problem is reported in `havn contracts`,
+`havn validate` and `GET /api/contracts`.
+
+### What each difference costs
+
+| Difference | Severity | Why |
+|---|---|---|
+| Declared column is missing | error | Every consumer of that column breaks. |
+| Undeclared column exists, `strict: true` | error | You asked for the shape to be exact. |
+| Undeclared column exists, `strict: false` (default) | info | Declaring three columns of twenty is a normal way to use this. Reported in the contract result, not in `havn validate`. |
+| Type widened (`INTEGER` to `BIGINT`, `DOUBLE` to `DECIMAL(38,1)`) | warning, or whatever `on_widen` says | Nothing downstream breaks, but you should know. |
+| Type narrowed (`BIGINT` to `SMALLINT`) | error | Values are being lost. |
+| Type changed category (`BIGINT` to `VARCHAR`, `VARCHAR` to `VARCHAR[]`) | error | Every expression over that column changes meaning. |
+| `nullable: false` and the column admits nulls | error | The promise is broken. |
+
+A change of parameters within one type -- `DECIMAL(10,2)` to `DECIMAL(38,2)`,
+`VARCHAR(20)` to `VARCHAR` -- is not a difference at all and is never reported.
+
+`DECIMAL(38,1)` against a declared `DOUBLE` is treated as a **widening**, so it
+warns rather than failing. This is deliberate and it is the single most common
+case: `SUM(some_double)` resolves to `DECIMAL(38,1)` in DuckDB, so a contract
+written by reading the model's SQL says `DOUBLE` and the real column is a
+`DECIMAL`. Set `on_widen: error` on a contract where you want that to fail.
+
+### Nullability is often unavailable
+
+`nullable: false` is only checked when DuckDB actually distinguishes nullable
+from not-null for that object. A table built with `CREATE TABLE AS` -- which is
+every havn model -- reports **every** column as nullable through `DESCRIBE`,
+whether or not a null has ever been in it. Taking that at face value would fail
+every `nullable: false` declaration in every project, so an all-nullable answer
+is treated as no answer and the check is skipped.
+
+In practice that means `nullable:` is documentation on a normal model, and an
+enforced check only where the object carries a real NOT NULL constraint. For a
+data-level guarantee, use `no_nulls(column)` in `assertions:` instead, which
+queries the rows.
+
+### When the check runs
+
+| Moment | Source of the real schema |
+|---|---|
+| `havn validate` (with the bind pass on, the default) | The bind pass, which resolves the model's SQL without building it |
+| The pre-build gate in `havn serve` pipelines | The same bind pass, before the first transform runs |
+| A model the bind pass did not cover | The schema recorded in `_havn.model_columns` at its last build |
+| `havn contracts`, `havn check`, `POST /api/contracts/run` | A live `DESCRIBE` of the built table |
+
+All four produce the same findings from the same code, so the pre-build and
+post-build reports cannot disagree with each other.
+
+### Schema drift without a contract
+
+The same comparison runs without a contract, using the schema recorded at a
+model's last build as the baseline:
+
+```
+warning  gold.orders  output schema of gold.orders changes: added region;
+                      removed legacy_id; retyped amount INTEGER -> BIGINT
+```
+
+It is **off by default**, because the equivalence rules have not been tuned on
+a real project yet and a warning that fires on every model is a warning nobody
+reads. Turn it on per project:
+
+```yaml
+# project.yml
+validation:
+  schema_drift: warn      # warn | off
+```
+
+or per run:
+
+```bash
+havn validate --schema-drift
+```
 
 ## Assertion Types
 
@@ -233,7 +351,7 @@ All three must pass for `havn check` to exit with code 0.
 | Feature | Inline Assertions | YAML Contracts |
 |---------|-------------------|----------------|
 | Location | Inside SQL files | Separate YAML files |
-| Evaluated | During `havn transform` | During `havn contracts` or `havn check` |
+| Evaluated | During `havn transform` | Column declarations during `havn validate`, before the build; assertions during `havn contracts` or `havn check` |
 | Severity | Always error | Configurable (error/warn) |
 | History | Stored in `assertion_results` | Stored in `contract_results` |
 | Use case | Model-specific checks | Cross-model, reusable rules |

@@ -23,8 +23,9 @@ havn lint --fix                 # auto-fix
 
 # Common commands
 havn init my-project            # scaffold new project
-havn validate                   # structure, DAG + bind pass (DuckDB binder)
+havn validate                   # structure, DAG, bind pass + contract columns
 havn validate --no-bind         # skip the bind pass
+havn validate --schema-drift    # also warn when a model's output shape moved
 havn transform                  # build all SQL models
 havn transform --force          # force rebuild (ignore cache)
 havn transform +gold.orders     # graph selectors: +x, x+, +x+, n+x, x+n, @x
@@ -50,6 +51,7 @@ havn macros                     # list registered SQL macros
 havn test                       # run model unit tests (tests/unit/*.yml)
 havn test --model silver.customers -v   # one model, with row diffs
 havn check                      # validate + assertions + contracts + unit tests
+havn contracts                  # run contracts/*.yml (assertions + declared columns)
 havn metrics                    # list semantic-layer metrics (metrics/*.yml)
 havn metrics query revenue --by region --grain month   # query a metric
 havn mcp                        # start MCP stdio server for AI agents
