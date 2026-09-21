@@ -100,6 +100,25 @@ def _finditer_patterns(patterns: tuple[re.Pattern, ...], sql: str) -> list[re.Ma
     return matches
 
 
+# Every key `@config` understands, in one place so later work extends this
+# set rather than adding another silently-ignored key. Discovery reads
+# exactly these; `validate_models` reports anything else instead of letting
+# a typo like `materialised=table` quietly build a view.
+CONFIG_KEYS = frozenset({
+    "schema",
+    "materialized",
+    "unique_key",
+    "incremental_strategy",
+    "incremental_filter",
+    "partition_by",
+    "watermark",
+})
+
+# Accepted values of `materialized`, checked at validation time rather than
+# only when execution reaches "Unknown materialization".
+MATERIALIZATIONS = frozenset({"view", "table", "incremental"})
+
+
 def parse_config(sql: str) -> dict[str, str]:
     """Parse config from SQL header.
 

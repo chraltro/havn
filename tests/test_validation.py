@@ -376,3 +376,61 @@ class TestImpactAnalysis:
         ]
         result = impact_analysis(models, "bronze.a")
         assert set(result["downstream_models"]) == {"silver.b", "silver.c", "gold.d"}
+
+
+class TestConfigKeyValidation:
+    """Unknown `@config` keys used to be dropped without a word."""
+
+    def _discover(self, tmp_path, header):
+        gold = tmp_path / "transform" / "gold"
+        gold.mkdir(parents=True)
+        (gold / "m.sql").write_text(f"{header}\n\nSELECT 1 AS id\n")
+        return discover_models(tmp_path / "transform")
+
+    def test_unknown_key_is_an_error_with_a_suggestion(self, tmp_path):
+        models = self._discover(tmp_path, "@config materialised=table, schema=gold")
+        errors = validate_models(None, models)
+        unknown = [e for e in errors if "Unknown @config key" in e.message]
+        assert len(unknown) == 1
+        assert unknown[0].severity == "error"
+        assert "'materialised'" in unknown[0].message
+        assert "Did you mean 'materialized'?" in unknown[0].message
+
+    def test_unknown_key_without_a_near_match(self, tmp_path):
+        models = self._discover(tmp_path, "@config schema=gold, on_schema_change=append")
+        errors = validate_models(None, models)
+        unknown = [e for e in errors if "Unknown @config key" in e.message]
+        assert len(unknown) == 1
+        assert "'on_schema_change'" in unknown[0].message
+        assert "Did you mean" not in unknown[0].message
+        assert "Known keys:" in unknown[0].message
+
+    def test_known_keys_pass(self, tmp_path):
+        models = self._discover(
+            tmp_path,
+            "@config materialized=incremental, schema=gold, unique_key=id, "
+            "incremental_strategy=merge, partition_by=id, watermark=id",
+        )
+        errors = validate_models(None, models)
+        assert not [e for e in errors if "@config" in e.message]
+        assert not [e for e in errors if "materialization" in e.message]
+
+    def test_legacy_header_is_validated_too(self, tmp_path):
+        models = self._discover(tmp_path, "-- config: materialised=table, schema=gold")
+        errors = validate_models(None, models)
+        assert [e for e in errors if "Unknown @config key" in e.message]
+
+    def test_unknown_materialization_is_an_error(self, tmp_path):
+        models = self._discover(tmp_path, "@config materialized=tabel, schema=gold")
+        errors = validate_models(None, models)
+        bad = [e for e in errors if "Unknown materialization" in e.message]
+        assert len(bad) == 1
+        assert bad[0].severity == "error"
+        assert "Did you mean 'table'?" in bad[0].message
+
+    def test_unsupported_materialization_without_a_near_match(self, tmp_path):
+        models = self._discover(tmp_path, "@config materialized=ephemeral, schema=gold")
+        errors = validate_models(None, models)
+        bad = [e for e in errors if "Unknown materialization" in e.message]
+        assert len(bad) == 1
+        assert "Supported: incremental, table, view." in bad[0].message

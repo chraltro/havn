@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import difflib
 import logging
 
 import duckdb
 
 from havn.engine.sql_analysis import (
+    CONFIG_KEYS,
+    MATERIALIZATIONS,
     extract_column_lineage as _extract_column_lineage_impl,
     fetch_column_catalog,
+    parse_config,
 )
 
 from .models import SQLModel, ValidationError
@@ -37,6 +41,50 @@ def extract_column_lineage(
         column_catalog=column_catalog,
         ast=model.ast,
     )
+
+
+def _did_you_mean(value: str, options: set[str] | frozenset[str]) -> str:
+    """A ``Did you mean 'x'?`` clause for a near miss, or "" when there is none."""
+    close = difflib.get_close_matches(value.lower(), sorted(options), n=1, cutoff=0.6)
+    return f" Did you mean '{close[0]}'?" if close else ""
+
+
+def _validate_config_keys(models: list[SQLModel]) -> list[ValidationError]:
+    """Report `@config` keys and materializations that mean nothing.
+
+    Discovery reads a fixed set of keys off the config dict and ignores the
+    rest, so `materialised=table` used to build a view without a word of
+    complaint, and any key from a newer version of havn (or a plain typo)
+    did the same.
+    """
+    errors: list[ValidationError] = []
+    for model in models:
+        config = parse_config(model.sql)
+        for key in config:
+            if key in CONFIG_KEYS:
+                continue
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown @config key '{key}'."
+                    f"{_did_you_mean(key, CONFIG_KEYS)}"
+                    f" Known keys: {', '.join(sorted(CONFIG_KEYS))}."
+                ),
+            ))
+
+        materialized = config.get("materialized")
+        if materialized and materialized not in MATERIALIZATIONS:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown materialization '{materialized}'."
+                    f"{_did_you_mean(materialized, MATERIALIZATIONS)}"
+                    f" Supported: {', '.join(sorted(MATERIALIZATIONS))}."
+                ),
+            ))
+    return errors
 
 
 def validate_models(
@@ -224,6 +272,8 @@ def validate_models(
                     ))
 
     # --- Additional pre-build validations ---
+
+    errors.extend(_validate_config_keys(models))
 
     # Default landing schemas if not provided
     _landing = {s.lower() for s in landing_schemas} if landing_schemas else {"landing"}

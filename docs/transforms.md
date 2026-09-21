@@ -73,6 +73,13 @@ Sets materialization, schema, and per-model engine settings:
 | `incremental_strategy`  | `delete+insert`, `merge`, `append`      | `delete+insert`                               |
 | `incremental_filter`    | SQL expression (e.g. `event_time >= ...`) | none                                        |
 | `partition_by`          | column name                             | none                                          |
+| `watermark`             | column name                             | none                                          |
+
+Keys outside this table are rejected by `havn check`, rather than being read as nothing: `@config materialised=table` used to build a view without complaining. An unrecognised key, and an unsupported value of `materialized`, are both validation errors, with a suggestion when the name is a near miss:
+
+```
+error  gold.orders  Unknown @config key 'materialised'. Did you mean 'materialized'? Known keys: ...
+```
 
 #### `@depends_on` (optional)
 
