@@ -849,3 +849,50 @@ asks, packages (8) until the macro-pack version has been tried.
   packs via pip cover the realistic case at a tenth of the cost.
 - SCD2 under the name "snapshot" without renaming the three modules that
   already use the word. Do both or the docs will be unreadable.
+
+## 12. Status, 2026-09-21
+
+Everything in sections 2 through 9 is implemented on
+`claude/havn-dbt-v2-gaps-8ijjeg`, including the three items this plan
+deferred (rename, microbatch, packages). The build ran as five phases of
+parallel agents in isolated worktrees, merged in dependency order. Test
+counts went from 1474 backend and 42 frontend to about 2100 backend and 104
+frontend. The CHANGELOG `Unreleased` entry is the user-facing summary.
+
+Deviations from the plan worth knowing:
+
+- The snapshot, rewind and versioning modules were not renamed. The
+  materialization is called `snapshot` anyway; docs carry a disambiguation
+  paragraph. The rename is still a good idea and still a separate change.
+- Unit tests do not default missing mock columns from the bind schema; they
+  warn when a mock is narrower than the real table and the model projects a
+  star. Filling NULL columns silently would have forced every expect row to
+  enumerate them.
+- `impact_analysis` keeps SELECT-list hits on the lineage path and adds only
+  non-projection hits from the reference index, so existing counts hold.
+- Contract nullability is checked only when DuckDB reports a real NOT NULL
+  constraint; `CREATE TABLE AS` objects report everything nullable, which
+  would have failed every `nullable: false` declaration.
+- Defer's snapshot mode cannot use `COPY FROM DATABASE` on a locked file
+  (it needs the attach that just failed), so the locked case falls back to
+  the newest verified backup, and a raw file copy is not offered.
+- `concurrent_batches` for microbatch is not implemented; windows run in
+  order because the per-window transaction is what makes resume honest.
+- `result:` and `source_status:` selectors are not implemented; havn keeps no
+  per-model result set from the previous run.
+- Lint does not walk installed packages, deliberately.
+
+Bugs found and fixed along the way that were not on the gap list: the
+non-transactional incremental path (row loss on a failed INSERT), the
+targeted-run upstream hash corruption, `havn diff` in changed mode comparing
+against an empty upstream hash, partial wildcards in job targets matching
+nothing, lint line numbers wrong for every `@config` model, sqlglot 30
+keying `FROM` and `WITH` as `from_` and `with_` (broke star detection and
+CTE handling in two places), and macro registration inside the shadow
+catalog dying with the DETACH.
+
+Follow-ups that fell out of the work: switch `engine/sentinel.py`,
+`engine/snapshots.py` and the notebook promote path to
+`discover_all_models` so packages are covered there too; a selector input
+in the DAG panel; a frontend surface for the environment's defer status;
+DuckLake support for the bind pass and defer; the module renames above.

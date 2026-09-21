@@ -133,6 +133,20 @@ in `docs/internal/dbt-v2-gap-plan.md`.
   models in job targets.
 - Fixed: `havn diff` in changed mode compared against an empty upstream hash
   and reported nearly every model as changed.
+- **Defer.** `havn transform --defer` builds in the active environment while
+  reading every model it has not built from the environment's `defer:`
+  target (`environments.<name>.defer: <other env>` in `project.yml`). Writes
+  always land locally. What is redirected is decided by the live DuckDB
+  catalogs, so `landing` tables, seeds and sources fall through with no
+  declaration. The limitation is DuckDB's file lock: the attach fails while
+  another process holds the target open for writing, so `--defer-snapshot`
+  defers to a consistent copy instead (`COPY FROM DATABASE` when the target
+  is free, the newest verified backup when it is locked). `havn env show`
+  and `GET /api/environment` report the target and whether it can be opened
+  right now. No manifest or `--state`; havn needs the other environment's
+  file.
+- Model existence and column probes are scoped to the current database, so
+  an attached second warehouse cannot be mistaken for the local one.
 
 ### Lineage and performance
 
