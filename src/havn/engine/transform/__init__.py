@@ -42,10 +42,15 @@ from .quality import (
 # Execution
 from .execution import (
     SchemaChangeError,
+    SnapshotError,
+    SnapshotSettings,
     _execute_incremental,
     _execute_single_model,
+    _execute_snapshot,
     execute_model,
     resolve_query,
+    snapshot_settings_for,
+    snapshot_settings_from_config,
 )
 
 # Ephemeral model inlining
@@ -99,6 +104,11 @@ __all__ = [
     # Execution
     "SchemaChangeError",
     "execute_model",
+    "SnapshotError",
+    "SnapshotSettings",
+    "_execute_snapshot",
+    "snapshot_settings_for",
+    "snapshot_settings_from_config",
     "resolve_query",
     "run_transform",
     # Ephemeral inlining

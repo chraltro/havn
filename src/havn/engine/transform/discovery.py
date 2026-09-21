@@ -117,6 +117,13 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         watermark = config.get("watermark")
         on_schema_change = config.get("on_schema_change", "append_new_columns")
         tags = [t.strip() for t in config.get("tags", "").split(",") if t.strip()]
+        # Snapshot (SCD2) settings. Read for every model so `validate_models`
+        # can complain about them on a model that is not a snapshot; execution
+        # only looks at them when materialized=snapshot.
+        strategy = config.get("strategy", "check")
+        updated_at = config.get("updated_at")
+        check_cols = config.get("check_cols")
+        hard_deletes = config.get("hard_deletes", "ignore")
 
         model = SQLModel(
             path=sql_file,
@@ -137,6 +144,10 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
             partition_by=partition_by,
             watermark=watermark,
             on_schema_change=on_schema_change,
+            strategy=strategy,
+            updated_at=updated_at,
+            check_cols=check_cols,
+            hard_deletes=hard_deletes,
             grain=grain,
             owner=owner,
             source_freshness=source_freshness,

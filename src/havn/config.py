@@ -184,6 +184,21 @@ class DenyRule(BaseModel):
     reason: str = ""
 
 
+class SnapshotsConfig(BaseModel):
+    """Project-wide shape of the meta columns a `materialized=snapshot` model writes.
+
+    ``meta_columns`` renames any of ``valid_from``, ``valid_to``,
+    ``is_current``, ``row_hash`` and ``is_deleted`` -- the point is that a
+    project migrating from dbt can keep reading ``dbt_valid_from`` without
+    rewriting every downstream model. ``valid_to_current`` is a SQL literal
+    written into the open row's ``valid_to`` instead of NULL, because most BI
+    tools filter a sentinel date more comfortably than a NULL.
+    """
+
+    meta_columns: dict[str, str] = Field(default_factory=dict)
+    valid_to_current: str | None = None
+
+
 class PoliciesConfig(BaseModel):
     """Project-level policy framework, declared under ``policies:`` in ``project.yml``."""
     model_config = ConfigDict(extra="ignore")
@@ -206,6 +221,7 @@ class ProjectConfig(BaseModel):
     rewind: RewindConfig = Field(default_factory=RewindConfig)
     sentinel: SentinelConfig = Field(default_factory=SentinelConfig)
     policies: PoliciesConfig = Field(default_factory=PoliciesConfig)
+    snapshots: SnapshotsConfig = Field(default_factory=SnapshotsConfig)
     environments: dict[str, EnvironmentConfig] = Field(default_factory=dict)
     active_environment: str | None = None
     sources: list[SourceConfig] = Field(default_factory=list)
@@ -379,6 +395,20 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
         ))
     policies = PoliciesConfig(deny=deny_rules)
 
+    # Snapshot meta columns
+    snapshots_raw = raw.get("snapshots", {}) or {}
+    snapshots = SnapshotsConfig(
+        meta_columns={
+            str(k): str(v)
+            for k, v in (snapshots_raw.get("meta_columns", {}) or {}).items()
+        },
+        valid_to_current=(
+            str(snapshots_raw["valid_to_current"])
+            if snapshots_raw.get("valid_to_current") is not None
+            else None
+        ),
+    )
+
     # Quality (anomaly detection)
     quality_raw = raw.get("quality", {})
     anomaly_raw = quality_raw.get("anomaly_detection", {})
@@ -455,6 +485,7 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
         rewind=rewind,
         sentinel=sentinel,
         policies=policies,
+        snapshots=snapshots,
         environments=environments,
         active_environment=active_env if active_env and active_env in environments else None,
         sources=sources,

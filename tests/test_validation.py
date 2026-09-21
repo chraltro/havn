@@ -430,11 +430,21 @@ class TestConfigKeyValidation:
         assert "Did you mean 'table'?" in bad[0].message
 
     def test_unsupported_materialization_without_a_near_match(self, tmp_path):
-        models = self._discover(tmp_path, "@config materialized=snapshot, schema=gold")
+        models = self._discover(tmp_path, "@config materialized=parquet, schema=gold")
         errors = validate_models(None, models)
         bad = [e for e in errors if "Unknown materialization" in e.message]
         assert len(bad) == 1
-        assert "Supported: ephemeral, incremental, table, view." in bad[0].message
+        assert (
+            "Supported: ephemeral, incremental, snapshot, table, view."
+            in bad[0].message
+        )
+
+    def test_snapshot_is_a_supported_materialization(self, tmp_path):
+        models = self._discover(
+            tmp_path, "@config materialized=snapshot, unique_key=id, schema=gold"
+        )
+        errors = validate_models(None, models)
+        assert not [e for e in errors if "Unknown materialization" in e.message]
 
     def test_ephemeral_is_a_supported_materialization(self, tmp_path):
         models = self._discover(tmp_path, "@config materialized=ephemeral, schema=gold")

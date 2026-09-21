@@ -478,6 +478,40 @@ def _unavailable(reason: str, started: float) -> BindResult:
     )
 
 
+def _shadow_body(model: SQLModel, snapshot_settings: object | None) -> str:
+    """The body of the shadow view for ``model``, starting at a newline.
+
+    Every materialization but ``snapshot`` binds its own SELECT verbatim. A
+    snapshot's target carries meta columns the query never selects, so a
+    downstream model that reads ``is_current`` would fail to bind against the
+    raw query even though the built table has the column. The wrapper adds
+    them as typed NULLs, which is enough for the binder to resolve and type
+    them, and it is kept on the ``CREATE VIEW`` line so a DuckDB ``LINE n``
+    still maps back to the model's own file by subtracting
+    ``_STATEMENT_LINE_OFFSET``.
+    """
+    if model.materialized != "snapshot":
+        return "\n" + model.query
+
+    from .execution import SnapshotSettings
+
+    st = snapshot_settings if snapshot_settings is not None else SnapshotSettings()
+    meta = [
+        f"CAST(NULL AS TIMESTAMP) AS {_quote_ident(st.valid_from)}",
+        f"CAST(NULL AS TIMESTAMP) AS {_quote_ident(st.valid_to)}",
+        f"CAST(NULL AS BOOLEAN) AS {_quote_ident(st.is_current)}",
+        f"CAST(NULL AS VARCHAR) AS {_quote_ident(st.row_hash)}",
+    ]
+    if model.hard_deletes == "new_record":
+        meta.append(f"CAST(NULL AS BOOLEAN) AS {_quote_ident(st.is_deleted)}")
+    inner = model.query.rstrip().rstrip(";")
+    return (
+        " SELECT *, " + ", ".join(meta) + " FROM (\n"
+        + inner
+        + "\n) AS _havn_snapshot_src"
+    )
+
+
 def bind_models(
     conn: duckdb.DuckDBPyConnection,
     models: list[SQLModel],
@@ -545,6 +579,14 @@ def bind_models(
 
         _seed_extensions(cur, conn)
         _seed_macros(conn, Path(project_dir) if project_dir else None)
+        # Snapshot meta column names are a project-level setting, and a
+        # downstream model referring to them has to bind against the names
+        # this project actually writes.
+        snapshot_settings = None
+        if any(m.materialized == "snapshot" for m in ordered):
+            from .execution import snapshot_settings_for
+
+            snapshot_settings = snapshot_settings_for(project_dir)
 
         for schema in sorted({m.schema for m in ordered}):
             cur.execute(
@@ -581,7 +623,10 @@ def bind_models(
                 continue
             view = f"{_quote_ident(model.schema)}.{_quote_ident(model.name)}"
             try:
-                cur.execute(f"CREATE OR REPLACE VIEW {view} AS\n{model.query}")
+                cur.execute(
+                    f"CREATE OR REPLACE VIEW {view} AS"
+                    + _shadow_body(model, snapshot_settings)
+                )
                 rows = cur.execute(f"DESCRIBE {view}").fetchall()
             except Exception as e:
                 result.errors[model.full_name] = [

@@ -72,7 +72,7 @@ class SQLModel:
     full_name: str  # e.g. "bronze.customers"
     sql: str  # raw SQL content
     query: str  # SQL without config comments
-    materialized: str  # "view", "table", or "incremental"
+    materialized: str  # "view", "table", "incremental", "ephemeral" or "snapshot"
     depends_on: list[str] = field(default_factory=list)
     description: str = ""
     column_docs: dict[str, str] = field(default_factory=dict)
@@ -91,6 +91,17 @@ class SQLModel:
     # "fail" or "sync_all_columns".
     on_schema_change: str = "append_new_columns"
     watermark: str | None = None  # @watermark column for incremental models — auto-generates incremental_filter
+    # --- Snapshot (SCD2) settings, read only when materialized="snapshot" ---
+    # How a changed row is recognised: "check" hashes the tracked columns,
+    # "timestamp" trusts ``updated_at``. Same names and values as dbt.
+    strategy: str = "check"
+    updated_at: str | None = None  # timestamp strategy: the source's change clock
+    # "all" (or None) tracks every non-key column; otherwise a comma list.
+    check_cols: str | None = None
+    # What happens to a key that disappeared from the source:
+    # "ignore" leaves history alone, "invalidate" closes the current row,
+    # "new_record" closes it and appends a tombstone row.
+    hard_deletes: str = "ignore"
     grain: list[str] = field(default_factory=list)  # @grain columns; auto-asserts uniqueness post-build
     owner: str = ""  # @owner label for alert routing
     # @config tags=daily,finance -- labels for `tag:` selectors. Deliberately
@@ -116,6 +127,18 @@ class SQLModel:
             parts.append(f"watermark={self.watermark}")
         if self.on_schema_change != "append_new_columns":
             parts.append(f"on_schema_change={self.on_schema_change}")
+        # Snapshot settings change what a run writes into history, so a model
+        # that switches from check to timestamp (or narrows check_cols) has to
+        # be recognised as modified. Only non-defaults are folded in, so every
+        # model that is not a snapshot keeps the hash it already had.
+        if self.strategy != "check":
+            parts.append(f"strategy={self.strategy}")
+        if self.updated_at:
+            parts.append(f"updated_at={self.updated_at}")
+        if self.check_cols:
+            parts.append(f"check_cols={self.check_cols}")
+        if self.hard_deletes != "ignore":
+            parts.append(f"hard_deletes={self.hard_deletes}")
         # Assertions and @grain are stripped out of `query` by
         # strip_config_comments, so without folding them in here, adding an
         # @assert to a model that is already built leaves content_hash

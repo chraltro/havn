@@ -179,7 +179,7 @@ LEFT JOIN bronze.orders o ON c.customer_id = o.customer_id
 GROUP BY 1, 2
 ```
 
-- `@config` sets materialization (`view` / `table` / `incremental` / `ephemeral`) and schema. Other useful keys: `unique_key`, `incremental_strategy` (`delete+insert` / `merge` / `append`), `incremental_filter`, `partition_by`, `on_schema_change` (`append_new_columns` / `ignore` / `fail` / `sync_all_columns`), `tags` (comma list, for `tag:` selectors; deliberately not hashed, so retagging does not rebuild).
+- `@config` sets materialization (`view` / `table` / `incremental` / `ephemeral` / `snapshot`) and schema. Other useful keys: `unique_key`, `incremental_strategy` (`delete+insert` / `merge` / `append`), `incremental_filter`, `partition_by`, `on_schema_change` (`append_new_columns` / `ignore` / `fail` / `sync_all_columns`), `tags` (comma list, for `tag:` selectors; deliberately not hashed, so retagging does not rebuild). Snapshot models (SCD2 row history) add `strategy` (`check` / `timestamp`), `updated_at`, `check_cols`, `hard_deletes` (`ignore` / `invalidate` / `new_record`); these are row-history models and are unrelated to `havn snapshot` / `havn rewind`, which are whole-warehouse restore points.
 - Dependencies are auto-extracted from `FROM` and `JOIN` clauses via `sqlglot`. You only need `@depends_on` when the parser can't see the reference (e.g. a model name passed through a function or constructed in a string).
 - Folder name is the default schema (e.g., `transform/bronze/` → `schema=bronze`); override with `schema=` in `@config`.
 - Other directives: `@description <text>` for model docs, `@assert <expr>` for data-quality assertions (one per line, runs after build), `@col <name>: <text>` for column-level docs.

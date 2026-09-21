@@ -10,8 +10,10 @@ import duckdb
 
 from havn.engine.sql_analysis import (
     CONFIG_KEYS,
+    HARD_DELETE_POLICIES,
     MATERIALIZATIONS,
     ON_SCHEMA_CHANGE_POLICIES,
+    SNAPSHOT_STRATEGIES,
     extract_column_lineage as _extract_column_lineage_impl,
     fetch_column_catalog,
     parse_config,
@@ -133,6 +135,110 @@ def _validate_tags(models: list[SQLModel]) -> list[ValidationError]:
                         f"Invalid tag '{tag}' in @config tags=. Tags must be "
                         "identifiers (letters, digits, underscore, hyphen; "
                         "not starting with a digit) and separated by commas."
+                    ),
+                ))
+    return errors
+
+
+_SNAPSHOT_ONLY_KEYS = ("strategy", "updated_at", "check_cols", "hard_deletes")
+
+
+def _validate_snapshot_config(models: list[SQLModel]) -> list[ValidationError]:
+    """Check that a `materialized=snapshot` model can actually be merged.
+
+    Every one of these is caught at execution time too, because the engine
+    refuses to write history it cannot reason about. Catching them here means
+    `havn check` says so before a run, rather than after the first table has
+    already been built.
+    """
+    errors: list[ValidationError] = []
+    for model in models:
+        config = parse_config(model.sql)
+        is_snapshot = model.materialized == "snapshot"
+
+        if not is_snapshot:
+            for key in _SNAPSHOT_ONLY_KEYS:
+                if key in config:
+                    errors.append(ValidationError(
+                        model=model.full_name,
+                        severity="warning",
+                        message=(
+                            f"@config {key}= only applies to a snapshot model; "
+                            f"this model is materialized as '{model.materialized}' "
+                            "and the setting is ignored"
+                        ),
+                    ))
+            continue
+
+        if not model.unique_key:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    "Snapshot models need @config unique_key=<column> so a "
+                    "source row can be matched against its own history."
+                ),
+            ))
+        if model.strategy not in SNAPSHOT_STRATEGIES:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown snapshot strategy '{model.strategy}'."
+                    f"{_did_you_mean(model.strategy, SNAPSHOT_STRATEGIES)}"
+                    f" Supported: {', '.join(sorted(SNAPSHOT_STRATEGIES))}."
+                ),
+            ))
+        elif model.strategy == "timestamp" and not model.updated_at:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    "strategy=timestamp needs @config updated_at=<column>: the "
+                    "engine compares that column against the stored valid_from "
+                    "to decide whether a row changed."
+                ),
+            ))
+        if model.updated_at and model.strategy != "timestamp":
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="warning",
+                message=(
+                    "updated_at only applies to strategy=timestamp; this "
+                    f"snapshot uses strategy={model.strategy} and the column "
+                    "is ignored"
+                ),
+            ))
+        if model.check_cols and model.strategy != "check":
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    "check_cols only applies to strategy=check. Drop "
+                    "check_cols, or switch the snapshot to strategy=check."
+                ),
+            ))
+        if model.hard_deletes not in HARD_DELETE_POLICIES:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown hard_deletes policy '{model.hard_deletes}'."
+                    f"{_did_you_mean(model.hard_deletes, HARD_DELETE_POLICIES)}"
+                    f" Supported: {', '.join(sorted(HARD_DELETE_POLICIES))}."
+                ),
+            ))
+        for key in ("incremental_filter", "watermark"):
+            if key in config:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=(
+                        f"@config {key}= is not supported on a snapshot model. "
+                        "A snapshot always reads the source's current state in "
+                        "full and compares it against the history it already "
+                        "holds; filtering the read would silently look like a "
+                        "hard delete of every row that got filtered out."
                     ),
                 ))
     return errors
@@ -329,6 +435,7 @@ def validate_models(
 
     errors.extend(_validate_config_keys(models))
     errors.extend(_validate_tags(models))
+    errors.extend(_validate_snapshot_config(models))
 
     # Default landing schemas if not provided
     _landing = {s.lower() for s in landing_schemas} if landing_schemas else {"landing"}

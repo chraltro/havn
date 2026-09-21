@@ -20,7 +20,12 @@ from .discovery import (
     build_dag_tiers,
     discover_models,
 )
-from .execution import _execute_single_model, _record_ephemeral, execute_model
+from .execution import (
+    _execute_single_model,
+    _record_ephemeral,
+    execute_model,
+    snapshot_settings_for,
+)
 from .models import SQLModel
 from .quality import (
     _save_assertions,
@@ -335,7 +340,12 @@ def _run_transform_sequential(
         try:
             schema_changes: list[str] = []
             duration_ms, row_count = execute_model(
-                conn, model, schema_changes, model_map
+                conn, model, schema_changes, model_map,
+                snapshot_settings=(
+                    snapshot_settings_for(project_dir)
+                    if model.materialized == "snapshot"
+                    else None
+                ),
             )
             _update_state(conn, model, duration_ms, row_count)
             log_run(
@@ -392,7 +402,7 @@ def _run_transform_sequential(
                     continue
 
             # Auto-profile for tables
-            if model.materialized in ("table", "incremental"):
+            if model.materialized in ("table", "incremental", "snapshot"):
                 profile = profile_model(conn, model)
                 _save_profile(conn, model, profile)
                 _run_profiles[model.full_name] = profile
@@ -613,7 +623,12 @@ def _run_transform_parallel(
             try:
                 schema_changes: list[str] = []
                 duration_ms, row_count = execute_model(
-                    conn, model, schema_changes, model_map
+                    conn, model, schema_changes, model_map,
+                    snapshot_settings=(
+                        snapshot_settings_for(project_dir)
+                        if model.materialized == "snapshot"
+                        else None
+                    ),
                 )
                 _update_state(conn, model, duration_ms, row_count)
                 log_run(
@@ -640,7 +655,7 @@ def _run_transform_parallel(
                         continue
 
                 # Profile
-                if model.materialized in ("table", "incremental"):
+                if model.materialized in ("table", "incremental", "snapshot"):
                     profile = profile_model(conn, model)
                     _save_profile(conn, model, profile)
 
