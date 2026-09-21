@@ -282,13 +282,22 @@ def _defining_projections(
 
 
 def _source_projections(
-    select: exp.Select, column: str, relations: set[str], aliases: dict[str, str]
+    select: exp.Select,
+    column: str,
+    relations: set[str],
+    aliases: dict[str, str],
+    own_relations: set[str] | None = None,
 ) -> list[tuple[exp.Expression, str, bool]]:
     """Projections that **read** ``column`` out of one of ``relations``.
 
     Returns ``(node, output_name, is_alias)``: ``node`` is the identifier that
     names the output. ``relations`` holds lower-cased relation names; an empty
     set means "any relation".
+
+    An unqualified projection is attributed through ``own_relations``, the
+    relations this SELECT reads: with exactly one of them there is nothing to
+    be ambiguous about, and with more than one the projection is left alone
+    rather than assigned to a guess.
     """
     found: list[tuple[exp.Expression, str, bool]] = []
     for projection in select.expressions:
@@ -299,9 +308,13 @@ def _source_projections(
             continue
         if relations:
             qualifier = _unquote(inner.table or "").lower()
-            source = aliases.get(qualifier, qualifier)
-            if source not in relations:
-                continue
+            if qualifier:
+                if aliases.get(qualifier, qualifier) not in relations:
+                    continue
+            else:
+                scope = own_relations or set()
+                if len(scope) != 1 or not (scope & relations):
+                    continue
         if isinstance(projection, exp.Alias):
             found.append(
                 (projection.args.get("alias"), _unquote(projection.alias).lower(), True)
@@ -328,8 +341,9 @@ def _classify_projections(
     re_exported = False
     same_name: list[exp.Expression] = []
     renamed: list[tuple[exp.Expression, str]] = []
+    own = _select_relations(select, aliases)
     for node, out_name, is_alias in _source_projections(
-        select, column, exposed, aliases
+        select, column, exposed, aliases, own
     ):
         if not is_alias:
             re_exported = True
