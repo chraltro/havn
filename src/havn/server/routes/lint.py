@@ -44,8 +44,15 @@ def lint_endpoint(request: Request, fix: bool = False) -> dict:
 
 @router.post("/api/lint/file")
 def lint_file_endpoint(request: Request, req: LintFileRequest) -> dict:
-    """Run SQLFluff on a single SQL file."""
-    _require_permission(request, "execute")
+    """Run SQLFluff on a single SQL file.
+
+    Linting a buffer reads it and returns violations, which is no more than a
+    viewer can already do by opening the file, so a plain check needs only
+    read. Auto-fix rewrites the file and needs write. The editor polls this
+    for diagnostics on an idle debounce and would otherwise be closed to every
+    viewer in the project.
+    """
+    _require_permission(request, "write" if req.fix else "read")
     from havn.lint.linter import lint_file
 
     project_dir = _get_project_dir()

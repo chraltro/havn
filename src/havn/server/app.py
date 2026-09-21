@@ -179,10 +179,12 @@ from havn.server.routes.semantic import router as semantic_router  # noqa: E402
 from havn.server.routes.sql_api import router as sql_api_router  # noqa: E402
 from havn.server.routes.export import router as export_router  # noqa: E402
 from havn.server.routes.streaming import router as streaming_router  # noqa: E402
+from havn.server.routes.bind import router as bind_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(files_router)
 app.include_router(models_router)
+app.include_router(bind_router)
 app.include_router(dag_router)
 app.include_router(query_router)
 app.include_router(notebooks_router)

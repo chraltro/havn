@@ -617,3 +617,103 @@ def as_validation_message(error: BindError) -> str:
     the line does not say "error" three times.
     """
     return "bind error: " + _DUCKDB_PREFIX.sub("", error.message)
+
+
+# ---------------------------------------------------------------------------
+# Buffer parsing
+# ---------------------------------------------------------------------------
+
+
+def model_from_buffer(
+    content: str,
+    *,
+    path: str | Path | None = None,
+    transform_dir: Path | str | None = None,
+) -> SQLModel:
+    """Build a :class:`SQLModel` out of unsaved editor text.
+
+    Reads the same directives ``discover_models`` reads, from the same
+    parsers, so the buffer binds exactly as the saved file would. The schema
+    comes from the containing folder unless ``@config schema=`` overrides it,
+    which is the convention discovery uses.
+
+    ``path`` may be relative to the project root or absolute. A buffer with no
+    path at all still binds; it is named ``scratch.buffer`` and depends on
+    whatever its SQL references.
+
+    Raises:
+        ValueError: the schema or model name is not a safe SQL identifier.
+    """
+    from havn.engine.sql_analysis import (
+        extract_table_refs,
+        parse_assertion_specs,
+        parse_assertions,
+        parse_column_docs,
+        parse_config,
+        parse_depends,
+        parse_description,
+        parse_grain,
+        parse_owner,
+        parse_source_freshness,
+        parse_sql,
+        strip_config_comments,
+    )
+    from havn.engine.utils import validate_identifier
+
+    config = parse_config(content)
+    query = strip_config_comments(content)
+    ast = parse_sql(query)
+
+    file_path = Path(path) if path is not None else Path("scratch.sql")
+    name = file_path.stem or "buffer"
+    folder_schema = "scratch"
+    if path is not None:
+        parent = file_path.parent.name
+        if transform_dir is not None:
+            try:
+                relative = file_path.relative_to(Path(transform_dir))
+                parent = relative.parent.name
+            except ValueError:
+                pass
+        folder_schema = parent or "public"
+    schema = config.get("schema", folder_schema)
+
+    validate_identifier(schema, "schema for the buffer")
+    validate_identifier(name, "model name for the buffer")
+
+    depends = parse_depends(content)
+    auto_refs = extract_table_refs(query, exclude=f"{schema}.{name}", ast=ast)
+    if depends:
+        seen = set(depends)
+        for ref in auto_refs:
+            if ref not in seen:
+                depends.append(ref)
+                seen.add(ref)
+    else:
+        depends = auto_refs
+
+    model = SQLModel(
+        path=file_path,
+        name=name,
+        schema=schema,
+        full_name=f"{schema}.{name}",
+        sql=content,
+        query=query,
+        materialized=config.get("materialized", "view"),
+        depends_on=depends,
+        description=parse_description(content),
+        column_docs=parse_column_docs(content),
+        assertions=parse_assertions(content),
+        assertion_specs=parse_assertion_specs(content),
+        unique_key=config.get("unique_key"),
+        incremental_strategy=config.get("incremental_strategy", "delete+insert"),
+        incremental_filter=config.get("incremental_filter"),
+        partition_by=config.get("partition_by"),
+        watermark=config.get("watermark"),
+        grain=parse_grain(content),
+        owner=parse_owner(content),
+        source_freshness=parse_source_freshness(content),
+    )
+    if ast is not None:
+        model.ast = ast
+    return model
