@@ -32,7 +32,7 @@ def promote(
     SQL can be provided as a positional argument, via --file, or piped from stdin.
     """
     from havn.engine.notebook import promote_sql_to_model
-    from havn.engine.transform import build_dag, discover_models
+    from havn.engine.transform import build_dag, discover_all_models
 
     project_dir = _resolve_project(project_dir)
     transform_dir = project_dir / "transform"
@@ -79,7 +79,7 @@ def promote(
 
         # Validate the new model fits into the DAG
         try:
-            models = discover_models(transform_dir)
+            models = discover_all_models(project_dir)
             build_dag(models)
             console.print(f"[green]DAG validation passed[/green] ({len(models)} models)")
         except Exception as e:
@@ -202,12 +202,11 @@ def impact(
 
     from havn.config import load_project
     from havn.engine.database import ensure_meta_table, open_warehouse
-    from havn.engine.transform import discover_models, impact_analysis
+    from havn.engine.transform import discover_all_models, impact_analysis
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
-    transform_dir = project_dir / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir, config)
     model_map = {m.full_name: m for m in models}
 
     # Resolve model name
@@ -277,12 +276,11 @@ def lineage(
     import json as json_mod
 
     from havn.engine.database import open_warehouse
-    from havn.engine.transform import discover_models, extract_column_lineage
+    from havn.engine.transform import discover_all_models, extract_column_lineage
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir)
-    transform_dir = project_dir / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir, config)
     model_map = {m.full_name: m for m in models}
 
     target = model_map.get(model)
@@ -349,7 +347,7 @@ def explain(
         explain_query,
         plan_to_dict,
     )
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
@@ -357,8 +355,7 @@ def explain(
         console.print("[yellow]No warehouse database found. Run a pipeline first.[/yellow]")
         raise typer.Exit(1)
 
-    transform_dir = project_dir / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir, config)
 
     target = next((m for m in models if m.full_name == model), None) or next(
         (m for m in models if m.name == model), None

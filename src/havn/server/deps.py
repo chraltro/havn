@@ -106,7 +106,7 @@ def invalidate_config_cache() -> None:
 # Model discovery cache
 # ---------------------------------------------------------------------------
 
-_MODEL_CACHE_VERSION = 2
+_MODEL_CACHE_VERSION = 3
 _model_cache: dict[str, Any] = {
     "models": None,
     "mtime_map": None,
@@ -116,13 +116,30 @@ _model_cache: dict[str, Any] = {
 
 
 def _discover_models_cached(transform_dir: Path):
-    """Discover models with file-mtime-based caching."""
-    if not transform_dir.exists():
+    """Discover project and package models, with file-mtime-based caching.
+
+    The cache key covers every ``.sql`` file the DAG is built from, including
+    each installed package's, plus ``havn_packages.lock`` itself: installing
+    or upgrading a package changes the model list without touching a single
+    file under ``transform/``.
+    """
+    from havn.engine.packages import lock_path, package_roots
+    from havn.engine.transform.discovery import discover_all_models
+
+    project_dir = transform_dir.parent
+    roots = package_roots(project_dir) if transform_dir.name == "transform" else []
+    if not transform_dir.exists() and not roots:
         return []
 
     current_mtimes = {}
     for sql_file in sorted(transform_dir.rglob("*.sql")):
         current_mtimes[str(sql_file)] = sql_file.stat().st_mtime
+    lock = lock_path(project_dir)
+    if lock.is_file():
+        current_mtimes[str(lock)] = lock.stat().st_mtime
+    for root in roots:
+        for sql_file in sorted(root.transform_dir.rglob("*.sql")):
+            current_mtimes[str(sql_file)] = sql_file.stat().st_mtime
 
     if (
         _model_cache["models"] is not None
@@ -132,7 +149,11 @@ def _discover_models_cached(transform_dir: Path):
     ):
         return _model_cache["models"]
 
-    models = discover_models(transform_dir)
+    models = (
+        discover_all_models(project_dir)
+        if transform_dir.name == "transform"
+        else discover_models(transform_dir)
+    )
     _model_cache["models"] = models
     _model_cache["mtime_map"] = current_mtimes
     _model_cache["transform_dir"] = str(transform_dir)

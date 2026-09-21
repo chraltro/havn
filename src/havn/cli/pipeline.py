@@ -200,16 +200,15 @@ def ls(
     """
     from havn.engine.database import open_warehouse
     from havn.engine.selectors import select_models
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir, env)
-    transform_dir = project_dir / "transform"
 
     selectors = list(targets or []) + list(select or [])
     exclusions = list(exclude or [])
 
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir, config)
     by_name = {m.full_name: m for m in models}
 
     # Only `state:` selectors need the warehouse; opening it otherwise would
@@ -318,9 +317,9 @@ def transform(
     resolved: Optional[list[str]] = None
     if selectors or exclusions:
         from havn.engine.selectors import select_models
-        from havn.engine.transform import discover_models
+        from havn.engine.transform import discover_all_models
 
-        all_models = discover_models(transform_dir)
+        all_models = discover_all_models(project_dir, config)
         selection = select_models(
             selectors or ["all"],
             all_models,

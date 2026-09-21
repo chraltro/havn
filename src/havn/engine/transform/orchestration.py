@@ -18,6 +18,7 @@ from .discovery import (
     _update_state,
     build_dag,
     build_dag_tiers,
+    discover_all_models,
     discover_models,
 )
 from .execution import _execute_single_model, _record_ephemeral, execute_model
@@ -78,7 +79,14 @@ def run_transform(
     ensure_meta_table(conn)
     # The full project is always needed for change detection: upstream hashes
     # are computed over the whole DAG, even when only a subset is executed.
-    all_models = discover_models(transform_dir)
+    # "The whole DAG" includes installed packages, so go through the project
+    # root whenever transform_dir is a project's own -- a caller that handed
+    # us some other directory meant that directory and nothing else.
+    _root = Path(project_dir) if project_dir else transform_dir.parent
+    if _root / "transform" == transform_dir:
+        all_models = discover_all_models(_root)
+    else:
+        all_models = discover_models(transform_dir)
 
     if not all_models:
         console.print("[yellow]No SQL models found in transform/[/yellow]")

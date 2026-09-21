@@ -537,9 +537,9 @@ class MCPServer:
         }
 
     def _models(self):
-        from havn.engine.transform import discover_models
+        from havn.engine.transform import discover_all_models
 
-        return discover_models(self.project_dir / "transform")
+        return discover_all_models(self.project_dir)
 
     def _tool_list_models(self, args: dict) -> dict:
         models = self._models()

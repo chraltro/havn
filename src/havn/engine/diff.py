@@ -402,9 +402,9 @@ def diff_models(
     Returns:
         List of DiffResult objects
     """
-    from havn.engine.transform import build_dag, discover_models
+    from havn.engine.transform import build_dag, discover_all_models
 
-    all_models = discover_models(transform_dir)
+    all_models = discover_all_models(transform_dir.parent)
     if not all_models:
         return []
 

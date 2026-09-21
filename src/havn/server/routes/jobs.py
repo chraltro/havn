@@ -116,9 +116,9 @@ class UpdateJobRequest(BaseModel):
 
 
 def _get_dag(project_dir):
-    from havn.engine.transform.discovery import build_dag, discover_models
+    from havn.engine.transform.discovery import build_dag, discover_all_models
 
-    models = discover_models(project_dir / "transform")
+    models = discover_all_models(project_dir)
     return build_dag(models)
 
 

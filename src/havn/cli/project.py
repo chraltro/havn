@@ -306,7 +306,7 @@ def validate(
     have never been built -- and reports them with a line number.
     """
     from havn.config import load_project
-    from havn.engine.transform import build_dag, discover_models
+    from havn.engine.transform import build_dag, discover_all_models
 
     project_dir = _resolve_project(project_dir)
     errors: list[str] = []
@@ -332,8 +332,7 @@ def validate(
                 errors.append(f"Stream '{name}': unknown action '{step.action}'")
 
     # 4. Discover and validate SQL models
-    transform_dir = project_dir / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir, config)
     model_names = {m.full_name for m in models}
 
     # Check for duplicate model names
@@ -648,7 +647,7 @@ def context(
     """Generate a project summary to paste into any AI assistant (ChatGPT, Claude, etc.)."""
     from havn.config import load_project
     from havn.engine.database import open_warehouse
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
@@ -673,8 +672,7 @@ def context(
     lines.append("")
 
     # SQL models
-    transform_dir = project_dir / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir, config)
     if models:
         lines.append("## SQL Models")
         for m in models:
