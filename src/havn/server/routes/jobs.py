@@ -55,6 +55,8 @@ class CreateJobRequest(BaseModel):
     # one must be provided; both are supported for backward compatibility.
     target: str | None = Field(default=None, min_length=1, max_length=500)
     targets: list[str] | None = Field(default=None, max_length=200)
+    # Selectors subtracted from `targets`; same grammar.
+    exclude: list[str] | None = Field(default=None, max_length=200)
     resolve: str = Field(default="upstream", pattern="^(upstream|none)$")
     # Either `cron` (legacy single) or `schedules` (preferred list). Either
     # can be omitted for on-demand-only jobs.
@@ -75,7 +77,7 @@ class CreateJobRequest(BaseModel):
             return v
         return _reject_traversal(v)
 
-    @field_validator("targets")
+    @field_validator("targets", "exclude")
     @classmethod
     def _validate_targets(cls, v: list[str] | None) -> list[str] | None:
         return _validate_target_list(v)
@@ -85,6 +87,7 @@ class UpdateJobRequest(BaseModel):
     name: str | None = None
     target: str | None = None
     targets: list[str] | None = None
+    exclude: list[str] | None = None
     resolve: str | None = None
     cron: str | None = None
     schedules: list[str] | None = None
@@ -103,7 +106,7 @@ class UpdateJobRequest(BaseModel):
             return v
         return _reject_traversal(v)
 
-    @field_validator("targets")
+    @field_validator("targets", "exclude")
     @classmethod
     def _validate_targets(cls, v: list[str] | None) -> list[str] | None:
         return _validate_target_list(v)
@@ -201,6 +204,7 @@ def list_jobs(request: Request, conn: DbConnReadOnly):
             "name": job.name,
             "target": job.target,
             "targets": job.targets or [job.target],
+            "exclude": job.exclude,
             "resolve": job.resolve,
             "cron": job.cron,
             "schedules": schedules,
@@ -239,7 +243,8 @@ def get_job(name: str, request: Request, conn: DbConnReadOnly):
         raise HTTPException(404, f"Job '{name}' not found")
     dag = _get_dag(project_dir)
     plan = preview_plan(
-        job.targets or [job.target], dag, project_dir, conn=conn, resolve=job.resolve
+        job.targets or [job.target], dag, project_dir, conn=conn,
+        resolve=job.resolve, exclude=job.exclude or None,
     )
     schedules = job.schedules or ([job.cron] if job.cron else [])
     # Fetch last successful fire for interval-schedule next-run computation
@@ -285,7 +290,8 @@ def get_job_plan(name: str, request: Request, conn: DbConnReadOnly):
         raise HTTPException(404, f"Job '{name}' not found")
     dag = _get_dag(project_dir)
     return preview_plan(
-        job.targets or [job.target], dag, project_dir, conn=conn, resolve=job.resolve
+        job.targets or [job.target], dag, project_dir, conn=conn,
+        resolve=job.resolve, exclude=job.exclude or None,
     )
 
 
@@ -306,7 +312,8 @@ def run_job(name: str, request: Request, conn: DbConn):
         raise HTTPException(404, f"Job '{name}' not found")
     dag = _get_dag(project_dir)
     plan = resolve_execution_plan(
-        job.targets or [job.target], dag, project_dir, conn=conn, resolve=job.resolve
+        job.targets or [job.target], dag, project_dir, conn=conn,
+        resolve=job.resolve, exclude=job.exclude or None,
     )
 
     # Try to use the pipeline SSE infrastructure so the UI sees live output.

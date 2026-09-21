@@ -357,6 +357,7 @@ class SchedulerThread(threading.Thread):
                                     self.project_dir,
                                     conn=jconn,
                                     resolve=job.resolve,
+                                    exclude=job.exclude or None,
                                 )
                                 execute_job(
                                     job, plan, jconn, self.project_dir, trigger="scheduled"

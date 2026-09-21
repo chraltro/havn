@@ -38,6 +38,9 @@ class Job:
     targets: list[str] = field(default_factory=list)      # preferred multi-target
     schedules: list[str] = field(default_factory=list)    # preferred multi-schedule
     tags: list[str] = field(default_factory=list)
+    # Selectors subtracted from `targets`, e.g. targets: ["gold.*"] with
+    # exclude: ["tag:expensive"].
+    exclude: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # Mirror target <-> targets for backward compatibility
@@ -155,7 +158,8 @@ def discover_jobs(project_dir: Path) -> list[Job]:
 
     Accepts either ``target: <str>`` (legacy single-target) or ``targets:
     [<str>, ...]`` (preferred multi-target). If both are present, ``targets``
-    wins and ``target`` is set to the first element.
+    wins and ``target`` is set to the first element. ``exclude: [<str>, ...]``
+    takes the same selector grammar and is subtracted from the selection.
     """
     orch_dir = project_dir / "orchestration"
     if not orch_dir.exists():
@@ -204,6 +208,9 @@ def discover_jobs(project_dir: Path) -> list[Job]:
             tags = data.get("tags", []) or []
             if not isinstance(tags, list):
                 tags = [str(tags)]
+            raw_exclude = data.get("exclude", []) or []
+            if not isinstance(raw_exclude, list):
+                raw_exclude = [raw_exclude]
             jobs.append(Job(
                 name=data.get("name", yml_file.stem),
                 target=targets[0],
@@ -212,6 +219,7 @@ def discover_jobs(project_dir: Path) -> list[Job]:
                 cron=valid_schedules[0] if valid_schedules else "",
                 schedules=valid_schedules,
                 tags=[str(t) for t in tags if t],
+                exclude=[str(x) for x in raw_exclude if x],
                 enabled=data.get("enabled", True),
                 notify=data.get("notify", []) or [],
                 retry=int(data.get("retry", 0) or 0),
@@ -870,9 +878,12 @@ def preview_plan(
     project_dir: Path,
     conn=None,
     resolve: str = "upstream",
+    exclude: list[str] | None = None,
 ) -> dict:
     """Return a JSON-serializable plan preview without executing."""
-    plan = resolve_execution_plan(targets, dag, project_dir, conn=conn, resolve=resolve)
+    plan = resolve_execution_plan(
+        targets, dag, project_dir, conn=conn, resolve=resolve, exclude=exclude
+    )
     return {
         "steps": [
             {
@@ -1111,6 +1122,15 @@ def save_job(project_dir: Path, job_data: dict) -> Path:
         tags = [str(tags)]
     tags = [str(t).strip() for t in tags if t]
 
+    # Normalize exclude selectors, held to the same traversal rules as targets
+    raw_exclude = job_data.get("exclude") or []
+    if not isinstance(raw_exclude, list):
+        raw_exclude = [raw_exclude]
+    exclusions = [str(x).strip() for x in raw_exclude if x]
+    for x in exclusions:
+        if ".." in x:
+            raise ValueError(f"Invalid exclude selector (contains '..'): {x}")
+
     out_data = dict(job_data)
     out_data["targets"] = targets
     out_data["target"] = targets[0]
@@ -1121,6 +1141,10 @@ def save_job(project_dir: Path, job_data: dict) -> Path:
         out_data.pop("schedules", None)
         out_data["cron"] = ""
     out_data["tags"] = tags
+    if exclusions:
+        out_data["exclude"] = exclusions
+    else:
+        out_data.pop("exclude", None)
 
     path = orch_dir / f"{slug}.yml"
     path.write_text(yaml.dump(out_data, default_flow_style=False, sort_keys=False))
