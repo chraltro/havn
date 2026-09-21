@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+from dataclasses import replace
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import duckdb
 
@@ -26,6 +29,12 @@ from havn.engine.utils import validate_identifier
 
 from .columns import save_model_columns
 from .models import SQLModel
+
+if TYPE_CHECKING:
+    from havn.config import ProjectConfig
+    from havn.engine.packages import PackageRoot
+
+logger = logging.getLogger(__name__)
 
 
 class DuplicateModelError(ValueError):
@@ -146,6 +155,123 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
             model.ast = ast
         models.append(model)
 
+    return models
+
+
+def discover_package_models(root: PackageRoot) -> list[SQLModel]:
+    """Discover one installed package's models, namespaced into the project.
+
+    A package's models are written as if the package were the whole project:
+    ``transform/silver/customers.sql`` says ``schema=silver`` and its siblings
+    say ``FROM silver.customers``. Both halves are rewritten here, once, at
+    discovery time:
+
+    - the schema becomes ``<pkg>_<schema>`` (or whatever the package's
+      ``havn_package.yml`` maps it to), so a package can never quietly take a
+      name the project was already using;
+    - references to the package's *own* models are rewritten to match, so the
+      package author never writes the prefix and the project never has to
+      care that it exists.
+
+    References to anything else -- ``landing.*``, a table the package expects
+    the host project to provide -- are left exactly as written.
+    """
+    from havn.engine.sql_rewrite import SQLRewriteError, find_table_refs, rewrite_table_refs
+
+    raw = discover_models(root.transform_dir)
+    if not raw:
+        return []
+
+    mapping: dict[str, str] = {}
+    for m in raw:
+        target_schema = root.schema_for(m.schema)
+        validate_identifier(target_schema, f"schema for package '{root.name}'")
+        mapping[f"{m.schema}.{m.name}".lower()] = f"{target_schema}.{m.name}"
+
+    models: list[SQLModel] = []
+    for m in raw:
+        query = m.query
+        try:
+            refs = find_table_refs(query)
+        except SQLRewriteError:
+            # Unparseable SQL cannot be rewritten. Leave it alone: the model
+            # will fail its own build with a real error, which is more useful
+            # than a rewrite error standing in front of it.
+            refs = []
+        if any(ref in mapping for ref in refs):
+            try:
+                query = rewrite_table_refs(query, mapping)
+            except SQLRewriteError as exc:
+                raise ValueError(
+                    f"Package '{root.name}': could not rewrite references in "
+                    f"{m.path}: {exc}"
+                ) from exc
+
+        target_schema = root.schema_for(m.schema)
+        models.append(
+            replace(
+                m,
+                schema=target_schema,
+                full_name=f"{target_schema}.{m.name}",
+                query=query,
+                depends_on=[mapping.get(d.lower(), d) for d in m.depends_on],
+                package=root.name,
+            )
+        )
+    return models
+
+
+def discover_all_models(
+    project_dir: Path,
+    config: ProjectConfig | None = None,
+) -> list[SQLModel]:
+    """Every model the project builds: its own, plus each installed package's.
+
+    This is what every caller that runs or lists the DAG should use.
+    :func:`discover_models` stays the single-directory primitive underneath
+    it, for callers that genuinely mean one directory.
+
+    Packages come from ``havn_packages.lock``, so a project without one pays
+    a single ``stat`` and gets byte-identical output to ``discover_models``.
+
+    Raises:
+        DuplicateModelError: a package model lands on a name the project (or
+            an earlier package) already uses. That only happens once a
+            package's manifest has overridden the ``<pkg>_`` schema prefix,
+            and it is the same error a project would get from two of its own
+            files claiming one name.
+    """
+    from havn.engine.packages import package_roots
+
+    project_dir = Path(project_dir)
+    models = discover_models(project_dir / "transform")
+
+    roots = package_roots(project_dir)
+    if config is not None:
+        installed = {r.name for r in roots}
+        for declared in getattr(config, "packages", []) or []:
+            if declared.name not in installed:
+                logger.warning(
+                    "Package '%s' is declared in project.yml but not installed; "
+                    "run 'havn packages install'",
+                    declared.name,
+                )
+    if not roots:
+        return models
+
+    claimed: dict[str, Path] = {m.full_name: m.path for m in models}
+    for root in roots:
+        for model in discover_package_models(root):
+            previous = claimed.get(model.full_name)
+            if previous is not None:
+                raise DuplicateModelError(
+                    f"Duplicate model '{model.full_name}': both {previous} and "
+                    f"{model.path} (package '{root.name}') produce it. "
+                    f"Remove the schema override in {root.name}'s "
+                    "havn_package.yml, or rename the project model."
+                )
+            claimed[model.full_name] = model.path
+            models.append(model)
     return models
 
 

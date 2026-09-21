@@ -27,7 +27,9 @@ from .discovery import (
     _update_state,
     build_dag,
     build_dag_tiers,
+    discover_all_models,
     discover_models,
+    discover_package_models,
 )
 
 # Data quality and profiling
@@ -92,7 +94,9 @@ __all__ = [
     # Discovery
     "build_dag",
     "build_dag_tiers",
+    "discover_all_models",
     "discover_models",
+    "discover_package_models",
     # Quality
     "profile_model",
     "run_assertions",

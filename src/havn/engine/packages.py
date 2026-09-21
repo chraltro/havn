@@ -170,6 +170,21 @@ class PackageRoot:
     macros_dir: Path
     manifest: PackageManifest
 
+    def schema_for(self, schema: str) -> str:
+        """The warehouse schema a package schema lands in.
+
+        ``silver`` in package ``crm`` becomes ``crm_silver`` by default, so a
+        package can never take a name the project was already using. The
+        package's own ``havn_package.yml`` can override a schema to land
+        somewhere else -- including back on its own name, which is how a
+        package deliberately writes into a shared schema and accepts the
+        collision risk that comes with it.
+        """
+        override = self.manifest.schemas.get(schema)
+        if override:
+            return override
+        return f"{self.name}_{schema}"
+
 
 # ---------------------------------------------------------------------------
 # Paths, lock file and manifest

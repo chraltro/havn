@@ -19,6 +19,8 @@ Grammar (one *selector* per list entry)::
     @x                   x, its descendants, and every ancestor of those
     tag:daily            models carrying @config tags=daily
     path:transform/gold/ models under a path prefix (or a path glob)
+    package:crm          models that came from the installed package ``crm``
+    package:             the project's own models, excluding every package
     config.materialized:incremental   any @config key on the model
     state:modified       models whose SQL or upstream changed since the last run
     state:modified+      ... plus their downstream
@@ -47,7 +49,9 @@ UNLIMITED = 1 << 30
 
 # Selector methods that take a ``method:value`` form. ``config`` is special:
 # it is written ``config.<key>:<value>``.
-SELECTOR_METHODS = frozenset({"tag", "path", "config", "state", "fqn", "name"})
+SELECTOR_METHODS = frozenset(
+    {"tag", "path", "config", "state", "fqn", "name", "package"}
+)
 
 
 @dataclass
@@ -289,6 +293,22 @@ def _match_core(
             if rel == prefix or rel.startswith(prefix + "/") or fnmatch.fnmatchcase(rel, value):
                 out.add(m.full_name)
         return (out, "")
+
+    if method == "package":
+        # ``package:crm`` selects a package's models; ``package:*`` every
+        # package model; ``package:`` (empty) the project's own models, which
+        # is the only way to say "mine, not theirs".
+        if not value:
+            return ({m.full_name for m in models if not getattr(m, "package", None)}, "")
+        return (
+            {
+                m.full_name
+                for m in models
+                if getattr(m, "package", None)
+                and fnmatch.fnmatchcase(m.package or "", value)
+            },
+            "",
+        )
 
     if method in ("fqn", "name"):
         attr = "full_name" if method == "fqn" else "name"
