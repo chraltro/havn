@@ -141,6 +141,36 @@ This starts the web server on `http://localhost:3000` with:
 - **Notebook Runner** -- Execute `.dpnb` notebooks interactively
 - **Pipeline Controls** -- Run streams and view history
 
+### Editor
+
+Open a `.sql` file under `transform/` and the editor works against the
+warehouse catalog rather than just colouring text.
+
+- **Live error markers.** As you type, the model is bound against its upstream
+  tables and the errors are underlined in place: a misspelled column, a table
+  that does not exist, a syntax error. Lint warnings from SQLFluff appear the
+  same way, on save and after a short pause in typing. The count sits next to
+  the filename above the editor.
+- **Hover types.** Hover a column and the inferred type appears at the top of
+  the tooltip, for the model's own output columns and for `alias.column`
+  references into upstream models. Hovering a table still lists its columns,
+  and hovering a macro still shows its signature.
+- **Go to definition.** `Ctrl+Click` (`Cmd+Click` on macOS) or `F12` on a
+  `schema.model` reference opens the file that declares it.
+- **Preview a single CTE.** A `Preview` link appears above each CTE in a `WITH`
+  chain. Click it, or press `Ctrl+Shift+Enter` (`Cmd+Shift+Enter`) with the
+  cursor inside a CTE, to run just that step and see the rows below the editor.
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl/Cmd+Enter` | Preview the whole model |
+| `Ctrl/Cmd+Shift+Enter` | Preview the CTE at the cursor |
+| `Ctrl/Cmd+Shift+F` | Format the file (`havn lint --fix`) |
+| `F12` or `Ctrl/Cmd+Click` | Go to the definition of a model reference |
+
+Previews are capped at 100 rows. Renaming a column across downstream models is
+not available yet; see [Limitations](limitations).
+
 ### With Authentication
 
 ```bash

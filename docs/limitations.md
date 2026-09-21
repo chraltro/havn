@@ -110,11 +110,11 @@ The Monaco editor in `havn serve`.
 | Feature | Status | Notes |
 |---|---|---|
 | Autocomplete | Supported | Schemas, tables, columns and macros. |
-| Hover | Partial | Shows macro signatures and docstrings, and table and column metadata. Inferred column types arrive with type checking. |
+| Hover | Supported | Shows inferred column types for output columns and `alias.column` references, plus macro signatures and docstrings and table and column metadata. |
 | Format and whole-model preview | Supported | |
-| Live error markers | Planned | Bind and lint diagnostics inline as you type, from the same pass as type checking. |
-| Go to definition on a model reference | Planned | |
-| Preview a single CTE | Planned | Whole-model preview works today. |
+| Live error markers | Supported | Bind diagnostics 400 ms after a keystroke, lint diagnostics on save and after 1.5 s idle, under separate marker owners. Only for `.sql` files under `transform/`. |
+| Go to definition on a model reference | Supported | `F12` or Ctrl/Cmd+Click on `schema.model`. Resolves through the model's own path, so `@config schema=` overrides are followed. Column-level definition is still planned. |
+| Preview a single CTE | Supported | A `Preview` code lens above each CTE, or Ctrl/Cmd+Shift+Enter at the cursor. Capped at 100 rows, like the whole-model preview. |
 | Rename a column across downstream models | Not supported | Deliberately withheld. Today's lineage does not see columns referenced only in `WHERE`, `JOIN`, `GROUP BY` or `ORDER BY`, so an automated rename would silently skip them and report success. It waits on the lineage rewrite. |
 
 ## Reuse
