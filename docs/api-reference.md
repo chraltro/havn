@@ -160,16 +160,31 @@ Get table and column names for query editor autocomplete.
 
 ### GET /api/models
 
-List all SQL transform models with metadata.
+List SQL transform models with metadata.
 
-Returns: `[{name, schema, full_name, materialized, depends_on, path, content_hash}]`
+Query parameters:
+
+| Name | Description |
+|---|---|
+| `select` | Graph selector filtering the list, e.g. `tag:daily`, `+gold.orders`, `gold.fct_*`. Omit to list everything. `state:` is not available here: this endpoint is read-only and has no warehouse connection to compare hashes against. |
+
+Returns: `[{name, schema, full_name, materialized, depends_on, path, content_hash, tags}]`
 
 ### POST /api/transform
 
 Run the SQL transformation pipeline.
 
 ```json
-{"targets": null, "force": false}
+{"targets": null, "exclude": null, "force": false}
+```
+
+`targets` and `exclude` are graph selectors, the same grammar as
+`havn transform` (see [Selecting models](transforms#selecting-models)). A plain
+`"gold.orders"` is an exact match, so a caller that sends one model name keeps
+working.
+
+```json
+{"targets": ["state:modified+"], "exclude": ["tag:expensive"]}
 ```
 
 ### POST /api/models/create

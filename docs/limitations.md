@@ -94,10 +94,13 @@ lands, treat a lineage result as a strong hint, not a guarantee.
 | Feature | Status | Notes |
 |---|---|---|
 | `havn transform` (whole project) | Supported | Content-hash change detection rebuilds only what changed, `--force` rebuilds everything. |
-| Targets on `havn transform` | Partial | Takes exact model names only (`gold.orders` or `orders`). Graph operators are not accepted here yet, so upstream and downstream are not pulled in. |
-| Job selectors in `orchestration/*.yml` | Supported | Full selector grammar: `+model`, `model+`, `+model+`, `schema.*`, and ingest/export script paths, with `resolve: upstream`. |
-| Glob selectors (`gold.fct_*`) | Planned | Only whole-schema `schema.*` matches today. |
-| Selector methods (`tag:`, `path:`, `state:modified`) | Planned | The underlying change detection exists; the selector syntax does not. |
+| Selectors on `havn transform` | Supported | The full grammar, positionally or with `--select/-s`, plus `--exclude/-x`. `havn ls` dry-runs a selector without building. |
+| Job selectors in `orchestration/*.yml` | Supported | The same grammar, plus ingest/export script paths, a job-level `exclude:`, and `resolve: upstream`. |
+| Graph operators (`+x`, `x+`, `+x+`, `n+x`, `x+n`, `@x`) | Supported | `n+`/`+n` bound the walk to N hops; `@x` is x, its downstream, and every upstream of those. |
+| Glob selectors (`gold.fct_*`, `*.customers`) | Supported | fnmatch anywhere in the name, in either half. |
+| Selector methods (`tag:`, `path:`, `config.<key>:`, `state:modified`) | Supported | `state:modified` reads the same content and upstream hashes change detection uses. Comma intersects, e.g. `tag:daily,gold.*`. |
+| Selectors on the API and MCP | Supported | `POST /api/transform` takes `targets` and `exclude`; `GET /api/models?select=` filters the listing; the MCP `run_transform` and `list_models` tools take `select`. |
+| `result:` and `source_status:` selectors | Not supported | These need a stored result set from the previous run, which havn does not keep per model beyond its status. |
 | Environments | Supported | `havn env use <name>` switches the database path and connection overrides declared in `project.yml`. |
 | Defer to another environment | Planned | Will attach a prod warehouse read-only so a dev run reads models it has not built. DuckDB's file lock means it cannot attach while another process holds that file open for writing; that constraint is not removable. |
 | Scheduler | Supported | Cron schedules in job files, run by `havn schedule`, plus `havn watch` for rebuild on file change. |

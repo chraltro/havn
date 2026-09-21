@@ -25,6 +25,13 @@ havn lint --fix                 # auto-fix
 havn init my-project            # scaffold new project
 havn transform                  # build all SQL models
 havn transform --force          # force rebuild (ignore cache)
+havn transform +gold.orders     # graph selectors: +x, x+, +x+, n+x, x+n, @x
+havn transform 'gold.fct_*'     # fnmatch wildcards (quote them)
+havn transform tag:daily        # tag:, path:, config.<key>:, state:modified
+havn transform state:modified+  # what changed, plus downstream
+havn transform -s tag:daily -x tag:expensive   # --select / --exclude
+havn ls '+gold.orders'          # dry-run a selector (schema, materialization, tags)
+havn ls state:modified+ --names # bare names, one per line, for piping
 havn query "SELECT 1"           # ad-hoc SQL
 havn tables                     # list warehouse objects
 havn serve                      # start web UI on :3000
@@ -62,6 +69,7 @@ src/havn/                       # Python package (the platform itself)
     explain.py                # Query plan parsing (EXPLAIN/EXPLAIN ANALYZE)
     anomaly.py                # Statistical anomaly detection
     diff.py                   # 3-mode diff engine (single/changed/all)
+    selectors.py              # Graph selectors (+x, x+, @x, tag:, state:modified)
     auth.py                   # Token auth, RBAC (admin/editor/viewer)
     secrets.py                # .env secrets management
     scheduler.py              # Cron scheduler (SchedulerThread) + file watcher
@@ -111,6 +119,7 @@ tests/                        # pytest test suite
   test_connectors_warehouse.py # Warehouse migration connectors
   test_semantic.py            # Semantic layer (metrics)
   test_mcp_server.py          # MCP server
+  test_selectors.py           # Graph selectors + @config tags
 ```
 
 ## Architecture
@@ -157,7 +166,7 @@ LEFT JOIN bronze.orders o ON c.customer_id = o.customer_id
 GROUP BY 1, 2
 ```
 
-- `@config` sets materialization (`view` / `table` / `incremental`) and schema. Other useful keys: `unique_key`, `incremental_strategy` (`delete+insert` / `merge` / `append`), `incremental_filter`, `partition_by`.
+- `@config` sets materialization (`view` / `table` / `incremental`) and schema. Other useful keys: `unique_key`, `incremental_strategy` (`delete+insert` / `merge` / `append`), `incremental_filter`, `partition_by`, `tags` (comma list, for `tag:` selectors; deliberately not hashed, so retagging does not rebuild).
 - Dependencies are auto-extracted from `FROM` and `JOIN` clauses via `sqlglot`. You only need `@depends_on` when the parser can't see the reference (e.g. a model name passed through a function or constructed in a string).
 - Folder name is the default schema (e.g., `transform/bronze/` → `schema=bronze`); override with `schema=` in `@config`.
 - Other directives: `@description <text>` for model docs, `@assert <expr>` for data-quality assertions (one per line, runs after build), `@col <name>: <text>` for column-level docs.
