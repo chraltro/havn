@@ -25,6 +25,22 @@ def _hash_content(content: str) -> str:
     return hashlib.sha256(normalized.encode()).hexdigest()[:16]
 
 
+def _drop_leading_blank_lines(sql: str) -> str:
+    """Drop whitespace-only lines from the front of ``sql``.
+
+    ``strip_config_comments`` blanks directive lines in place instead of
+    deleting them, to keep the line map intact, so a model's query now starts
+    with as many blank lines as its header had. Everything else in the hash is
+    whitespace-normalized, but a leading blank line does change the hash, and
+    without this every already-built model in every project would rebuild once
+    on upgrade for no reason.
+    """
+    lines = sql.split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    return "\n".join(lines)
+
+
 @dataclass
 class AssertionResult:
     """Result of a data quality assertion."""
@@ -80,7 +96,7 @@ class SQLModel:
         # so editing e.g. @config unique_key or incremental_strategy triggers
         # a rebuild. Only non-default values are appended, keeping hashes of
         # models without these settings stable across havn upgrades.
-        parts = [f"{self.materialized}:{self.query}"]
+        parts = [f"{self.materialized}:{_drop_leading_blank_lines(self.query)}"]
         if self.unique_key:
             parts.append(f"unique_key={self.unique_key}")
         if self.incremental_strategy != "delete+insert":

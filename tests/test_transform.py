@@ -46,6 +46,31 @@ def test_strip_config_comments():
     assert query.strip() == "SELECT 1"
 
 
+def test_content_hash_ignores_blanked_directive_lines():
+    """Blanking directives in place must not change any model's hash.
+
+    Otherwise every already-built model in every project would rebuild once
+    on upgrade: the queries are the same SQL, only the header's worth of
+    leading blank lines differs.
+    """
+    # What discovery produced before directives were blanked in place...
+    before = _make_model(query="SELECT id\nFROM bronze.src\n")
+    # ...and what it produces now, for the same file.
+    after = _make_model(query="\n\nSELECT id\nFROM bronze.src\n")
+    assert before.content_hash == after.content_hash
+
+    # A directive between the SQL lines blanks to an empty line, which the
+    # whitespace normalization already absorbs.
+    mid_file = _make_model(query="SELECT id\n\nFROM bronze.src\n")
+    assert mid_file.content_hash == before.content_hash
+
+
+def test_content_hash_still_tracks_real_query_changes():
+    a = _make_model(query="SELECT id FROM bronze.src")
+    b = _make_model(query="SELECT id, name FROM bronze.src")
+    assert a.content_hash != b.content_hash
+
+
 def test_discover_models(tmp_path):
     bronze = tmp_path / "transform" / "bronze"
     bronze.mkdir(parents=True)

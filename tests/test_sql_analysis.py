@@ -162,6 +162,42 @@ def test_strip_config_comments_at_syntax():
     assert "SELECT id FROM bronze.customers" in result
 
 
+def test_strip_config_comments_preserves_line_numbers():
+    """Directives are blanked in place so line N stays line N.
+
+    They used to be deleted, which shifted everything below them by a
+    non-constant amount and broke every mapping from a parser's line number
+    back to a line of the file.
+    """
+    sql = textwrap.dedent("""\
+        @config materialized=table, schema=gold
+        @description A model
+
+        SELECT
+            id
+        FROM bronze.customers
+        @assert row_count > 0
+    """)
+    result = strip_config_comments(sql)
+    original = sql.split("\n")
+    stripped = result.split("\n")
+
+    assert len(stripped) == len(original)
+    for i, line in enumerate(original):
+        if line.strip().startswith("@"):
+            assert stripped[i] == ""
+        else:
+            assert stripped[i] == line
+
+    # The SELECT is on line 4 of the file and stays on line 4.
+    assert stripped[3] == "SELECT"
+
+
+def test_strip_config_comments_keeps_leading_blanks():
+    sql = "@config materialized=view\n\nSELECT 1"
+    assert strip_config_comments(sql) == "\n\nSELECT 1"
+
+
 # ===========================================================================
 # extract_table_refs — the core tests for AST-based parsing
 # ===========================================================================

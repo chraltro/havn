@@ -364,16 +364,25 @@ def parse_column_docs(sql: str) -> dict[str, str]:
 
 
 def strip_config_comments(sql: str) -> str:
-    """Remove config/depends/description/col/assert comment lines, return the query."""
-    lines = sql.split("\n")
+    """Blank out config/depends/description/col/assert lines, return the query.
+
+    Directive lines are replaced by empty lines rather than deleted, and
+    leading blanks are kept, so line N of the result is line N of the file.
+    Directives are allowed anywhere (an ``@assert`` below the SQL is legal),
+    so deleting them shifted every later line by a non-constant amount and
+    nothing built on sqlglot or SQLFluff line numbers could point back at the
+    right source line.
+
+    Everything that consumes the result either wraps it in ``CREATE ... AS``,
+    which tolerates leading blank lines, or strips it first.
+    """
     query_lines = []
-    for line in lines:
+    for line in sql.split("\n"):
         stripped = line.strip()
         if any(stripped.startswith(prefix) for prefix in _META_PREFIXES):
+            query_lines.append("")
             continue
         query_lines.append(line)
-    while query_lines and not query_lines[0].strip():
-        query_lines.pop(0)
     return "\n".join(query_lines)
 
 
