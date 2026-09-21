@@ -115,7 +115,7 @@ def bind_endpoint(request: Request, req: BindRequest) -> dict:
         bind_models,
         model_from_buffer,
     )
-    from havn.engine.transform.columns import load_model_columns
+    from havn.engine.transform.columns import describe_object, load_model_columns
 
     project_dir = _get_project_dir()
     transform_dir = project_dir / "transform"
@@ -199,10 +199,15 @@ def bind_endpoint(request: Request, req: BindRequest) -> dict:
                 upstream[key] = [{"name": n, "type": t} for n, t in bound]
                 continue
             # Not in the bound chain (a landing table, a seed, or a model that
-            # failed): fall back to what the last successful build recorded.
+            # failed): fall back to what the last successful build recorded,
+            # then to whatever the catalog holds right now.
             persisted = load_model_columns(cur, dep)
             if persisted:
                 upstream[key] = persisted
+                continue
+            described = describe_object(cur, dep)
+            if described:
+                upstream[key] = [{"name": n, "type": t} for n, t in described]
     finally:
         cur.close()
 
