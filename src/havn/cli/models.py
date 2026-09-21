@@ -252,7 +252,9 @@ def impact(
             console.print()
             console.print(f"  [yellow]Affected columns:[/yellow]")
             for ac in result["affected_columns"]:
-                console.print(f"    {ac['model']}.{ac['column']}")
+                clause = ac.get("clause", "select")
+                where = "" if clause == "select" else f"  [dim]({clause})[/dim]"
+                console.print(f"    {ac['model']}.{ac['column']}{where}")
 
         if result.get("impact_chain"):
             console.print()

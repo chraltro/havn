@@ -361,6 +361,92 @@ class TestImpactAnalysis:
         affected = result["affected_columns"]
         assert any(a["model"] == "silver.users" and a["column"] == "name" for a in affected)
 
+    def test_projection_hits_are_labelled_select(self, db):
+        """Every hit carries the clause it was found in."""
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        db.execute("CREATE TABLE bronze.src AS SELECT 1 AS id, 'x' AS name")
+
+        models = [
+            SQLModel(path=Path("a.sql"), name="src", schema="bronze", full_name="bronze.src",
+                     sql="", query="SELECT 1 AS id, 'x' AS name", materialized="table", depends_on=[]),
+            SQLModel(path=Path("b.sql"), name="users", schema="silver", full_name="silver.users",
+                     sql="", query="SELECT s.name AS label FROM bronze.src s",
+                     materialized="table", depends_on=["bronze.src"]),
+        ]
+        result = impact_analysis(models, "bronze.src", column="name", conn=db)
+        assert result["affected_columns"] == [
+            {"model": "silver.users", "column": "label", "clause": "select"}
+        ]
+
+    def _filter_models(self, db, downstream_query: str):
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        db.execute(
+            "CREATE TABLE bronze.src AS SELECT 1 AS id, 'x' AS name, 'eu' AS region"
+        )
+        db.execute("CREATE TABLE bronze.other AS SELECT 1 AS id, 'x' AS name")
+        return [
+            SQLModel(path=Path("a.sql"), name="src", schema="bronze", full_name="bronze.src",
+                     sql="", query="SELECT 1 AS id, 'x' AS name, 'eu' AS region",
+                     materialized="table", depends_on=[]),
+            SQLModel(path=Path("o.sql"), name="other", schema="bronze", full_name="bronze.other",
+                     sql="", query="SELECT 1 AS id, 'x' AS name",
+                     materialized="table", depends_on=[]),
+            SQLModel(path=Path("b.sql"), name="users", schema="silver", full_name="silver.users",
+                     sql="", query=downstream_query, materialized="table",
+                     depends_on=["bronze.src", "bronze.other"]),
+        ]
+
+    def test_where_only_column_is_affected(self, db):
+        """A column that only ever appears in a WHERE still shows up."""
+        models = self._filter_models(
+            db, "SELECT s.id FROM bronze.src s WHERE s.name = 'x'"
+        )
+        result = impact_analysis(models, "bronze.src", column="name", conn=db)
+        assert result["affected_columns"] == [
+            {"model": "silver.users", "column": "name", "clause": "where"}
+        ]
+
+    def test_join_only_column_is_affected(self, db):
+        """A join key that feeds no output column is still an impact."""
+        models = self._filter_models(
+            db,
+            "SELECT s.id FROM bronze.src s "
+            "JOIN bronze.other o ON s.name = o.name",
+        )
+        result = impact_analysis(models, "bronze.src", column="name", conn=db)
+        assert result["affected_columns"] == [
+            {"model": "silver.users", "column": "name", "clause": "join"}
+        ]
+
+    def test_group_by_only_column_is_affected(self, db):
+        """Grouping on a column counts, even when it is not projected."""
+        models = self._filter_models(
+            db,
+            "SELECT COUNT(*) AS n FROM bronze.src s GROUP BY s.region",
+        )
+        result = impact_analysis(models, "bronze.src", column="region", conn=db)
+        assert result["affected_columns"] == [
+            {"model": "silver.users", "column": "region", "clause": "group"}
+        ]
+
+    def test_repeated_mentions_in_one_clause_report_once(self, db):
+        """Three mentions in the same WHERE are one reason, not three."""
+        models = self._filter_models(
+            db,
+            "SELECT s.id FROM bronze.src s "
+            "WHERE s.name = 'x' OR s.name = 'y' OR s.name = 'z'",
+        )
+        result = impact_analysis(models, "bronze.src", column="name", conn=db)
+        assert len(result["affected_columns"]) == 1
+
+    def test_unrelated_column_is_not_affected(self, db):
+        """A filter on another table's column of the same name is not a hit."""
+        models = self._filter_models(
+            db, "SELECT s.id FROM bronze.src s, bronze.other o WHERE o.name = 'x'"
+        )
+        result = impact_analysis(models, "bronze.src", column="name", conn=db)
+        assert result["affected_columns"] == []
+
     def test_impact_diamond_dependency(self):
         """Diamond dependency: A -> B, A -> C, B -> D, C -> D."""
         models = [

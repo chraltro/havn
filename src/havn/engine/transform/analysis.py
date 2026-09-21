@@ -13,6 +13,7 @@ from havn.engine.sql_analysis import (
     MATERIALIZATIONS,
     ON_SCHEMA_CHANGE_POLICIES,
     extract_column_lineage as _extract_column_lineage_impl,
+    extract_column_references,
     fetch_column_catalog,
     parse_config,
 )
@@ -470,7 +471,16 @@ def impact_analysis(
         conn: Optional connection for column-level lineage resolution
 
     Returns:
-        Dict with downstream_models, affected_columns, impact_chain
+        Dict with downstream_models, affected_columns, impact_chain.
+
+    Each entry in ``affected_columns`` carries ``model``, ``column`` and
+    ``clause``. A projection hit comes from column lineage and names the
+    downstream *output* column, with ``clause`` set to ``select``. A hit in
+    any other clause comes from the reference index and names the upstream
+    column as it is written, because a filter, a join predicate, a GROUP BY
+    or an ORDER BY produces no output column of its own. Without the second
+    kind, a downstream model that only filters on the column looked
+    unaffected.
     """
     model_map = {m.full_name: m for m in models}
 
@@ -518,6 +528,14 @@ def impact_analysis(
         affected_columns: list[dict[str, str]] = []
         # One catalog read for the whole downstream set, not one per model.
         catalog = fetch_column_catalog(conn)
+        # The reference index attributes an unqualified column by name, so it
+        # wants the column sets the catalog already gave us. Types play no
+        # part in that decision, hence the empty type strings.
+        reference_schema = {
+            table: [(col, "") for col in cols] for table, cols in catalog.items()
+        }
+        target_key = target.lower()
+        column_key = column.lower()
         for ds_name in downstream:
             ds_model = model_map.get(ds_name)
             if not ds_model:
@@ -529,11 +547,57 @@ def impact_analysis(
                         affected_columns.append({
                             "model": ds_name,
                             "column": out_col,
+                            "clause": "select",
                         })
+            affected_columns.extend(
+                _non_projection_hits(ds_model, ds_name, target_key, column_key, reference_schema)
+            )
         result["column"] = column
         result["affected_columns"] = affected_columns
 
     return result
+
+
+def _non_projection_hits(
+    model: SQLModel,
+    model_name: str,
+    target: str,
+    column: str,
+    reference_schema: dict[str, list[tuple[str, str]]],
+) -> list[dict[str, str]]:
+    """Mentions of ``target.column`` in ``model`` outside the SELECT list.
+
+    The SELECT list is left to column lineage, which knows the output column
+    name a projection lands in; repeating it here would report the same hit
+    twice under two names. Everything else -- WHERE, JOIN ... ON, GROUP BY,
+    HAVING, QUALIFY, ORDER BY, a window's own PARTITION BY -- has no output
+    column, so the upstream column name is what the hit carries. One hit per
+    clause per model: a predicate that names the column three times is still
+    one reason the model is affected.
+    """
+    try:
+        references = extract_column_references(
+            model.query,
+            model.depends_on,
+            reference_schema,
+            ast=getattr(model, "ast", None),
+        )
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug("Could not index column references for %s: %s", model_name, e)
+        return []
+
+    hits: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for ref in references:
+        if ref.clause == "select":
+            continue
+        if ref.table != target or ref.column != column:
+            continue
+        if ref.clause in seen:
+            continue
+        seen.add(ref.clause)
+        hits.append({"model": model_name, "column": column, "clause": ref.clause})
+    return hits
 
 
 def check_freshness(
