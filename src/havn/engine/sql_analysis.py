@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any
 
 import sqlglot
@@ -972,3 +973,201 @@ def _pivot_lineage(
             sources = [{"source_table": fqn, "source_column": col} for col in pivoted]
         lineage[_disambiguate(name, lineage)] = sources
     return lineage
+
+
+# --- Column reference index ---
+
+
+@dataclass(frozen=True)
+class ColumnRef:
+    """One mention of a column in a query, with where it is written.
+
+    Lineage answers "which source column feeds this output column"; it says
+    nothing about a column a model only filters, joins or groups on. Renaming
+    a column has to find those too, and has to know where they are, which is
+    what this carries: ``start`` and ``end`` are character offsets into the
+    query, so an edit is a splice.
+    """
+
+    table: str
+    """Resolved ``schema.table``, a CTE name, or "" when it cannot be resolved."""
+
+    column: str
+    line: int
+    """1-based line the identifier ends on, as sqlglot records it."""
+
+    col: int
+    """1-based column of the identifier's last character."""
+
+    start: int
+    """Character offset of the identifier's first character."""
+
+    end: int
+    """Character offset of the identifier's last character."""
+
+    clause: str
+    """select, where, join, group, order, having, qualify or window."""
+
+
+_CLAUSE_TYPES: tuple[tuple[type[exp.Expression], str], ...] = (
+    (exp.Where, "where"),
+    (exp.Join, "join"),
+    (exp.Group, "group"),
+    (exp.Having, "having"),
+    (exp.Qualify, "qualify"),
+    (exp.Order, "order"),
+)
+
+
+def _clause_of(column: exp.Column) -> str:
+    """Which clause a column sits in.
+
+    A window's own PARTITION BY / ORDER BY reports ``window`` rather than
+    ``order``: it is the window that owns those columns.
+    """
+    node: exp.Expression | None = column.parent
+    while node is not None and not isinstance(node, exp.Select):
+        if isinstance(node, exp.Window):
+            return "window"
+        node = node.parent
+
+    node = column.parent
+    while node is not None:
+        if isinstance(node, exp.Select):
+            return "select"
+        for clause_type, name in _CLAUSE_TYPES:
+            if isinstance(node, clause_type):
+                return name
+        node = node.parent
+    return "select"
+
+
+def _select_sources(parsed: exp.Expression, cte_names: set[str]) -> dict[int, list[str]]:
+    """``{id(select): [real tables it reads]}`` for unqualified-column attribution."""
+    sources: dict[int, list[str]] = {}
+    for table in parsed.find_all(exp.Table):
+        select = table.find_ancestor(exp.Select)
+        if select is None:
+            continue
+        name = (table.name or "").lower()
+        if not (table.db or "") and name in cte_names:
+            continue
+        fqn = _table_fqn(table)
+        if not fqn:
+            continue
+        bucket = sources.setdefault(id(select), [])
+        if fqn not in bucket:
+            bucket.append(fqn)
+    return sources
+
+
+def extract_column_references(
+    query: str,
+    depends_on: list[str] | None = None,
+    schema: dict[str, list[tuple[str, str]]] | None = None,
+    ast: exp.Expression | None = None,
+) -> list[ColumnRef]:
+    """Every column mention in ``query``, in source order, with its position.
+
+    This is the walk validation already does over ``exp.Column``, but it keeps
+    the positions and the clause instead of throwing them away. Impact
+    analysis reads it to notice a downstream model that only filters on a
+    column; a rename will need the offsets.
+
+    Positions come from the unqualified AST, so they point into ``query`` as
+    written. Qualification is deliberately not run here: it rewrites the tree,
+    and the offsets would stop matching the user's text.
+
+    Args:
+        query: The SQL to index (config comments should be stripped).
+        depends_on: Upstream ``schema.table`` dependencies, used to attribute
+            an unqualified column when the query's own scope does not.
+        schema: ``{"schema.table": [(column, type), ...]}``, used to attribute
+            an unqualified column to the one source that has it.
+        ast: Pre-parsed AST for ``query``. Never mutated.
+
+    Returns:
+        A ColumnRef per mention, ordered by position in the query.
+    """
+    parsed = ast if ast is not None else parse_sql(query)
+    if parsed is None:
+        return []
+
+    cte_names = {
+        (cte.alias or "").lower() for cte in parsed.find_all(exp.CTE) if cte.alias
+    }
+    cte_names.discard("")
+
+    alias_map: dict[str, str] = {}
+    cte_alias_map: dict[str, str] = {}
+    for table in parsed.find_all(exp.Table):
+        name = (table.name or "").lower()
+        alias = (table.alias or "").lower()
+        if not (table.db or "") and name in cte_names:
+            cte_alias_map[name] = name
+            if alias:
+                cte_alias_map[alias] = name
+            continue
+        fqn = _table_fqn(table)
+        if not fqn:
+            continue
+        if alias:
+            alias_map[alias] = fqn
+        alias_map[name] = fqn
+        alias_map[fqn] = fqn
+
+    columns_by_table = {
+        fqn.lower(): {column.lower() for column, _ in columns}
+        for fqn, columns in (schema or {}).items()
+    }
+    select_sources = _select_sources(parsed, cte_names)
+    depends_on = depends_on or []
+
+    references: list[ColumnRef] = []
+    for column in parsed.find_all(exp.Column):
+        name = (column.name or "").lower()
+        if not name or name == "*":
+            continue
+
+        qualifier = (column.table or "").lower()
+        if qualifier:
+            table = cte_alias_map.get(qualifier) or alias_map.get(qualifier, qualifier)
+        else:
+            table = _attribute_unqualified(
+                column, name, select_sources, columns_by_table, depends_on
+            )
+
+        meta = getattr(column.this, "meta", None) or {}
+        references.append(
+            ColumnRef(
+                table=table,
+                column=name,
+                line=int(meta.get("line", 0)),
+                col=int(meta.get("col", 0)),
+                start=int(meta.get("start", 0)),
+                end=int(meta.get("end", 0)),
+                clause=_clause_of(column),
+            )
+        )
+
+    references.sort(key=lambda ref: (ref.start, ref.end))
+    return references
+
+
+def _attribute_unqualified(
+    column: exp.Column,
+    name: str,
+    select_sources: dict[int, list[str]],
+    columns_by_table: dict[str, set[str]],
+    depends_on: list[str],
+) -> str:
+    """The table an unqualified column belongs to, or "" when it is a guess."""
+    select = column.find_ancestor(exp.Select)
+    in_scope = select_sources.get(id(select), []) if select is not None else []
+
+    if len(in_scope) == 1:
+        return in_scope[0]
+
+    candidates = in_scope or [dep.lower() for dep in depends_on]
+    matches = [fqn for fqn in candidates if name in columns_by_table.get(fqn, set())]
+    return matches[0] if len(matches) == 1 else ""
