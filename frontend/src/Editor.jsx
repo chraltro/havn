@@ -318,6 +318,47 @@ export function lintViolationsToMarkers(violations, warningSeverity) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Reference resolution shared by the completion, hover and definition providers
+// ---------------------------------------------------------------------------
+
+/** Extract every `schema.table` reference and its alias from SQL text. */
+export function extractTableRefs(text) {
+  const refs = [];
+  const pattern = /\b(?:FROM|JOIN)\s+(\w+)\.(\w+)(?:\s+(?:AS\s+)?(\w+))?/gi;
+  let m;
+  while ((m = pattern.exec(text)) !== null) {
+    refs.push({ schema: m[1], table: m[2], alias: m[3] || null });
+  }
+  return refs;
+}
+
+/**
+ * Resolve a hovered token to a column type using a bind result.
+ *
+ * Two cases resolve: a bare word that is one of the model's own output
+ * columns, and `alias.column` where the alias names an upstream relation the
+ * binder reported a schema for. Anything else returns null and the hover
+ * keeps its existing behaviour.
+ */
+export function resolveColumnType({ word, qualifier, bind, tableRefs = [] }) {
+  if (!word || !bind) return null;
+  const lower = word.toLowerCase();
+  if (qualifier) {
+    const q = qualifier.toLowerCase();
+    const ref = tableRefs.find(
+      (r) => (r.alias && r.alias.toLowerCase() === q) || (!r.alias && r.table.toLowerCase() === q),
+    );
+    if (!ref) return null;
+    const key = `${ref.schema}.${ref.table}`;
+    const columns = (bind.upstream || {})[key];
+    const col = (columns || []).find((c) => c.name.toLowerCase() === lower);
+    return col ? { name: col.name, type: col.type, source: key } : null;
+  }
+  const col = (bind.columns || []).find((c) => c.name.toLowerCase() === lower);
+  return col ? { name: col.name, type: col.type, source: bind.model || null } : null;
+}
+
 /** Short label for the editor toolbar: "binding...", "3 errors", "ok". */
 export function bindStatusLabel(state) {
   if (!state) return null;
@@ -371,18 +412,6 @@ loader.init().then((monaco) => {
 
   // Alias.column — "a." where "a" is an alias for a table
   const ALIAS_DOT = /\b(\w+)\.\s*(\w*)$/;
-
-  // Extract all schema.table references and their aliases from the full SQL text
-  function extractTableRefs(text) {
-    const refs = [];
-    const pattern = /\b(?:FROM|JOIN)\s+(\w+)\.(\w+)(?:\s+(?:AS\s+)?(\w+))?/gi;
-    let m;
-    while ((m = pattern.exec(text)) !== null) {
-      const schema = m[1], table = m[2], alias = m[3] || null;
-      refs.push({ schema, table, alias });
-    }
-    return refs;
-  }
 
   monaco.languages.registerCompletionItemProvider("sql", {
     triggerCharacters: [".", " ", ","],
@@ -570,20 +599,32 @@ loader.init().then((monaco) => {
       const word = model.getWordAtPosition(position);
       if (!word) return null;
 
+      const hoverRange = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
+
+      // Inferred column type from the last bind of this buffer. Shown above
+      // whatever else the hover has to say.
+      const before = line.substring(0, word.startColumn - 1);
+      const dotBefore = before.match(/(\w+)\.\s*$/);
+      const bind = editorContext.bindResults.get(pathFromUri(model.uri));
+      const typed = resolveColumnType({
+        word: word.word,
+        qualifier: dotBefore ? dotBefore[1] : null,
+        bind,
+        tableRefs: bind ? extractTableRefs(model.getValue()) : [],
+      });
+      const typePrefix = typed ? [`\`${typed.name}\`: **${typed.type}**${typed.source ? ` (${typed.source})` : ""}`, ""] : [];
+
       // Check if the hovered word is a known macro
       const macros = await getMacrosCache();
       const macroMatch = macros.find((m) => m.name === word.word);
       if (macroMatch) {
         const sig = buildMacroSignature(macroMatch);
         const kindLabel = macroMatch.kind === "table" ? "table macro" : macroMatch.kind === "sql" ? "SQL macro" : "scalar macro";
-        const lines = [`**${sig}** *(${kindLabel})*`];
+        const lines = [...typePrefix, `**${sig}** *(${kindLabel})*`];
         if (macroMatch.docstring) {
           lines.push("", macroMatch.docstring);
         }
-        return {
-          range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
-          contents: [{ value: lines.join("\n") }],
-        };
+        return { range: hoverRange, contents: [{ value: lines.join("\n") }] };
       }
 
       // Detect schema.table pattern around cursor
@@ -591,8 +632,6 @@ loader.init().then((monaco) => {
       let table = null;
 
       // Case 1: cursor is on the table part (after the dot)
-      const before = line.substring(0, word.startColumn - 1);
-      const dotBefore = before.match(/(\w+)\.\s*$/);
       if (dotBefore) {
         schema = dotBefore[1];
         table = word.word;
@@ -608,26 +647,27 @@ loader.init().then((monaco) => {
         }
       }
 
-      if (!schema || !table) return null;
+      // Nothing but the inferred type resolved: still worth showing.
+      if (!schema || !table) {
+        if (typePrefix.length === 0) return null;
+        return { range: hoverRange, contents: [{ value: typePrefix.join("\n").trimEnd() }] };
+      }
 
       const info = await getColumnsCache(schema, table);
 
       if (!info || !info.columns || info.columns.length === 0) {
         return {
-          range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
-          contents: [{ value: `*${schema}.${table}* — table not found in warehouse` }],
+          range: hoverRange,
+          contents: [{ value: [...typePrefix, `*${schema}.${table}* — table not found in warehouse`].join("\n") }],
         };
       }
 
-      const lines = [`**${schema}.${table}** — ${info.columns.length} columns`, ""];
+      const lines = [...typePrefix, `**${schema}.${table}** — ${info.columns.length} columns`, ""];
       for (const col of info.columns) {
         lines.push(`- \`${col.name}\` *${col.type}*`);
       }
 
-      return {
-        range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
-        contents: [{ value: lines.join("\n") }],
-      };
+      return { range: hoverRange, contents: [{ value: lines.join("\n") }] };
     },
   });
 });
