@@ -246,19 +246,22 @@ def ls(
             print(name)
         return
 
+    # The package column only earns its width when a package is installed.
+    has_packages = any(getattr(by_name[n], "package", None) for n in selection.selected)
     table = Table(title=f"{len(selection.selected)} model(s)")
     table.add_column("model", style="bold")
     table.add_column("schema")
     table.add_column("materialized")
+    if has_packages:
+        table.add_column("package")
     table.add_column("tags")
     for name in selection.selected:
         model = by_name[name]
-        table.add_row(
-            name,
-            model.schema,
-            model.materialized,
-            ", ".join(getattr(model, "tags", []) or []) or "[dim]-[/dim]",
-        )
+        row = [name, model.schema, model.materialized]
+        if has_packages:
+            row.append(getattr(model, "package", None) or "[dim]-[/dim]")
+        row.append(", ".join(getattr(model, "tags", []) or []) or "[dim]-[/dim]")
+        table.add_row(*row)
     console.print(table)
 
 

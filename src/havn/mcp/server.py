@@ -561,6 +561,10 @@ class MCPServer:
                     "depends_on": m.depends_on,
                     "description": m.description,
                     "tags": list(getattr(m, "tags", []) or []),
+                    # None for the project's own models; the package name for
+                    # a model that came from havn_packages/, which an agent
+                    # needs before it suggests editing the file.
+                    "package": getattr(m, "package", None),
                     "path": str(m.path.relative_to(self.project_dir)),
                 }
                 for m in models

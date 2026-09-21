@@ -88,6 +88,7 @@ from havn.cli import mcp  # noqa: E402, F401
 from havn.cli.metrics import metrics_app  # noqa: E402
 from havn.cli import migrate  # noqa: E402, F401
 from havn.cli import models  # noqa: E402, F401
+from havn.cli import packages  # noqa: E402, F401
 from havn.cli import pipeline  # noqa: E402, F401
 from havn.cli import pr  # noqa: E402, F401
 from havn.cli import project  # noqa: E402, F401
