@@ -24,15 +24,21 @@ extraction is what decides build order, and it handles every construct below.
 
 | Feature | Status | Notes |
 |---|---|---|
-| CTEs | Supported | Build order and column lineage both correct through CTE chains. |
-| Window functions | Supported | Including `QUALIFY`. |
-| `UNION` / `UNION ALL` | Supported | Builds correctly. Column lineage only reports the first branch, see the lineage table below. |
-| `SELECT * EXCLUDE (...)` | Supported | Builds correctly. Excluded columns are still reported by column lineage. |
-| `SELECT * REPLACE (...)` | Supported | Builds correctly. The replacement expression is invisible to column lineage. |
-| Struct and list columns | Supported | Builds correctly. `s.field` confuses column lineage, `s['field']` does not. |
-| `PIVOT` / `UNPIVOT` | Supported | Builds correctly and the DAG sees the source table. Column lineage returns nothing. |
+| CTEs | Supported | Build order and column lineage both correct through CTE chains, including recursive CTEs. |
+| Window functions | Supported | Including `QUALIFY`. Column lineage traces `PARTITION BY` and `ORDER BY` columns into the window's output column. |
+| `UNION` / `UNION ALL` | Supported | Every branch is traced, including `UNION ALL BY NAME`. |
+| `SELECT *` over a join | Supported | A column name present on both sides stays two output columns, named the way DuckDB names them when the model is built. Star expansion needs a column catalog, a connection or a bind-pass schema. |
+| `SELECT * EXCLUDE (...)` | Supported | Excluded columns are gone from the lineage output too. |
+| `SELECT * REPLACE (...)` | Supported | The replacement expression is the source of the replaced column. |
+| Nested subquery in `FROM` | Supported | The subquery alias is not reported as a source table. |
+| Struct and list columns | Partial | Builds correctly, and `unnest` lineage is exact. `s.field` and `s['field']` both resolve to the struct column `s`; lineage does not point inside the struct. |
+| `PIVOT` | Partial | Builds correctly and the DAG sees the source table. The grouping columns are exact; each pivoted output column maps to the `ON` and `USING` columns together. Enumerating a pivot's output columns needs a live connection. |
+| `UNPIVOT` | Supported | The `NAME` and `VALUE` outputs map to every unpivoted column. |
 | `QUALIFY` | Supported | Builds correctly, column lineage correct. |
-| `ASOF JOIN` | Supported | Builds correctly, dependencies detected. |
+| `ASOF JOIN` | Supported | Builds correctly, dependencies detected, column lineage exact. |
+| `LATERAL` | Partial | Over-broad, never wrong: sqlglot gives a `LATERAL` body no scope of its own, so the correlation predicate's columns come along with the projection. |
+| `COLUMNS('regex')` | Supported | Needs a live connection to enumerate the matched columns. |
+| `GROUP BY ALL` | Supported | |
 | Python macros (`@macro`) | Supported | Registered as DuckDB scalar UDFs, callable anywhere in a model. |
 | Table macros (`@table_macro`) | Supported | Called with `FROM`. Output columns come from the declared `schema=`. |
 | `CREATE MACRO` SQL macros | Supported | `.sql` files in `macros/` are registered alongside the Python ones. |
@@ -69,25 +75,27 @@ Set with `@config materialized=...` at the top of a model.
 
 ### Column lineage, per construct
 
-Column lineage is what powers the lineage view and impact analysis. It is
-accurate for the common shapes and wrong in specific ones. Until the rewrite
-lands, treat a lineage result as a strong hint, not a guarantee.
+Column lineage is what powers the lineage view and impact analysis. Every row
+below is pinned by `tests/test_lineage_conformance.py`, which checks the output
+column set against DuckDB's own `DESCRIBE` of the built model and the per-column
+source mapping against a written-out expectation. See
+[Lineage](lineage.md#what-lineage-gets-right) for the detail.
 
 | Construct | Status | Notes |
 |---|---|---|
-| CTE chain | Supported | |
-| Window function | Supported | |
-| `QUALIFY` | Supported | |
-| `unnest` | Supported | |
-| Correlated subquery | Supported | Over-broad: reports more sources than strictly contribute. |
-| Struct bracket `s['field']` | Partial | Correct, but resolves to the struct column rather than the field. |
-| Nested subquery in `FROM` | Partial | The subquery alias is reported as if it were a source table. |
-| `UNION ALL` | Partial | Only the first branch is traced; later branches are dropped. |
-| `SELECT *` over a join | Partial | A column name present in both sides collapses to a single source. |
-| `SELECT * EXCLUDE (x)` | Partial | `x` is still reported as an output column. |
-| `SELECT * REPLACE (expr AS x)` | Partial | The replacement expression is never inspected. |
-| Struct dot `s.field` | Partial | `s` is reported as a source table. |
-| `PIVOT` | Not supported | Returns an empty result. Precise per-column lineage through a pivot is not planned; mapping output columns to the pivoted source is. |
+| CTE chain, recursive CTE | Supported | |
+| Nested subquery in `FROM` | Supported | |
+| Window function, `QUALIFY` | Supported | |
+| `UNION ALL`, `UNION ALL BY NAME` | Supported | Every branch. |
+| `SELECT *` over a join | Supported | Both sides of a duplicated name survive. |
+| `SELECT * EXCLUDE`, `SELECT * REPLACE` | Supported | |
+| `unnest`, `UNPIVOT`, `ASOF JOIN`, `GROUP BY ALL` | Supported | |
+| Correlated subquery | Supported | |
+| `COLUMNS('regex')` | Supported | Needs a live connection. |
+| Struct dot `s.field`, bracket `s['field']` | Partial | Resolves to the struct column, not the field inside it. |
+| `PIVOT` | Partial | Grouping columns exact; a pivoted output column maps to the `ON` and `USING` columns together. Needs a live connection to enumerate the outputs. |
+| `LATERAL` | Partial | Over-broad, never wrong: the correlation predicate's columns come along with the projection. |
+| Columns used only in `WHERE`, `JOIN`, `GROUP BY`, `ORDER BY` | Not applicable | They feed no output column, so they have no lineage entry by construction. Impact analysis finds them through the reference index and labels each hit with its clause. |
 
 ## Running models
 
