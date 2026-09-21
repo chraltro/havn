@@ -61,6 +61,10 @@ _BARE_FUNCTION = re.compile(r"with name ([A-Za-z_][A-Za-z0-9_]*) does not exist"
 
 UNAVAILABLE_MESSAGE = "bind pass unavailable on this backend"
 
+# What a DuckDB type name may look like: MAP(VARCHAR, INTEGER), DECIMAL(10,2),
+# STRUCT(a INTEGER), INTEGER[]. Deliberately no quotes, semicolons or dashes.
+_TYPE_TEXT = re.compile(r"[A-Za-z_][A-Za-z0-9_ ,()\[\]]*")
+
 
 @dataclass
 class BindError:
@@ -369,12 +373,21 @@ def _create_typed_stub(
     table: str,
     columns: list[tuple[str, str]],
 ) -> None:
-    """Create an empty, correctly typed view for a base table given by spec."""
+    """Create an empty, correctly typed view for a base table given by spec.
+
+    The type text goes into the SQL unquoted, because there is no other way to
+    say ``DECIMAL(10,2)`` or ``STRUCT(a INTEGER)``, so it is checked against
+    the shape a DuckDB type name can take first.
+    """
     if not columns:
         return
     projection = ", ".join(
-        f"CAST(NULL AS {ctype}) AS {_quote_ident(cname)}" for cname, ctype in columns
+        f"CAST(NULL AS {ctype}) AS {_quote_ident(cname)}"
+        for cname, ctype in columns
+        if _TYPE_TEXT.fullmatch(str(ctype))
     )
+    if not projection:
+        return
     cur.execute(
         f"CREATE OR REPLACE VIEW {_quote_ident(shadow)}.{_quote_ident(schema)}."
         f"{_quote_ident(table)} AS "
@@ -483,8 +496,8 @@ def bind_models(
         base_tables: Explicit ``schema.table -> [(column, type)]`` specs for
             base objects that are not in the catalog yet. Anything not listed
             here is mirrored from the main catalog when it exists.
-        project_dir: Used to register Python macros on the bind cursor when
-            the connection does not already have them.
+        project_dir: Used to register Python macros on ``conn`` when it does
+            not already have them, so they resolve inside the shadow.
 
     Returns:
         A :class:`BindResult`. ``available`` is False, with a single warning,
