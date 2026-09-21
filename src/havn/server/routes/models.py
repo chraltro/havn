@@ -18,7 +18,6 @@ from havn.server.deps import (
     _require_permission,
     _serialize,
     build_dag,
-    discover_models,
     ensure_meta_table,
     run_transform,
 )
@@ -278,10 +277,9 @@ def get_impact(
 ) -> dict:
     """Analyze downstream impact of changing a model or column."""
     _require_permission(request, "read")
-    from havn.engine.transform import discover_models, impact_analysis
+    from havn.engine.transform import discover_all_models, impact_analysis
 
-    transform_dir = _get_project_dir() / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(_get_project_dir())
     model_map = {m.full_name: m for m in models}
 
     if model_name not in model_map:
@@ -316,10 +314,9 @@ def get_explain(
         explain_query,
         plan_to_dict,
     )
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
-    transform_dir = _get_project_dir() / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(_get_project_dir())
 
     target = next((m for m in models if m.full_name == model_name), None) or next(
         (m for m in models if m.name == model_name), None
@@ -485,11 +482,10 @@ def run_validate(request: Request, conn_opt: DbConnReadOnlyOptional = None) -> d
     """
     _require_permission(request, "read")
     from havn.engine.seeds import discover_seeds
-    from havn.engine.transform import discover_models, validate_models
+    from havn.engine.transform import discover_all_models, validate_models
 
     project_dir = _get_project_dir()
-    transform_dir = project_dir / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir)
     config = _get_config()
 
     known_tables: set[str] = set()
@@ -537,11 +533,10 @@ def run_check(request: Request, conn_opt: DbConnReadOnlyOptional = None) -> dict
     """Validate SQL models, run inline assertions, and run YAML contracts."""
     _require_permission(request, "read")
     from havn.engine.seeds import discover_seeds
-    from havn.engine.transform import discover_models, run_assertions, validate_models
+    from havn.engine.transform import discover_all_models, run_assertions, validate_models
 
     project_dir = _get_project_dir()
-    transform_dir = project_dir / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir)
     config = _get_config()
 
     known_tables: set[str] = set()

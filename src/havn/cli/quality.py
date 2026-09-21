@@ -28,13 +28,12 @@ def check(
     """
     from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.seeds import discover_seeds
-    from havn.engine.transform import discover_models, run_assertions, validate_models
+    from havn.engine.transform import discover_all_models, run_assertions, validate_models
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir, env)
-    transform_dir = project_dir / "transform"
     seeds_dir = project_dir / "seeds"
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir, config)
     if not models:
         console.print("[yellow]No SQL models found in transform/[/yellow]")
         return

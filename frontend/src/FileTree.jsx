@@ -1,6 +1,17 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { schemaCompare } from "./schemaOrder";
 
+// Files under havn_packages/ come from `havn packages install` and are
+// replaced wholesale by the next one, so the tree marks them and the editor
+// warns before you spend an afternoon on an edit that will not survive.
+export const PACKAGES_DIR = "havn_packages";
+
+export function packageOfPath(path) {
+  const parts = (path || "").replace(/\\/g, "/").split("/").filter(Boolean);
+  if (parts[0] !== PACKAGES_DIR) return null;
+  return parts[1] || "";
+}
+
 function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, onMoveFile }) {
   // Auto-expand directories that contain the active file
   const _af = activeFile?.replace(/\\/g, "/");
@@ -27,6 +38,14 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
     }
   }, [isActive]);
 
+  const pkg = node.package !== undefined && node.package !== null
+    ? node.package
+    : packageOfPath(node.path);
+  const isPackage = pkg !== null;
+  const packageTitle = isPackage
+    ? `Installed package${pkg ? ` '${pkg}'` : ""} — havn packages install overwrites this`
+    : undefined;
+
   if (node.type === "dir") {
     return (
       <div role="treeitem" aria-expanded={expanded} aria-label={node.name}>
@@ -47,7 +66,7 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
             e.stopPropagation();
             setDragOver(false);
             const srcPath = e.dataTransfer.getData("text/plain");
-            if (srcPath && onMoveFile) {
+            if (srcPath && onMoveFile && !isPackage) {
               const fileName = srcPath.split("/").pop();
               const dest = `${node.path}/${fileName}`;
               if (dest !== srcPath) onMoveFile(srcPath, dest);
@@ -57,18 +76,22 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
           <svg width="10" height="10" viewBox="0 0 10 10" style={{ ...styles.icon, transform: expanded ? "rotate(0deg)" : "rotate(-90deg)" }}>
             <path d="M2.5 3L5 6L7.5 3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          <span style={styles.dirName}>{node.name}</span>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded(true);
-              setCreating(true);
-              setNewName("");
-            }}
-            style={{ ...styles.addBtn, opacity: hovered ? 1 : 0, pointerEvents: hovered ? "auto" : "none" }}
-            title={`New file in ${node.name}/`}
-            aria-label={`New file in ${node.name}`}
-          >+</button>
+          <span style={{ ...styles.dirName, opacity: isPackage ? 0.65 : 1 }}>{node.name}</span>
+          {isPackage ? (
+            <span style={styles.packageTag} title={packageTitle}>installed</span>
+          ) : (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpanded(true);
+                setCreating(true);
+                setNewName("");
+              }}
+              style={{ ...styles.addBtn, opacity: hovered ? 1 : 0, pointerEvents: hovered ? "auto" : "none" }}
+              title={`New file in ${node.name}/`}
+              aria-label={`New file in ${node.name}`}
+            >+</button>
+          )}
         </div>
         {expanded && creating && (
           <div style={{ ...styles.newFileRow, paddingLeft: 24 + depth * 16 }}>
@@ -125,13 +148,16 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
       data-havn-file=""
       role="treeitem"
       aria-selected={isActive}
-      draggable
+      title={packageTitle}
+      draggable={!isPackage}
       onDragStart={(e) => {
+        if (isPackage) { e.preventDefault(); return; }
         e.dataTransfer.setData("text/plain", node.path);
         e.dataTransfer.effectAllowed = "move";
       }}
       style={{
         ...styles.item,
+        opacity: isPackage ? 0.7 : 1,
         paddingLeft: 8 + depth * 16,
         background: isActive ? "color-mix(in srgb, var(--havn-accent) 8%, var(--havn-bg-secondary))" : "transparent",
         borderLeft: isActive ? "2px solid var(--havn-accent)" : "2px solid transparent",
@@ -142,7 +168,7 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
     >
       <span style={{ ...styles.dot, background: iconColor }} />
       <span style={isActive ? styles.activeFileName : styles.fileName}>{node.name}</span>
-      {onDeleteFile && (
+      {onDeleteFile && !isPackage && (
         <button
           onClick={(e) => { e.stopPropagation(); onDeleteFile(node.path); }}
           style={{ ...styles.deleteBtn, opacity: hovered ? 1 : 0, pointerEvents: hovered ? "auto" : "none" }}
@@ -306,5 +332,6 @@ const styles = {
   activeFileName: { color: "var(--havn-text)", fontWeight: 500, fontFamily: "var(--havn-font-mono)", fontSize: "11.5px", letterSpacing: "0.005em" },
   dot: { width: "5px", height: "5px", borderRadius: "50%", flexShrink: 0 },
   deleteBtn: { marginLeft: "auto", width: "18px", height: "18px", background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", lineHeight: "18px", textAlign: "center", padding: 0, flexShrink: 0, borderRadius: "var(--havn-radius)", transition: "color 0.1s ease" },
+  packageTag: { marginLeft: "auto", color: "var(--havn-text-dim)", fontFamily: "var(--havn-font-mono)", fontSize: "9px", letterSpacing: "0.04em", textTransform: "uppercase", flexShrink: 0 },
   empty: { padding: "16px 12px", color: "var(--havn-text-dim)", fontSize: "11px", textAlign: "center", fontFamily: "var(--havn-font-mono)" },
 };

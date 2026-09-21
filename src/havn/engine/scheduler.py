@@ -292,7 +292,7 @@ class SchedulerThread(threading.Thread):
                     )
                     from havn.engine.transform.discovery import (
                         build_dag,
-                        discover_models,
+                        discover_all_models,
                     )
 
                     from havn.engine.orchestration import (
@@ -349,7 +349,7 @@ class SchedulerThread(threading.Thread):
                                 jconn = open_warehouse(config, self.project_dir)
                                 _emt(jconn)
                                 ensure_job_runs_table(jconn)
-                                models = discover_models(self.project_dir / "transform")
+                                models = discover_all_models(self.project_dir)
                                 dag = build_dag(models)
                                 plan = resolve_execution_plan(
                                     job.targets or [job.target],

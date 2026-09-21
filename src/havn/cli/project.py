@@ -232,6 +232,9 @@ def init(
         ".havn/catalog.ducklake\n.havn/catalog.ducklake.wal\n.havn/data/\n"
         "__pycache__/\n*.pyc\n.venv/\n.env\noutput/\n_snapshots/\n"
         ".havn/pr-build/\n"
+        # Installed package sources are reproducible from havn_packages.lock,
+        # which IS committed. Only the checkout is ignored.
+        "havn_packages/\n"
     )
     # .havn/ holds shareable PR state. .havn/prs/ travels with the repo (commit
     # the JSON files there to share PRs with collaborators); .havn/pr-build/ is
@@ -310,7 +313,7 @@ def validate(
     contract.
     """
     from havn.config import load_project
-    from havn.engine.transform import build_dag, discover_models
+    from havn.engine.transform import build_dag, discover_all_models
 
     project_dir = _resolve_project(project_dir)
     errors: list[str] = []
@@ -336,8 +339,7 @@ def validate(
                 errors.append(f"Stream '{name}': unknown action '{step.action}'")
 
     # 4. Discover and validate SQL models
-    transform_dir = project_dir / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir, config)
     model_names = {m.full_name for m in models}
 
     # Check for duplicate model names
@@ -654,7 +656,7 @@ def context(
     """Generate a project summary to paste into any AI assistant (ChatGPT, Claude, etc.)."""
     from havn.config import load_project
     from havn.engine.database import open_warehouse
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
@@ -679,8 +681,7 @@ def context(
     lines.append("")
 
     # SQL models
-    transform_dir = project_dir / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir, config)
     if models:
         lines.append("## SQL Models")
         for m in models:

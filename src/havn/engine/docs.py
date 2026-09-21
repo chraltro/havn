@@ -27,13 +27,13 @@ def generate_docs(
     - sources.yml declarations
     - exposures.yml declarations
     """
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
     lines: list[str] = []
     lines.append("# Data Warehouse Documentation\n")
 
     # Discover models for dependency info
-    models = discover_models(transform_dir) if transform_dir.exists() else []
+    models = discover_all_models(transform_dir.parent) if transform_dir.exists() else []
     model_map = {m.full_name: m for m in models}
 
     # Get all schemas (excluding internal)
@@ -211,9 +211,9 @@ def generate_structured_docs(
     Returns a JSON-serializable dict with schema/table metadata
     for a two-pane UI layout.
     """
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
-    models = discover_models(transform_dir) if transform_dir.exists() else []
+    models = discover_all_models(transform_dir.parent) if transform_dir.exists() else []
     model_map = {m.full_name: m for m in models}
 
     # Get all schemas (excluding internal)

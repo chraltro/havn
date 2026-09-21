@@ -114,6 +114,10 @@ class SQLModel:
     # left out of content_hash below: retagging a model must not rebuild it.
     tags: list[str] = field(default_factory=list)
     source_freshness: list[dict] = field(default_factory=list)  # @source_freshness specs
+    # Name of the havn package this model came from, or None for a project
+    # model. Set by package discovery, never by a @config directive, and
+    # deliberately out of content_hash: it is provenance, not build semantics.
+    package: str | None = None
 
     def __post_init__(self) -> None:
         # Hash everything that changes build semantics — not just the query —

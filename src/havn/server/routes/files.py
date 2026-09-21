@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from havn.engine.packages import PACKAGES_DIRNAME
 from havn.server.deps import _detect_language, _get_project_dir, _require_permission
 
 import logging
@@ -47,6 +48,10 @@ class FileInfo(BaseModel):
     path: str
     type: str  # "file" or "dir"
     children: list[FileInfo] | None = None
+    # Name of the havn package this path belongs to, or None for the
+    # project's own files. Set for everything under havn_packages/, which
+    # the UI marks so nobody edits a file the next install will overwrite.
+    package: str | None = None
 
 
 class SaveFileRequest(BaseModel):
@@ -102,6 +107,19 @@ def _safe_project_path(project_dir: Path, rel_path: str) -> Path:
     return full
 
 
+def _package_of(rel_path: str) -> str | None:
+    """The package a project-relative path belongs to, or None.
+
+    ``havn_packages/crm/transform/x.sql`` -> ``crm``; ``havn_packages`` itself
+    -> ``""``, which is falsy but still marks the directory as not the
+    project's own.
+    """
+    parts = Path(rel_path).parts
+    if not parts or parts[0] != PACKAGES_DIRNAME:
+        return None
+    return parts[1] if len(parts) > 1 else ""
+
+
 def _scan_dir(base: Path, rel: Path | None = None) -> list[FileInfo]:
     """Scan a directory and return file tree."""
     target = base / rel if rel else base
@@ -115,6 +133,7 @@ def _scan_dir(base: Path, rel: Path | None = None) -> list[FileInfo]:
         if ".duckdb" in entry.name:
             continue
         rel_path = str(entry.relative_to(base))
+        package = _package_of(rel_path)
         if entry.is_dir():
             items.append(
                 FileInfo(
@@ -122,10 +141,13 @@ def _scan_dir(base: Path, rel: Path | None = None) -> list[FileInfo]:
                     path=rel_path,
                     type="dir",
                     children=_scan_dir(base, entry.relative_to(base)),
+                    package=package,
                 )
             )
         elif entry.suffix in (".sql", ".py", ".yml", ".yaml", ".dpnb", ".csv"):
-            items.append(FileInfo(name=entry.name, path=rel_path, type="file"))
+            items.append(
+                FileInfo(name=entry.name, path=rel_path, type="file", package=package)
+            )
     return items
 
 

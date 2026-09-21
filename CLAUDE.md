@@ -52,6 +52,11 @@ havn rename-column silver.customers customer_id cust_id   # rename across downst
 havn rename-column silver.customers customer_id cust_id --dry-run  # list the sites, write nothing
 havn rename-column silver.customers customer_id cust_id --force    # rename past the blockers
 havn macros                     # list registered SQL macros
+havn packages install           # install packages: from project.yml into havn_packages/
+havn packages install --upgrade # re-resolve each rev instead of using the lock
+havn packages list              # installed packages: rev, commit, model + macro counts
+havn packages remove crm        # delete a package checkout and its lock entry
+havn ls package:crm             # package: selector (package: alone = your own models)
 havn test                       # run model unit tests (tests/unit/*.yml)
 havn test --model silver.customers -v   # one model, with row diffs
 havn check                      # validate + assertions + contracts + unit tests
@@ -94,6 +99,7 @@ src/havn/                       # Python package (the platform itself)
     query_governor.py         # Query timeout enforcement via DuckDB interrupt()
     backup.py                 # Verified backup/restore with integrity checks
     semantic.py               # Semantic layer (metrics/*.yml → SQL compiler)
+    packages.py               # Package install/lock (havn_packages/, havn_packages.lock)
     unit_tests.py             # Model unit tests (tests/unit/*.yml loader + runner)
     sql_rewrite.py            # Table-reference rewriter (mocks, ephemeral, defer)
     sql_safety.py             # Shared read-only SQL validation
@@ -140,6 +146,7 @@ tests/                        # pytest test suite
   test_mcp_server.py          # MCP server
   test_selectors.py           # Graph selectors + @config tags
   test_rename.py              # Column rename index, plan, apply, CLI and API
+  test_packages.py            # Packages: install, lock, namespacing, macros, CLI, API
 ```
 
 ## Architecture
@@ -156,7 +163,9 @@ User project layout (created by `havn init`):
   macros/         Python SQL macros (auto-registered as DuckDB UDFs)
   metrics/        Semantic-layer metric definitions (YAML)
   tests/unit/     Model unit tests (fixture rows in, expected rows out)
-  project.yml     Config: connections, lint, alerts
+  havn_packages/  Installed packages (gitignored; rebuilt by `havn packages install`)
+  project.yml     Config: connections, lint, alerts, packages
+  havn_packages.lock  Resolved commit per package (committed)
   .env            Secrets (never committed)
   .havn-env       Active environment (local, not committed)
   warehouse.duckdb   Single-file DuckDB database
@@ -243,6 +252,36 @@ SELECT * FROM active_users('active')
 - `schema=` declares output columns and DuckDB types -- required (or inferred from first row)
 - Each dict in the returned list is one row; keys are column names
 - No pyarrow required -- uses DuckDB's native SQL TABLE MACRO + json_each internally
+
+### Packages
+
+Shared models and macros are installed from a git repo or a local directory:
+
+```yaml
+# project.yml
+packages:
+  - name: crm
+    git: https://github.com/example/havn-crm.git
+    rev: v1.4.0        # tag, commit or branch; a branch warns (it is not a pin)
+```
+
+- `havn packages install` clones into `havn_packages/<name>/` and writes
+  `havn_packages.lock` (the resolved commit per package). The lock is committed;
+  `havn_packages/` is gitignored. A later install uses the lock unless `--upgrade`.
+- A package's schemas are prefixed: `silver.customers` in package `crm` becomes
+  `crm_silver.customers`. References inside the package to its own models are
+  rewritten at discovery time; references to anything else are left as written.
+  Project models reference the namespaced name.
+- A package may ship `havn_package.yml` at its root (`name`, `version`,
+  `requires_havn`, and `schemas:` to override the prefix per schema).
+- `discover_all_models(project_dir, config)` in `engine/transform/discovery.py`
+  is the multi-root entry point; `discover_models(transform_dir)` remains the
+  single-directory primitive. Anything that lists or builds the DAG uses the
+  former.
+- Package macros register between the stdlib and the project, under module names
+  `havn_macros.<pkg>.<stem>`.
+
+See `docs/packages.md`.
 
 ### Python Script Convention
 

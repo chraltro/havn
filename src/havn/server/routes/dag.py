@@ -152,6 +152,9 @@ def get_dag(request: Request) -> dict:
                 "schema": m.schema,
                 "type": m.materialized,
                 "path": str(m.path.relative_to(project_dir)),
+                # None for project models. The panel labels the rest so a
+                # node that cannot be edited here is visibly not yours.
+                "package": getattr(m, "package", None),
             }
         )
 
@@ -408,6 +411,7 @@ def get_full_dag(request: Request) -> dict:
                 "schema": m.schema,
                 "type": m.materialized,
                 "path": str(m.path.relative_to(project_dir)),
+                "package": getattr(m, "package", None),
             }
         )
 

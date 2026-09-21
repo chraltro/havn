@@ -537,9 +537,9 @@ class MCPServer:
         }
 
     def _models(self):
-        from havn.engine.transform import discover_models
+        from havn.engine.transform import discover_all_models
 
-        return discover_models(self.project_dir / "transform")
+        return discover_all_models(self.project_dir)
 
     def _tool_list_models(self, args: dict) -> dict:
         models = self._models()
@@ -561,6 +561,10 @@ class MCPServer:
                     "depends_on": m.depends_on,
                     "description": m.description,
                     "tags": list(getattr(m, "tags", []) or []),
+                    # None for the project's own models; the package name for
+                    # a model that came from havn_packages/, which an agent
+                    # needs before it suggests editing the file.
+                    "package": getattr(m, "package", None),
                     "path": str(m.path.relative_to(self.project_dir)),
                 }
                 for m in models

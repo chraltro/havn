@@ -792,6 +792,19 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
         ctx.font = `bold 9px ${monoFamily}`;
         ctx.textAlign = "right";
         ctx.fillText(badge, pos.x + NODE_W - 6, pos.y + 12);
+
+        // Package provenance. A model from havn_packages/ is not this
+        // project's to edit, so it says where it came from — quietly, since
+        // the point is orientation, not a warning.
+        if (n.package) {
+          const prevAlpha = ctx.globalAlpha;
+          ctx.globalAlpha = prevAlpha * 0.6;
+          ctx.fillStyle = getCV("--havn-text-secondary") || "#8b949e";
+          ctx.font = `9px ${monoFamily}`;
+          ctx.textAlign = "left";
+          ctx.fillText(`pkg:${n.package}`, pos.x + 8, pos.y + NODE_H - 9, NODE_W - 20);
+          ctx.globalAlpha = prevAlpha;
+        }
       }
     }
 

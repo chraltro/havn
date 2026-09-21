@@ -582,7 +582,7 @@ def execute_job(
         _compute_upstream_hash,
         _update_state,
         build_dag,
-        discover_models,
+        discover_all_models,
     )
     from havn.engine.transform.execution import execute_model
 
@@ -622,7 +622,7 @@ def execute_job(
 
     try:
         # Build model map for transform steps
-        models = discover_models(project_dir / "transform")
+        models = discover_all_models(project_dir)
         dag_sorted = build_dag(models)
         model_map = {m.full_name: m for m in dag_sorted}
         # Compute upstream hashes

@@ -30,6 +30,7 @@ nav:
   - Unit Tests: unit-tests.md
   - Contracts: contracts.md
   - Macros: macros.md
+  - Packages: packages.md
   - Semantic Layer: semantic-layer.md
   - Lineage: lineage.md
   - Masking: masking.md

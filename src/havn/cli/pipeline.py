@@ -200,16 +200,15 @@ def ls(
     """
     from havn.engine.database import open_warehouse
     from havn.engine.selectors import select_models
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir, env)
-    transform_dir = project_dir / "transform"
 
     selectors = list(targets or []) + list(select or [])
     exclusions = list(exclude or [])
 
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir, config)
     by_name = {m.full_name: m for m in models}
 
     # Only `state:` selectors need the warehouse; opening it otherwise would
@@ -247,19 +246,22 @@ def ls(
             print(name)
         return
 
+    # The package column only earns its width when a package is installed.
+    has_packages = any(getattr(by_name[n], "package", None) for n in selection.selected)
     table = Table(title=f"{len(selection.selected)} model(s)")
     table.add_column("model", style="bold")
     table.add_column("schema")
     table.add_column("materialized")
+    if has_packages:
+        table.add_column("package")
     table.add_column("tags")
     for name in selection.selected:
         model = by_name[name]
-        table.add_row(
-            name,
-            model.schema,
-            model.materialized,
-            ", ".join(getattr(model, "tags", []) or []) or "[dim]-[/dim]",
-        )
+        row = [name, model.schema, model.materialized]
+        if has_packages:
+            row.append(getattr(model, "package", None) or "[dim]-[/dim]")
+        row.append(", ".join(getattr(model, "tags", []) or []) or "[dim]-[/dim]")
+        table.add_row(*row)
     console.print(table)
 
 
@@ -343,9 +345,9 @@ def transform(
     resolved: Optional[list[str]] = None
     if selectors or exclusions:
         from havn.engine.selectors import select_models
-        from havn.engine.transform import discover_models
+        from havn.engine.transform import discover_all_models
 
-        all_models = discover_models(transform_dir)
+        all_models = discover_all_models(project_dir, config)
         selection = select_models(
             selectors or ["all"],
             all_models,

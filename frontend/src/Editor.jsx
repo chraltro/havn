@@ -3,6 +3,7 @@ import MonacoEditor, { loader } from "@monaco-editor/react";
 import { useTheme } from "./ThemeProvider";
 import { COLOR_THEMES } from "./themes";
 import { api, getMacros } from "./api";
+import { packageOfPath } from "./FileTree";
 
 // ---------------------------------------------------------------------------
 // Custom Monaco themes derived from havn COLOR_THEMES
@@ -1326,6 +1327,13 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
   const disableFolding = contentLen > 1_000_000;  // > 1MB
 
   const editorElement = (
+  // Installed package files are still editable -- sometimes you need a quick
+  // local patch to find out whether a fix works -- but the next
+  // `havn packages install` replaces the whole checkout, so say so up front
+  // rather than letting the edit quietly disappear.
+  const activePackage = packageOfPath(activeFile);
+
+  const editor = (
     <MonacoEditor
       height="100%"
       language={language}
@@ -1452,6 +1460,18 @@ function BlockerDialog({ blocked, onAnswer }) {
           <button style={styles.dialogConfirm} onClick={() => onAnswer(true)}>Rename anyway</button>
         </div>
       </div>
+  if (activePackage === null) return editor;
+
+  return (
+    <div style={styles.packageWrap}>
+      <div style={styles.packageBanner} role="status">
+        From installed package
+        {activePackage ? <strong>{` ${activePackage}`}</strong> : null}
+        {". The next "}
+        <code style={styles.code}>havn packages install</code>
+        {" overwrites your edits."}
+      </div>
+      <div style={styles.packageEditor}>{editor}</div>
     </div>
   );
 }
@@ -1484,4 +1504,7 @@ const styles = {
   emptyText: { margin: 0, fontSize: "15px", fontWeight: 500, letterSpacing: "-0.01em" },
   emptyHint: { margin: 0, fontSize: "13px", textAlign: "center", lineHeight: "1.8", color: "var(--havn-text-dim)", maxWidth: "400px" },
   code: { background: "var(--havn-btn-bg)", padding: "2px 6px", borderRadius: "3px", fontSize: "12px", fontFamily: "var(--havn-font-mono)" },
+  packageWrap: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 },
+  packageBanner: { flexShrink: 0, padding: "6px 12px", fontSize: "11.5px", color: "var(--havn-text-secondary)", background: "var(--havn-bg-secondary)", borderBottom: "1px solid var(--havn-border-light)" },
+  packageEditor: { flex: 1, minHeight: 0 },
 };
