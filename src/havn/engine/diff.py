@@ -403,7 +403,6 @@ def diff_models(
         List of DiffResult objects
     """
     from havn.engine.transform import build_dag, discover_models
-    from havn.engine.transform.discovery import _has_changed
 
     all_models = discover_models(transform_dir)
     if not all_models:
@@ -423,21 +422,17 @@ def diff_models(
     # Sort by DAG order
     ordered = build_dag(models)
 
-    # Changed mode: only diff models whose SQL or upstream changed
+    # Changed mode: only diff models whose SQL or upstream changed, plus
+    # everything downstream of them. That is exactly ``state:modified+``, so
+    # it goes through the shared selector rather than a fourth hand-rolled
+    # downstream closure.
     changed_set = None
     if mode == "changed" and not targets:
-        changed_set = set()
-        model_map = {m.full_name: m for m in ordered}
-        for model in ordered:
-            if _has_changed(conn, model):
-                changed_set.add(model.full_name)
-        # Include downstream of changed models
-        downstream = set()
-        for model in ordered:
-            for dep in model.depends_on:
-                if dep in changed_set or dep in downstream:
-                    downstream.add(model.full_name)
-        changed_set.update(downstream)
+        from havn.engine.selectors import select_models
+
+        changed_set = set(
+            select_models(["state:modified+"], ordered, conn=conn).selected
+        )
 
     results: list[DiffResult] = []
     for model in ordered:

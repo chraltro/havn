@@ -239,12 +239,16 @@ def _find_job(project_dir: Path, name: str) -> Job | None:
 
 
 def _collect_upstream(target_name: str, model_map: dict, visited: set) -> None:
-    """Recursively collect all upstream model names."""
-    if target_name in visited or target_name not in model_map:
+    """Recursively collect all upstream model names.
+
+    Thin wrapper over :func:`havn.engine.selectors.ancestors`, kept because
+    the export-script scan below wants to accumulate into a shared set.
+    """
+    from havn.engine.selectors import ancestors
+
+    if target_name not in model_map:
         return
-    visited.add(target_name)
-    for dep in model_map[target_name].depends_on:
-        _collect_upstream(dep, model_map, visited)
+    visited |= ancestors(target_name, list(model_map.values()))
 
 
 def _validate_script_target(project_dir: Path, target: str) -> None:
@@ -266,13 +270,14 @@ def _validate_script_target(project_dir: Path, target: str) -> None:
 def _collect_downstream(
     target_name: str, model_map: dict, visited: set
 ) -> None:
-    """Recursively collect all downstream model names for a given target."""
-    if target_name in visited:
-        return
-    visited.add(target_name)
-    for name, model in model_map.items():
-        if target_name in (model.depends_on or []):
-            _collect_downstream(name, model_map, visited)
+    """Collect all downstream model names for a given target.
+
+    Thin wrapper over :func:`havn.engine.selectors.descendants` so the tree
+    has exactly one downstream-closure implementation.
+    """
+    from havn.engine.selectors import descendants
+
+    visited |= descendants(target_name, list(model_map.values()))
 
 
 def _parse_selector(target: str) -> tuple[bool, bool, str]:
@@ -284,19 +289,12 @@ def _parse_selector(target: str) -> tuple[bool, bool, str]:
     ``foo`` -> (False, False, "foo")
 
     The legacy ``+downstream:`` prefix is still accepted for back-compat.
+    Delegates to :func:`havn.engine.selectors.strip_graph_operators`, which
+    also understands the ``n+`` depth and ``@`` forms.
     """
-    if target.startswith("+downstream:"):  # legacy
-        return (False, True, target[len("+downstream:") :])
-    up = False
-    down = False
-    inner = target
-    if inner.startswith("+"):
-        up = True
-        inner = inner[1:]
-    if inner.endswith("+"):
-        down = True
-        inner = inner[:-1]
-    return (up, down, inner)
+    from havn.engine.selectors import strip_graph_operators
+
+    return strip_graph_operators(target)
 
 
 def resolve_execution_plan(
@@ -305,6 +303,7 @@ def resolve_execution_plan(
     project_dir: Path,
     conn=None,
     resolve: str = "upstream",
+    exclude: list[str] | None = None,
 ) -> ExecutionPlan:
     """Build an ordered execution plan for one or more targets.
 
@@ -317,24 +316,33 @@ def resolve_execution_plan(
     - ``+schema.name`` — this model plus every upstream dependency
     - ``schema.name+`` — this model plus every downstream consumer
     - ``+schema.name+`` — upstream + this + downstream
-    - ``schema.*`` — wildcard over every model in ``schema``
-    - ``+schema.*`` / ``schema.*+`` / ``+schema.*+`` — upstream/downstream of all matched
+    - ``schema.*`` / ``gold.fct_*`` / ``*.customers`` — fnmatch wildcards
+    - ``2+x`` / ``x+2`` — bounded to N hops
+    - ``@x`` — x, its descendants, and every ancestor of those
+    - ``tag:daily``, ``path:transform/gold/``,
+      ``config.materialized:incremental``, ``state:modified`` — selector
+      methods; comma means intersection
     - ``ingest/script.py`` — run that ingest script
     - ``export/script.py`` — run that export script (and its referenced models
       when the selector includes ``+`` prefix)
     - ``ingest/script.py+`` — run ingest, then all models that eventually
       depend on tables it creates (handy for a fresh-data refresh)
 
+    Model selection is delegated to :func:`havn.engine.selectors.select_models`;
+    only the script-scheduling half lives here.
+
     Args:
         targets: One or more targets.
         dag: List of SQLModels from build_dag().
         project_dir: Project root.
-        conn: Optional DB connection (used for duration estimates).
+        conn: Optional DB connection (used for duration estimates and by
+            ``state:`` selectors).
         resolve: Legacy knob. When "upstream" (the old default), bare targets
             without ``+`` markers are treated as ``+target`` for backward
             compatibility with jobs saved before selectors existed. When set
             to "none", bare targets run literally with no expansion. New jobs
             should rely on the selector syntax and leave this at the default.
+        exclude: Selectors whose matches are removed from the model selection.
     """
     if isinstance(targets, str):
         targets = [targets]
@@ -346,6 +354,7 @@ def resolve_execution_plan(
     needed_models: set[str] = set()
     explicit_ingest_scripts: list[str] = []
     explicit_export_scripts: list[str] = []
+    model_selectors: list[str] = []
 
     for target in targets:
         up, down, inner = _parse_selector(target)
@@ -356,7 +365,6 @@ def resolve_execution_plan(
 
         is_ingest_target = inner.startswith("ingest/")
         is_export_target = inner.startswith("export/")
-        is_wildcard = "*" in inner
 
         if is_ingest_target or is_export_target:
             _validate_script_target(project_dir, inner)
@@ -402,47 +410,24 @@ def resolve_execution_plan(
             # export+ doesn't make sense (exports are terminal); ignore down
             continue
 
-        if is_wildcard:
-            schema_prefix = inner.replace(".*", "")
-            matching = [
-                m.full_name
-                for m in dag
-                if m.schema == schema_prefix
-                or m.full_name.startswith(schema_prefix + ".")
-            ]
-            if not matching:
-                logger.warning("Wildcard target '%s' matched no models", target)
-            for mname in matching:
-                if up:
-                    _collect_upstream(mname, model_map, needed_models)
-                else:
-                    needed_models.add(mname)
-                if down:
-                    downstream = set()
-                    _collect_downstream(mname, model_map, downstream)
-                    if resolve == "upstream":
-                        for m_name in downstream:
-                            _collect_upstream(m_name, model_map, needed_models)
-                    else:
-                        needed_models.update(downstream)
-            continue
+        # Everything else is a model selector; the full grammar lives in
+        # havn.engine.selectors so jobs, the CLI and the API share it.
+        model_selectors.append(target)
 
-        # Plain model target
-        if inner not in model_map:
-            logger.warning("Target '%s' not found in the DAG", target)
-            continue
-        if up:
-            _collect_upstream(inner, model_map, needed_models)
-        else:
-            needed_models.add(inner)
-        if down:
-            downstream = set()
-            _collect_downstream(inner, model_map, downstream)
-            if resolve == "upstream":
-                for m_name in downstream:
-                    _collect_upstream(m_name, model_map, needed_models)
-            else:
-                needed_models.update(downstream)
+    if model_selectors:
+        from havn.engine.selectors import select_models
+
+        selection = select_models(
+            model_selectors,
+            dag,
+            conn=conn,
+            project_dir=project_dir,
+            resolve=resolve,
+            exclude=exclude,
+        )
+        needed_models.update(selection.selected)
+        for warning in selection.warnings:
+            logger.warning("%s", warning)
 
     # Find ingest scripts that feed the selected models. Previously this only
     # considered ``landing.*`` deps, which silently dropped ingest steps for
