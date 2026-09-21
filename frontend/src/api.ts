@@ -109,6 +109,88 @@ export interface BindResult {
   duration_ms: number;
 }
 
+/**
+ * One place a column is written, from the rename index.
+ *
+ * `start` and `end` are 0-based character offsets into the file, `end`
+ * exclusive, so `content.slice(start, end)` is the identifier.
+ */
+export interface RenameSite {
+  /** Model full_name, or "" for a YAML site that belongs to no model. */
+  model: string;
+  path: string;
+  line: number;
+  col: number;
+  start: number;
+  end: number;
+  /** select, where, join, group, order, having, qualify, window or yaml. */
+  clause: string;
+  /** definition, reference, alias or yaml. */
+  kind: string;
+  /** False when the index could not attribute the mention to one relation. */
+  resolved: boolean;
+  text: string;
+  needs_alias: boolean;
+}
+
+/** Something the rename index saw and refuses to rename around. */
+export interface RenameBlocker {
+  reason: string;
+  model: string;
+  path: string;
+  message: string;
+  line: number | null;
+}
+
+export interface RenameReferences {
+  model: string;
+  column: string;
+  sites: RenameSite[];
+  blocked: RenameBlocker[];
+  models: string[];
+}
+
+/** One splice: replace `old_text` at [start, end) with `new_text`. */
+export interface RenameEdit {
+  path: string;
+  start: number;
+  end: number;
+  old_text: string;
+  new_text: string;
+  kind: string;
+  model: string;
+  line: number;
+}
+
+/** A file the rename touches, with the content it would get. */
+export interface RenameFileContent {
+  path: string;
+  content: string;
+  /** Hash of what is on disk now, handed back to /apply as the conflict check. */
+  file_hash: string;
+}
+
+export interface RenamePlan {
+  model: string;
+  column: string;
+  new_name: string;
+  sites: RenameSite[];
+  blocked: RenameBlocker[];
+  edits: RenameEdit[];
+  files: RenameFileContent[];
+  /** Set when the rename was refused; `edits` is then empty. */
+  error?: string;
+}
+
+export interface RenameApplyResult {
+  status: string;
+  model: string;
+  column: string;
+  new_name: string;
+  blocked: RenameBlocker[];
+  files: { path: string; file_hash: string }[];
+}
+
 /** One CTE found in a buffer by POST /api/sql/ctes. */
 export interface CteInfo {
   name: string;
@@ -709,6 +791,43 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ content, line }),
       signal,
+    }),
+
+  // Column rename
+  /** Every place a model's column is written, plus what could not be seen. */
+  columnReferences: (model: string, column: string, signal?: AbortSignal) =>
+    request<RenameReferences>(
+      `/rename/references?model=${encodeURIComponent(model)}&column=${encodeURIComponent(column)}`,
+      { signal },
+    ),
+  /** The splices a rename would make. Writes nothing. */
+  planColumnRename: (model: string, column: string, newName: string, force = false) =>
+    request<RenamePlan>("/rename/plan", {
+      method: "POST",
+      body: JSON.stringify({ model, column, new_name: newName, force }),
+    }),
+  /**
+   * Apply a rename to every file it touches, or to none of them.
+   *
+   * `hashes` maps each path to the hash the plan reported; a file that moved
+   * since then comes back as a 409 rather than being overwritten.
+   */
+  applyColumnRename: (
+    model: string,
+    column: string,
+    newName: string,
+    hashes: Record<string, string>,
+    force = false,
+  ) =>
+    request<RenameApplyResult>("/rename/apply", {
+      method: "POST",
+      body: JSON.stringify({ model, column, new_name: newName, force, hashes }),
+    }),
+  /** Save several files as one unit: all of them land, or none do. */
+  saveFiles: (files: { path: string; content: string; expected_hash?: string }[]) =>
+    request<{ status: string; files: { path: string; file_hash: string }[] }>("/files", {
+      method: "PUT",
+      body: JSON.stringify({ files }),
     }),
 
   // Transform
