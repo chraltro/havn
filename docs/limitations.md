@@ -133,6 +133,6 @@ The Monaco editor in `havn serve`.
 | `@assert` data-quality assertions | Supported | One expression per line in a model, evaluated against the built model. |
 | Contracts (`contracts/*.yml`) | Partial | Assertions, freshness windows, severity, notification and escalation all work. They run strictly after the model is built, and a contract on a model that does not exist yet reports a missing table. |
 | Contract column and type declarations | Planned | Contracts have no column, type or nullability surface today. It arrives with type checking, along with a type-equivalence policy so a harmless widening does not fail the build. |
-| Unit tests (fixed input rows, expected output) | Planned | Nothing exists today. The design runs the model against in-memory fixtures with no warehouse involved. |
+| Unit tests (fixed input rows, expected output) | Supported | `tests/unit/*.yml` declares mock upstream rows and the expected output; `havn test` runs each case on an in-memory DuckDB with the project's macros, reading nothing from the warehouse. An unmocked upstream is an error, not a fallback. Incremental models are tested as a full refresh: `incremental_filter` and the merge strategy are not exercised. |
 | Anomaly detection | Supported | Statistical checks over run history, configured under `quality.anomaly_detection` and surfaced in the web UI. |
 | `havn diff` | Supported | Row-level diff of what a change would do, before you build it. |

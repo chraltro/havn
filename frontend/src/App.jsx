@@ -18,6 +18,7 @@ import RunSummary from "./RunSummary";
 import SettingsPanel from "./SettingsPanel";
 import MaskingPanel from "./MaskingPanel";
 import QualityPanel from "./QualityPanel";
+import UnitTestsPanel from "./UnitTestsPanel";
 import WikiPanel from "./WikiPanel";
 import LoginPage from "./LoginPage";
 import ResizeHandle from "./ResizeHandle";
@@ -58,7 +59,7 @@ const SECTIONS = [
   { id: "Overview", label: "Overview", tabs: [] },
   { id: "Develop", label: "Develop", tabs: ["Editor", "Data Sources", "Orchestration", "Git"] },
   { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "DAG", "Dashboards"] },
-  { id: "Observe", label: "Observe", tabs: ["Quality", "Sentinel", "Diff", "Runs"] },
+  { id: "Observe", label: "Observe", tabs: ["Quality", "Unit Tests", "Sentinel", "Diff", "Runs"] },
   { id: "Configure", label: "Configure", tabs: ["Masking", "Wiki", "Docs", "Settings"] },
 ];
 
@@ -1338,6 +1339,7 @@ function AppContent() {
             {activeTab === "Diff" && <ErrorBoundary name="Diff"><DiffPanel api={api} addOutput={addOutput} /></ErrorBoundary>}
             {activeTab === "Docs" && <ErrorBoundary name="Docs"><DocsPanel /></ErrorBoundary>}
             {activeTab === "Quality" && <ErrorBoundary name="Quality"><QualityPanel addOutput={addOutput} /></ErrorBoundary>}
+            {activeTab === "Unit Tests" && <ErrorBoundary name="Unit Tests"><UnitTestsPanel /></ErrorBoundary>}
             {activeTab === "Masking" && <ErrorBoundary name="Masking"><MaskingPanel showConfirm={showConfirm} /></ErrorBoundary>}
             {activeTab === "Wiki" && <ErrorBoundary name="Wiki"><WikiPanel /></ErrorBoundary>}
             {activeTab === "Runs" && <ErrorBoundary name="Runs"><HistoryPanel onOpenFile={openFile} /></ErrorBoundary>}

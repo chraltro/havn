@@ -483,4 +483,5 @@ from havn.templates import (  # noqa: E402, F401
     SAMPLE_SEED_CSV,
     SAMPLE_SILVER_DAILY_SQL,
     SAMPLE_SILVER_EVENTS_SQL,
+    SAMPLE_UNIT_TEST_YML,
 )

@@ -2,6 +2,8 @@
 
 havn provides a comprehensive data quality framework with three complementary systems: inline assertions in SQL models, automatic profiling, and freshness monitoring. For standalone quality rules, see [Contracts](contracts).
 
+All three check the data that is currently in the warehouse. To check the SQL itself against fixed input rows, with no warehouse involved, see [Unit Tests](unit-tests).
+
 ## Inline Assertions
 
 Add `@assert` directives to SQL model files. Assertions are evaluated after each model builds during `havn transform`:
@@ -221,6 +223,7 @@ This executes:
 1. **Model validation** -- SQL syntax, dependency resolution, column references
 2. **Inline assertions** -- `@assert` directives against live data
 3. **YAML contracts** -- Rules from `contracts/` directory
+4. **Unit tests** -- Fixtures from `tests/unit/`, run in memory (`--no-unit-tests` to skip)
 
 ### CI/CD Integration
 
@@ -309,6 +312,7 @@ In the web UI, anomalies appear in the Observe → Quality panel with severity c
 ## Related Pages
 
 - [Contracts](contracts) -- Standalone YAML data quality rules
+- [Unit Tests](unit-tests) -- Fixed input rows in, expected rows out, no warehouse
 - [Transforms](transforms) -- Adding assertions to SQL models
 - [Sources](sources) -- Source freshness SLAs
 - [Lineage](lineage) -- Understanding data dependencies

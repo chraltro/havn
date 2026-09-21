@@ -376,6 +376,22 @@ class MCPServer:
                 },
                 self._tool_query_metric,
             ),
+            (
+                "run_unit_tests",
+                "Run model unit tests from tests/unit/*.yml. Each test runs "
+                "the model against declared fixture rows on a throwaway "
+                "in-memory database, so it reads nothing from the warehouse.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "model": {
+                            "type": "string",
+                            "description": "Only run tests for this model, e.g. silver.customers",
+                        },
+                    },
+                },
+                self._tool_run_unit_tests,
+            ),
         ]
         if not self.read_only:
             tools.append(
@@ -552,6 +568,30 @@ class MCPServer:
         )
         keys = ["run_type", "target", "status", "started_at", "duration_ms", "rows_affected", "error"]
         return {"runs": [dict(zip(keys, row)) for row in result["rows"]]}
+
+    def _tool_run_unit_tests(self, args: dict) -> dict:
+        from havn.engine.unit_tests import (
+            CATALOG_SQL,
+            catalog_from_rows,
+            run_unit_tests,
+        )
+
+        model = args.get("model")
+        if model is not None and not isinstance(model, str):
+            raise _InvalidParams("model must be a string")
+
+        # Column types for mocks that don't declare them. A warehouse that
+        # isn't there, or is locked by `havn serve`, just means no catalog —
+        # the tests themselves run entirely in memory either way.
+        catalog: dict = {}
+        try:
+            rows = self._execute_readonly(CATALOG_SQL, max_rows=_MAX_QUERY_ROWS)["rows"]
+            catalog = catalog_from_rows(rows)
+        except Exception as e:
+            logger.debug("No catalog available for unit tests: %s", e)
+
+        result = run_unit_tests(self.project_dir, model=model, catalog=catalog)
+        return result.to_dict()
 
     def _tool_list_metrics(self, args: dict) -> dict:
         from havn.engine.semantic import load_metrics

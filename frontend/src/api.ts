@@ -38,6 +38,43 @@ export interface ColumnInfo {
   nullable?: boolean;
 }
 
+/** One declared model unit test, from GET /api/unit-tests. */
+export interface UnitTestInfo {
+  name: string;
+  model: string;
+  description?: string;
+  source_path?: string;
+  given?: { ref: string; columns: Record<string, string>; row_count: number }[];
+  expected_row_count?: number;
+  ordered?: boolean;
+}
+
+/** One test outcome from POST /api/unit-tests/run. */
+export interface UnitTestResult {
+  name: string;
+  model: string;
+  status: "pass" | "fail" | "error";
+  duration_ms: number;
+  message: string;
+  source_path?: string;
+  columns: string[];
+  missing_rows: Record<string, unknown>[];
+  unexpected_rows: Record<string, unknown>[];
+  missing_count: number;
+  unexpected_count: number;
+  warnings: string[];
+}
+
+export interface UnitTestRunResult {
+  results: UnitTestResult[];
+  load_errors: string[];
+  duration_ms: number;
+  passed: number;
+  failed: number;
+  errored: number;
+  ok: boolean;
+}
+
 /** A model as listed by GET /api/models. */
 export interface ModelInfo {
   name: string;
@@ -501,7 +538,7 @@ interface RequestOptions extends RequestInit {
 }
 
 /** Endpoints that need a longer timeout (e.g. diff can scan many models). */
-const LONG_TIMEOUT_PATHS = ["/diff", "/transform", "/stream/", "/query", "/contracts", "/docs/"];
+const LONG_TIMEOUT_PATHS = ["/diff", "/transform", "/stream/", "/query", "/contracts", "/docs/", "/unit-tests"];
 
 function getTimeoutForPath(path: string): number {
   if (LONG_TIMEOUT_PATHS.some((p) => path.startsWith(p) || path === p)) {
@@ -1041,6 +1078,15 @@ export const api = {
 
   // Check (validation + assertions + contracts)
   runCheck: () => request("/check", { method: "POST" }),
+
+  // Unit tests (tests/unit/*.yml)
+  getUnitTests: () =>
+    request<{ tests: UnitTestInfo[]; errors: string[] }>("/unit-tests"),
+  runUnitTests: (model: string | null = null) =>
+    request<UnitTestRunResult>("/unit-tests/run", {
+      method: "POST",
+      body: JSON.stringify(model ? { model } : {}),
+    }),
 
   // Contracts
   runContracts: () => request("/contracts/run", { method: "POST" }),
