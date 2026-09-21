@@ -105,11 +105,94 @@ function defineHavnThemes(monaco) {
   }
 }
 
-// Cache for table schema lookups to avoid repeated API calls
+// ---------------------------------------------------------------------------
+// Editor context shared with the language providers
+//
+// Completion, hover, definition and code lens providers are registered once
+// against the `sql` language when Monaco loads, so they cannot close over React
+// state. This module-level object is the bridge: the Editor component keeps it
+// in sync with the active file, and the providers read it.
+// ---------------------------------------------------------------------------
+
+export const editorContext = {
+  /** Project-relative path of the file in the editor, e.g. "transform/silver/customers.sql". */
+  activeFile: null,
+  /** Latest bind result, keyed by project-relative path. Feeds hover types. */
+  bindResults: new Map(),
+  /** App navigation hook: (path, line, col) => void. Set by the component. */
+  openModel: null,
+};
+
+/** Monaco model URI for a project file, so every open file gets its own model. */
+export function modelUriFor(path) {
+  if (!path) return undefined;
+  return `file:///${String(path).replace(/^\/+/, "")}`;
+}
+
+/** Inverse of `modelUriFor`: project-relative path from a Monaco model URI. */
+export function pathFromUri(uri) {
+  if (!uri) return null;
+  const p = String(uri.path || "");
+  return p.startsWith("/") ? p.slice(1) : p;
+}
+
+/** True for files the SQL model features (bind, lint, definition) apply to. */
+export function isTransformSql(path) {
+  return !!path && path.endsWith(".sql") && path.replace(/\\/g, "/").startsWith("transform/");
+}
+
+// Cache for table schema lookups to avoid repeated API calls.
+// Entries are { info, time }; `info` is null for a known miss (negative cache).
+const COLUMNS_TTL_MS = 60_000;
 const schemaCache = new Map();
 // Cached table list for completions (populated on first completion request)
 let tablesCache = null;
 let tablesCacheTime = 0;
+// Cached /api/models, for go-to-definition
+let modelsCache = null;
+let modelsCacheTime = 0;
+const MODELS_TTL_MS = 60_000;
+
+/**
+ * Drop every cached schema. Called when a transform run completes: a rebuilt
+ * model can add, drop or retype columns, and a stale cache would keep offering
+ * the old ones for the rest of the session.
+ */
+export function invalidateSchemaCaches() {
+  schemaCache.clear();
+  tablesCache = null;
+  tablesCacheTime = 0;
+  modelsCache = null;
+  modelsCacheTime = 0;
+}
+
+function readColumns(key) {
+  const hit = schemaCache.get(key);
+  if (!hit) return undefined;
+  if (Date.now() - hit.time > COLUMNS_TTL_MS) {
+    schemaCache.delete(key);
+    return undefined;
+  }
+  return hit.info;
+}
+
+function writeColumns(key, info) {
+  schemaCache.set(key, { info, time: Date.now() });
+}
+
+/**
+ * Seed the column cache from a bind result. The binder saw the upstream
+ * relations moments ago, so its schemas are fresher than anything
+ * `describeTable` cached earlier.
+ */
+export function seedColumnsFromBind(bind) {
+  if (!bind || !bind.upstream) return;
+  for (const [key, columns] of Object.entries(bind.upstream)) {
+    if (!Array.isArray(columns)) continue;
+    const [schema, name] = key.split(".");
+    writeColumns(key, { schema, name, columns });
+  }
+}
 
 async function getTablesCache() {
   const now = Date.now();
@@ -123,18 +206,36 @@ async function getTablesCache() {
   return tablesCache;
 }
 
+async function getModelsCache() {
+  const now = Date.now();
+  if (modelsCache && now - modelsCacheTime < MODELS_TTL_MS) return modelsCache;
+  try {
+    modelsCache = await api.listModels();
+    modelsCacheTime = now;
+  } catch {
+    modelsCache = modelsCache || [];
+  }
+  return modelsCache;
+}
+
 async function getColumnsCache(schema, table) {
   const key = `${schema}.${table}`;
-  let info = schemaCache.get(key);
-  if (info !== undefined) return info;
+  const cached = readColumns(key);
+  if (cached !== undefined) return cached;
+  let info;
   try {
     info = await api.describeTable(schema, table);
-    schemaCache.set(key, info);
   } catch {
-    schemaCache.set(key, null);
     info = null;
   }
+  writeColumns(key, info);
   return info;
+}
+
+// A finished transform run invalidates every cached schema. The bridge in
+// App.jsx fires this event once the pipeline completes.
+if (typeof window !== "undefined") {
+  window.addEventListener("havn-data-changed", invalidateSchemaCaches);
 }
 
 // Cache for macro metadata
@@ -420,18 +521,7 @@ loader.init().then((monaco) => {
 
       if (!schema || !table) return null;
 
-      const cacheKey = `${schema}.${table}`;
-      let info = schemaCache.get(cacheKey);
-
-      if (info === undefined) {
-        try {
-          info = await api.describeTable(schema, table);
-          schemaCache.set(cacheKey, info);
-        } catch {
-          schemaCache.set(cacheKey, null);
-          info = null;
-        }
-      }
+      const info = await getColumnsCache(schema, table);
 
       if (!info || !info.columns || info.columns.length === 0) {
         return {
@@ -453,7 +543,7 @@ loader.init().then((monaco) => {
   });
 });
 
-export default function Editor({ content, language, onChange, activeFile, onMount, goToLine, onFormat, onPreview }) {
+export default function Editor({ content, language, onChange, activeFile, onMount, goToLine, onFormat, onPreview, onOpenModel }) {
   const { themeId } = useTheme();
   const monacoTheme = `havn-${themeId}`;
   const editorRef = useRef(null);
@@ -461,6 +551,15 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
   onFormatRef.current = onFormat;
   const onPreviewRef = useRef(onPreview);
   onPreviewRef.current = onPreview;
+
+  // Keep the module-level provider context pointed at the file on screen.
+  editorContext.activeFile = activeFile || null;
+  editorContext.openModel = onOpenModel || null;
+
+  // Warm the model list so go-to-definition resolves on the first try.
+  useEffect(() => {
+    if (isTransformSql(activeFile)) getModelsCache();
+  }, [activeFile]);
 
   function handleBeforeMount(monaco) {
     defineHavnThemes(monaco);
@@ -528,6 +627,7 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
     <MonacoEditor
       height="100%"
       language={language}
+      path={modelUriFor(activeFile)}
       value={content}
       onChange={(val) => onChange(val || "")}
       theme={monacoTheme}

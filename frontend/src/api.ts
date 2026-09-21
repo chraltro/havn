@@ -38,6 +38,55 @@ export interface ColumnInfo {
   nullable?: boolean;
 }
 
+/** A model as listed by GET /api/models. */
+export interface ModelInfo {
+  name: string;
+  schema: string;
+  full_name: string;
+  materialized?: string;
+  depends_on?: string[];
+  path?: string;
+}
+
+/** One diagnostic from POST /api/bind. Coordinates are 1-based file positions. */
+export interface BindError {
+  severity: "error" | "warning";
+  message: string;
+  /** null means the diagnostic applies to the whole file. */
+  line: number | null;
+  col: number | null;
+  end_line: number | null;
+  end_col: number | null;
+  source: "bind" | "validate";
+}
+
+/** Result of a shadow bind of an unsaved buffer against the warehouse catalog. */
+export interface BindResult {
+  model: string | null;
+  ok: boolean;
+  errors: BindError[];
+  /** Inferred output schema of the model. */
+  columns: ColumnInfo[];
+  /** Schema of each upstream relation, keyed by "schema.table". */
+  upstream: Record<string, ColumnInfo[]>;
+  duration_ms: number;
+}
+
+/** One CTE found in a buffer by POST /api/sql/ctes. */
+export interface CteInfo {
+  name: string;
+  start_line: number;
+  end_line: number;
+  /** Complete "WITH ... SELECT * FROM <name>" query, without a LIMIT. */
+  preview_sql: string;
+}
+
+export interface CteListResult {
+  ctes: CteInfo[];
+  /** Index into `ctes` of the CTE containing the requested line, if any. */
+  active: number | null;
+}
+
 export interface QueryResult {
   columns: string[];
   rows: unknown[][];
@@ -607,7 +656,23 @@ export const api = {
     request(`/files/${source}/move`, { method: "POST", body: JSON.stringify({ destination }) }),
 
   // Models
-  listModels: () => request("/models"),
+  listModels: () => request<ModelInfo[]>("/models"),
+
+  // Editor diagnostics
+  /** Shadow-bind an unsaved buffer: diagnostics plus inferred output/upstream schemas. */
+  bindSql: (path: string | null, content: string, signal?: AbortSignal) =>
+    request<BindResult>("/bind", {
+      method: "POST",
+      body: JSON.stringify({ path, content }),
+      signal,
+    }),
+  /** Enumerate the CTEs in a buffer, flagging the one containing `line`. */
+  listCtes: (content: string, line: number | null = null, signal?: AbortSignal) =>
+    request<CteListResult>("/sql/ctes", {
+      method: "POST",
+      body: JSON.stringify({ content, line }),
+      signal,
+    }),
 
   // Transform
   runTransform: (targets: string[] | null = null, force: boolean = false) =>
