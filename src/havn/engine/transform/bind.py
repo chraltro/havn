@@ -41,6 +41,7 @@ import logging
 import re
 import time
 import uuid
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -478,6 +479,37 @@ def _unavailable(reason: str, started: float) -> BindResult:
     )
 
 
+def _bindable_query(model: SQLModel) -> str:
+    """The model's query with anything the binder cannot see filled in.
+
+    A microbatch model's SQL carries ``{start}`` and ``{end}``, which are not
+    SQL and would fail to parse. Substituting the model's first window gives
+    the binder real literals of the right type, and since the placeholders
+    are replaced in place the line numbers in any error still point at the
+    line the user wrote.
+    """
+    if model.incremental_strategy != "microbatch":
+        return model.query
+    if "{start}" not in model.query and "{end}" not in model.query:
+        return model.query
+
+    from .execution import (
+        parse_event_time,
+        shift_batch,
+        substitute_batch_window,
+        truncate_to_batch,
+    )
+
+    batch_size = model.batch_size if model.batch_size in ("hour", "day", "month", "year") else "day"
+    try:
+        start = truncate_to_batch(parse_event_time(model.begin or ""), batch_size)
+    except Exception:
+        start = datetime(1970, 1, 1)
+    return substitute_batch_window(
+        model.query, start, shift_batch(start, batch_size, 1)
+    )
+
+
 def _shadow_body(model: SQLModel, snapshot_settings: object | None) -> str:
     """The body of the shadow view for ``model``, starting at a newline.
 
@@ -491,7 +523,7 @@ def _shadow_body(model: SQLModel, snapshot_settings: object | None) -> str:
     ``_STATEMENT_LINE_OFFSET``.
     """
     if model.materialized != "snapshot":
-        return "\n" + model.query
+        return "\n" + _bindable_query(model)
 
     from .execution import SnapshotSettings
 
@@ -504,7 +536,7 @@ def _shadow_body(model: SQLModel, snapshot_settings: object | None) -> str:
     ]
     if model.hard_deletes == "new_record":
         meta.append(f"CAST(NULL AS BOOLEAN) AS {_quote_ident(st.is_deleted)}")
-    inner = model.query.rstrip().rstrip(";")
+    inner = _bindable_query(model).rstrip().rstrip(";")
     return (
         " SELECT *, " + ", ".join(meta) + " FROM (\n"
         + inner

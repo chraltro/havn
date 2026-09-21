@@ -102,6 +102,12 @@ class SQLModel:
     # "ignore" leaves history alone, "invalidate" closes the current row,
     # "new_record" closes it and appends a tombstone row.
     hard_deletes: str = "ignore"
+    # --- Microbatch settings, read only with incremental_strategy=microbatch ---
+    event_time: str | None = None  # the column each batch window is cut on
+    batch_size: str | None = None  # "hour", "day", "month" or "year"
+    begin: str | None = None  # the first window's date or timestamp, UTC
+    # How many already-done windows to reprocess on each run, for late arrivals.
+    lookback: int = 1
     grain: list[str] = field(default_factory=list)  # @grain columns; auto-asserts uniqueness post-build
     owner: str = ""  # @owner label for alert routing
     # @config tags=daily,finance -- labels for `tag:` selectors. Deliberately
@@ -139,6 +145,16 @@ class SQLModel:
             parts.append(f"check_cols={self.check_cols}")
         if self.hard_deletes != "ignore":
             parts.append(f"hard_deletes={self.hard_deletes}")
+        # Microbatch settings decide which rows a run even looks at, so a
+        # changed batch_size or begin has to read as a modified model.
+        if self.event_time:
+            parts.append(f"event_time={self.event_time}")
+        if self.batch_size:
+            parts.append(f"batch_size={self.batch_size}")
+        if self.begin:
+            parts.append(f"begin={self.begin}")
+        if self.lookback != 1:
+            parts.append(f"lookback={self.lookback}")
         # Assertions and @grain are stripped out of `query` by
         # strip_config_comments, so without folding them in here, adding an
         # @assert to a model that is already built leaves content_hash

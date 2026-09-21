@@ -21,6 +21,7 @@ from .discovery import (
     discover_models,
 )
 from .execution import (
+    BatchRange,
     _execute_single_model,
     _record_ephemeral,
     execute_model,
@@ -52,6 +53,7 @@ def run_transform(
     pipeline_run_id: str | None = None,
     db_config: object | None = None,
     exclude: list[str] | None = None,
+    batch_range: BatchRange | None = None,
 ) -> dict[str, str]:
     """Run the full transformation pipeline.
 
@@ -72,6 +74,11 @@ def run_transform(
         run_id: Pipeline run ID (for snapshot tagging)
         pipeline_run_id: Shared ID grouping all model executions in this pipeline run
         exclude: Selectors whose matches are subtracted from ``targets``.
+        batch_range: An explicit event-time range for microbatch models, from
+            ``--event-time-start`` / ``--event-time-end``. Microbatch models
+            process exactly these windows instead of resuming from recorded
+            state; every other model ignores it, except that an
+            ``incremental_filter`` may use ``{start}`` and ``{end}``.
 
     Returns:
         Dict of model_name -> status ("built", "skipped", "error")
@@ -123,12 +130,13 @@ def run_transform(
             conn, models, force, max_workers, db_path=db_path,
             project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
             pipeline_run_id=pipeline_run_id, db_config=db_config,
-            all_models=all_models,
+            all_models=all_models, batch_range=batch_range,
         )
     return _run_transform_sequential(
         conn, models, force,
         project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
         pipeline_run_id=pipeline_run_id, all_models=all_models,
+        batch_range=batch_range,
     )
 
 
@@ -221,6 +229,7 @@ def _run_transform_sequential(
     run_id: str | None = None,
     pipeline_run_id: str | None = None,
     all_models: list[SQLModel] | None = None,
+    batch_range: BatchRange | None = None,
 ) -> dict[str, str]:
     """Run models sequentially (original behavior + assertions + profiling).
 
@@ -346,6 +355,9 @@ def _run_transform_sequential(
                     if model.materialized == "snapshot"
                     else None
                 ),
+                batch_range=batch_range,
+                force=force,
+                run_id=pipeline_run_id,
             )
             _update_state(conn, model, duration_ms, row_count)
             log_run(
@@ -461,6 +473,7 @@ def _run_transform_parallel(
     pipeline_run_id: str | None = None,
     db_config: object | None = None,
     all_models: list[SQLModel] | None = None,
+    batch_range: BatchRange | None = None,
 ) -> dict[str, str]:
     """Run models in parallel by DAG tiers.
 
@@ -629,6 +642,9 @@ def _run_transform_parallel(
                         if model.materialized == "snapshot"
                         else None
                     ),
+                    batch_range=batch_range,
+                    force=force,
+                    run_id=pipeline_run_id,
                 )
                 _update_state(conn, model, duration_ms, row_count)
                 log_run(
@@ -695,6 +711,7 @@ def _run_transform_parallel(
                         _execute_single_model,
                         db_path_str, model, force, model_map,
                         db_config, project_dir, pipeline_run_id,
+                        batch_range,
                     ): model
                     for model in tier
                 }

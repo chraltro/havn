@@ -41,14 +41,22 @@ from .quality import (
 
 # Execution
 from .execution import (
+    BatchRange,
+    MicrobatchError,
     SchemaChangeError,
     SnapshotError,
     SnapshotSettings,
     _execute_incremental,
+    _execute_microbatch,
     _execute_single_model,
     _execute_snapshot,
+    compute_batch_windows,
     execute_model,
+    parse_event_time,
     resolve_query,
+    shift_batch,
+    substitute_batch_window,
+    truncate_to_batch,
     snapshot_settings_for,
     snapshot_settings_from_config,
 )
@@ -104,6 +112,14 @@ __all__ = [
     # Execution
     "SchemaChangeError",
     "execute_model",
+    "BatchRange",
+    "MicrobatchError",
+    "_execute_microbatch",
+    "compute_batch_windows",
+    "parse_event_time",
+    "shift_batch",
+    "substitute_batch_window",
+    "truncate_to_batch",
     "SnapshotError",
     "SnapshotSettings",
     "_execute_snapshot",

@@ -38,6 +38,10 @@ class TransformRequest(BaseModel):
     targets: list[str] | None = Field(default=None, max_length=500)
     exclude: list[str] | None = Field(default=None, max_length=500)
     force: bool = False
+    # Explicit event-time backfill range for microbatch models, mirroring
+    # `havn transform --event-time-start/--event-time-end`. UTC.
+    event_time_start: str | None = Field(default=None, max_length=64)
+    event_time_end: str | None = Field(default=None, max_length=64)
 
 
 class DiffRequest(BaseModel):
@@ -122,6 +126,19 @@ def run_transform_endpoint(
         "Transform requested: targets=%s exclude=%s force=%s",
         req.targets, req.exclude, req.force,
     )
+    from havn.engine.transform import BatchRange, parse_event_time
+
+    batch_range = None
+    if req.event_time_start or req.event_time_end:
+        try:
+            batch_range = BatchRange(
+                start=parse_event_time(req.event_time_start, "event_time_start")
+                if req.event_time_start else None,
+                end=parse_event_time(req.event_time_end, "event_time_end")
+                if req.event_time_end else None,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
     try:
         results = run_transform(
             conn,
@@ -129,6 +146,7 @@ def run_transform_endpoint(
             targets=req.targets,
             exclude=req.exclude,
             force=req.force,
+            batch_range=batch_range,
         )
         return {"results": results}
     except Exception as e:

@@ -32,6 +32,7 @@ havn transform 'gold.fct_*'     # fnmatch wildcards (quote them)
 havn transform tag:daily        # tag:, path:, config.<key>:, state:modified
 havn transform state:modified+  # what changed, plus downstream
 havn transform -s tag:daily -x tag:expensive   # --select / --exclude
+havn transform gold.events --event-time-start 2024-01-01 --event-time-end 2024-03-01  # microbatch backfill
 havn ls '+gold.orders'          # dry-run a selector (schema, materialization, tags)
 havn ls state:modified+ --names # bare names, one per line, for piping
 havn query "SELECT 1"           # ad-hoc SQL
@@ -179,7 +180,7 @@ LEFT JOIN bronze.orders o ON c.customer_id = o.customer_id
 GROUP BY 1, 2
 ```
 
-- `@config` sets materialization (`view` / `table` / `incremental` / `ephemeral` / `snapshot`) and schema. Other useful keys: `unique_key`, `incremental_strategy` (`delete+insert` / `merge` / `append`), `incremental_filter`, `partition_by`, `on_schema_change` (`append_new_columns` / `ignore` / `fail` / `sync_all_columns`), `tags` (comma list, for `tag:` selectors; deliberately not hashed, so retagging does not rebuild). Snapshot models (SCD2 row history) add `strategy` (`check` / `timestamp`), `updated_at`, `check_cols`, `hard_deletes` (`ignore` / `invalidate` / `new_record`); these are row-history models and are unrelated to `havn snapshot` / `havn rewind`, which are whole-warehouse restore points.
+- `@config` sets materialization (`view` / `table` / `incremental` / `ephemeral` / `snapshot`) and schema. Other useful keys: `unique_key`, `incremental_strategy` (`delete+insert` / `merge` / `append` / `microbatch`), `incremental_filter`, `partition_by`, `on_schema_change` (`append_new_columns` / `ignore` / `fail` / `sync_all_columns`), `tags` (comma list, for `tag:` selectors; deliberately not hashed, so retagging does not rebuild). Snapshot models (SCD2 row history) add `strategy` (`check` / `timestamp`), `updated_at`, `check_cols`, `hard_deletes` (`ignore` / `invalidate` / `new_record`); these are row-history models and are unrelated to `havn snapshot` / `havn rewind`, which are whole-warehouse restore points. `incremental_strategy=microbatch` adds `event_time`, `batch_size` (`hour` / `day` / `month` / `year`), `begin` and `lookback`; the model filters itself on the `{start}` and `{end}` placeholders, each window is its own transaction, and per-window state lives in `_havn.batch_state`.
 - Dependencies are auto-extracted from `FROM` and `JOIN` clauses via `sqlglot`. You only need `@depends_on` when the parser can't see the reference (e.g. a model name passed through a function or constructed in a string).
 - Folder name is the default schema (e.g., `transform/bronze/` → `schema=bronze`); override with `schema=` in `@config`.
 - Other directives: `@description <text>` for model docs, `@assert <expr>` for data-quality assertions (one per line, runs after build), `@col <name>: <text>` for column-level docs.

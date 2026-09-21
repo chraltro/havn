@@ -9,6 +9,7 @@ import re
 import duckdb
 
 from havn.engine.sql_analysis import (
+    BATCH_SIZES,
     CONFIG_KEYS,
     HARD_DELETE_POLICIES,
     MATERIALIZATIONS,
@@ -19,6 +20,7 @@ from havn.engine.sql_analysis import (
     parse_config,
 )
 
+from .execution import parse_event_time
 from .models import SQLModel, ValidationError
 
 logger = logging.getLogger("havn.transform")
@@ -244,6 +246,113 @@ def _validate_snapshot_config(models: list[SQLModel]) -> list[ValidationError]:
     return errors
 
 
+_MICROBATCH_ONLY_KEYS = ("event_time", "batch_size", "begin", "lookback")
+
+
+def _validate_microbatch_config(models: list[SQLModel]) -> list[ValidationError]:
+    """Check that a microbatch model can be cut into windows.
+
+    The engine refuses to run one it cannot window, so everything here is a
+    pre-flight of the same rules. The point is that `havn check` answers
+    before a backfill starts rather than after the first window.
+    """
+    errors: list[ValidationError] = []
+    for model in models:
+        config = parse_config(model.sql)
+        is_microbatch = (
+            model.materialized == "incremental"
+            and model.incremental_strategy == "microbatch"
+        )
+
+        if not is_microbatch:
+            for key in _MICROBATCH_ONLY_KEYS:
+                if key in config:
+                    errors.append(ValidationError(
+                        model=model.full_name,
+                        severity="warning",
+                        message=(
+                            f"@config {key}= only applies to "
+                            "incremental_strategy=microbatch; this model uses "
+                            f"'{model.incremental_strategy}' and the setting "
+                            "is ignored"
+                        ),
+                    ))
+            continue
+
+        for key, what in (
+            ("event_time", "the column each window is cut on"),
+            ("batch_size", "one of hour, day, month, year"),
+            ("begin", "the first window to process, as a date"),
+        ):
+            if not getattr(model, key):
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=(
+                        f"incremental_strategy=microbatch needs @config "
+                        f"{key}=: {what}."
+                    ),
+                ))
+        if model.batch_size and model.batch_size not in BATCH_SIZES:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown batch_size '{model.batch_size}'."
+                    f"{_did_you_mean(model.batch_size, BATCH_SIZES)}"
+                    f" Supported: {', '.join(sorted(BATCH_SIZES))}."
+                ),
+            ))
+        if model.begin:
+            try:
+                parse_event_time(model.begin, "begin=")
+            except Exception as e:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=str(e),
+                ))
+        raw_lookback = config.get("lookback")
+        if raw_lookback is not None:
+            try:
+                if int(raw_lookback) < 0:
+                    raise ValueError
+            except ValueError:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=(
+                        f"lookback must be a whole number of windows, not "
+                        f"'{raw_lookback}'."
+                    ),
+                ))
+        for key in ("incremental_filter", "watermark"):
+            if key in config:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=(
+                        f"@config {key}= cannot be combined with "
+                        "incremental_strategy=microbatch. The batch window is "
+                        "already the filter; a second one would silently "
+                        "narrow every window and leave gaps nothing refills."
+                    ),
+                ))
+        for placeholder in ("{start}", "{end}"):
+            if placeholder not in model.query:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="warning",
+                    message=(
+                        f"Microbatch model does not use {placeholder}. havn "
+                        "does not add an event-time filter for you, so every "
+                        "window would read the whole source and the last "
+                        "window would win."
+                    ),
+                ))
+    return errors
+
+
 def validate_models(
     conn: duckdb.DuckDBPyConnection | None,
     models: list[SQLModel],
@@ -436,6 +545,7 @@ def validate_models(
     errors.extend(_validate_config_keys(models))
     errors.extend(_validate_tags(models))
     errors.extend(_validate_snapshot_config(models))
+    errors.extend(_validate_microbatch_config(models))
 
     # Default landing schemas if not provided
     _landing = {s.lower() for s in landing_schemas} if landing_schemas else {"landing"}
