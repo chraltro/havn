@@ -9,7 +9,11 @@ import duckdb
 import pytest
 
 from havn.engine.database import ensure_meta_table
-from havn.engine.sql_analysis import fetch_column_catalog
+from havn.engine.sql_analysis import (
+    clear_lineage_cache,
+    extract_column_lineage as extract_column_lineage_sql,
+    fetch_column_catalog,
+)
 from havn.engine.transform import (
     SQLModel,
     extract_column_lineage,
@@ -343,3 +347,93 @@ class TestLineageCatalogFetch:
         result = impact_analysis(models, "bronze.src", column="name", conn=counting)
         assert len(result["affected_columns"]) == 6
         assert counting.executes == 1
+
+
+class TestInferredSchema:
+    """The `schema=` argument: columns a bind pass knows, the catalog does not."""
+
+    def test_star_expands_from_an_inferred_schema(self):
+        lineage = extract_column_lineage_sql(
+            "SELECT * FROM silver.unbuilt",
+            ["silver.unbuilt"],
+            schema={"silver.unbuilt": [("id", "INTEGER"), ("label", "VARCHAR")]},
+        )
+        assert set(lineage) == {"id", "label"}
+        assert lineage["label"] == [
+            {"source_table": "silver.unbuilt", "source_column": "label"}
+        ]
+
+    def test_inferred_schema_wins_over_the_catalog(self, db):
+        """The catalog describes the last build; the inferred schema, the next one."""
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        db.execute("CREATE TABLE bronze.src AS SELECT 1 AS id, 'x' AS name")
+        lineage = extract_column_lineage_sql(
+            "SELECT * FROM bronze.src",
+            ["bronze.src"],
+            db,
+            schema={"bronze.src": [("id", "INTEGER"), ("name", "VARCHAR"), ("added", "DOUBLE")]},
+        )
+        assert set(lineage) == {"id", "name", "added"}
+
+    def test_unparseable_inferred_type_does_not_break_the_trace(self):
+        lineage = extract_column_lineage_sql(
+            "SELECT id FROM silver.unbuilt",
+            ["silver.unbuilt"],
+            schema={"silver.unbuilt": [("id", "NOT A REAL TYPE")]},
+        )
+        assert lineage["id"] == [
+            {"source_table": "silver.unbuilt", "source_column": "id"}
+        ]
+
+    def test_star_without_any_schema_is_marked_unresolved(self):
+        """No catalog, no inferred schema: the upstream is known, the columns are not."""
+        lineage = extract_column_lineage_sql(
+            "SELECT * FROM bronze.mystery", ["bronze.mystery"]
+        )
+        assert lineage == {
+            "*": [
+                {
+                    "source_table": "bronze.mystery",
+                    "source_column": "*",
+                    "resolved": False,
+                }
+            ]
+        }
+
+
+class TestLineageMemo:
+    """Tracing is memoized on the SQL plus the upstream column lists."""
+
+    def test_repeat_call_returns_an_independent_copy(self):
+        clear_lineage_cache()
+        sql = "SELECT c.customer_id, c.name FROM bronze.customers c"
+        first = extract_column_lineage_sql(sql, ["bronze.customers"])
+        first["customer_id"].append({"source_table": "junk", "source_column": "junk"})
+        first["injected"] = []
+
+        second = extract_column_lineage_sql(sql, ["bronze.customers"])
+        assert "injected" not in second
+        assert second["customer_id"] == [
+            {"source_table": "bronze.customers", "source_column": "customer_id"}
+        ]
+
+    def test_new_upstream_column_is_not_served_from_the_memo(self, db):
+        """A rebuilt upstream changes the key, so `SELECT *` re-expands."""
+        clear_lineage_cache()
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        db.execute("CREATE TABLE bronze.src AS SELECT 1 AS id, 'x' AS name")
+        sql = "SELECT * FROM bronze.src"
+        assert set(extract_column_lineage_sql(sql, ["bronze.src"], db)) == {"id", "name"}
+
+        db.execute("ALTER TABLE bronze.src ADD COLUMN extra INTEGER")
+        assert set(extract_column_lineage_sql(sql, ["bronze.src"], db)) == {
+            "id",
+            "name",
+            "extra",
+        }
+
+    def test_clear_lineage_cache_does_not_change_results(self):
+        sql = "SELECT o.order_id, o.amount FROM bronze.orders o"
+        before = extract_column_lineage_sql(sql, ["bronze.orders"])
+        clear_lineage_cache()
+        assert extract_column_lineage_sql(sql, ["bronze.orders"]) == before
