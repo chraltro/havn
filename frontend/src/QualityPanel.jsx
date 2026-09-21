@@ -718,6 +718,25 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                                             <td style={{ ...s.td, fontFamily: 'var(--havn-font-mono)', fontSize: 12 }} colSpan={2}>{rule}</td>
                                           </tr>
                                         ))}
+                                        {(c.columns || []).map((col, ci) => (
+                                          <tr key={`col-${ci}`}>
+                                            <td style={{ ...s.td, paddingLeft: 32, width: 60 }}>
+                                              <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, background: 'var(--havn-bg)', color: 'var(--havn-text-dim)', whiteSpace: 'nowrap' }}>column</span>
+                                            </td>
+                                            <td style={{ ...s.td, fontFamily: 'var(--havn-font-mono)', fontSize: 12 }}>
+                                              {col.name} {col.type}{col.nullable === false ? ' NOT NULL' : ''}
+                                            </td>
+                                            <td style={{ ...s.td, fontSize: 12, color: 'var(--havn-text-dim)' }}>{col.description || '—'}</td>
+                                          </tr>
+                                        ))}
+                                        {(c.errors || []).map((err, ei) => (
+                                          <tr key={`err-${ei}`}>
+                                            <td style={{ ...s.td, paddingLeft: 32, width: 60 }}>
+                                              <span style={s.badge(false)}>FAIL</span>
+                                            </td>
+                                            <td style={{ ...s.td, fontSize: 12, color: 'var(--havn-red)' }} colSpan={2}>{err}</td>
+                                          </tr>
+                                        ))}
                                       </tbody>
                                     </table>
                                   </div>

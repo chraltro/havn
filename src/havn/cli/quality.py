@@ -395,7 +395,11 @@ def contracts(
               - unique(order_id)
     """
     from havn.config import load_project
-    from havn.engine.contracts import get_contract_history, run_contracts
+    from havn.engine.contracts import (
+        discover_contracts,
+        get_contract_history,
+        run_contracts,
+    )
     from havn.engine.database import open_warehouse
 
     project_dir = _resolve_project(project_dir)
@@ -435,6 +439,15 @@ def contracts(
             console.print("[yellow]No contracts found.[/yellow]")
             return
 
+        # The declared shape is part of the contract, so show it next to the
+        # result rather than making the reader open the YAML to find out what
+        # was promised.
+        declared = {
+            c.name: c
+            for c in discover_contracts(contracts_dir)
+            if c.columns or c.errors
+        }
+
         console.print(f"[bold]Running {len(results)} contract(s)...[/bold]")
         console.print()
 
@@ -442,6 +455,16 @@ def contracts(
         for cr in results:
             status = "[green]PASS[/green]" if cr.passed else "[red]FAIL[/red]"
             console.print(f"  {status}  [bold]{cr.contract_name}[/bold] ({cr.model}) [{cr.duration_ms}ms]")
+            contract = declared.get(cr.contract_name)
+            if contract is not None and contract.columns:
+                strict = " [dim](strict)[/dim]" if contract.strict else ""
+                console.print(f"         [dim]columns:[/dim]{strict}")
+                for col in contract.columns:
+                    null_note = "" if col.nullable is None else (
+                        " NULL" if col.nullable else " NOT NULL"
+                    )
+                    desc = f"  [dim]{col.description}[/dim]" if col.description else ""
+                    console.print(f"           {col.name} {col.type}{null_note}{desc}")
             for ar in cr.results:
                 if ar["passed"]:
                     console.print(f"         [green]pass[/green]  {ar['expression']}")
