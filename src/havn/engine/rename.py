@@ -1019,28 +1019,59 @@ def apply_rename(
     if dry_run:
         return updated
 
+    write_files_atomically(root, updated, originals=originals)
+    return updated
+
+
+def write_files_atomically(
+    project_dir: Path | str,
+    contents: dict[str, str],
+    *,
+    originals: dict[str, str] | None = None,
+) -> None:
+    """Write several files, or leave every one of them as it was.
+
+    Each file goes to a temporary neighbour and is renamed into place, and the
+    previous contents are held in memory so a failure part way through can put
+    back what was already written. A file whose owner-write bit is clear is
+    refused instead of replaced: ``os.replace`` only needs the *directory* to
+    be writable, so without the check a read-only file would be overwritten
+    without a word.
+
+    Args:
+        project_dir: Root the paths are relative to.
+        contents: ``{path: new content}``.
+        originals: Previous contents, read here when not supplied.
+
+    Raises:
+        RenameError: nothing was left changed.
+    """
+    root = Path(project_dir)
+    previous = dict(originals or {})
     written: list[str] = []
     try:
-        for path in sorted(updated):
+        for path in sorted(contents):
             full = root / path
-            # A read-only file is refused rather than replaced: os.replace
-            # only needs the directory to be writable, so without this check
-            # the mode bits the user set would be silently ignored.
-            mode = full.stat().st_mode
+            if path not in previous and full.is_file():
+                previous[path] = full.read_text(encoding="utf-8")
+            mode = full.stat().st_mode if full.exists() else stat.S_IWUSR
             if not mode & stat.S_IWUSR:
                 raise RenameError(f"{path}: file is read-only")
-            _atomic_write(full, updated[path])
+            full.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write(full, contents[path])
             written.append(path)
     except Exception as e:
         for path in written:
             try:
-                _atomic_write(root / path, originals[path])
+                if path in previous:
+                    _atomic_write(root / path, previous[path])
+                else:  # pragma: no cover - a file that did not exist before
+                    (root / path).unlink(missing_ok=True)
             except OSError:  # pragma: no cover - restoring is best effort
                 pass
         if isinstance(e, RenameError):
             raise
         raise RenameError(f"Write failed, all files restored: {e}") from e
-    return updated
 
 
 def _atomic_write(path: Path, content: str) -> None:
