@@ -191,6 +191,43 @@ class PoliciesConfig(BaseModel):
     deny: list[DenyRule] = Field(default_factory=list)
 
 
+class PackageConfig(BaseModel):
+    """One entry under ``packages:`` in ``project.yml``.
+
+    Either a git source (``git`` plus a required ``rev``) or a local directory
+    (``path``). ``rev`` is required for git sources because an unpinned clone
+    makes a build unreproducible; a branch name is accepted but warned about,
+    since a branch moves under you.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str
+    git: str | None = None
+    rev: str | None = None
+    path: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_source(self) -> "PackageConfig":
+        from havn.engine.utils import validate_identifier
+
+        validate_identifier(self.name, "package name")
+        if self.git and self.path:
+            raise ValueError(
+                f"package '{self.name}': set either 'git' or 'path', not both"
+            )
+        if not self.git and not self.path:
+            raise ValueError(
+                f"package '{self.name}': needs a 'git' URL or a local 'path'"
+            )
+        if self.git and not self.rev:
+            raise ValueError(
+                f"package '{self.name}': git packages need a 'rev' "
+                "(tag, branch or commit) so installs are reproducible"
+            )
+        return self
+
+
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(extra="ignore", arbitrary_types_allowed=True)
 
@@ -210,6 +247,7 @@ class ProjectConfig(BaseModel):
     active_environment: str | None = None
     sources: list[SourceConfig] = Field(default_factory=list)
     exposures: list[ExposureConfig] = Field(default_factory=list)
+    packages: list[PackageConfig] = Field(default_factory=list)
     resources: dict[str, dict[str, Any]] = Field(default_factory=dict)
     streaming: dict[str, Any] = Field(default_factory=dict)
     project_dir: Path = Field(default_factory=Path.cwd)
@@ -271,6 +309,29 @@ def _parse_sources(project_dir: Path) -> list[SourceConfig]:
             connection=src_raw.get("connection"),
         ))
     return sources
+
+
+def _parse_packages(raw: dict[str, Any]) -> list[PackageConfig]:
+    """Parse and validate the ``packages:`` block of ``project.yml``.
+
+    Raises ValueError on a malformed entry or a duplicate name: two packages
+    sharing a name would fight over the same ``havn_packages/<name>/``
+    directory and the same schema prefix, and neither answer is right.
+    """
+    entries = raw.get("packages", []) or []
+    if not isinstance(entries, list):
+        raise ValueError("'packages' must be a list of {name, git, rev} entries")
+    packages: list[PackageConfig] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(f"'packages' entry must be a mapping, got {entry!r}")
+        pkg = PackageConfig(**entry)
+        if pkg.name in seen:
+            raise ValueError(f"Duplicate package name '{pkg.name}' in packages:")
+        seen.add(pkg.name)
+        packages.append(pkg)
+    return packages
 
 
 def _parse_exposures(project_dir: Path) -> list[ExposureConfig]:
@@ -438,9 +499,10 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
                 conn_type = params.pop("type", "")
                 connections[conn_name] = ConnectionConfig(type=conn_type, params=params)
 
-    # Sources and exposures
+    # Sources, exposures and packages
     sources = _parse_sources(project_dir)
     exposures = _parse_exposures(project_dir)
+    packages = _parse_packages(raw)
 
     config = ProjectConfig(
         name=raw.get("name", project_dir.name),
@@ -459,6 +521,7 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
         active_environment=active_env if active_env and active_env in environments else None,
         sources=sources,
         exposures=exposures,
+        packages=packages,
         project_dir=project_dir,
     )
     config._raw = raw
