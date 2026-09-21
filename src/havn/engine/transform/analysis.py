@@ -324,7 +324,21 @@ def validate_models(
                     ),
                 ))
 
-        # 6. Model must not write to a landing schema
+        # 6. Assertions need a table to query, and an ephemeral model never
+        #    becomes one.
+        if model.materialized == "ephemeral" and (model.assertions or model.grain):
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    "assertions cannot run on ephemeral models; move them to a "
+                    "consumer. An ephemeral model is inlined into its consumers "
+                    "as a CTE and never materialized, so there is nothing to "
+                    "query after the build."
+                ),
+            ))
+
+        # 7. Model must not write to a landing schema
         if model.schema.lower() in _landing:
             errors.append(ValidationError(
                 model=model.full_name,
@@ -335,7 +349,7 @@ def validate_models(
                 ),
             ))
 
-    # 7. Deny-list policies: refuse models in forbidden schemas that
+    # 8. Deny-list policies: refuse models in forbidden schemas that
     #    reference forbidden columns. Catches PII leaks at compile time.
     if deny_rules:
         for model in models:

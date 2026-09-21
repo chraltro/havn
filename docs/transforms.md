@@ -67,7 +67,7 @@ Sets materialization, schema, and per-model engine settings:
 
 | Key                     | Values                                  | Default                                       |
 |-------------------------|-----------------------------------------|-----------------------------------------------|
-| `materialized`          | `table`, `view`, `incremental`          | `view`                                        |
+| `materialized`          | `table`, `view`, `incremental`, `ephemeral` | `view`                                    |
 | `schema`                | any valid schema name                   | folder name (e.g. `bronze` for `transform/bronze/`) |
 | `unique_key`            | column name                             | none (required for incremental merges)        |
 | `incremental_strategy`  | `delete+insert`, `merge`, `append`      | `delete+insert`                               |
@@ -259,6 +259,53 @@ Two limits worth stating plainly, both shared with dbt:
 `sync_all_columns` depends on DuckDB accepting the `ALTER`. DuckDB refuses to drop or retype a column that a constraint or an index depends on; havn reports that as an error naming the column, and the run leaves the table untouched.
 
 The policy is folded into the model's content hash, so changing it rebuilds the model's change-detection state on the next run rather than being picked up silently on the run after.
+
+### Ephemeral
+
+```sql
+@config materialized=ephemeral
+```
+
+Builds nothing. Every model that references an ephemeral model gets its query prepended as a named CTE, and the reference rewritten to that CTE, so DuckDB sees one query. Use it for a step that exists to be read once by the models downstream, where a view would add a name to the warehouse that nobody should query directly.
+
+```sql
+-- transform/silver/active_orders.sql
+@config materialized=ephemeral
+
+SELECT * FROM bronze.orders WHERE status <> 'cancelled'
+```
+```sql
+-- transform/gold/revenue.sql
+@config materialized=table
+
+SELECT customer_id, SUM(amount) AS revenue FROM silver.active_orders GROUP BY 1
+```
+
+`havn transform` builds that as:
+
+```sql
+WITH __havn_silver_active_orders AS (
+  SELECT * FROM bronze.orders WHERE status <> 'cancelled'
+)
+SELECT customer_id, SUM(amount) AS revenue
+FROM __havn_silver_active_orders AS active_orders
+GROUP BY 1
+```
+
+What to expect:
+
+- The model is reported as `inlined` rather than `built` or `skipped`, and gets a `model_state` row with `materialized_as = ephemeral` so change detection has something honest to read. Editing an ephemeral model rebuilds every model downstream of it, through the same transitive upstream hash every other model uses.
+- Aliases survive. `FROM silver.active_orders o` stays `o`, and an unaliased reference keeps the model's own name, so `active_orders.amount` still resolves.
+- Chains work. An ephemeral model that reads another is inlined first, and an ephemeral model's own CTEs are hoisted ahead of it under the same `__havn_` prefix, so two ephemeral models can both define a CTE called `base`.
+- Switching a model to `ephemeral` drops the table or view it used to materialize, so a stale copy cannot answer queries that look like they hit the model.
+- Consumers may be views, tables or incrementals. For an incremental consumer the inlined query is what builds both the first full load and every staging table after it.
+
+Two limits:
+
+- **`@assert` is rejected on an ephemeral model.** There is no table to query after the build. `havn check` says so and points you at moving the assertion to a consumer.
+- **`{this}`, `@watermark` and `incremental_filter` are rejected.** They all name a target table, and an ephemeral model has none.
+
+The trade, which dbt makes too: a DuckDB error inside a three-level inlined query reports a line the user never wrote. Naming each CTE after the model it came from is what makes the message readable.
 
 ## Plain SQL -- No Templating
 

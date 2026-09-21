@@ -692,6 +692,9 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
       const isSelected = selectedNode === n.id;
       const isSearchMatch = dagSearch && n.id.toLowerCase().includes(dagSearch.toLowerCase());
       const isTable = n.type === "table";
+      // Ephemeral models are never materialized — they are inlined into their
+      // consumers as a CTE. A dashed outline says "nothing on disk here".
+      const isEphemeral = n.type === "ephemeral";
       const snap = rewindMode ? currentSnaps[n.id] : null;
       const prevSnap = rewindMode ? prevSnaps[n.id] : null;
 
@@ -726,10 +729,12 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
         ctx.shadowOffsetX = 0;
         ctx.shadowOffsetY = 2;
       }
+      if (isEphemeral) ctx.setLineDash([4, 3]);
       ctx.beginPath();
       ctx.roundRect(pos.x, pos.y, NODE_W, NODE_H, r);
       ctx.fill();
       ctx.stroke();
+      ctx.setLineDash([]);
       ctx.shadowColor = "transparent";
       ctx.shadowBlur = 0;
 
@@ -782,7 +787,7 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
         }
       } else if (!rewindMode) {
         // Type badge
-        const badge = n.type === "ingest" ? "I" : n.type === "import" ? "\u2191" : n.type === "source" ? "S" : n.type === "seed" ? "D" : n.type === "exposure" ? "E" : n.type === "table" ? "T" : "V";
+        const badge = n.type === "ingest" ? "I" : n.type === "import" ? "\u2191" : n.type === "source" ? "S" : n.type === "seed" ? "D" : n.type === "exposure" ? "E" : n.type === "table" ? "T" : n.type === "ephemeral" ? "\u25ca" : "V";
         ctx.fillStyle = color;
         ctx.font = `bold 9px ${monoFamily}`;
         ctx.textAlign = "right";

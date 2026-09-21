@@ -24,6 +24,9 @@ export default function RunSummary({ summary, onNavigate, onDismiss }) {
   const { type, status, models, totalRows, duration, errors } = summary;
   const builtCount = models ? models.filter((m) => m.result === "built").length : 0;
   const skippedCount = models ? models.filter((m) => m.result === "skipped").length : 0;
+  // Ephemeral models are inlined into their consumers, never built, so they
+  // belong in neither the built count nor the skipped one.
+  const inlinedCount = models ? models.filter((m) => m.result === "inlined").length : 0;
   const errorCount = errors || (models ? models.filter((m) => m.result === "error").length : 0);
 
   return (
@@ -52,6 +55,12 @@ export default function RunSummary({ summary, onNavigate, onDismiss }) {
           <div style={st.stat}>
             <span style={{ ...st.statValue, color: "var(--havn-text-secondary)" }}>{skippedCount}</span>
             <span style={st.statLabel}>skipped</span>
+          </div>
+        )}
+        {inlinedCount > 0 && (
+          <div style={st.stat}>
+            <span style={{ ...st.statValue, color: "var(--havn-text-secondary)" }}>{inlinedCount}</span>
+            <span style={st.statLabel}>inlined</span>
           </div>
         )}
         {errorCount > 0 && (

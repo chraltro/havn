@@ -117,7 +117,7 @@ CONFIG_KEYS = frozenset({
 
 # Accepted values of `materialized`, checked at validation time rather than
 # only when execution reaches "Unknown materialization".
-MATERIALIZATIONS = frozenset({"view", "table", "incremental"})
+MATERIALIZATIONS = frozenset({"view", "table", "incremental", "ephemeral"})
 
 # Accepted values of `on_schema_change`, the policy an incremental model
 # applies when its query's columns no longer line up with the target table.

@@ -20,7 +20,7 @@ from .discovery import (
     build_dag_tiers,
     discover_models,
 )
-from .execution import _execute_single_model, execute_model
+from .execution import _execute_single_model, _record_ephemeral, execute_model
 from .models import SQLModel
 from .quality import (
     _save_assertions,
@@ -202,7 +202,7 @@ def _run_transform_sequential(
     Upstream hashes are computed over the former so a targeted run does not
     corrupt change detection.
     """
-    ordered, _model_map = _hash_full_dag(models, all_models)
+    ordered, model_map = _hash_full_dag(models, all_models)
     # Collect profiles for anomaly detection at end of run
     _run_profiles: dict[str, object] = {}
 
@@ -257,6 +257,16 @@ def _run_transform_sequential(
                 pass
             continue
 
+        # Ephemeral models are never built: every consumer carries their query
+        # as a CTE instead. Reported as "inlined" rather than "skipped", which
+        # would read as "unchanged, the table on disk is current".
+        if model.materialized == "ephemeral":
+            console.print(f"  [dim]inline[/dim]  {label}")
+            results[model.full_name] = _record_ephemeral(
+                conn, model, pipeline_run_id
+            ).status
+            continue
+
         if not changed:
             console.print(f"  [dim]skip[/dim]  {label}")
             results[model.full_name] = "skipped"
@@ -303,7 +313,9 @@ def _run_transform_sequential(
 
         try:
             schema_changes: list[str] = []
-            duration_ms, row_count = execute_model(conn, model, schema_changes)
+            duration_ms, row_count = execute_model(
+                conn, model, schema_changes, model_map
+            )
             _update_state(conn, model, duration_ms, row_count)
             log_run(
                 conn, "transform", model.full_name, "success", duration_ms, row_count,
@@ -557,8 +569,16 @@ def _run_transform_parallel(
         if len(tier) == 1:
             # Single model — run in the main connection
             model = tier[0]
-            changed = force or _has_changed(conn, model)
             label = f"[bold]{model.full_name}[/bold] ({model.materialized})"
+
+            if model.materialized == "ephemeral":
+                console.print(f"  [dim]inline[/dim]  {label}")
+                results[model.full_name] = _record_ephemeral(
+                    conn, model, pipeline_run_id
+                ).status
+                continue
+
+            changed = force or _has_changed(conn, model)
 
             if not changed:
                 console.print(f"  [dim]skip[/dim]  {label}")
@@ -571,7 +591,9 @@ def _run_transform_parallel(
 
             try:
                 schema_changes: list[str] = []
-                duration_ms, row_count = execute_model(conn, model, schema_changes)
+                duration_ms, row_count = execute_model(
+                    conn, model, schema_changes, model_map
+                )
                 _update_state(conn, model, duration_ms, row_count)
                 log_run(
                     conn, "transform", model.full_name, "success", duration_ms, row_count,
@@ -648,6 +670,8 @@ def _run_transform_parallel(
                 label = f"[bold]{model_name}[/bold]"
                 if model_result.status == "skipped":
                     console.print(f"  [dim]skip[/dim]  {label}")
+                elif model_result.status == "inlined":
+                    console.print(f"  [dim]inline[/dim]  {label}")
                 elif model_result.status == "built":
                     suffix = ""
                     if model_result.row_count:

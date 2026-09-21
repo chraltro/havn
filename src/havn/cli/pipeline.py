@@ -292,8 +292,11 @@ def transform(
         assertions_failed = sum(1 for s in results.values() if s == "assertion_failed")
         policy_denied = sum(1 for s in results.values() if s == "policy_denied")
         source_stale = sum(1 for s in results.values() if s == "source_stale")
+        inlined = sum(1 for s in results.values() if s == "inlined")
         console.print()
         parts = [f"{built} built", f"{skipped} skipped", f"{errors} errors"]
+        if inlined:
+            parts.append(f"{inlined} inlined")
         if assertions_failed:
             parts.append(f"{assertions_failed} assertion failures")
         if policy_denied:

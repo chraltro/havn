@@ -45,6 +45,14 @@ from .execution import (
     _execute_incremental,
     _execute_single_model,
     execute_model,
+    resolve_query,
+)
+
+# Ephemeral model inlining
+from .inline import (
+    EphemeralInlineError,
+    cte_name_for,
+    inline_ephemeral,
 )
 
 # Analysis, validation, lineage, freshness
@@ -77,7 +85,12 @@ __all__ = [
     # Execution
     "SchemaChangeError",
     "execute_model",
+    "resolve_query",
     "run_transform",
+    # Ephemeral inlining
+    "EphemeralInlineError",
+    "cte_name_for",
+    "inline_ephemeral",
     # Analysis
     "check_freshness",
     "extract_column_lineage",

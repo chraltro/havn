@@ -271,10 +271,28 @@ def _apply_schema_plan(
         logger.info("%s: %s", model.full_name, line)
 
 
+def resolve_query(
+    model: SQLModel,
+    model_map: dict[str, SQLModel] | None,
+) -> str:
+    """The SQL to build ``model`` from, with ephemeral upstreams inlined.
+
+    Without a ``model_map`` there is nothing to resolve against, so the model's
+    own query is returned and a project with no ephemeral models never pays for
+    a sqlglot round trip.
+    """
+    if not model_map:
+        return model.query
+    from .inline import inline_ephemeral
+
+    return inline_ephemeral(model, model_map)
+
+
 def _execute_incremental(
     conn: duckdb.DuckDBPyConnection,
     model: SQLModel,
     actions: list[str] | None = None,
+    model_map: dict[str, SQLModel] | None = None,
 ) -> tuple[int, int]:
     """Execute an incremental model.
 
@@ -315,7 +333,7 @@ def _execute_incremental(
     # silently lost forever; the dedup on unique_key absorbs the re-read. For
     # append-only loads there is no dedup, so we keep strict ``>`` to avoid
     # inserting duplicates of the boundary rows.
-    query = model.query
+    query = resolve_query(model, model_map)
     incremental_filter = model.incremental_filter
     if model.watermark and not incremental_filter:
         wm = model.watermark.strip()
@@ -491,7 +509,15 @@ def _drop_conflicting(
         return
     existing = row[0]  # 'BASE TABLE' or 'VIEW'
     full_name = f"{schema}.{name}"
-    if target_type == "view" and existing == "BASE TABLE":
+    if target_type == "ephemeral":
+        # The model used to be materialized and is now inlined into its
+        # consumers. Whatever sits at schema.name is an orphan: nothing will
+        # refresh it again, and leaving it would let a stale copy answer
+        # queries that look like they hit the model.
+        conn.execute(
+            f"DROP VIEW {full_name}" if existing == "VIEW" else f"DROP TABLE {full_name}"
+        )
+    elif target_type == "view" and existing == "BASE TABLE":
         conn.execute(f"DROP TABLE {full_name}")
     elif target_type in ("table", "incremental") and existing == "VIEW":
         conn.execute(f"DROP VIEW {full_name}")
@@ -501,31 +527,45 @@ def execute_model(
     conn: duckdb.DuckDBPyConnection,
     model: SQLModel,
     actions: list[str] | None = None,
+    model_map: dict[str, SQLModel] | None = None,
 ) -> tuple[int, int]:
     """Execute a single model. Returns (duration_ms, row_count).
 
     ``actions`` collects human-readable schema-evolution lines ("added column
     region VARCHAR") when the caller wants them for the run log. Passing None
     discards them.
+
+    ``model_map`` is the full project, keyed by full name. It is what lets an
+    ephemeral upstream be inlined into this model's query; without it the query
+    is built as written.
     """
     from havn.engine.observability import ROWS_PROCESSED, TRANSFORM_DURATION
     from havn.engine.resource_manager import get_resource_manager
+
+    if model.materialized == "ephemeral":
+        # Nothing to build: consumers carry the query as a CTE. The only work
+        # is clearing whatever an earlier materialization left behind.
+        _drop_conflicting(conn, model.schema, model.name, "ephemeral")
+        return 0, 0
 
     manager = get_resource_manager()
     with manager.acquire_sync("transform", f"model:{model.full_name}", conn=conn):
         manager_task_register_cancel(manager, conn)
 
         if model.materialized == "incremental":
-            duration_ms, row_count = _execute_incremental(conn, model, actions)
+            duration_ms, row_count = _execute_incremental(
+                conn, model, actions, model_map
+            )
         else:
             conn.execute(f"CREATE SCHEMA IF NOT EXISTS {model.schema}")
             start = time.perf_counter()
             _drop_conflicting(conn, model.schema, model.name, model.materialized)
+            query = resolve_query(model, model_map)
 
             if model.materialized == "view":
-                ddl = f"CREATE OR REPLACE VIEW {model.full_name} AS\n{model.query}"
+                ddl = f"CREATE OR REPLACE VIEW {model.full_name} AS\n{query}"
             elif model.materialized == "table":
-                ddl = f"CREATE OR REPLACE TABLE {model.full_name} AS\n{model.query}"
+                ddl = f"CREATE OR REPLACE TABLE {model.full_name} AS\n{query}"
             else:
                 raise ValueError(f"Unknown materialization: {model.materialized}")
 
@@ -554,6 +594,34 @@ def manager_task_register_cancel(manager, conn: duckdb.DuckDBPyConnection) -> No
     manager.register_cancel(task.task_id, conn.interrupt)
 
 
+def _record_ephemeral(
+    conn: duckdb.DuckDBPyConnection,
+    model: SQLModel,
+    pipeline_run_id: str | None = None,
+) -> ModelResult:
+    """Settle an ephemeral model: drop any orphan, record it, report "inlined".
+
+    The status is deliberately not "skipped". A skip means change detection
+    found nothing to do and the table on disk is current; an ephemeral model
+    has no table at all, and saying "skipped" would read as the former.
+
+    A ``model_state`` row is written on every run, with ``materialized_as``
+    "ephemeral" and a row count of zero. Without it ``_has_changed`` would
+    answer True for this model forever, and the row would also be the last
+    thing a reader saw from when the model was still a table.
+    """
+    execute_model(conn, model)
+    _update_state(conn, model, 0, 0)
+    try:
+        log_run(
+            conn, "transform", model.full_name, "inlined", 0, 0,
+            pipeline_run_id=pipeline_run_id,
+        )
+    except Exception as e:
+        logger.debug("Failed to log ephemeral model %s: %s", model.full_name, e)
+    return ModelResult(status="inlined")
+
+
 def _execute_single_model(
     db_path: str,
     model: SQLModel,
@@ -579,6 +647,12 @@ def _execute_single_model(
     try:
         ensure_meta_table(conn)
         model.upstream_hash = _compute_upstream_hash(model, model_map)
+
+        if model.materialized == "ephemeral":
+            return model.full_name, _record_ephemeral(
+                conn, model, pipeline_run_id
+            )
+
         changed = force or _has_changed(conn, model)
 
         if not changed:
@@ -589,7 +663,9 @@ def _execute_single_model(
             return model.full_name, ModelResult(status="skipped")
 
         schema_changes: list[str] = []
-        duration_ms, row_count = execute_model(conn, model, schema_changes)
+        duration_ms, row_count = execute_model(
+            conn, model, schema_changes, model_map
+        )
         _update_state(conn, model, duration_ms, row_count)
         log_run(
             conn, "transform", model.full_name, "success", duration_ms, row_count,
