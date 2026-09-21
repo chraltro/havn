@@ -58,6 +58,16 @@ class MoveFileRequest(BaseModel):
     destination: str
 
 
+class BatchFileWrite(BaseModel):
+    path: str = Field(..., max_length=1000)
+    content: str = Field(..., max_length=5_000_000)
+    expected_hash: str | None = None
+
+
+class BatchSaveRequest(BaseModel):
+    files: list[BatchFileWrite] = Field(..., max_length=500)
+
+
 # --- Helpers ---
 
 
@@ -128,6 +138,86 @@ def list_files(request: Request) -> list[FileInfo]:
     _require_permission(request, "read")
     project_dir = _get_project_dir()
     return _scan_dir(project_dir)
+
+
+WRITABLE_SUFFIXES = (
+    ".sql", ".py", ".yml", ".yaml", ".dpnb", ".sqlfluff", ".csv", ".md",
+)
+
+
+def check_write_conflicts(
+    project_dir: Path, items: list[BatchFileWrite]
+) -> tuple[list[Path], dict[str, str]]:
+    """Resolve and vet a batch of writes before any of them happens.
+
+    Returns the resolved paths and, when a file on disk no longer hashes to
+    what the caller last saw, the current hashes keyed by path. A caller that
+    gets a non-empty conflict map must not write.
+    """
+    resolved: list[Path] = []
+    conflicts: dict[str, str] = {}
+    for item in items:
+        full = _safe_project_path(project_dir, item.path)
+        if full.suffix not in WRITABLE_SUFFIXES:
+            raise HTTPException(400, f"Unsupported file type: {full.suffix}")
+        resolved.append(full)
+        if not item.expected_hash or not full.exists():
+            continue
+        try:
+            current = full.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            current = full.read_text(encoding="latin-1")
+        current_hash = _file_hash(current)
+        if current_hash != item.expected_hash:
+            conflicts[item.path] = current_hash
+    return resolved, conflicts
+
+
+@router.put("/api/files")
+def save_files(request: Request, req: BatchSaveRequest) -> dict:
+    """Save several files as one unit: all of them land, or none do.
+
+    A refactor that spans files (a column rename, say) leaves a project that
+    does not build if half its edits reach disk. Every file is hash-checked
+    first, then written through a temporary neighbour, and anything already
+    written is put back if a later write fails.
+    """
+    user = _require_permission(request, "write")
+    project_dir = _get_project_dir()
+    if not req.files:
+        return {"status": "saved", "files": []}
+
+    seen: set[str] = set()
+    for item in req.files:
+        if item.path in seen:
+            raise HTTPException(400, f"Duplicate path in batch: {item.path}")
+        seen.add(item.path)
+
+    _resolved, conflicts = check_write_conflicts(project_dir, req.files)
+    if conflicts:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "conflict": True,
+                "message": "Files were modified by another user or process",
+                "stale": sorted(conflicts),
+                "current_hashes": conflicts,
+            },
+        )
+
+    from havn.engine.rename import RenameError, write_files_atomically
+
+    contents = {item.path: item.content for item in req.files}
+    try:
+        write_files_atomically(project_dir, contents)
+    except RenameError as e:
+        raise HTTPException(500, str(e))
+
+    written = []
+    for item in req.files:
+        _audit_file_action(request, user, "file_edit", item.path)
+        written.append({"path": item.path, "file_hash": _file_hash(item.content)})
+    return {"status": "saved", "files": written}
 
 
 @router.get("/api/files/{file_path:path}")

@@ -98,6 +98,17 @@ Save or create a file. Allowed extensions: `.sql`, `.py`, `.yml`, `.yaml`, `.dpn
 {"content": "SELECT 1"}
 ```
 
+### PUT /api/files
+
+Save several files as one unit: all of them land, or none do. Every file is
+hash-checked before any is written, and anything already written is restored
+if a later write fails. Returns `409` with `{conflict, stale, current_hashes}`
+when a file no longer matches its `expected_hash`.
+
+```json
+{"files": [{"path": "transform/silver/customers.sql", "content": "SELECT 1", "expected_hash": "a1b2c3"}]}
+```
+
 ### DELETE /api/files/{path}
 
 Delete a file. Optional `?drop_object=true` to also drop the corresponding database object.
@@ -234,6 +245,43 @@ Get column-level lineage for all models.
 ### GET /api/impact/{model_name}
 
 Analyze downstream impact. Optional `?column=name` for column-level analysis.
+
+## Rename
+
+See [Refactoring](refactoring.md) for what the blockers mean.
+
+### GET /api/rename/references
+
+`?model=silver.customers&column=customer_id`. Every place the column is
+written, with a character range per site, plus the places the index could not
+see through. Read permission.
+
+Returns `{model, column, sites, blocked, models}`.
+
+### POST /api/rename/plan
+
+The splices a rename would make and the file contents they produce. Writes
+nothing. Read permission. A refusal comes back as `{error}` with an empty
+`edits`, not as an HTTP error.
+
+```json
+{"model": "silver.customers", "column": "customer_id", "new_name": "cust_id", "force": false}
+```
+
+Returns `{model, column, new_name, sites, blocked, edits, files}`. Each entry
+in `files` carries the new `content` and the `file_hash` of what is on disk
+now, to hand back to `/apply`.
+
+### POST /api/rename/apply
+
+Apply the rename to every file it touches, or to none of them. Write
+permission. `409` when a file changed since the plan was made, `400` when the
+rename is refused.
+
+```json
+{"model": "silver.customers", "column": "customer_id", "new_name": "cust_id",
+ "hashes": {"transform/silver/customers.sql": "a1b2c3"}}
+```
 
 ## Pipeline
 

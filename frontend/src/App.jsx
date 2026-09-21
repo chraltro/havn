@@ -1301,7 +1301,7 @@ function AppContent() {
                       onFormat={activeFile?.endsWith(".sql") ? formatCurrentFile : undefined}
                       onPreview={activeFile?.endsWith(".sql") ? previewCurrentFile : undefined}
                       onStatus={setBindStatus}
-                      onOpenModel={(path, line) => openFileAtLine(path, line || 1, 1)}
+                      onOpenModel={(path, line, col) => openFileAtLine(path, line || 1, col || 1)}
                       onPreviewCte={(sql, name) => previewSql(sql, name ? `CTE ${name}` : "CTE")}
                     />
                   </div>

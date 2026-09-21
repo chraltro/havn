@@ -93,6 +93,7 @@ from havn.cli import pr  # noqa: E402, F401
 from havn.cli import project  # noqa: E402, F401
 from havn.cli import quality  # noqa: E402, F401
 from havn.cli import query  # noqa: E402, F401
+from havn.cli import rename  # noqa: E402, F401
 from havn.cli import shell  # noqa: E402, F401
 from havn.cli import masking  # noqa: E402, F401
 from havn.cli import rewind  # noqa: E402, F401

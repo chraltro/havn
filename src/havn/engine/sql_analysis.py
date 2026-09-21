@@ -1099,6 +1099,46 @@ def _select_sources(parsed: exp.Expression, cte_names: set[str]) -> dict[int, li
     return sources
 
 
+def relation_aliases(
+    parsed: exp.Expression,
+) -> tuple[dict[str, str], dict[str, str], set[str]]:
+    """Every name ``parsed`` can use for a relation, and what each one means.
+
+    Returns ``(tables, ctes, cte_names)``. ``tables`` maps a table's alias, its
+    bare name and its fully qualified name onto ``schema.table``; ``ctes`` maps
+    a CTE's name and any alias it is used under onto the CTE's name;
+    ``cte_names`` is the set of CTE names, which is what tells a two-part-less
+    table reference apart from a CTE reference.
+
+    Every key is lower-cased. A rename walk needs the same mapping the
+    reference index builds, so it lives here rather than being rebuilt from a
+    second copy of the rules.
+    """
+    cte_names = {
+        (cte.alias or "").lower() for cte in parsed.find_all(exp.CTE) if cte.alias
+    }
+    cte_names.discard("")
+
+    tables: dict[str, str] = {}
+    ctes: dict[str, str] = {}
+    for table in parsed.find_all(exp.Table):
+        name = (table.name or "").lower()
+        alias = (table.alias or "").lower()
+        if not (table.db or "") and name in cte_names:
+            ctes[name] = name
+            if alias:
+                ctes[alias] = name
+            continue
+        fqn = _table_fqn(table)
+        if not fqn:
+            continue
+        if alias:
+            tables[alias] = fqn
+        tables[name] = fqn
+        tables[fqn] = fqn
+    return tables, ctes, cte_names
+
+
 def extract_column_references(
     query: str,
     depends_on: list[str] | None = None,
@@ -1131,28 +1171,7 @@ def extract_column_references(
     if parsed is None:
         return []
 
-    cte_names = {
-        (cte.alias or "").lower() for cte in parsed.find_all(exp.CTE) if cte.alias
-    }
-    cte_names.discard("")
-
-    alias_map: dict[str, str] = {}
-    cte_alias_map: dict[str, str] = {}
-    for table in parsed.find_all(exp.Table):
-        name = (table.name or "").lower()
-        alias = (table.alias or "").lower()
-        if not (table.db or "") and name in cte_names:
-            cte_alias_map[name] = name
-            if alias:
-                cte_alias_map[alias] = name
-            continue
-        fqn = _table_fqn(table)
-        if not fqn:
-            continue
-        if alias:
-            alias_map[alias] = fqn
-        alias_map[name] = fqn
-        alias_map[fqn] = fqn
+    alias_map, cte_alias_map, cte_names = relation_aliases(parsed)
 
     columns_by_table = {
         fqn.lower(): {column.lower() for column, _ in columns}

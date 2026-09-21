@@ -8,6 +8,7 @@ const h = vi.hoisted(() => {
     hover: null,
     definition: null,
     codeLens: null,
+    rename: null,
     command: null,
     opener: null,
   };
@@ -27,6 +28,7 @@ const h = vi.hoisted(() => {
       registerHoverProvider: (_lang, p) => { registered.hover = p; },
       registerDefinitionProvider: (_lang, p) => { registered.definition = p; },
       registerCodeLensProvider: (_lang, p) => { registered.codeLens = p; },
+      registerRenameProvider: (_lang, p) => { registered.rename = p; },
     },
     editor: {
       defineTheme: () => {},

@@ -435,6 +435,35 @@ Analyze downstream impact of changing a model or column.
 havn impact MODEL [--column NAME] [--json] [--project PATH]
 ```
 
+### havn rename-column
+
+Rename a column in the model that defines it and everywhere it is read.
+
+```bash
+havn rename-column MODEL COLUMN NEW_NAME [--dry-run] [--force] [--yes] [--env NAME] [--project PATH]
+```
+
+Prints every site it found, with the clause each one sits in, and every place
+it cannot see through. Writes nothing until you confirm, and either writes
+every file or none.
+
+```bash
+# Look first: the sites and the blockers, nothing written
+havn rename-column silver.customers customer_id cust_id --dry-run
+
+# Rename, asking before it writes
+havn rename-column silver.customers customer_id cust_id
+
+# Rename the places it can see, leaving the blocked ones alone
+havn rename-column silver.customers customer_id cust_id --force
+```
+
+A rename refuses while anything is blocked. A downstream `SELECT *`,
+`COLUMNS(...)`, `UNION BY NAME`, a relation-position macro call, an
+unqualified reference two relations could own, or a metrics or contracts YAML
+naming the column each block it; `--force` goes ahead with the rest. See
+[Refactoring](refactoring.md).
+
 ### havn promote
 
 Promote SQL to a transform model file.

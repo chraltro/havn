@@ -123,6 +123,14 @@ export const editorContext = {
   openModel: null,
   /** App preview hook: (sql, label) => void. Set by the component. */
   previewSql: null,
+  /**
+   * Ask the user whether to go ahead despite blockers: (blocked) => Promise<bool>.
+   * Left null the rename refuses, which is the safe default: a blocker means
+   * the index could not see the whole picture.
+   */
+  confirmBlockers: null,
+  /** Show a list of column reference sites: (result) => void. */
+  showReferences: null,
 };
 
 /** Monaco model URI for a project file, so every open file gets its own model. */
@@ -376,6 +384,14 @@ export function findModelDefinition(models, schema, name) {
   return hit && hit.path ? hit : null;
 }
 
+/** The `alias` in `alias.word`, or null when the word is unqualified. */
+export function qualifierBefore(line, word) {
+  if (!word) return null;
+  const before = String(line || "").substring(0, word.startColumn - 1);
+  const match = before.match(/(\w+)\.\s*$/);
+  return match ? match[1] : null;
+}
+
 /**
  * Read a `schema.name` reference around the cursor, whichever half it sits on.
  * `line` is the line text, `word` the Monaco word at the position.
@@ -389,6 +405,95 @@ export function qualifiedRefAt(line, word) {
   const dotAfter = after.match(/^\s*\.(\w+)/);
   if (dotAfter) return { schema: word.word, name: dotAfter[1] };
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Column rename
+// ---------------------------------------------------------------------------
+
+/**
+ * Which model's column the cursor is on, if any.
+ *
+ * Two things are renameable: the current model's own output column, and
+ * `alias.column` reaching into an upstream relation the binder reported a
+ * schema for. Anything else (a function name, a table name, a column of a
+ * relation nobody bound) returns null, and the editor says so rather than
+ * renaming something it cannot see the extent of.
+ */
+export function renameTargetAt({ word, qualifier, bind, tableRefs = [] }) {
+  if (!word || !bind) return null;
+  const lower = word.toLowerCase();
+  if (qualifier) {
+    const q = qualifier.toLowerCase();
+    const ref = tableRefs.find(
+      (r) => (r.alias && r.alias.toLowerCase() === q) || (!r.alias && r.table.toLowerCase() === q),
+    );
+    if (!ref) return null;
+    const key = `${ref.schema}.${ref.table}`;
+    const columns = (bind.upstream || {})[key] || [];
+    const hit = columns.find((c) => c.name.toLowerCase() === lower);
+    return hit ? { model: key, column: hit.name } : null;
+  }
+  const own = (bind.columns || []).find((c) => c.name.toLowerCase() === lower);
+  if (own && bind.model) return { model: bind.model, column: own.name };
+  // Unqualified, and not an output column: it may still be an upstream
+  // column, but only when exactly one upstream has it. Two would be a guess.
+  const matches = [];
+  for (const [key, columns] of Object.entries(bind.upstream || {})) {
+    const hit = (columns || []).find((c) => c.name.toLowerCase() === lower);
+    if (hit) matches.push({ model: key, column: hit.name });
+  }
+  return matches.length === 1 ? matches[0] : null;
+}
+
+/**
+ * The plan's edits for one open buffer, as a Monaco WorkspaceEdit.
+ *
+ * Every file the rename touches is written by the API, which is the simpler
+ * of the two options: Monaco would otherwise need a text model per file, and
+ * creating models for files nobody opened leaks them. The editor holds one
+ * file at a time, so the only buffer that can be out of step with disk is
+ * this one, and this edit brings it back in line without a reload.
+ */
+export function planToWorkspaceEdit(plan, model, path) {
+  const mine = ((plan && plan.edits) || []).filter((e) => e.path === path);
+  return {
+    edits: mine.map((edit) => ({
+      resource: model.uri,
+      versionId: undefined,
+      textEdit: {
+        range: rangeFromOffsets(model, edit.start, edit.end),
+        text: edit.new_text,
+      },
+    })),
+  };
+}
+
+/** Monaco range for a [start, end) character span in a text model. */
+export function rangeFromOffsets(model, start, end) {
+  const from = model.getPositionAt(start);
+  const to = model.getPositionAt(end);
+  return {
+    startLineNumber: from.lineNumber,
+    startColumn: from.column,
+    endLineNumber: to.lineNumber,
+    endColumn: to.column,
+  };
+}
+
+/** One line per blocker for the confirmation dialog. */
+export function blockerLines(blocked) {
+  return (blocked || []).map((b) => `${b.path}: ${b.message}`);
+}
+
+/** Short right-hand label for a site row: "where clause in silver.customers". */
+export function siteLabel(site) {
+  if (!site) return "";
+  if (site.kind === "yaml") return "named in YAML";
+  const where = site.clause === "select" ? "projection" : `${site.clause} clause`;
+  if (site.kind === "definition") return `defined here (${where})`;
+  if (site.kind === "alias") return "re-aliased here, the name stops";
+  return site.resolved ? where : `${where}, unresolved`;
 }
 
 // ---------------------------------------------------------------------------
@@ -425,6 +530,9 @@ export function stripModelDirectives(text) {
 
 /** Monaco command the "Preview" code lens invokes. */
 export const PREVIEW_CTE_COMMAND = "havn.previewCte";
+
+/** Monaco command the "Find column references" action invokes. */
+export const FIND_COLUMN_REFERENCES_COMMAND = "havn.findColumnReferences";
 
 /**
  * Pick the CTE to preview from a /api/sql/ctes response.
@@ -782,6 +890,96 @@ loader.init().then((monaco) => {
     },
   });
 
+  // --- Rename provider ---
+  // F2 on a column renames it in every model that reads it. The plan comes
+  // from the server, which is the only thing that can see the downstream
+  // models; the editor's job is to show what the plan refuses to do before
+  // anything is written.
+  monaco.languages.registerRenameProvider("sql", {
+    resolveRenameLocation: async (model, position) => {
+      const path = pathFromUri(model.uri);
+      const word = model.getWordAtPosition(position);
+      if (!word) return { rejectReason: "Nothing to rename here" };
+      if (!isTransformSql(path)) {
+        return { rejectReason: "Only columns in transform models can be renamed" };
+      }
+      const target = renameTargetAt({
+        word: word.word,
+        qualifier: qualifierBefore(model.getLineContent(position.lineNumber), word),
+        bind: editorContext.bindResults.get(path),
+        tableRefs: extractTableRefs(model.getValue()),
+      });
+      if (!target) {
+        return { rejectReason: `${word.word} is not a column this editor can resolve` };
+      }
+      return {
+        range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
+        text: word.word,
+      };
+    },
+
+    provideRenameEdits: async (model, position, newName) => {
+      const path = pathFromUri(model.uri);
+      const word = model.getWordAtPosition(position);
+      if (!word) return { edits: [], rejectReason: "Nothing to rename here" };
+      const target = renameTargetAt({
+        word: word.word,
+        qualifier: qualifierBefore(model.getLineContent(position.lineNumber), word),
+        bind: editorContext.bindResults.get(path),
+        tableRefs: extractTableRefs(model.getValue()),
+      });
+      if (!target) {
+        return { edits: [], rejectReason: `${word.word} is not a column this editor can resolve` };
+      }
+
+      let plan;
+      try {
+        plan = await api.planColumnRename(target.model, target.column, newName);
+      } catch (e) {
+        return { edits: [], rejectReason: e.message };
+      }
+
+      let force = false;
+      if ((plan.blocked || []).length > 0) {
+        const confirm = editorContext.confirmBlockers;
+        const ok = confirm ? await confirm(plan.blocked, plan) : false;
+        if (!ok) {
+          return {
+            edits: [],
+            rejectReason: `${plan.blocked.length} place(s) the rename cannot see through`,
+          };
+        }
+        force = true;
+        try {
+          plan = await api.planColumnRename(target.model, target.column, newName, true);
+        } catch (e) {
+          return { edits: [], rejectReason: e.message };
+        }
+      }
+      if (plan.error) return { edits: [], rejectReason: plan.error };
+      if (!(plan.edits || []).length) {
+        return { edits: [], rejectReason: `Nothing references ${target.model}.${target.column}` };
+      }
+
+      const hashes = {};
+      for (const file of plan.files || []) hashes[file.path] = file.file_hash;
+      try {
+        await api.applyColumnRename(target.model, target.column, newName, hashes, force);
+      } catch (e) {
+        return { edits: [], rejectReason: e.message };
+      }
+      window.dispatchEvent(
+        new CustomEvent("havn-files-changed", { detail: { paths: (plan.files || []).map((f) => f.path) } }),
+      );
+      return planToWorkspaceEdit(plan, model, path);
+    },
+  });
+
+  // --- Find column references ---
+  monaco.editor.registerCommand(FIND_COLUMN_REFERENCES_COMMAND, async (_accessor, payload) => {
+    if (editorContext.showReferences) editorContext.showReferences(payload);
+  });
+
   // --- CTE preview ---
   // A "Preview" lens above each CTE runs just that CTE, so a long WITH chain
   // can be checked a step at a time instead of only end to end.
@@ -853,10 +1051,29 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
   const onPreviewCteRef = useRef(onPreviewCte);
   onPreviewCteRef.current = onPreviewCte;
 
+  // Column references panel and the blocker confirmation it shares with the
+  // rename provider.
+  const [columnRefs, setColumnRefs] = useState(null);
+  const [blockers, setBlockers] = useState(null);
+  const blockerResolveRef = useRef(null);
+
+  function answerBlockers(proceed) {
+    const resolve = blockerResolveRef.current;
+    blockerResolveRef.current = null;
+    setBlockers(null);
+    if (resolve) resolve(proceed);
+  }
+
   // Keep the module-level provider context pointed at the file on screen.
   editorContext.activeFile = activeFile || null;
   editorContext.openModel = onOpenModel || null;
   editorContext.previewSql = onPreviewCte || null;
+  editorContext.showReferences = setColumnRefs;
+  editorContext.confirmBlockers = (blocked) =>
+    new Promise((resolve) => {
+      blockerResolveRef.current = resolve;
+      setBlockers(blocked);
+    });
 
   // Warm the model list so go-to-definition resolves on the first try.
   useEffect(() => {
@@ -1012,6 +1229,50 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
       keybindingContext: null,
       run: (ed) => { previewCteAtCursor(ed); },
     });
+
+    editor.addAction({
+      id: "havn-find-column-references",
+      label: "Find column references",
+      precondition: null,
+      keybindingContext: null,
+      contextMenuGroupId: "navigation",
+      contextMenuOrder: 1.6,
+      run: (ed) => { findColumnReferencesAtCursor(ed); },
+    });
+  }
+
+  /**
+   * List every place the column under the cursor is written.
+   *
+   * The same resolution the rename uses, without the edit: a model that only
+   * filters on the column shows up here, which is the part a text search over
+   * the project cannot tell you.
+   */
+  async function findColumnReferencesAtCursor(ed) {
+    const path = activeFileRef.current;
+    if (!isTransformSql(path)) return;
+    const position = ed.getPosition();
+    const model = ed.getModel();
+    if (!position || !model) return;
+    const word = model.getWordAtPosition(position);
+    if (!word) return;
+    const target = renameTargetAt({
+      word: word.word,
+      qualifier: qualifierBefore(model.getLineContent(position.lineNumber), word),
+      bind: editorContext.bindResults.get(path),
+      tableRefs: extractTableRefs(model.getValue()),
+    });
+    if (!target) {
+      setColumnRefs({ model: "", column: word.word, sites: [], blocked: [], error: `${word.word} is not a column this editor can resolve` });
+      return;
+    }
+    setColumnRefs({ model: target.model, column: target.column, sites: [], blocked: [], loading: true });
+    try {
+      const result = await api.columnReferences(target.model, target.column);
+      setColumnRefs(result);
+    } catch (e) {
+      setColumnRefs({ model: target.model, column: target.column, sites: [], blocked: [], error: e.message });
+    }
   }
 
   /** Preview the CTE the cursor sits in, falling back to the last one. */
@@ -1064,7 +1325,7 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
   const disableMinimap = contentLen > 500_000;    // > 500KB
   const disableFolding = contentLen > 1_000_000;  // > 1MB
 
-  return (
+  const editorElement = (
     <MonacoEditor
       height="100%"
       language={language}
@@ -1096,9 +1357,128 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
       }}
     />
   );
+
+  return (
+    <div style={styles.shell}>
+      <div style={styles.editorArea}>{editorElement}</div>
+      {columnRefs && (
+        <ColumnReferencesPanel
+          result={columnRefs}
+          onClose={() => setColumnRefs(null)}
+          onJump={(site) => {
+            if (editorContext.openModel) editorContext.openModel(site.path, site.line || 1, site.col || 1);
+          }}
+        />
+      )}
+      {blockers && <BlockerDialog blocked={blockers} onAnswer={answerBlockers} />}
+    </div>
+  );
+}
+
+/**
+ * The sites a column reference search found, one row each.
+ *
+ * Rows are grouped by nothing on purpose: the order the server returns is
+ * path then position, which reads like a file listing and keeps the
+ * definition next to the model that owns it.
+ */
+function ColumnReferencesPanel({ result, onClose, onJump }) {
+  const sites = result.sites || [];
+  const blocked = result.blocked || [];
+  return (
+    <div style={styles.panel} aria-label="Column references">
+      <div style={styles.panelHeader}>
+        <span>
+          {result.column
+            ? `${result.model ? `${result.model}.` : ""}${result.column}`
+            : "Column references"}
+          {result.loading ? ": searching…" : `: ${sites.length} site${sites.length === 1 ? "" : "s"}`}
+        </span>
+        <button onClick={onClose} style={styles.panelClose} aria-label="Close column references">
+          {"×"}
+        </button>
+      </div>
+      <div style={styles.panelBody}>
+        {result.error && <div style={styles.panelError}>{result.error}</div>}
+        {sites.map((site, i) => (
+          <button
+            key={`${site.path}:${site.start}:${i}`}
+            style={styles.panelRow}
+            onClick={() => onJump(site)}
+            title={`${site.path}:${site.line}`}
+          >
+            <span style={styles.panelPath}>{site.path}</span>
+            <span style={styles.panelLine}>:{site.line}</span>
+            <span style={styles.panelKind}>{siteLabel(site)}</span>
+          </button>
+        ))}
+        {!result.loading && !result.error && sites.length === 0 && (
+          <div style={styles.panelEmpty}>No references found.</div>
+        )}
+        {blocked.map((b, i) => (
+          <div key={`blocked-${i}`} style={styles.panelBlocked}>
+            {b.path}: {b.message}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What the rename could not see through, shown before anything is written.
+ *
+ * Renaming past a blocker is allowed but never the default: the index has
+ * already said it cannot account for these places, so the person has to say
+ * they know.
+ */
+function BlockerDialog({ blocked, onAnswer }) {
+  return (
+    <div style={styles.dialogBackdrop} role="dialog" aria-label="Rename blockers">
+      <div style={styles.dialog}>
+        <div style={styles.dialogTitle}>
+          {blocked.length} place{blocked.length === 1 ? "" : "s"} this rename cannot see through
+        </div>
+        <div style={styles.dialogBody}>
+          {blockerLines(blocked).map((line, i) => (
+            <div key={i} style={styles.dialogLine}>{line}</div>
+          ))}
+        </div>
+        <div style={styles.dialogHint}>
+          Renaming anyway leaves these untouched. They may need editing by hand.
+        </div>
+        <div style={styles.dialogButtons}>
+          <button style={styles.dialogCancel} onClick={() => onAnswer(false)}>Cancel</button>
+          <button style={styles.dialogConfirm} onClick={() => onAnswer(true)}>Rename anyway</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 const styles = {
+  shell: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0, position: "relative" },
+  editorArea: { flex: 1, minHeight: 0 },
+  panel: { height: "180px", flexShrink: 0, borderTop: "1px solid var(--havn-border)", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--havn-bg-secondary)" },
+  panelHeader: { padding: "4px 12px", fontSize: "11px", color: "var(--havn-text-secondary)", borderBottom: "1px solid var(--havn-border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 },
+  panelClose: { background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", lineHeight: 1 },
+  panelBody: { flex: 1, overflow: "auto", padding: "4px 0" },
+  panelRow: { display: "flex", gap: "8px", alignItems: "baseline", width: "100%", textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: "2px 12px", color: "var(--havn-text)", fontFamily: "var(--havn-font-mono)", fontSize: "12px" },
+  panelPath: { color: "var(--havn-text)" },
+  panelLine: { color: "var(--havn-text-dim)" },
+  panelKind: { color: "var(--havn-text-secondary)", marginLeft: "auto" },
+  panelEmpty: { padding: "6px 12px", fontSize: "12px", color: "var(--havn-text-dim)" },
+  panelError: { padding: "6px 12px", fontSize: "12px", color: "var(--havn-red)" },
+  panelBlocked: { padding: "2px 12px", fontSize: "12px", color: "var(--havn-yellow)", fontFamily: "var(--havn-font-mono)" },
+  dialogBackdrop: { position: "absolute", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20 },
+  dialog: { background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "6px", padding: "16px", maxWidth: "520px", width: "90%", display: "flex", flexDirection: "column", gap: "10px" },
+  dialogTitle: { fontSize: "13px", fontWeight: 600, color: "var(--havn-text)" },
+  dialogBody: { maxHeight: "200px", overflow: "auto", display: "flex", flexDirection: "column", gap: "4px" },
+  dialogLine: { fontSize: "12px", fontFamily: "var(--havn-font-mono)", color: "var(--havn-text-secondary)" },
+  dialogHint: { fontSize: "12px", color: "var(--havn-text-dim)" },
+  dialogButtons: { display: "flex", gap: "8px", justifyContent: "flex-end" },
+  dialogCancel: { padding: "5px 12px", background: "var(--havn-btn-bg)", border: "1px solid var(--havn-border)", borderRadius: "4px", color: "var(--havn-text)", cursor: "pointer", fontSize: "12px" },
+  dialogConfirm: { padding: "5px 12px", background: "var(--havn-accent)", border: "1px solid var(--havn-accent)", borderRadius: "4px", color: "var(--havn-bg)", cursor: "pointer", fontSize: "12px" },
   empty: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--havn-text-secondary)", gap: "6px" },
   emptyIcon: { marginBottom: "8px", opacity: 0.5 },
   emptyText: { margin: 0, fontSize: "15px", fontWeight: 500, letterSpacing: "-0.01em" },

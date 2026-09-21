@@ -303,6 +303,7 @@ a change either keeps it working or says out loud which one it broke.
 
 ## Related Pages
 
+- [Refactoring](refactoring.md) -- renaming a column across the models that read it
 - [Transforms](transforms) -- SQL model format and `@depends_on` overrides
 - [Quality](quality) -- Using lineage for data quality
 - [Sources](sources) -- Sources in the DAG
