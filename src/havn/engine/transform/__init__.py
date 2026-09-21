@@ -46,6 +46,14 @@ from .execution import (
     execute_model,
 )
 
+# Shadow bind pass
+from .bind import (
+    BindError,
+    BindResult,
+    ancestor_closure,
+    bind_models,
+)
+
 # Analysis, validation, lineage, freshness
 from .analysis import (
     check_freshness,
@@ -76,6 +84,11 @@ __all__ = [
     # Execution
     "execute_model",
     "run_transform",
+    # Bind
+    "BindError",
+    "BindResult",
+    "ancestor_closure",
+    "bind_models",
     # Analysis
     "check_freshness",
     "extract_column_lineage",
