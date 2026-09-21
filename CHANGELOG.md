@@ -2,6 +2,163 @@
 
 All notable changes to havn are documented in this file.
 
+## [Unreleased]
+
+The dbt v2 gap work. Every item below came out of a research pass over the
+current code against dbt v2.0 (GA 2026-09-16); the plan and its evidence live
+in `docs/internal/dbt-v2-gap-plan.md`.
+
+### Validation and types
+
+- **Bind pass.** `havn validate` now resolves every model's SQL through the
+  DuckDB binder against a throwaway in-memory shadow catalog, reporting bind
+  errors with line and column: wrong arity, unknown functions, operator
+  overload failures, missing columns (including on upstreams that have never
+  been built), missing struct keys, ambiguous references, aggregation without
+  `GROUP BY`, set-operation arity mismatches. Reads no rows, writes nothing,
+  about 3 ms per model. `--no-bind` opts out.
+- **Validation reflects the file, not the last build.** A model's fresh SQL
+  shadows its stale built table, so a rename or retype upstream is caught
+  before the build rather than during it.
+- **The pre-build gate no longer skips runs that include ingest.** It runs
+  after ingest and before the first transform.
+- **Known boundary, stated plainly:** the binder does not catch value
+  conversions. `CAST(some_varchar AS INTEGER)` binds clean and fails at run
+  time. dbt v2 has the same boundary.
+- **Column contracts.** Contract YAML takes a `columns:` block (name, type,
+  optional `nullable` and `description`) plus `strict:` and `on_widen:`.
+  Declarations are checked before the build against the bind pass, so a
+  break is caught on a warehouse where the table does not exist yet, and
+  again after the build against the live table.
+- **`havn validate --schema-drift`** (or `validation.schema_drift: warn`)
+  reports a model whose output shape moved since its last build, contract or
+  no contract. Off by default.
+- **`havn check` rejects unknown `@config` keys and unsupported
+  `materialized` values** with a did-you-mean. `materialised=table` used to
+  build a view in silence.
+- **Two SQL files resolving to the same `schema.name` now fail discovery**
+  naming both paths, instead of one being dropped from the DAG.
+- New `_havn.model_columns` table records each model's columns at build time;
+  `GET /api/models/{name}/columns` reads it.
+
+### Editor
+
+- **Live error markers** in `transform/*.sql`: bind diagnostics 400 ms after a
+  keystroke, SQLFluff warnings on save and after 1.5 s idle, with a count in
+  the toolbar. Backed by the new `POST /api/bind`, which returns positioned
+  diagnostics plus the inferred output and upstream schemas.
+- **Hover shows inferred column types**, for the model's own output columns
+  and `alias.column` references into upstream models.
+- **`F12` or Ctrl/Cmd+Click on a `schema.model` reference opens the file that
+  declares it**, resolved through the model's real path so `@config schema=`
+  overrides are followed (the old `transform/{schema}/{name}.sql` guess is
+  gone from every jump).
+- **Preview a single CTE** from a `Preview` link above it or Ctrl/Cmd+Shift+
+  Enter at the cursor, via the new `POST /api/sql/ctes`. Recursive CTEs are
+  refused.
+- **`F2` renames a column across files**, in the model that defines it and
+  every downstream model that reads it, including references that only appear
+  in `WHERE`, `JOIN`, `GROUP BY`, `ORDER BY`, `HAVING` or `QUALIFY`. A
+  downstream `SELECT *`, `COLUMNS(...)`, `UNION BY NAME` or a YAML mention is
+  reported as a blocker before anything is written. Right-click offers
+  **Find column references**. Also `havn rename-column MODEL COLUMN NEW`.
+- `PUT /api/files` takes a batch of files and writes all or none, with per-file
+  hash checks and rollback.
+- Fixed: the whole-model preview sent no row limit and shipped mid-file
+  `@assert` lines to DuckDB as SQL.
+- Fixed: the editor's column cache never expired, so a rebuilt model kept
+  offering its old columns for the rest of the session.
+- Fixed: lint violations were reported at the wrong line for every model with
+  a modern `@config` header; a directive below the SQL also produced a
+  spurious "unparsable section".
+- `POST /api/lint/file` needs only `read` when `fix` is false.
+
+### Testing
+
+- **Model unit tests.** Declare fixture rows for a model's upstreams and the
+  rows it should produce in `tests/unit/*.yml`. Each test runs on a throwaway
+  in-memory DuckDB with your macros registered and reads nothing from the
+  warehouse, so a test cannot pass because of what happens to be built. Row
+  comparison is type-drift proof and order-insensitive by default.
+- `havn test` runs the suite (`--model`, `-v`), `havn check` includes it,
+  `GET /api/unit-tests` and `POST /api/unit-tests/run`, a `run_unit_tests`
+  MCP tool, and an Observe > Unit Tests panel. `havn init` scaffolds
+  `tests/unit/` with an example.
+
+### Modeling
+
+- **`@config on_schema_change=append_new_columns|ignore|fail|sync_all_columns`**
+  for incremental models. Staging and target are compared on name and type,
+  both directions, before any write. The default now refuses a removed column
+  (which used to diverge silently) and a retyped column (which used to round
+  a `DOUBLE` 20.5 into an `INTEGER` 21). Schema actions are recorded in the
+  run log.
+- **Incremental writes are transactional.** The ALTER, DELETE, UPDATE and
+  INSERT of a `delete+insert` or `merge` run commit together or not at all.
+  Previously a failing INSERT left the target missing the rows it had just
+  deleted.
+- **`@config materialized=ephemeral`.** Never built; every consumer gets the
+  query prepended as a `__havn_`-prefixed CTE with references rewritten.
+  Chains and the ephemeral's own CTEs are hoisted in dependency order. Runs
+  report it as `inlined`.
+- **Snapshot models (SCD2).** `@config materialized=snapshot, unique_key=...`
+  keeps row-level history with `valid_from`, `valid_to`, `is_current` and
+  `row_hash`. `strategy=check` (optionally `check_cols=`) or
+  `strategy=timestamp, updated_at=`; `hard_deletes=ignore|invalidate|
+  new_record`. Config names and values match dbt's. Meta column names and a
+  `valid_to_current` sentinel are configurable under `snapshots:` in
+  `project.yml`. Runs are idempotent; a duplicate key in the query fails
+  before any write; `--force` never drops history. This is row history, not
+  the whole-warehouse restore points of `havn snapshot` / `havn rewind`.
+- **Microbatch incremental strategy.** `incremental_strategy=microbatch` with
+  `event_time`, `batch_size` (`hour`/`day`/`month`/`year`), `begin` and
+  `lookback` cuts a run into UTC windows; the model filters on `{start}` and
+  `{end}`. Each window commits in its own transaction and is recorded in
+  `_havn.batch_state`, so a failure at window 17 of 30 leaves sixteen
+  committed and the next run resumes. `havn transform --event-time-start/
+  --event-time-end` backfills a range.
+
+### Running
+
+- **Graph selectors on `havn transform`:** `+x`, `x+`, `+x+`, `n+x`, `x+n`,
+  `@x`, fnmatch wildcards (`gold.fct_*`), `tag:`, `path:`, `config.<key>:`,
+  `state:modified`, comma for intersection, `--select/-s` and `--exclude/-x`.
+  `havn ls` dry-runs a selector. Jobs gain `exclude:`. `POST /api/transform`
+  and the MCP tools take the same grammar.
+- **`@config tags=daily,finance`** for `tag:` selectors. Tags are not part of
+  the content hash, so retagging does not rebuild.
+- Fixed: targeted runs (`havn transform gold.orders`) wrote an empty upstream
+  hash to `model_state`, so the next full run spuriously rebuilt the model.
+- Fixed: `gold.fct_*` and any other partial wildcard silently matched no
+  models in job targets.
+- Fixed: `havn diff` in changed mode compared against an empty upstream hash
+  and reported nearly every model as changed.
+
+### Lineage and performance
+
+- **Column lineage rewritten on `sqlglot.lineage`** with a conformance suite
+  that uses DuckDB `DESCRIBE` as ground truth. Nested subqueries, every
+  UNION branch, `SELECT * EXCLUDE/REPLACE`, `UNPIVOT` and `ASOF JOIN` are now
+  exact; `PIVOT`, `LATERAL` and struct field access are documented as
+  approximate. `docs/lineage.md` matches the suite.
+- **Impact analysis reports downstream models that only filter, join, group
+  or order on a column**, with the clause named.
+- **Full-project lineage on 1000 models drops from about 20 s to about 150
+  ms.** The catalog was read once per dependency; it is now read once per
+  pass. Each model's SQL is also parsed once per pass instead of four times.
+- New `benchmarks/bench_parse.py`.
+- The `sqlglot` floor is now 26.17, the first version carrying token
+  positions.
+
+### First impression
+
+- README leads with `pip install havn`; the clone-and-npm chain moved to the
+  from-source section. The wheel ships the built web UI.
+- README shows a screenshot of the web UI instead of a commented-out
+  placeholder.
+- New docs page, **What havn Supports** (`docs/limitations.md`): per-area
+  tables of supported, partial, not supported and planned.
+
 ## [0.2.27] - 2026-08-04
 
 ### Security

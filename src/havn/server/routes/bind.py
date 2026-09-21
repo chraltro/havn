@@ -248,8 +248,10 @@ def list_ctes_endpoint(request: Request, req: CteRequest) -> dict:
     from havn.engine.sql_analysis import strip_config_comments
     from havn.engine.transform.ctes import CteParseError, enumerate_ctes
 
-    # Directive lines are blanked in place, so offsets and line numbers still
-    # match the buffer the editor is showing.
+    # Directive lines are blanked in place, so line numbers still match the
+    # buffer the editor is showing. Character offsets do not (a blanked line
+    # is shorter than the original); this route only uses lines. Anything that
+    # needs offsets must go through the per-line map in engine/rename.py.
     query = strip_config_comments(req.content)
     try:
         ctes, active = enumerate_ctes(query, line=req.line)
