@@ -239,6 +239,21 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
             row_count    BIGINT DEFAULT 0
         )
     """)
+    # Column names and types of each model as last built. Nothing else in the
+    # warehouse records inferred types: model_profiles has names only, and the
+    # catalog holds the last successful build, which disappears the moment a
+    # model is dropped or renamed. The editor and the bind pass both want a
+    # cheap answer for "what columns does this upstream have", so the
+    # DESCRIBE taken at build time is kept here, keyed by the content hash it
+    # belongs to.
+    _exec("""
+        CREATE TABLE IF NOT EXISTS _havn.model_columns (
+            model_path   VARCHAR PRIMARY KEY,
+            content_hash VARCHAR NOT NULL,
+            columns      JSON NOT NULL,
+            bound_at     TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
     _exec("""
         CREATE TABLE IF NOT EXISTS _havn.run_log (
             run_id       VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
