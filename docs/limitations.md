@@ -61,8 +61,8 @@ Set with `@config materialized=...` at the top of a model.
 | Check | Status | Notes |
 |---|---|---|
 | DAG construction, cycle detection | Supported | Circular dependencies are reported by name. |
-| Table and column name checking | Partial | Columns are checked against the warehouse catalog. Any upstream that has not been built yet is skipped, so on a fresh warehouse a bad column name can pass validation and fail at build time. |
-| Type checking | Planned | Nothing checks types today. The design delegates to the DuckDB binder against a shadow catalog, which resolves types and catches bind errors (wrong arity, unknown function, missing column, ambiguous reference, set-operation mismatch) without reading a row. It will not catch value-domain failures such as `CAST('abc' AS INTEGER)`; those still fail at run time. |
+| Table and column name checking | Supported | The bind pass resolves every model against a shadow catalog, so columns on upstreams that have never been built are checked too. `--no-bind` falls back to the name-level check, which skips unbuilt upstreams. |
+| Type resolution and bind errors | Supported | `havn validate` hands each model's SQL to the DuckDB binder against a shadow catalog. Resolves output types and catches wrong arity, unknown functions, operator overload failures, missing columns, missing struct keys, ambiguous references, aggregation without GROUP BY and set-operation arity mismatches, without reading a row. Caveat: it does not catch value conversions. `CAST(some_varchar AS INTEGER)` binds clean and fails at run time on the first row that is not a number, as does comparing a numeric column to a string constant. A clean bind is not a guarantee that the build will succeed. See [Data Quality](quality.md#validation-and-type-resolution). |
 | Column-level lineage | Partial | See the per-construct table below. |
 | Contracts | Partial | See [Testing](#testing). |
 | Unknown `@config` keys | Partial | Unrecognised keys are ignored rather than rejected, so a typo such as `materialised=table` silently builds a view. |

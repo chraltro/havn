@@ -55,6 +55,20 @@ from .inline import (
     inline_ephemeral,
 )
 
+# Persisted model column schemas
+from .columns import (
+    load_model_columns,
+    save_model_columns,
+)
+
+# Shadow bind pass
+from .bind import (
+    BindError,
+    BindResult,
+    ancestor_closure,
+    bind_models,
+)
+
 # Analysis, validation, lineage, freshness
 from .analysis import (
     check_freshness,
@@ -91,6 +105,13 @@ __all__ = [
     "EphemeralInlineError",
     "cte_name_for",
     "inline_ephemeral",
+    # Bind
+    "BindError",
+    "BindResult",
+    "ancestor_closure",
+    "bind_models",
+    "load_model_columns",
+    "save_model_columns",
     # Analysis
     "check_freshness",
     "extract_column_lineage",

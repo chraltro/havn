@@ -24,6 +24,7 @@ from havn.engine.sql_analysis import (
 )
 from havn.engine.utils import validate_identifier
 
+from .columns import save_model_columns
 from .models import SQLModel
 
 
@@ -304,3 +305,4 @@ def _update_state(
             """,
             params,
         )
+    save_model_columns(conn, model)

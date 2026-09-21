@@ -347,6 +347,34 @@ class MCPServer:
                 self._tool_model_lineage,
             ),
             (
+                "bind_model",
+                "Resolve a model's SQL through the DuckDB binder without "
+                "building it: returns the inferred output columns and any bind "
+                "errors with line numbers. Catches wrong arity, unknown "
+                "functions, operator overload failures and missing columns, "
+                "including on upstream models that have never been built. Does "
+                "not catch value conversions such as CAST of a non-numeric "
+                "string, which only fail at run time.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Model name, e.g. silver.customers",
+                        },
+                        "sql": {
+                            "type": "string",
+                            "description": (
+                                "SQL to bind instead of a saved model, including "
+                                "any @config lines. Pair with name to bind it in "
+                                "that model's place."
+                            ),
+                        },
+                    },
+                },
+                self._tool_bind_model,
+            ),
+            (
                 "run_history",
                 "Show recent pipeline run history (ingest, transform, export).",
                 {
@@ -593,6 +621,89 @@ class MCPServer:
             "upstream_external": sorted(
                 d for d in m.depends_on if d not in by_name
             ),
+        }
+
+    def _tool_bind_model(self, args: dict) -> dict:
+        """Bind one model (saved or supplied as SQL) and report its schema."""
+        from havn.engine.database import open_warehouse
+        from havn.engine.transform.bind import (
+            ancestor_closure,
+            as_validation_message,
+            bind_models,
+            model_from_buffer,
+        )
+
+        name = str(args.get("name") or "").strip()
+        sql = args.get("sql")
+        if not name and not sql:
+            raise _InvalidParams("bind_model needs a name or sql")
+
+        models = list(self._models())
+        if sql:
+            path = None
+            if name:
+                existing = self._find_model(name)
+                path = existing.path
+                models = [m for m in models if m.full_name != existing.full_name]
+            target = model_from_buffer(
+                str(sql), path=path, transform_dir=self.project_dir / "transform"
+            )
+            models.append(target)
+        else:
+            target = self._find_model(name)
+
+        chain = ancestor_closure(models, [target.full_name])
+
+        # The bind pass attaches a throwaway in-memory catalog, which DuckDB
+        # only allows on a writable handle. It writes nothing to the warehouse.
+        config = self._config()
+        try:
+            conn = open_warehouse(config, self.project_dir)
+        except Exception as e:
+            raise ToolError(
+                "Could not open the warehouse for binding "
+                f"(a running `havn serve` holds the lock): {e}"
+            )
+        try:
+            result = bind_models(conn, chain, project_dir=self.project_dir)
+        except Exception as e:
+            raise ToolError(f"bind failed: {e}")
+        finally:
+            conn.close()
+
+        if not result.available:
+            return {
+                "model": target.full_name,
+                "ok": False,
+                "available": False,
+                "errors": [w.message for w in result.warnings],
+                "columns": [],
+            }
+
+        own = result.errors.get(target.full_name, [])
+        return {
+            "model": target.full_name,
+            "ok": not own,
+            "available": True,
+            "errors": [
+                {
+                    "message": as_validation_message(e),
+                    "line": e.line,
+                    "col": e.col,
+                    "kind": e.kind,
+                }
+                for e in own
+            ],
+            "columns": [
+                {"name": n, "type": t}
+                for n, t in result.schemas.get(target.full_name, [])
+            ],
+            "upstream_errors": {
+                other: [as_validation_message(e) for e in errs]
+                for other, errs in result.errors.items()
+                if other != target.full_name
+            },
+            "duration_ms": result.duration_ms,
         }
 
     def _tool_run_history(self, args: dict) -> dict:
