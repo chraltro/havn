@@ -232,6 +232,9 @@ def init(
         ".havn/catalog.ducklake\n.havn/catalog.ducklake.wal\n.havn/data/\n"
         "__pycache__/\n*.pyc\n.venv/\n.env\noutput/\n_snapshots/\n"
         ".havn/pr-build/\n"
+        # Installed package sources are reproducible from havn_packages.lock,
+        # which IS committed. Only the checkout is ignored.
+        "havn_packages/\n"
     )
     # .havn/ holds shareable PR state. .havn/prs/ travels with the repo (commit
     # the JSON files there to share PRs with collaborators); .havn/pr-build/ is
