@@ -288,8 +288,16 @@ def init(
 @app.command()
 def validate(
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
+    bind: Annotated[Optional[bool], typer.Option("--bind/--no-bind", help="Resolve model SQL through the DuckDB binder (default: on when a warehouse exists)")] = None,
 ) -> None:
-    """Validate project structure, config, and SQL model dependencies."""
+    """Validate project structure, config, and SQL model dependencies.
+
+    With the bind pass on (the default once a warehouse exists), every model's
+    SQL is also resolved through the DuckDB binder against a throwaway shadow
+    catalog. That catches wrong arity, unknown functions, operator overload
+    failures and missing columns -- including columns on upstream models that
+    have never been built -- and reports them with a line number.
+    """
     from havn.config import load_project
     from havn.engine.transform import build_dag, discover_models
 
@@ -345,6 +353,37 @@ def validate(
         console.print(f"[green]DAG[/green] {len(models)} models, no circular dependencies")
     except Exception as e:
         errors.append(f"Circular dependency detected: {e}")
+
+    # 5b. Bind pass. Needs a writable warehouse to attach its shadow catalog
+    # to, so it defaults on only once one exists and stays quiet otherwise
+    # rather than reporting a failure the user cannot act on.
+    warehouse_ready = _warehouse_exists(config, project_dir)
+    want_bind = warehouse_ready if bind is None else bind
+    if want_bind and not warehouse_ready:
+        warnings.append(
+            "--bind needs a warehouse; run a pipeline first. Skipping the bind pass."
+        )
+    elif want_bind and models:
+        from havn.engine.database import open_warehouse
+        from havn.engine.transform.analysis import _bind_errors
+
+        conn = open_warehouse(config, project_dir)
+        try:
+            bind_errors = _bind_errors(conn, models, project_dir)
+        finally:
+            conn.close()
+        failures = 0
+        for e in bind_errors:
+            where = f"{e.model}:{e.line}" if e.line else (e.model or "project")
+            if e.severity == "error":
+                errors.append(f"{where}: {e.message}")
+                failures += 1
+            else:
+                warnings.append(f"{where}: {e.message}")
+        if not failures:
+            console.print(
+                f"[green]bind[/green] {len(models)} models resolved against the warehouse"
+            )
 
     # 6. Check .env variables referenced in config
     import re

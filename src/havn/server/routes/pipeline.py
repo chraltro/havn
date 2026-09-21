@@ -375,7 +375,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
     from havn.engine.database import log_run as _lr
     from havn.engine.runner import run_script as _run_script
     from havn.server.deps import _get_db_resource_limits, _get_shared_conn
-    from havn.engine.transform import discover_models as _dm, build_dag as _bd, validate_models as _vm
+    from havn.engine.transform import discover_models as _dm, build_dag as _bd
     from havn.engine.transform.discovery import _compute_upstream_hash as _cuh, _has_changed as _hc, _update_state as _us
     from havn.engine.transform.execution import execute_model as _em
     from havn.engine.transform.quality import run_assertions as _ra, _save_assertions as _sa, profile_model as _pm, _save_profile as _sp
@@ -500,21 +500,19 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
         from havn.engine.database import ensure_meta_table as _emt
         _emt(conn)
 
-        # 5. Pre-build validation for transform models
-        # Skip validation when stream includes ingest steps — landing tables
-        # won't exist yet on a fresh database and will be created by ingest.
+        # 5. Pre-build validation for transform models.
+        #
+        # Runs up front when the stream has no ingest steps. When it does, the
+        # landing tables do not exist yet on a fresh database, so the gate is
+        # deferred to just before the first transform node is submitted --
+        # after ingest has created them. See _maybe_run_gate below.
+        from havn.server.prebuild_gate import run_prebuild_gate as _gate
         has_ingest = bool(ingest_node_ids)
+        _gate_pending = bool(models) and has_ingest
+        _gate_failed = [False]
         if models and not has_ingest:
-            val_cur = cursor_for(conn)
-            try:
-                _val_errors = _vm(val_cur, models)
-            finally:
-                val_cur.close()
-            for _ve in _val_errors:
-                emit("validation", {"model": _ve.model, "severity": _ve.severity, "message": _ve.message})
-                if _ve.severity == "error":
-                    has_error = True
-            if has_error:
+            if not _gate(conn, models, emit, project_dir=project_dir):
+                has_error = True
                 emit("complete", {"stream": stream_name, "status": "failed", "duration_seconds": 0, "pipeline_run_id": pipeline_run_id})
                 return
 
@@ -612,10 +610,29 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
         # Pending queue: nodes that are ready but not yet submitted
         pending = []
 
+        def _maybe_run_gate() -> bool:
+            """Run the deferred pre-build gate once. True when the run may go on.
+
+            Called just before the first transform node is submitted, which on
+            an ingest-plus-transform run is the earliest point where the
+            landing tables exist and the gate has something real to check.
+            """
+            nonlocal _gate_pending
+            if not _gate_pending:
+                return not _gate_failed[0]
+            _gate_pending = False
+            ok = _gate(conn, models, emit, project_dir=project_dir)
+            _gate_failed[0] = not ok
+            return ok
+
         def _submit_batch():
             """Submit pending nodes up to max_workers active limit."""
             nonlocal active
             while pending and active < max_workers:
+                if nodes[pending[0]]["type"] == "transform" and not _maybe_run_gate():
+                    # Gate failed: submit nothing more. The result loop sees
+                    # _gate_failed on its next pass and shuts down.
+                    return
                 nid = pending.pop(0)
                 if nid not in _node_number:
                     _node_number[nid] = _next_num[0]
@@ -633,6 +650,10 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
 
         # Process results as they arrive, submit newly ready nodes
         while sorter.is_active() or active > 0:
+            if _gate_failed[0] and active == 0:
+                has_error = True
+                executor.shutdown(wait=False, cancel_futures=True)
+                break
             if _is_cancelled():
                 cancelled = True
                 executor.shutdown(wait=False, cancel_futures=True)
@@ -769,7 +790,7 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
     from havn.engine.database import log_run as _lr
     from havn.engine.runner import run_script as _run_script
     from havn.server.deps import _get_db_resource_limits, _get_shared_conn
-    from havn.engine.transform import discover_models as _dm, build_dag as _bd, validate_models as _vm
+    from havn.engine.transform import discover_models as _dm, build_dag as _bd
     from havn.engine.transform.discovery import _compute_upstream_hash as _cuh, _has_changed as _hc, _update_state as _us
     from havn.engine.transform.execution import execute_model as _em
     from havn.engine.transform.quality import run_assertions as _ra, _save_assertions as _sa, profile_model as _pm, _save_profile as _sp
@@ -900,19 +921,16 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
         from havn.engine.database import ensure_meta_table as _emt
         _emt(conn)
 
-        # Pre-build validation for transform models (skip if ingest is included)
+        # Pre-build validation for transform models. With ingest in the run the
+        # gate is deferred to just before the first transform, once the landing
+        # tables exist; see _maybe_run_gate below.
+        from havn.server.prebuild_gate import run_prebuild_gate as _gate
         has_ingest = bool(ingest_node_ids)
+        _gate_pending = bool(models) and has_ingest
+        _gate_failed = [False]
         if models and not has_ingest:
-            val_cur = cursor_for(conn)
-            try:
-                _val_errors = _vm(val_cur, models)
-            finally:
-                val_cur.close()
-            for _ve in _val_errors:
-                emit("validation", {"model": _ve.model, "severity": _ve.severity, "message": _ve.message})
-                if _ve.severity == "error":
-                    has_error = True
-            if has_error:
+            if not _gate(conn, models, emit, project_dir=project_dir):
+                has_error = True
                 emit("complete", {"stream": "pipeline", "status": "failed", "duration_seconds": 0, "pipeline_run_id": pipeline_run_id})
                 return
 
@@ -1005,10 +1023,22 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
 
         pending = []
 
+        def _maybe_run_gate() -> bool:
+            """Run the deferred pre-build gate once, before the first transform."""
+            nonlocal _gate_pending
+            if not _gate_pending:
+                return not _gate_failed[0]
+            _gate_pending = False
+            ok = _gate(conn, models, emit, project_dir=project_dir)
+            _gate_failed[0] = not ok
+            return ok
+
         def _submit_batch():
             """Submit pending nodes up to max_workers active limit."""
             nonlocal active
             while pending and active < max_workers:
+                if nodes[pending[0]]["type"] == "transform" and not _maybe_run_gate():
+                    return
                 nid = pending.pop(0)
                 if nid not in _node_number:
                     _node_number[nid] = _next_num[0]
@@ -1023,6 +1053,10 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
         _submit_batch()
 
         while sorter.is_active() or active > 0:
+            if _gate_failed[0] and active == 0:
+                has_error = True
+                executor.shutdown(wait=False, cancel_futures=True)
+                break
             if _is_cancelled():
                 cancelled = True
                 executor.shutdown(wait=False, cancel_futures=True)

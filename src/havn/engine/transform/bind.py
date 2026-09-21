@@ -596,3 +596,24 @@ def bind_models(
 
     result.duration_ms = int((time.perf_counter() - started) * 1000)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Presentation helpers
+# ---------------------------------------------------------------------------
+
+_DUCKDB_PREFIX = re.compile(
+    r"^(Binder|Catalog|Parser|Conversion|Invalid Input|Not implemented)\s+Error:\s*"
+)
+
+
+def as_validation_message(error: BindError) -> str:
+    """Render a :class:`BindError` for a validation report.
+
+    The wording stays "bind error". This pass resolves names and types and
+    reports what the DuckDB binder refuses; it is not a type checker, and
+    calling it one would be a promise the first clean-binding CAST breaks.
+    DuckDB's own ``Binder Error:`` / ``Catalog Error:`` prefix is dropped so
+    the line does not say "error" three times.
+    """
+    return "bind error: " + _DUCKDB_PREFIX.sub("", error.message)

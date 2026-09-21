@@ -94,6 +94,9 @@ def validate_models(
     source_columns: dict[str, set[str]] | None = None,
     landing_schemas: set[str] | None = None,
     deny_rules: list | None = None,
+    *,
+    bind: bool = False,
+    project_dir=None,
 ) -> list[ValidationError]:
     """Validate all models without executing them.
 
@@ -342,6 +345,47 @@ def validate_models(
                         ),
                     ))
 
+    # 8. Shadow bind pass: hand the SQL to the DuckDB binder.
+    #
+    # Everything above is name-level. The binder is what resolves types,
+    # function signatures and columns on upstreams that were never built. It
+    # needs a writable connection to attach its throwaway catalog, so it is
+    # opt-in rather than on by default.
+    if bind and conn is not None:
+        errors.extend(_bind_errors(conn, models, project_dir))
+
+    return errors
+
+
+def _bind_errors(
+    conn: duckdb.DuckDBPyConnection,
+    models: list[SQLModel],
+    project_dir=None,
+) -> list[ValidationError]:
+    """Run the shadow bind pass and render it as ``ValidationError`` rows."""
+    from .bind import as_validation_message, bind_models
+
+    errors: list[ValidationError] = []
+    try:
+        result = bind_models(conn, models, project_dir=project_dir)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug("Bind pass failed: %s", e)
+        return errors
+
+    for warning in result.warnings:
+        errors.append(ValidationError(
+            model="",
+            severity="warning",
+            message=warning.message,
+        ))
+    for model_name, bind_errors in result.errors.items():
+        for err in bind_errors:
+            errors.append(ValidationError(
+                model=model_name,
+                severity="error",
+                message=as_validation_message(err),
+                line=err.line,
+            ))
     return errors
 
 
