@@ -23,6 +23,8 @@ havn lint --fix                 # auto-fix
 
 # Common commands
 havn init my-project            # scaffold new project
+havn validate                   # structure, DAG + bind pass (DuckDB binder)
+havn validate --no-bind         # skip the bind pass
 havn transform                  # build all SQL models
 havn transform --force          # force rebuild (ignore cache)
 havn query "SELECT 1"           # ad-hoc SQL
@@ -57,6 +59,9 @@ src/havn/                       # Python package (the platform itself)
   engine/
     database.py               # DuckDB connection, metadata tables
     transform/                # SQL DAG engine with change detection
+                              #   bind.py: shadow-catalog bind pass (DuckDB binder)
+                              #   ctes.py: CTE enumeration + preview slicing
+                              #   columns.py: persisted per-model column schemas
     runner.py                 # Python script executor (ingest/export)
     macros.py                 # Python SQL macros (@macro → DuckDB UDFs)
     explain.py                # Query plan parsing (EXPLAIN/EXPLAIN ANALYZE)

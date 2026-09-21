@@ -208,6 +208,81 @@ This sends notifications via Slack or webhook (requires alert configuration in `
 curl "http://localhost:3000/api/freshness?max_hours=24"
 ```
 
+## Validation and type resolution
+
+`havn validate` runs a **bind pass** over your models: every model's SQL is
+handed to DuckDB's binder against a throwaway in-memory catalog, which
+resolves names and types without reading a single row.
+
+```bash
+havn validate              # bind pass on, once a warehouse exists
+havn validate --no-bind    # structure and DAG checks only
+havn validate --bind       # ask for it explicitly
+```
+
+The pass creates each model as a view in dependency order inside the shadow
+catalog, using the SQL in your file. Nothing is written to the warehouse, and
+nothing is built. Three consequences are worth knowing:
+
+- **Unbuilt upstreams are typed.** A model that has never run still resolves,
+  because the shadow has its definition. On a fresh warehouse a bad column on
+  an unbuilt upstream is caught, where the name-level check used to skip it.
+- **Stale tables do not win.** If a model's built table has an old shape, the
+  fresh definition in the shadow shadows it. Validation reflects the file, not
+  the last build.
+- **Macros and extensions are present.** Your Python `@macro` UDFs and any
+  loaded extensions resolve inside the shadow, so they are not reported as
+  unknown functions.
+
+Findings are reported as **bind errors**, with a line number:
+
+```
+  error gold.summary:4: bind error: Referenced column "no_such_column" not found in FROM clause!
+```
+
+### What the bind pass catches
+
+| Problem | Example |
+|---|---|
+| Wrong number of arguments | `date_trunc(event_ts)` |
+| Unknown function | `no_such_fn(x)` |
+| Operator overload failure | `customer + 1` where `customer` is `VARCHAR` |
+| Missing column | `SELECT no_such_column FROM silver.orders` |
+| Missing column on an upstream that was never built | same, with `silver.orders` unbuilt |
+| Missing struct key | `payload.zzz` where `payload` is `STRUCT(a INTEGER)` |
+| Ambiguous reference | `SELECT customer FROM a, b` with `customer` in both |
+| Aggregation without GROUP BY | `SELECT customer, SUM(amount) FROM ...` |
+| Set-operation arity mismatch | `SELECT a UNION ALL SELECT a, b` |
+
+It also gives you the model's inferred output columns and their types, which
+is what the editor's hover and the `/api/bind` endpoint return.
+
+### What it does not catch
+
+The binder decides whether an expression *can* be evaluated, not whether the
+data in it *will* evaluate. Value conversions bind clean and fail at run time:
+
+```sql
+-- binds fine, returns INTEGER; fails on the first row that is not a number
+SELECT CAST(customer AS INTEGER) AS id FROM landing.orders
+```
+
+The same applies to comparing a numeric column against a string constant and
+to joining on columns whose types are convertible but whose values are not.
+These are the cases a bind pass cannot reach on any engine: the value is not
+known until the query runs. A clean bind is not a guarantee that the build
+will succeed.
+
+### Where the bind pass runs
+
+- `havn validate`, as above.
+- The pre-build gate in the web UI. A pipeline that would build a model with a
+  bind error stops before building anything. When the run also includes ingest
+  steps, the gate runs after ingest and before the first transform, so the
+  landing tables it needs are already there.
+- `POST /api/bind`, which the editor calls on a debounce for live markers.
+- The `bind_model` MCP tool, for agents editing SQL.
+
 ## Combined Validation
 
 The `havn check` command runs all quality checks in one pass:

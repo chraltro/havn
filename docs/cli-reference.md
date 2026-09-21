@@ -24,10 +24,31 @@ Creates project structure with sample earthquake data pipeline, seeds, contracts
 Validate project structure, config, and SQL model dependencies.
 
 ```bash
-havn validate [--project PATH]
+havn validate [--project PATH] [--bind | --no-bind]
 ```
 
+| Option | Default | Description |
+|---|---|---|
+| `--project, -p` | `.` | Project directory |
+| `--bind / --no-bind` | on when a warehouse exists | Resolve every model's SQL through the DuckDB binder |
+
 Checks `project.yml` parsing, directory structure, stream actions, model dependencies, circular dependencies, and environment variable references.
+
+With the bind pass on, each model is also created as a view inside a throwaway
+shadow catalog and described, which resolves output types and reports **bind
+errors** with a line number:
+
+```
+  error gold.summary:4: bind error: Referenced column "no_such_column" not found in FROM clause!
+```
+
+The pass reads no rows and writes nothing to the warehouse. It catches wrong
+arity, unknown functions, operator overload failures, missing columns
+(including on upstream models that have never been built), missing struct
+keys, ambiguous references, aggregation without `GROUP BY`, and set-operation
+arity mismatches. It does not catch value conversions such as
+`CAST(some_varchar AS INTEGER)`, which bind clean and fail at run time. See
+[Data Quality](quality.md#validation-and-type-resolution).
 
 ### havn status
 
