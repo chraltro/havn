@@ -112,6 +112,7 @@ CONFIG_KEYS = frozenset({
     "incremental_filter",
     "partition_by",
     "watermark",
+    "tags",
 })
 
 # Accepted values of `materialized`, checked at validation time rather than

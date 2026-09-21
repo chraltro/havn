@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+import re
 
 import duckdb
 
@@ -84,6 +85,33 @@ def _validate_config_keys(models: list[SQLModel]) -> list[ValidationError]:
                     f" Supported: {', '.join(sorted(MATERIALIZATIONS))}."
                 ),
             ))
+    return errors
+
+
+_TAG_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
+
+
+def _validate_tags(models: list[SQLModel]) -> list[ValidationError]:
+    """Report `@config tags=` entries that no `tag:` selector could match.
+
+    Tags are free text on the way in, so `tags = daily finance` (a space
+    instead of a comma) used to produce a single tag nobody would ever type
+    at the command line. Identifier-shaped tags keep `tag:` selectors
+    predictable, and a hyphen is allowed because job names use them.
+    """
+    errors: list[ValidationError] = []
+    for model in models:
+        for tag in getattr(model, "tags", []) or []:
+            if not _TAG_RE.match(tag):
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=(
+                        f"Invalid tag '{tag}' in @config tags=. Tags must be "
+                        "identifiers (letters, digits, underscore, hyphen; "
+                        "not starting with a digit) and separated by commas."
+                    ),
+                ))
     return errors
 
 
@@ -274,6 +302,7 @@ def validate_models(
     # --- Additional pre-build validations ---
 
     errors.extend(_validate_config_keys(models))
+    errors.extend(_validate_tags(models))
 
     # Default landing schemas if not provided
     _landing = {s.lower() for s in landing_schemas} if landing_schemas else {"landing"}

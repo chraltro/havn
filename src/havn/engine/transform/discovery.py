@@ -114,6 +114,7 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         incremental_filter = config.get("incremental_filter")
         partition_by = config.get("partition_by")
         watermark = config.get("watermark")
+        tags = [t.strip() for t in config.get("tags", "").split(",") if t.strip()]
 
         model = SQLModel(
             path=sql_file,
@@ -136,6 +137,7 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
             grain=grain,
             owner=owner,
             source_freshness=source_freshness,
+            tags=tags,
         )
         if ast is not None:
             model.ast = ast
