@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from havn.engine.sql_analysis import parse_sql_with_error
+from havn.engine.sql_rewrite import mask_placeholders, unmask_placeholders
 
 if TYPE_CHECKING:
     from sqlglot import exp
@@ -40,7 +41,12 @@ def cte_name_for(full_name: str) -> str:
 
 
 def _parse(model: SQLModel, what: str) -> exp.Expression:
-    parsed, error = parse_sql_with_error(model.query)
+    # Mask `{this}` / `{start}` / `{end}` first: sqlglot reads `{start}` as a
+    # struct literal and would regenerate it as `{'start': start}`, leaving a
+    # microbatch model with nothing for substitute_batch_window to replace.
+    # `unmask_placeholders` puts them back once the whole statement is built.
+    masked, _ = mask_placeholders(model.query)
+    parsed, error = parse_sql_with_error(masked)
     if parsed is None:
         raise EphemeralInlineError(
             f"{what} {model.full_name} does not parse, so it cannot be "
@@ -233,4 +239,4 @@ def inline_ephemeral(
     else:
         tree.set("with_", _exp.With(expressions=ctes))
 
-    return tree.sql(dialect="duckdb", pretty=True)
+    return unmask_placeholders(tree.sql(dialect="duckdb", pretty=True))

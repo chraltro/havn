@@ -617,3 +617,78 @@ def test_the_bind_pass_survives_an_unreadable_begin(tmp_path):
 
     assert result.ok, result.errors
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Ephemeral upstreams: the window placeholders must survive inlining
+# ---------------------------------------------------------------------------
+
+
+def test_ephemeral_upstream_keeps_the_window_placeholders(tmp_path):
+    """Inlining round-trips the SQL through sqlglot, which eats ``{start}``.
+
+    Without masking, ``{start}`` comes back out as ``{'start': start}`` and
+    every window fails to bind, so a microbatch model with an ephemeral
+    upstream could never build.
+    """
+    transform = write_project(
+        tmp_path,
+        {
+            "bronze/clean_events.sql": (
+                "@config materialized=ephemeral, schema=bronze\n\n"
+                "SELECT id, event_at FROM landing.events WHERE id >= 0\n"
+            ),
+            "gold/events.sql": (
+                "@config materialized=incremental, "
+                "incremental_strategy=microbatch, event_time=event_at, "
+                "batch_size=day, begin=2024-01-01\n\n"
+                "SELECT id, event_at FROM bronze.clean_events\n"
+                "WHERE event_at >= {start} AND event_at < {end}\n"
+            ),
+        },
+    )
+    conn = duckdb.connect(str(tmp_path / "warehouse.duckdb"))
+    conn.execute("CREATE SCHEMA landing")
+    conn.execute("CREATE TABLE landing.events (id INTEGER, event_at TIMESTAMP)")
+    for i in range(4):
+        conn.execute(
+            "INSERT INTO landing.events VALUES (?, ?)",
+            [i, datetime(2024, 1, 1) + timedelta(days=i)],
+        )
+
+    results = run_transform(
+        conn, transform, project_dir=tmp_path,
+        batch_range=BatchRange(datetime(2024, 1, 1), datetime(2024, 1, 3)),
+    )
+
+    assert results["gold.events"] == "built"
+    assert conn.execute("SELECT count(*) FROM gold.events").fetchone() == (2,)
+    conn.close()
+
+
+def test_inline_ephemeral_leaves_placeholders_alone():
+    """The placeholders come back out of inlining spelled as they went in."""
+    from havn.engine.transform.inline import inline_ephemeral
+
+    eph = SQLModel(
+        path=Path("transform/bronze/clean.sql"),
+        name="clean",
+        schema="bronze",
+        full_name="bronze.clean",
+        sql="",
+        query="SELECT id, event_at FROM landing.events",
+        materialized="ephemeral",
+    )
+    consumer = make_model(
+        "SELECT id, event_at FROM bronze.clean "
+        "WHERE event_at >= {start} AND event_at < {end}",
+        depends_on=["bronze.clean"],
+    )
+
+    resolved = inline_ephemeral(
+        consumer, {"bronze.clean": eph, "gold.events": consumer}
+    )
+
+    assert "{start}" in resolved
+    assert "{end}" in resolved
+    assert "'start'" not in resolved

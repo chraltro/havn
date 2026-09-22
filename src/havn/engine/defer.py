@@ -57,12 +57,6 @@ logger = logging.getLogger("havn.defer")
 DEFAULT_ALIAS = "havn_defer"
 
 _ALIAS_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-# Model SQL carries `{this}`, `{start}` and `{end}` placeholders that are
-# substituted after the query is resolved. sqlglot parses `{start}` as a
-# struct literal and regenerates it as `{'start': start}`, so they are hidden
-# behind plain identifiers for the duration of the rewrite.
-_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
-_PLACEHOLDER_TOKEN = "__havn_defer_ph_{}__"
 
 
 class DeferError(Exception):
@@ -480,9 +474,10 @@ def make_defer_rewriter(
             rewrite_table_refs,
         )
 
-        masked, restore = _mask_placeholders(sql)
+        # `{this}` / `{start}` / `{end}` survive the round trip because
+        # find_table_refs and rewrite_table_refs mask them internally.
         try:
-            refs = find_table_refs(masked, skip_catalog_qualified=True)
+            refs = find_table_refs(sql, skip_catalog_qualified=True)
         except SQLRewriteError as e:
             # Unparseable SQL is left exactly as written. Falling through is
             # safe in this direction: the query runs against the local
@@ -499,7 +494,7 @@ def make_defer_rewriter(
             return sql
         try:
             rewritten = rewrite_table_refs(
-                masked, mapping, skip_catalog_qualified=True
+                sql, mapping, skip_catalog_qualified=True
             )
         except SQLRewriteError as e:
             logger.debug("Defer rewrite skipped (generate): %s", e)
@@ -509,35 +504,9 @@ def make_defer_rewriter(
         logger.info("defer: redirected %s", ", ".join(redirected))
         if report is not None:
             report(redirected)
-        return restore(rewritten)
+        return rewritten
 
     return rewrite
-
-
-def _mask_placeholders(sql: str) -> tuple[str, Callable[[str], str]]:
-    """Hide ``{this}`` / ``{start}`` / ``{end}`` from the SQL parser.
-
-    Returns the masked SQL and the function that puts the placeholders back.
-    Without this an incremental or microbatch model would come out of the
-    rewrite with ``{'start': start}`` where its placeholder used to be, and
-    the later substitution would find nothing to replace.
-    """
-    found: list[str] = []
-
-    def _mask(match: re.Match) -> str:
-        found.append(match.group(1))
-        return _PLACEHOLDER_TOKEN.format(match.group(1))
-
-    masked = _PLACEHOLDER_RE.sub(_mask, sql)
-    if not found:
-        return sql, lambda out: out
-
-    def restore(out: str) -> str:
-        for name in found:
-            out = out.replace(_PLACEHOLDER_TOKEN.format(name), "{" + name + "}")
-        return out
-
-    return masked, restore
 
 
 # ---------------------------------------------------------------------------
