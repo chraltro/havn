@@ -58,8 +58,6 @@ vi.mock("./api", () => ({
 import { api } from "./api";
 import {
   renameTargetAt,
-  planToWorkspaceEdit,
-  rangeFromOffsets,
   blockerLines,
   siteLabel,
   qualifierBefore,
@@ -132,52 +130,6 @@ describe("qualifierBefore", () => {
   });
 });
 
-describe("plan to WorkspaceEdit", () => {
-  const text = "SELECT customer_id\nFROM bronze.customers\nWHERE customer_id > 0\n";
-  const path = "transform/silver/customers.sql";
-
-  it("maps each offset span onto a Monaco range on the open model", () => {
-    const model = fakeModel(text, path);
-    const plan = {
-      edits: [
-        { path, start: 47, end: 58, old_text: "customer_id", new_text: "cust_id" },
-        { path, start: 7, end: 18, old_text: "customer_id", new_text: "cust_id" },
-      ],
-    };
-    const { edits } = planToWorkspaceEdit(plan, model, path);
-    expect(edits).toHaveLength(2);
-    expect(edits[0].textEdit).toEqual({
-      range: { startLineNumber: 3, startColumn: 7, endLineNumber: 3, endColumn: 18 },
-      text: "cust_id",
-    });
-    expect(edits[1].textEdit.range).toEqual({
-      startLineNumber: 1, startColumn: 8, endLineNumber: 1, endColumn: 19,
-    });
-    expect(edits[0].resource).toBe(model.uri);
-  });
-
-  it("leaves out edits for the other files, which the API already wrote", () => {
-    const model = fakeModel(text, path);
-    const plan = {
-      edits: [
-        { path, start: 7, end: 18, old_text: "customer_id", new_text: "cust_id" },
-        { path: "transform/gold/orders.sql", start: 3, end: 14, old_text: "customer_id", new_text: "cust_id" },
-      ],
-    };
-    expect(planToWorkspaceEdit(plan, model, path).edits).toHaveLength(1);
-  });
-
-  it("returns no edits for a plan that produced none", () => {
-    expect(planToWorkspaceEdit({ edits: [] }, fakeModel(text, path), path).edits).toEqual([]);
-  });
-
-  it("rangeFromOffsets handles a span on the first line", () => {
-    expect(rangeFromOffsets(fakeModel(text, path), 0, 6)).toEqual({
-      startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 7,
-    });
-  });
-});
-
 describe("blocker display", () => {
   const blocked = [
     { reason: "select_star", model: "gold.orders", path: "transform/gold/orders.sql", message: "the output expands SELECT *", line: null },
@@ -246,11 +198,11 @@ describe("the rename provider", () => {
     expect(result.range).toMatchObject({ startLineNumber: 1, startColumn: 8, endColumn: 19 });
   });
 
-  it("applies through the API and returns the open buffer's edits", async () => {
+  it("applies through the API and leaves the splicing to nobody", async () => {
     api.planColumnRename.mockResolvedValue({
       blocked: [],
       edits: [{ path, start: 7, end: 18, old_text: "customer_id", new_text: "cust_id" }],
-      files: [{ path, content: "…", file_hash: "abc123" }],
+      files: [{ path, content: "SELECT cust_id FROM bronze.customers c\n", file_hash: "abc123" }],
     });
     api.applyColumnRename.mockResolvedValue({ status: "applied", files: [] });
 
@@ -259,7 +211,7 @@ describe("the rename provider", () => {
     expect(api.applyColumnRename).toHaveBeenCalledWith(
       "silver.customers", "customer_id", "cust_id", { [path]: "abc123" }, false,
     );
-    expect(result.edits).toHaveLength(1);
+    expect(result.edits).toEqual([]);
   });
 
   it("never applies with blockers when nothing can confirm them", async () => {
@@ -286,7 +238,7 @@ describe("the rename provider", () => {
       .mockResolvedValueOnce({
         blocked: [],
         edits: [{ path, start: 7, end: 18, old_text: "customer_id", new_text: "cust_id" }],
-        files: [{ path, content: "…", file_hash: "abc123" }],
+        files: [{ path, content: "SELECT cust_id FROM bronze.customers c\n", file_hash: "abc123" }],
       });
     api.applyColumnRename.mockResolvedValue({ status: "applied", files: [] });
     editorContext.confirmBlockers = vi.fn().mockResolvedValue(true);
@@ -298,7 +250,7 @@ describe("the rename provider", () => {
     expect(api.applyColumnRename).toHaveBeenCalledWith(
       "silver.customers", "customer_id", "cust_id", { [path]: "abc123" }, true,
     );
-    expect(result.edits).toHaveLength(1);
+    expect(result.edits).toEqual([]);
   });
 
   it("surfaces a stale-file conflict from the apply call", async () => {

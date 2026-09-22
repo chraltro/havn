@@ -23,6 +23,7 @@ import WikiPanel from "./WikiPanel";
 import LoginPage from "./LoginPage";
 import ResizeHandle from "./ResizeHandle";
 import useResizable from "./useResizable";
+import { useFilesChanged } from "./filesChanged";
 import SortableTable from "./SortableTable";
 import Onboarding from "./Onboarding";
 import ErrorBoundary from "./ErrorBoundary";
@@ -835,6 +836,13 @@ function AppContent() {
   activeFileRef.current = activeFile;
   dirtyRef.current = dirty;
 
+  // A column rename rewrites files the editor never opened, so the tree and
+  // the cached model list both went stale when it returned.
+  useFilesChanged(() => {
+    modelsCacheRef.current = null;
+    loadFiles();
+  });
+
   // Reload the currently open file from disk (used when agent edits it)
   async function reloadActiveFile() {
     const file = activeFileRef.current;
@@ -1296,6 +1304,15 @@ function AppContent() {
                         setDirty(true);
                       }}
                       activeFile={activeFile}
+                      dirty={dirty}
+                      onReloadFile={(path, text) => {
+                        // A column rename wrote this file. The buffer is
+                        // replaced with what the server wrote, so there is
+                        // nothing left to save.
+                        if (path !== activeFileRef.current) return;
+                        setFileContent(text);
+                        setDirty(false);
+                      }}
                       onMount={(editor) => { editorRef.current = editor; }}
                       goToLine={goToLine}
                       onFormat={activeFile?.endsWith(".sql") ? formatCurrentFile : undefined}

@@ -4,6 +4,7 @@ import { useTheme } from "./ThemeProvider";
 import { COLOR_THEMES } from "./themes";
 import { api, getMacros } from "./api";
 import { packageOfPath } from "./FileTree";
+import { notifyFilesChanged } from "./filesChanged";
 
 // ---------------------------------------------------------------------------
 // Custom Monaco themes derived from havn COLOR_THEMES
@@ -118,6 +119,19 @@ function defineHavnThemes(monaco) {
 export const editorContext = {
   /** Project-relative path of the file in the editor, e.g. "transform/silver/customers.sql". */
   activeFile: null,
+  /**
+   * Whether the buffer on screen has unsaved edits.
+   *
+   * The rename plan is computed against the file on disk, so its offsets mean
+   * nothing once the buffer has moved. The providers refuse rather than splice
+   * a disk offset into text that is not on disk.
+   */
+  dirty: false,
+  /**
+   * Put a file's content back into the buffer, unmodified: (path, text) => void.
+   * Set by the component, used after a rename the API already wrote.
+   */
+  reloadFile: null,
   /** Latest bind result, keyed by project-relative path. Feeds hover types. */
   bindResults: new Map(),
   /** App navigation hook: (path, line, col) => void. Set by the component. */
@@ -130,6 +144,12 @@ export const editorContext = {
    * the index could not see the whole picture.
    */
   confirmBlockers: null,
+  /**
+   * Ask the user to confirm a rename that reaches outside the model on
+   * screen: ({ model, column, files }) => Promise<bool>. Left null the rename
+   * refuses, for the same reason as `confirmBlockers`.
+   */
+  confirmTarget: null,
   /** Show a list of column reference sites: (result) => void. */
   showReferences: null,
 };
@@ -145,6 +165,62 @@ export function pathFromUri(uri) {
   if (!uri) return null;
   const p = String(uri.path || "");
   return p.startsWith("/") ? p.slice(1) : p;
+}
+
+/**
+ * The project file a URI names, or null when it names something else.
+ *
+ * Monaco asks the opener about every URI it wants on screen, including its
+ * own `inmemory://model/17` buffers behind a diff or a peek widget. Those are
+ * Monaco's to open; claiming them navigated the app to a file that does not
+ * exist. Only a `file:` URI pointing inside the project is the app's.
+ */
+export function projectPathFromUri(uri) {
+  if (!uri || String(uri.scheme || "") !== "file") return null;
+  const path = pathFromUri(uri);
+  if (!path || path.startsWith("/") || path.split("/").includes("..")) return null;
+  return path;
+}
+
+/**
+ * How many file models stay alive at once.
+ *
+ * @monaco-editor/react creates a model per `path` and only disposes it when
+ * the component unmounts, so a session that opens fifty files keeps fifty
+ * buffers in memory. Keeping the recent ones means switching back and forth
+ * between a handful of files never pays for a reload.
+ */
+export const MAX_OPEN_MODELS = 8;
+
+/**
+ * Dispose the models of files that fell out of the recent list.
+ *
+ * `recent` is most-recently-opened first; everything past `keep` goes. The
+ * file on screen is the head of the list, so it is never a candidate, and
+ * each model's markers are cleared before it goes to keep the marker owners
+ * from outliving it.
+ */
+export function pruneOpenModels(monaco, recent, keep = MAX_OPEN_MODELS) {
+  if (!monaco) return [];
+  const disposed = [];
+  for (const path of (recent || []).slice(keep)) {
+    let model = null;
+    try {
+      model = monaco.editor.getModel(monaco.Uri.parse(modelUriFor(path)));
+    } catch {
+      model = null;
+    }
+    if (!model || (model.isDisposed && model.isDisposed())) continue;
+    try {
+      monaco.editor.setModelMarkers(model, BIND_MARKER_OWNER, []);
+      monaco.editor.setModelMarkers(model, LINT_MARKER_OWNER, []);
+      model.dispose();
+      disposed.push(path);
+    } catch {
+      // A model Monaco already let go of is nothing to worry about.
+    }
+  }
+  return disposed;
 }
 
 /** True for files the SQL model features (bind, lint, definition) apply to. */
@@ -191,16 +267,33 @@ function writeColumns(key, info) {
   schemaCache.set(key, { info, time: Date.now() });
 }
 
+/** Split "schema.name" -- or "db.schema.name" -- at the last dot. */
+export function splitRelationKey(key) {
+  const text = String(key || "");
+  const dot = text.lastIndexOf(".");
+  if (dot < 0) return { schema: "", name: text };
+  return { schema: text.slice(0, dot), name: text.slice(dot + 1) };
+}
+
 /**
- * Seed the column cache from a bind result. The binder saw the upstream
- * relations moments ago, so its schemas are fresher than anything
- * `describeTable` cached earlier.
+ * Seed the column cache from a bind result, without overwriting a better one.
+ *
+ * The binder usually saw the upstream relations moments ago, but it can also
+ * fall back to `_havn.model_columns`, which is only as new as the last build.
+ * A live DESCRIBE that knows at least as many columns is therefore kept: it
+ * is the one that has the column somebody just added, and replacing it would
+ * stop completions offering a column that really exists. Entries that stay
+ * keep their original TTL.
  */
 export function seedColumnsFromBind(bind) {
   if (!bind || !bind.upstream) return;
   for (const [key, columns] of Object.entries(bind.upstream)) {
     if (!Array.isArray(columns)) continue;
-    const [schema, name] = key.split(".");
+    const cached = readColumns(key);
+    // undefined is a miss or an expired entry; null is a known miss, which
+    // the binder's answer beats.
+    if (cached && Array.isArray(cached.columns) && cached.columns.length >= columns.length) continue;
+    const { schema, name } = splitRelationKey(key);
     writeColumns(key, { schema, name, columns });
   }
 }
@@ -345,6 +438,31 @@ export function extractTableRefs(text) {
 }
 
 /**
+ * The key the binder uses for an upstream relation.
+ *
+ * POST /api/bind keys its `upstream` map by the lower-cased model name, while
+ * the buffer keeps whatever case the author typed and may quote either half.
+ * `FROM Bronze."Customers" c` names the same relation as `bronze.customers`,
+ * so both have to arrive at the same key.
+ */
+export function relationKey(schema, table) {
+  const clean = (part) => String(part || "").replace(/["`\[\]]/g, "").toLowerCase();
+  return `${clean(schema)}.${clean(table)}`;
+}
+
+/**
+ * An upstream relation's columns from a bind result, and the key they are
+ * filed under. Returns null when the binder reported no schema for it.
+ */
+export function upstreamSchema(bind, schema, table) {
+  const upstream = (bind && bind.upstream) || {};
+  const key = relationKey(schema, table);
+  if (Array.isArray(upstream[key])) return { key, columns: upstream[key] };
+  const match = Object.keys(upstream).find((k) => k.toLowerCase() === key);
+  return match ? { key: match, columns: upstream[match] || [] } : null;
+}
+
+/**
  * Resolve a hovered token to a column type using a bind result.
  *
  * Two cases resolve: a bare word that is one of the model's own output
@@ -361,10 +479,10 @@ export function resolveColumnType({ word, qualifier, bind, tableRefs = [] }) {
       (r) => (r.alias && r.alias.toLowerCase() === q) || (!r.alias && r.table.toLowerCase() === q),
     );
     if (!ref) return null;
-    const key = `${ref.schema}.${ref.table}`;
-    const columns = (bind.upstream || {})[key];
-    const col = (columns || []).find((c) => c.name.toLowerCase() === lower);
-    return col ? { name: col.name, type: col.type, source: key } : null;
+    const upstream = upstreamSchema(bind, ref.schema, ref.table);
+    if (!upstream) return null;
+    const col = upstream.columns.find((c) => c.name.toLowerCase() === lower);
+    return col ? { name: col.name, type: col.type, source: upstream.key } : null;
   }
   const col = (bind.columns || []).find((c) => c.name.toLowerCase() === lower);
   return col ? { name: col.name, type: col.type, source: bind.model || null } : null;
@@ -413,6 +531,36 @@ export function qualifiedRefAt(line, word) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Every name a `WITH` block defines: the CTEs themselves and the columns
+ * aliased inside them.
+ *
+ * A CTE's `price * qty AS amount` is local to the query. It is not a column
+ * of any model, so a rename must not follow it out to an upstream that
+ * happens to have a column of the same name.
+ */
+export function cteLocalNames(sql) {
+  const text = String(sql || "");
+  const names = new Set();
+  const header = /(?:\bWITH\b|,)\s*(?:RECURSIVE\s+)?"?(\w+)"?\s+AS\s*(?:NOT\s+MATERIALIZED\s+|MATERIALIZED\s+)?\(/gi;
+  let m;
+  while ((m = header.exec(text)) !== null) {
+    names.add(m[1].toLowerCase());
+    // Walk the CTE body, so only aliases inside it count.
+    let depth = 1;
+    let i = header.lastIndex;
+    for (; i < text.length && depth > 0; i++) {
+      if (text[i] === "(") depth++;
+      else if (text[i] === ")") depth--;
+    }
+    const body = text.slice(header.lastIndex, Math.max(header.lastIndex, i - 1));
+    const alias = /\bAS\s+"?(\w+)"?/gi;
+    let a;
+    while ((a = alias.exec(body)) !== null) names.add(a[1].toLowerCase());
+  }
+  return names;
+}
+
+/**
  * Which model's column the cursor is on, if any.
  *
  * Two things are renameable: the current model's own output column, and
@@ -420,8 +568,11 @@ export function qualifiedRefAt(line, word) {
  * schema for. Anything else (a function name, a table name, a column of a
  * relation nobody bound) returns null, and the editor says so rather than
  * renaming something it cannot see the extent of.
+ *
+ * `cteLocal` are the names the buffer's own `WITH` blocks define; a token
+ * that is one of those is nobody's column and never resolves to an upstream.
  */
-export function renameTargetAt({ word, qualifier, bind, tableRefs = [] }) {
+export function renameTargetAt({ word, qualifier, bind, tableRefs = [], cteLocal = null }) {
   if (!word || !bind) return null;
   const lower = word.toLowerCase();
   if (qualifier) {
@@ -430,13 +581,17 @@ export function renameTargetAt({ word, qualifier, bind, tableRefs = [] }) {
       (r) => (r.alias && r.alias.toLowerCase() === q) || (!r.alias && r.table.toLowerCase() === q),
     );
     if (!ref) return null;
-    const key = `${ref.schema}.${ref.table}`;
-    const columns = (bind.upstream || {})[key] || [];
-    const hit = columns.find((c) => c.name.toLowerCase() === lower);
-    return hit ? { model: key, column: hit.name } : null;
+    const upstream = upstreamSchema(bind, ref.schema, ref.table);
+    if (!upstream) return null;
+    const hit = upstream.columns.find((c) => c.name.toLowerCase() === lower);
+    return hit ? { model: upstream.key, column: hit.name } : null;
   }
   const own = (bind.columns || []).find((c) => c.name.toLowerCase() === lower);
   if (own && bind.model) return { model: bind.model, column: own.name };
+  // A name the query itself invents lives and dies in this buffer. Following
+  // it to an upstream column of the same name would rename a model the
+  // cursor was never on.
+  if (cteLocal && (cteLocal.has ? cteLocal.has(lower) : [...cteLocal].includes(lower))) return null;
   // Unqualified, and not an output column: it may still be an upstream
   // column, but only when exactly one upstream has it. Two would be a guess.
   const matches = [];
@@ -448,38 +603,31 @@ export function renameTargetAt({ word, qualifier, bind, tableRefs = [] }) {
 }
 
 /**
- * The plan's edits for one open buffer, as a Monaco WorkspaceEdit.
+ * True when the buffer for `path` holds unsaved edits.
  *
- * Every file the rename touches is written by the API, which is the simpler
- * of the two options: Monaco would otherwise need a text model per file, and
- * creating models for files nobody opened leaks them. The editor holds one
- * file at a time, so the only buffer that can be out of step with disk is
- * this one, and this edit brings it back in line without a reload.
+ * The rename plan's offsets are offsets into the file on disk. A buffer that
+ * has moved since the last save is a different string, so those offsets point
+ * at the wrong characters and the rename must not touch it.
  */
-export function planToWorkspaceEdit(plan, model, path) {
-  const mine = ((plan && plan.edits) || []).filter((e) => e.path === path);
-  return {
-    edits: mine.map((edit) => ({
-      resource: model.uri,
-      versionId: undefined,
-      textEdit: {
-        range: rangeFromOffsets(model, edit.start, edit.end),
-        text: edit.new_text,
-      },
-    })),
-  };
+export function bufferIsDirty(path) {
+  if (!editorContext.dirty) return false;
+  return !editorContext.activeFile || path === editorContext.activeFile;
 }
 
-/** Monaco range for a [start, end) character span in a text model. */
-export function rangeFromOffsets(model, start, end) {
-  const from = model.getPositionAt(start);
-  const to = model.getPositionAt(end);
-  return {
-    startLineNumber: from.lineNumber,
-    startColumn: from.column,
-    endLineNumber: to.lineNumber,
-    endColumn: to.column,
-  };
+/** The message shown when a rename is refused because the buffer is dirty. */
+export const DIRTY_BUFFER_REJECTION = "Save the file before renaming";
+
+/**
+ * The file's content after a rename, as the server computed it.
+ *
+ * The plan carries the new content of every file it touches, so the open
+ * buffer can be replaced wholesale instead of being spliced: a whole-file
+ * swap cannot land an offset in the wrong place, and it leaves the buffer
+ * equal to what the API just wrote to disk.
+ */
+export function renamedContentFor(plan, path) {
+  const hit = ((plan && plan.files) || []).find((f) => f.path === path);
+  return hit && typeof hit.content === "string" ? hit.content : null;
 }
 
 /** One line per blocker for the confirmation dialog. */
@@ -904,11 +1052,13 @@ loader.init().then((monaco) => {
       if (!isTransformSql(path)) {
         return { rejectReason: "Only columns in transform models can be renamed" };
       }
+      if (bufferIsDirty(path)) return { rejectReason: DIRTY_BUFFER_REJECTION };
       const target = renameTargetAt({
         word: word.word,
         qualifier: qualifierBefore(model.getLineContent(position.lineNumber), word),
         bind: editorContext.bindResults.get(path),
         tableRefs: extractTableRefs(model.getValue()),
+        cteLocal: cteLocalNames(model.getValue()),
       });
       if (!target) {
         return { rejectReason: `${word.word} is not a column this editor can resolve` };
@@ -923,11 +1073,13 @@ loader.init().then((monaco) => {
       const path = pathFromUri(model.uri);
       const word = model.getWordAtPosition(position);
       if (!word) return { edits: [], rejectReason: "Nothing to rename here" };
+      if (bufferIsDirty(path)) return { edits: [], rejectReason: DIRTY_BUFFER_REJECTION };
       const target = renameTargetAt({
         word: word.word,
         qualifier: qualifierBefore(model.getLineContent(position.lineNumber), word),
         bind: editorContext.bindResults.get(path),
         tableRefs: extractTableRefs(model.getValue()),
+        cteLocal: cteLocalNames(model.getValue()),
       });
       if (!target) {
         return { edits: [], rejectReason: `${word.word} is not a column this editor can resolve` };
@@ -962,6 +1114,19 @@ loader.init().then((monaco) => {
         return { edits: [], rejectReason: `Nothing references ${target.model}.${target.column}` };
       }
 
+      // Renaming the model on screen is what F2 looks like it does. Anything
+      // else -- an upstream model's column, reached through an alias -- edits
+      // files the cursor was never in, so it is said out loud first.
+      const bind = editorContext.bindResults.get(path);
+      if (!bind || !bind.model || target.model !== bind.model) {
+        const confirmTarget = editorContext.confirmTarget;
+        const files = (plan.files || []).length;
+        const ok = confirmTarget ? await confirmTarget({ ...target, files }) : false;
+        if (!ok) {
+          return { edits: [], rejectReason: `Renaming ${target.model}.${target.column} was not confirmed` };
+        }
+      }
+
       const hashes = {};
       for (const file of plan.files || []) hashes[file.path] = file.file_hash;
       try {
@@ -969,10 +1134,23 @@ loader.init().then((monaco) => {
       } catch (e) {
         return { edits: [], rejectReason: e.message };
       }
-      window.dispatchEvent(
-        new CustomEvent("havn-files-changed", { detail: { paths: (plan.files || []).map((f) => f.path) } }),
-      );
-      return planToWorkspaceEdit(plan, model, path);
+      // The API wrote every file, this one included. Reload the buffer from
+      // what the server produced rather than replaying the plan's offsets
+      // into it: the buffer is then byte for byte what is on disk, and the
+      // editor has nothing left to save.
+      let renamed = renamedContentFor(plan, path);
+      if (renamed == null) {
+        try {
+          renamed = (await api.readFile(path)).content;
+        } catch {
+          renamed = null;
+        }
+      }
+      if (renamed != null && editorContext.reloadFile) editorContext.reloadFile(path, renamed);
+      notifyFilesChanged((plan.files || []).map((f) => f.path));
+      // Nothing for Monaco to splice: every file, including this buffer, is
+      // already at its new content.
+      return { edits: [] };
     },
   });
 
@@ -1016,7 +1194,7 @@ loader.init().then((monaco) => {
   // swap the model out from under App.jsx's editor state.
   monaco.editor.registerEditorOpener({
     openCodeEditor: (_source, resource, selectionOrPosition) => {
-      const path = pathFromUri(resource);
+      const path = projectPathFromUri(resource);
       if (!path || !editorContext.openModel) return false;
       // Same file: let Monaco reveal the position in place.
       if (path === editorContext.activeFile) return false;
@@ -1029,7 +1207,7 @@ loader.init().then((monaco) => {
   });
 });
 
-export default function Editor({ content, language, onChange, activeFile, onMount, goToLine, onFormat, onPreview, onOpenModel, onPreviewCte, onStatus }) {
+export default function Editor({ content, language, onChange, activeFile, dirty, onReloadFile, onMount, goToLine, onFormat, onPreview, onOpenModel, onPreviewCte, onStatus }) {
   const { themeId } = useTheme();
   const monacoTheme = `havn-${themeId}`;
   const editorRef = useRef(null);
@@ -1057,6 +1235,8 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
   const [columnRefs, setColumnRefs] = useState(null);
   const [blockers, setBlockers] = useState(null);
   const blockerResolveRef = useRef(null);
+  const [renameTarget, setRenameTarget] = useState(null);
+  const targetResolveRef = useRef(null);
 
   function answerBlockers(proceed) {
     const resolve = blockerResolveRef.current;
@@ -1065,8 +1245,29 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
     if (resolve) resolve(proceed);
   }
 
+  function answerTarget(proceed) {
+    const resolve = targetResolveRef.current;
+    targetResolveRef.current = null;
+    setRenameTarget(null);
+    if (resolve) resolve(proceed);
+  }
+
+  /**
+   * Answer "no" for a dialog nobody can answer any more.
+   *
+   * A rename waits on these promises. If the file changes under the dialog,
+   * or the editor unmounts while it is up, nothing will ever click a button
+   * and the rename would wait forever, holding Monaco's rename session open.
+   */
+  function settlePendingDialogs() {
+    if (blockerResolveRef.current) answerBlockers(false);
+    if (targetResolveRef.current) answerTarget(false);
+  }
+
   // Keep the module-level provider context pointed at the file on screen.
   editorContext.activeFile = activeFile || null;
+  editorContext.dirty = !!dirty;
+  editorContext.reloadFile = onReloadFile || null;
   editorContext.openModel = onOpenModel || null;
   editorContext.previewSql = onPreviewCte || null;
   editorContext.showReferences = setColumnRefs;
@@ -1075,11 +1276,32 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
       blockerResolveRef.current = resolve;
       setBlockers(blocked);
     });
+  editorContext.confirmTarget = (target) =>
+    new Promise((resolve) => {
+      targetResolveRef.current = resolve;
+      setRenameTarget(target);
+    });
 
   // Warm the model list so go-to-definition resolves on the first try.
   useEffect(() => {
     if (isTransformSql(activeFile)) getModelsCache();
   }, [activeFile]);
+
+  // The dialogs belong to the rename that opened them, and that rename is
+  // about the file on screen.
+  useEffect(() => settlePendingDialogs, [activeFile]);
+
+  // --- Keep the number of live text models bounded ---
+  // Every file opened gets its own model and @monaco-editor/react keeps it
+  // until unmount. The recent ones stay, so switching back is instant; the
+  // rest are disposed.
+  const recentPathsRef = useRef([]);
+  useEffect(() => {
+    if (!activeFile) return;
+    const recent = [activeFile, ...recentPathsRef.current.filter((p) => p !== activeFile)];
+    pruneOpenModels(monacoRef.current, recent);
+    recentPathsRef.current = recent.slice(0, MAX_OPEN_MODELS);
+  }, [activeFile, monacoReady]);
 
   function reportStatus(state) {
     if (onStatusRef.current) onStatusRef.current(state);
@@ -1096,12 +1318,17 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
     }
   }
 
+  // --- Toolbar status belongs to the file on screen ---
+  // A new file has no counts until its own bind lands, so the toolbar is
+  // cleared on every switch. Leaving the previous file's number up made the
+  // toolbar claim an error in a model that does not have one.
+  useEffect(() => {
+    reportStatus(null);
+  }, [activeFile]);
+
   // --- Bind diagnostics: debounced, follows the keyboard ---
   useEffect(() => {
-    if (!monacoReady || !isTransformSql(activeFile)) {
-      if (!isTransformSql(activeFile)) reportStatus(null);
-      return undefined;
-    }
+    if (!monacoReady || !isTransformSql(activeFile)) return undefined;
     const timer = setTimeout(async () => {
       const monaco = monacoRef.current;
       const guard = bindGuardRef.current;
@@ -1262,6 +1489,7 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
       qualifier: qualifierBefore(model.getLineContent(position.lineNumber), word),
       bind: editorContext.bindResults.get(path),
       tableRefs: extractTableRefs(model.getValue()),
+      cteLocal: cteLocalNames(model.getValue()),
     });
     if (!target) {
       setColumnRefs({ model: "", column: word.word, sites: [], blocked: [], error: `${word.word} is not a column this editor can resolve` });
@@ -1387,6 +1615,7 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
         />
       )}
       {blockers && <BlockerDialog blocked={blockers} onAnswer={answerBlockers} />}
+      {renameTarget && <TargetDialog target={renameTarget} onAnswer={answerTarget} />}
     </div>
   );
 }
@@ -1466,6 +1695,36 @@ function BlockerDialog({ blocked, onAnswer }) {
         <div style={styles.dialogButtons}>
           <button style={styles.dialogCancel} onClick={() => onAnswer(false)}>Cancel</button>
           <button style={styles.dialogConfirm} onClick={() => onAnswer(true)}>Rename anyway</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The sentence the target confirmation asks: model, column and file count. */
+export function targetPrompt(target) {
+  const files = (target && target.files) || 0;
+  return `Rename ${target.model}.${target.column} in ${files} file${files === 1 ? "" : "s"}?`;
+}
+
+/**
+ * Confirm a rename that leaves the model on screen.
+ *
+ * `alias.column` and an unqualified column of a single upstream both resolve
+ * to another model's column, and renaming it edits files the cursor was never
+ * in. The rename still happens, but never without being named first.
+ */
+function TargetDialog({ target, onAnswer }) {
+  return (
+    <div style={styles.dialogBackdrop} role="dialog" aria-label="Confirm rename target">
+      <div style={styles.dialog}>
+        <div style={styles.dialogTitle}>{targetPrompt(target)}</div>
+        <div style={styles.dialogHint}>
+          This column belongs to another model. Every model that reads it is rewritten too.
+        </div>
+        <div style={styles.dialogButtons}>
+          <button style={styles.dialogCancel} onClick={() => onAnswer(false)}>Cancel</button>
+          <button style={styles.dialogConfirm} onClick={() => onAnswer(true)}>Rename</button>
         </div>
       </div>
     </div>
