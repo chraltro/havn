@@ -1262,8 +1262,44 @@ def _execute_incremental(
         ddl = f"CREATE TABLE {model.full_name} AS\n{query}"
         conn.execute(ddl)
     elif strategy == "append" or not model.unique_key:
-        # Append-only: just insert
-        conn.execute(f"INSERT INTO {model.full_name}\n{query}")
+        # Append-only. It still goes through staging, because a bare
+        # ``INSERT INTO target <query>`` matches columns by position: a
+        # reordered projection wrote region into amount and amount into
+        # region without a word, and a new or dropped column ignored
+        # on_schema_change entirely. Staging gives the same schema diff and
+        # the same policy as every other strategy, plus an explicit column
+        # list so order stops mattering.
+        validate_identifier(model.name, "staging table name")
+        staging_name = f"_havn_staging_{model.name}"
+        conn.execute(f"CREATE OR REPLACE TEMP TABLE {staging_name} AS\n{query}")
+        plan = _plan_schema_change(
+            model,
+            _table_columns(conn, model.schema, model.name),
+            _temp_columns(conn, staging_name),
+            [],
+        )
+        cols = ", ".join(f'"{c}"' for c in plan.columns)
+        owns_tx = _begin_transaction(conn)
+        try:
+            _apply_schema_plan(conn, model, plan)
+            if actions is not None:
+                actions.extend(plan.describe())
+            conn.execute(
+                f"INSERT INTO {model.full_name} ({cols}) "
+                f"SELECT {cols} FROM {staging_name}"
+            )
+            conn.execute(f"DROP TABLE IF EXISTS {staging_name}")
+            if owns_tx:
+                conn.execute("COMMIT")
+        except Exception:
+            if owns_tx:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception as rb_err:
+                    logger.debug(
+                        "Rollback after failed append insert failed: %s", rb_err
+                    )
+            raise
     else:
         # Strategies that need staging: delete+insert, merge
         keys = [k.strip() for k in model.unique_key.split(",") if k.strip()]

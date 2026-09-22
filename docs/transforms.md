@@ -357,7 +357,7 @@ Incremental runs that use a `unique_key` (the `delete+insert` and `merge` strate
 
 #### Schema changes: `on_schema_change`
 
-Before it writes anything, an incremental run compares its query's columns against the target table on name **and** type, in both directions. What happens next is the model's `on_schema_change` policy:
+Before it writes anything, an incremental run compares its query's columns against the target table on name **and** type, in both directions. Every strategy does this, `append` included, and every strategy writes through an explicit column list, so reordering a projection moves nothing between columns. What happens next is the model's `on_schema_change` policy:
 
 ```sql
 @config materialized=incremental, unique_key=event_id, on_schema_change=sync_all_columns
