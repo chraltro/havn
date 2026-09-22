@@ -199,6 +199,55 @@ describe("pruneOpenModels", () => {
   });
 });
 
+describe("bind status across a file switch", () => {
+  it("clears the previous file's error count as soon as the file changes", async () => {
+    const seen = [];
+    api.bindSql.mockImplementation((path) => {
+      if (path === A) {
+        return Promise.resolve({
+          model: A,
+          errors: [{ severity: "error", message: "boom", line: 1, col: 1, end_line: 1, end_col: 2 }],
+          columns: [], upstream: {},
+        });
+      }
+      return new Promise(() => {});   // B never answers
+    });
+    const view = render(
+      <Editor content="SELECT 1" language="sql" onChange={() => {}} activeFile={A} onStatus={(s) => seen.push(s)} />,
+    );
+    await act(async () => { await sleep(500); });
+    expect(seen[seen.length - 1]).toMatchObject({ errorCount: 1 });
+
+    await act(async () => {
+      view.rerender(
+        <Editor content="SELECT 2" language="sql" onChange={() => {}} activeFile={B} onStatus={(s) => seen.push(s)} />,
+      );
+      await sleep(0);
+    });
+    expect(seen[seen.length - 1]).toBeNull();
+  });
+
+  it("clears it for a file the SQL features do not apply to either", async () => {
+    const seen = [];
+    api.bindSql.mockResolvedValue({
+      model: A,
+      errors: [{ severity: "error", message: "boom", line: 1, col: 1, end_line: 1, end_col: 2 }],
+      columns: [], upstream: {},
+    });
+    const view = render(
+      <Editor content="SELECT 1" language="sql" onChange={() => {}} activeFile={A} onStatus={(s) => seen.push(s)} />,
+    );
+    await act(async () => { await sleep(500); });
+    await act(async () => {
+      view.rerender(
+        <Editor content="print(1)" language="python" onChange={() => {}} activeFile="ingest/load.py" onStatus={(s) => seen.push(s)} />,
+      );
+      await sleep(600);
+    });
+    expect(seen[seen.length - 1]).toBeNull();
+  });
+});
+
 describe("model retention while switching files", () => {
   it("keeps the recent files and disposes the ones before them", async () => {
     api.bindSql.mockResolvedValue({ model: A, errors: [], columns: [], upstream: {} });

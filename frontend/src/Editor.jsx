@@ -1287,12 +1287,17 @@ export default function Editor({ content, language, onChange, activeFile, dirty,
     }
   }
 
+  // --- Toolbar status belongs to the file on screen ---
+  // A new file has no counts until its own bind lands, so the toolbar is
+  // cleared on every switch. Leaving the previous file's number up made the
+  // toolbar claim an error in a model that does not have one.
+  useEffect(() => {
+    reportStatus(null);
+  }, [activeFile]);
+
   // --- Bind diagnostics: debounced, follows the keyboard ---
   useEffect(() => {
-    if (!monacoReady || !isTransformSql(activeFile)) {
-      if (!isTransformSql(activeFile)) reportStatus(null);
-      return undefined;
-    }
+    if (!monacoReady || !isTransformSql(activeFile)) return undefined;
     const timer = setTimeout(async () => {
       const monaco = monacoRef.current;
       const guard = bindGuardRef.current;
