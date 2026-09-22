@@ -253,7 +253,7 @@ describe("go to definition", () => {
 
     const handled = h.registered.opener.openCodeEditor(
       null,
-      { path: "/transform/core/customers.sql" },
+      { scheme: "file", path: "/transform/core/customers.sql" },
       { lineNumber: 1, column: 1 },
     );
     expect(handled).toBe(true);

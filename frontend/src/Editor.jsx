@@ -168,6 +168,21 @@ export function pathFromUri(uri) {
 }
 
 /**
+ * The project file a URI names, or null when it names something else.
+ *
+ * Monaco asks the opener about every URI it wants on screen, including its
+ * own `inmemory://model/17` buffers behind a diff or a peek widget. Those are
+ * Monaco's to open; claiming them navigated the app to a file that does not
+ * exist. Only a `file:` URI pointing inside the project is the app's.
+ */
+export function projectPathFromUri(uri) {
+  if (!uri || String(uri.scheme || "") !== "file") return null;
+  const path = pathFromUri(uri);
+  if (!path || path.startsWith("/") || path.split("/").includes("..")) return null;
+  return path;
+}
+
+/**
  * How many file models stay alive at once.
  *
  * @monaco-editor/react creates a model per `path` and only disposes it when
@@ -1179,7 +1194,7 @@ loader.init().then((monaco) => {
   // swap the model out from under App.jsx's editor state.
   monaco.editor.registerEditorOpener({
     openCodeEditor: (_source, resource, selectionOrPosition) => {
-      const path = pathFromUri(resource);
+      const path = projectPathFromUri(resource);
       if (!path || !editorContext.openModel) return false;
       // Same file: let Monaco reveal the position in place.
       if (path === editorContext.activeFile) return false;
