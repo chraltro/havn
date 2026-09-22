@@ -1,5 +1,6 @@
 """Tests for the FastAPI backend."""
 
+import json
 from pathlib import Path
 
 import duckdb
@@ -732,6 +733,158 @@ def test_bind_endpoint_allows_a_viewer(bind_client, viewer):
         "content": "@config schema=gold\n\nSELECT order_id FROM silver.orders\n",
     })
     assert resp.status_code == 200, resp.text
+
+
+# --- /api/bind is not a way to run SQL ---------------------------------------
+#
+# The contract for a buffer that fails the read-only validator is HTTP 200
+# with ``ok: false`` and exactly one ``source: "bind"`` error carrying the
+# validator's reason and a null line. That is what the editor already renders
+# as a whole-file diagnostic, and it keeps a rejected buffer from looking like
+# a transport failure. The buffer is never bound, and never executed.
+
+
+def _rejected(resp) -> dict:
+    """Assert a bind response is a validator rejection and return its error."""
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is False, data
+    assert data["columns"] == []
+    bind_errors = [e for e in data["errors"] if e["source"] == "bind"]
+    assert len(bind_errors) == 1, data["errors"]
+    assert bind_errors[0]["severity"] == "error"
+    assert bind_errors[0]["line"] is None
+    return bind_errors[0]
+
+
+def test_bind_endpoint_refuses_a_second_statement(bind_client, viewer, bind_project):
+    """A trailing CREATE TABLE must not reach the warehouse."""
+    resp = bind_client.post("/api/bind", json={
+        "path": "transform/gold/summary.sql",
+        "content": (
+            "@config schema=gold\n\n"
+            "SELECT 1 AS a; CREATE TABLE warehouse.landing.pwned AS SELECT 99\n"
+        ),
+    })
+    err = _rejected(resp)
+    assert "Multi-statement" in err["message"]
+
+    conn = duckdb.connect(str(bind_project / "warehouse.duckdb"))
+    try:
+        names = {
+            r[0]
+            for r in conn.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE lower(table_schema) = 'landing'"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+    assert "pwned" not in names
+
+
+def test_bind_endpoint_refuses_copy_to_a_server_path(
+    bind_client, viewer, tmp_path
+):
+    """COPY ... TO would write warehouse rows to disk, bypassing masking."""
+    target = tmp_path / "exfiltrated.csv"
+    resp = bind_client.post("/api/bind", json={
+        "path": "transform/gold/summary.sql",
+        "content": (
+            "@config schema=gold\n\n"
+            f"COPY (SELECT * FROM silver.orders) TO '{target}'\n"
+        ),
+    })
+    err = _rejected(resp)
+    assert "Only SELECT queries" in err["message"]
+    assert not target.exists()
+
+
+def test_bind_endpoint_refuses_reading_a_server_file(bind_client, viewer):
+    """read_csv leaked /etc/passwd's first line as column names."""
+    resp = bind_client.post("/api/bind", json={
+        "path": "transform/gold/summary.sql",
+        "content": "@config schema=gold\n\nSELECT * FROM read_csv('/etc/passwd')\n",
+    })
+    err = _rejected(resp)
+    assert "File-access functions" in err["message"]
+
+
+@pytest.mark.parametrize(
+    "label,sql",
+    [
+        ("read_text", "SELECT read_text('/etc/passwd') AS x"),
+        ("glob", "SELECT * FROM glob('/*')"),
+        ("replacement scan", "SELECT * FROM '/etc/passwd'"),
+        ("quoted path", 'SELECT * FROM "/etc/passwd"'),
+    ],
+)
+def test_bind_endpoint_never_returns_file_contents(bind_client, viewer, label, sql):
+    resp = bind_client.post("/api/bind", json={
+        "path": "transform/gold/summary.sql",
+        "content": f"@config schema=gold\n\n{sql}\n",
+    })
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is False, (label, data)
+    blob = json.dumps(data)
+    assert "root:" not in blob, (label, blob)
+    assert "/bin/bash" not in blob, (label, blob)
+    assert data["columns"] == [], (label, data["columns"])
+
+
+def test_bind_endpoint_refuses_attach(bind_client, viewer, tmp_path):
+    """ATTACH + CREATE TABLE wrote a whole database to a server path."""
+    target = tmp_path / "dump.db"
+    resp = bind_client.post("/api/bind", json={
+        "path": "transform/gold/summary.sql",
+        "content": (
+            "@config schema=gold\n\n"
+            f"ATTACH '{target}' AS ex; CREATE TABLE ex.dump AS SELECT * FROM silver.orders\n"
+        ),
+    })
+    _rejected(resp)
+    assert not target.exists()
+
+
+def test_two_concurrent_binds_do_not_interfere(bind_client):
+    """Each request owns its shadow, so parallel binds cannot collide."""
+    import threading
+
+    payloads = [
+        (
+            "transform/gold/a.sql",
+            "@config schema=gold\n\nSELECT order_id FROM silver.orders\n",
+            [{"name": "order_id", "type": "INTEGER"}],
+        ),
+        (
+            "transform/gold/b.sql",
+            "@config schema=gold\n\nSELECT amount FROM silver.orders\n",
+            [{"name": "amount", "type": "DOUBLE"}],
+        ),
+    ]
+    results: list = []
+    lock = threading.Lock()
+
+    def run(path, content, expected):
+        resp = bind_client.post("/api/bind", json={"path": path, "content": content})
+        with lock:
+            results.append((path, resp.status_code, resp.json(), expected))
+
+    threads = [
+        threading.Thread(target=run, args=payloads[i % 2])
+        for i in range(8)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(results) == 8
+    for path, status, data, expected in results:
+        assert status == 200, (path, data)
+        assert data["ok"] is True, (path, data["errors"])
+        assert data["columns"] == expected, (path, data["columns"])
 
 
 def test_ctes_endpoint_lists_and_previews(bind_client):
