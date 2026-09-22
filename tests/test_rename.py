@@ -1030,6 +1030,42 @@ def test_api_apply_never_writes_inside_a_package(package_client, project_with_pa
     assert _package_file(project_with_package).read_text() == before
 
 
+def test_batch_file_write_rejects_a_duplicate_path(client):
+    path = "transform/bronze/customers.sql"
+    r = client.put(
+        "/api/files",
+        json={
+            "files": [
+                {"path": path, "content": "SELECT 1 AS a\n"},
+                {"path": path, "content": "SELECT 2 AS b\n"},
+            ]
+        },
+    )
+    assert r.status_code == 400
+    assert "Duplicate path" in r.json()["detail"]
+
+
+def test_batch_file_write_rejects_two_spellings_of_one_path(client, project):
+    """`a/b.sql` and `a/./b.sql` are one file, and the check compared strings.
+
+    Both writes went through, so the last one silently won and the other's
+    hash check was made against content that had already been replaced.
+    """
+    original = (project / "transform" / "bronze" / "customers.sql").read_text()
+    r = client.put(
+        "/api/files",
+        json={
+            "files": [
+                {"path": "transform/bronze/customers.sql", "content": "SELECT 1 AS a\n"},
+                {"path": "transform/bronze/./customers.sql", "content": "SELECT 2 AS b\n"},
+            ]
+        },
+    )
+    assert r.status_code == 400
+    assert "Duplicate path" in r.json()["detail"]
+    assert (project / "transform" / "bronze" / "customers.sql").read_text() == original
+
+
 def test_batch_file_write_saves_both_files(client, project):
     r = client.put(
         "/api/files",

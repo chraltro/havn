@@ -209,11 +209,20 @@ def save_files(request: Request, req: BatchSaveRequest) -> dict:
     if not req.files:
         return {"status": "saved", "files": []}
 
-    seen: set[str] = set()
+    # Two spellings of one file are still one file: `a/b.sql` and `a/./b.sql`
+    # both passed a raw-string check, and the batch then wrote the same path
+    # twice, so whichever landed last silently won and its hash check was made
+    # against content the other write had already replaced.
+    seen: dict[Path, str] = {}
     for item in req.files:
-        if item.path in seen:
-            raise HTTPException(400, f"Duplicate path in batch: {item.path}")
-        seen.add(item.path)
+        resolved = _safe_project_path(project_dir, item.path)
+        first = seen.get(resolved)
+        if first is not None:
+            detail = f"Duplicate path in batch: {item.path}"
+            if first != item.path:
+                detail += f" (same file as {first})"
+            raise HTTPException(400, detail)
+        seen[resolved] = item.path
 
     _resolved, conflicts = check_write_conflicts(project_dir, req.files)
     if conflicts:
