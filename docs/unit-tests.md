@@ -88,6 +88,9 @@ everything else stays a string and is cast to the column's type on insert.
 
 1. A fresh `:memory:` DuckDB connection is opened and your `macros/` are
    registered on it, so Python macros work exactly as they do in a build.
+   The connection is then locked down: `enable_external_access` is turned off
+   and the configuration is locked, so nothing that runs on it afterwards can
+   reach the filesystem or the network.
 2. One `TEMP TABLE` is created per `given` entry.
 3. Every reference to a mocked table in the model's SQL is rewritten to point
    at its mock, preserving aliases and leaving CTE names alone.
@@ -136,6 +139,19 @@ This is the property that makes the result mean something. dbt's local unit
 tests still need the direct upstream models to exist in the warehouse so the
 schema can be fetched; havn's do not, because the engine and the warehouse
 are the same thing and the mocks carry their own types.
+
+### And file-free, for the same reason
+
+The test connection cannot read or write files either. A model under test
+that calls `read_csv`, `read_text`, `glob` or a bare `FROM '<path>'`, or that
+tries `COPY ... TO`, `ATTACH`, `INSTALL` or `LOAD`, fails its test with a
+permission error rather than touching the disk. `havn test` runs on the
+server too, where the SQL being tested is a file anyone with write permission
+just saved, so the run gets no filesystem at all.
+
+Nothing legitimate needs it: fixture rows are the input a unit test is for.
+If a test seems to need a file read, put the rows it would have read into a
+`given` block, in the inline `csv:` form when there are a lot of columns.
 
 ## Limitations
 

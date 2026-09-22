@@ -6,24 +6,36 @@ UDFs havn registers at runtime. Rather than re-implement a type system in
 sqlglot, this module hands the model SQL to DuckDB and collects what comes
 back.
 
+The SQL handed over is, on the API path, an unsaved editor buffer from anyone
+with *read* permission. It is therefore never executed against the warehouse.
 Mechanics:
 
-1. Take a cursor off a **writable** connection. The read pool opens its
-   connections ``read_only=True`` and DuckDB refuses ``ATTACH ':memory:'``
-   there.
-2. ``ATTACH ':memory:' AS shadow_<uuid8>``. ATTACH is instance-scoped, so
-   the name has to be unique per call or two concurrent binds collide.
-3. Every non-model object the models reference (landing tables, seeds,
-   sources, anything already in the main catalog that is not a model) becomes
-   a view inside the shadow that selects from the real object. Binding a view
-   reads types, never rows.
-4. ``USE shadow_<uuid8>``, then ``CREATE VIEW schema.name AS <model.query>``
-   in topological order, with the model's SQL verbatim. Two-part names
-   resolve inside the shadow first, so a stale built table in the main
-   catalog is shadowed by the fresh definition. That is the property that
-   makes this reflect the file rather than the last build.
+1. Open a private ``duckdb.connect(":memory:")``. It is not attached to the
+   warehouse, holds no writable handle, and is closed at the end of the call.
+   Nothing a buffer does can reach the real catalog, so there is no
+   three-part-name escape, no cross-request ATTACH name collision and no
+   ``USE`` juggling on a shared connection.
+2. Seed every non-model object the models reference (landing tables, seeds,
+   sources, anything already built that is outside the bound chain) as an
+   **empty** table with the real column types, from one bulk
+   ``information_schema.columns`` fetch on the caller's warehouse connection
+   (read-only is fine: this pass only reads the catalog). An empty table binds
+   exactly like a populated one, and no row ever leaves the warehouse.
+3. Load the extensions the caller's connection has, register the project's
+   macros, then ``SET enable_external_access = false`` and
+   ``SET lock_configuration = true`` **before any user SQL runs**. From that
+   point on ``read_csv``, ``read_text``, ``glob``, ``COPY ... TO``, ``ATTACH``,
+   ``INSTALL``/``LOAD`` and re-enabling the switch all fail inside the shadow.
+4. ``CREATE OR REPLACE VIEW schema.name AS <model.query>`` in topological
+   order, with the model's SQL verbatim. The shadow holds only the models and
+   their base tables, so a stale built table in the warehouse cannot win over
+   the fresh definition. That is the property that makes this reflect the file
+   rather than the last build.
 5. ``DESCRIBE`` each view for its ``(name, type)`` pairs.
-6. ``USE <main>; DETACH`` in a ``finally``, always.
+
+A model that legitimately reads a file (``read_parquet('data/x.parquet')``)
+cannot bind under the lockdown. That is reported as a warning naming the
+model, not as an error, and the model is skipped.
 
 What it catches: wrong arity, unknown functions, operator overload failures,
 missing columns (including on upstreams that were never built), missing
@@ -40,7 +52,6 @@ from __future__ import annotations
 import logging
 import re
 import time
-import uuid
 from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -62,9 +73,33 @@ _BARE_FUNCTION = re.compile(r"with name ([A-Za-z_][A-Za-z0-9_]*) does not exist"
 
 UNAVAILABLE_MESSAGE = "bind pass unavailable on this backend"
 
+# What the shadow says about a model it cannot bind because the model reads a
+# file. The lockdown is deliberate, so this is a warning, not an error.
+FILE_ACCESS_MESSAGE = (
+    "file functions are not available in the bind pass; this model is skipped"
+)
+
+# DuckDB's own wording when the lockdown refuses something.
+_FILE_ACCESS_MARKERS = (
+    "file system operations are disabled",
+    "Loading external extensions is disabled",
+    "the configuration has been locked",
+)
+
 # What a DuckDB type name may look like: MAP(VARCHAR, INTEGER), DECIMAL(10,2),
-# STRUCT(a INTEGER), INTEGER[]. Deliberately no quotes, semicolons or dashes.
-_TYPE_TEXT = re.compile(r"[A-Za-z_][A-Za-z0-9_ ,()\[\]]*")
+# STRUCT(a INTEGER), INTEGER[], STRUCT("a b" INTEGER). Deliberately no single
+# quotes, semicolons or dashes, so the text cannot close the DDL it goes into.
+_TYPE_TEXT = re.compile(r'[A-Za-z_"][A-Za-z0-9_ ,()\[\]".]*')
+
+# Extensions the shadow loads before it locks itself down. ``connect()``
+# installs nothing itself (DuckDB auto-loads what a query needs), but
+# auto-loading is exactly what ``enable_external_access = false`` prevents, so
+# the statically linked ones are loaded up front and the rest is copied from
+# whatever the caller's connection already has.
+_BASE_EXTENSIONS = ("json", "parquet", "icu")
+
+_EXTENSION_NAME = re.compile(r"[a-z0-9_]+")
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 @dataclass
@@ -111,7 +146,7 @@ def ancestor_closure(
     Binding one model from the editor must not bind the other 999 in the
     project. ``depends_on`` is already resolved at discovery, so the closure
     is a plain walk. Names that are not models (landing tables, seeds) drop
-    out here and are seeded into the shadow as views instead.
+    out here and are seeded into the shadow as empty typed tables instead.
     """
     by_name = {m.full_name: m for m in models}
     wanted: set[str] = set()
@@ -296,114 +331,132 @@ def _split_two_part(name: str) -> tuple[str, str] | None:
     return schema, table
 
 
-def _catalog_objects(cur: duckdb.DuckDBPyConnection) -> set[str]:
-    """Lowercased ``schema.name`` of every table and view in the main catalog."""
-    try:
-        rows = cur.execute(
-            "SELECT lower(table_schema) || '.' || lower(table_name) "
-            "FROM information_schema.tables"
-        ).fetchall()
-    except Exception as e:  # pragma: no cover - catalog always readable
-        logger.debug("Could not list catalog objects for the bind pass: %s", e)
-        return set()
-    return {r[0] for r in rows}
+def _fetch_base_columns(
+    source: duckdb.DuckDBPyConnection, names: list[str]
+) -> dict[str, list[tuple[str, str]]]:
+    """One bulk ``information_schema.columns`` fetch for ``names``.
 
-
-def _seed_extensions(
-    cur: duckdb.DuckDBPyConnection, source: duckdb.DuckDBPyConnection
-) -> None:
-    """Load on the bind cursor whatever the parent connection has loaded.
-
-    Extensions are instance-scoped in DuckDB, so a cursor off the same
-    connection already sees them; this is belt and braces for the case where
-    the caller hands in a connection opened elsewhere. A missing ``httpfs``
-    or ``spatial`` would otherwise produce a spurious "function does not
-    exist", which is worse than no check at all.
+    ``names`` are lowercased ``schema.table`` keys. The result maps each key
+    that exists in the catalog to its ``(column, type)`` pairs in ordinal
+    order. Reading the catalog is all this needs, so a read-only connection is
+    enough; no rows are touched.
     """
+    if not names:
+        return {}
+    placeholders = ", ".join("?" for _ in names)
+    sql = (
+        "SELECT lower(table_schema), lower(table_name), column_name, data_type "
+        "FROM information_schema.columns "
+        f"WHERE lower(table_schema) || '.' || lower(table_name) IN ({placeholders}) "
+        "ORDER BY table_schema, table_name, ordinal_position"
+    )
+    try:
+        rows = source.execute(sql, list(names)).fetchall()
+    except Exception as e:  # pragma: no cover - catalog always readable
+        logger.debug("Could not read base table columns for the bind pass: %s", e)
+        return {}
+    out: dict[str, list[tuple[str, str]]] = {}
+    for schema, table, column, dtype in rows:
+        out.setdefault(f"{schema}.{table}", []).append((str(column), str(dtype)))
+    return out
+
+
+def _load_extensions(
+    shadow: duckdb.DuckDBPyConnection, source: duckdb.DuckDBPyConnection
+) -> None:
+    """Load into the shadow what the caller's connection has, plus the basics.
+
+    Must run before the lockdown: ``enable_external_access = false`` blocks
+    both ``LOAD`` of an installed extension and DuckDB's own auto-loading. A
+    missing ``json`` or ``spatial`` would otherwise produce a spurious
+    "function does not exist", which is worse than no check at all.
+    """
+    names = set(_BASE_EXTENSIONS)
     try:
         rows = source.execute(
             "SELECT extension_name FROM duckdb_extensions() WHERE loaded"
         ).fetchall()
+        names.update(str(r[0] or "") for r in rows)
     except Exception:
-        return
-    for (name,) in rows:
-        if not re.fullmatch(r"[a-z0-9_]+", str(name or "")):
+        logger.debug("Bind pass could not list the caller's extensions")
+    for name in sorted(names):
+        if not _EXTENSION_NAME.fullmatch(name):
             continue
         try:
-            cur.execute(f"LOAD {name}")
+            shadow.execute(f"LOAD {name}")
         except Exception:
             logger.debug("Bind pass could not load extension %s", name)
 
 
-def _seed_macros(
-    source: duckdb.DuckDBPyConnection,
-    project_dir: Path | None,
+def _register_shadow_macros(
+    shadow: duckdb.DuckDBPyConnection, project_dir: Path | None
 ) -> None:
-    """Make the project's Python macros resolvable from inside the shadow.
+    """Register the project's macros on the shadow connection.
 
-    Scalar UDFs registered with ``create_function`` live at instance level and
-    are visible from any cursor, including inside an attached database. The
-    public-name ``CREATE MACRO`` aliases do not: they live in the main
-    catalog's ``main`` schema, which drops out of the search path the moment
-    the cursor does ``USE shadow``. Keeping the main catalog on the search
-    path (see :func:`bind_models`) is what brings those back.
-
-    Registration goes on the parent connection, never on the bind cursor.
-    Aliases created while inside the shadow die with the DETACH, so the next
-    bind would lose them and report a spurious "function does not exist" --
-    the one failure mode that makes this check worse than no check at all.
-    ``register_macros`` is idempotent per connection, so on the server (where
-    the write connection already has them) this is a no-op.
+    The shadow is its own DuckDB instance, so neither the scalar UDFs nor the
+    public-name ``CREATE MACRO`` aliases come across from the warehouse: they
+    have to be registered here. Registration reads ``macros/*.py`` through
+    Python, not through DuckDB, so it needs no external access of its own --
+    but the ``CREATE MACRO`` bodies for table macros call ``json_each``, which
+    is why extensions load first and the lockdown comes last.
     """
     if project_dir is None:
         return
     try:
         from havn.engine.macros import register_macros
 
-        register_macros(source, Path(project_dir))
+        register_macros(shadow, Path(project_dir))
     except Exception as e:
-        # Sibling connections share the UDF catalog, so a second registration
-        # reports "already exists" and the functions are callable anyway.
         logger.debug("Bind pass macro registration skipped: %s", e)
 
 
+def _lock_down(shadow: duckdb.DuckDBPyConnection) -> None:
+    """Take file, network and configuration access away from the shadow.
+
+    Runs before any model SQL. After this, ``read_csv``/``read_text``/``glob``
+    and the rest of the file functions, ``COPY ... TO``, ``ATTACH``,
+    ``INSTALL``/``LOAD`` and re-enabling the switch itself all fail to bind.
+    """
+    shadow.execute("SET enable_external_access = false")
+    shadow.execute("SET lock_configuration = true")
+
+
 def _create_typed_stub(
-    cur: duckdb.DuckDBPyConnection,
-    shadow: str,
+    shadow: duckdb.DuckDBPyConnection,
     schema: str,
     table: str,
     columns: list[tuple[str, str]],
 ) -> None:
-    """Create an empty, correctly typed view for a base table given by spec.
+    """Create an empty, correctly typed table for one base object.
 
-    The type text goes into the SQL unquoted, because there is no other way to
-    say ``DECIMAL(10,2)`` or ``STRUCT(a INTEGER)``, so it is checked against
-    the shape a DuckDB type name can take first.
+    Empty tables bind identically to populated ones, and no warehouse row is
+    ever copied into the shadow. The type text goes into the DDL unquoted,
+    because there is no other way to say ``DECIMAL(10,2)`` or
+    ``STRUCT(a INTEGER)``, so it is checked against the shape a DuckDB type
+    name can take first. ``information_schema.columns`` round-trips every
+    DuckDB type this way, nested ones included.
     """
     if not columns:
         return
-    projection = ", ".join(
-        f"CAST(NULL AS {ctype}) AS {_quote_ident(cname)}"
+    spec = ", ".join(
+        f"{_quote_ident(cname)} {ctype}"
         for cname, ctype in columns
         if _TYPE_TEXT.fullmatch(str(ctype))
     )
-    if not projection:
+    if not spec:
         return
-    cur.execute(
-        f"CREATE OR REPLACE VIEW {_quote_ident(shadow)}.{_quote_ident(schema)}."
-        f"{_quote_ident(table)} AS "
-        f"SELECT * FROM (SELECT {projection}) AS _stub WHERE false"
+    shadow.execute(
+        f"CREATE OR REPLACE TABLE {_quote_ident(schema)}.{_quote_ident(table)} ({spec})"
     )
 
 
 def _seed_base_tables(
-    cur: duckdb.DuckDBPyConnection,
-    shadow: str,
-    main_catalog: str,
+    shadow: duckdb.DuckDBPyConnection,
+    source: duckdb.DuckDBPyConnection,
     models: list[SQLModel],
     base_tables: dict[str, list[tuple[str, str]]] | None,
 ) -> None:
-    """Mirror every non-model object the models reference into the shadow."""
+    """Seed every non-model object the models reference into the shadow."""
     model_names = {m.full_name.lower() for m in models}
     wanted: dict[str, str] = {}
     for model in models:
@@ -420,8 +473,10 @@ def _seed_base_tables(
     if not wanted:
         return
 
-    existing = _catalog_objects(cur)
-    lowered_specs = {k.lower(): v for k, v in (base_tables or {}).items()}
+    declared = {k.lower(): v for k, v in (base_tables or {}).items()}
+    fetched = _fetch_base_columns(
+        source, sorted(k for k in wanted if k not in declared)
+    )
 
     created_schemas: set[str] = set()
     for key, original in sorted(wanted.items()):
@@ -429,35 +484,21 @@ def _seed_base_tables(
         if parts is None:
             continue
         schema, table = parts
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema) or not re.fullmatch(
-            r"[A-Za-z_][A-Za-z0-9_]*", table
-        ):
+        if not _IDENTIFIER.fullmatch(schema) or not _IDENTIFIER.fullmatch(table):
             continue
-        if schema not in created_schemas:
-            cur.execute(
-                f"CREATE SCHEMA IF NOT EXISTS {_quote_ident(shadow)}.{_quote_ident(schema)}"
-            )
-            created_schemas.add(schema)
-        spec = lowered_specs.get(key)
-        if spec:
-            try:
-                _create_typed_stub(cur, shadow, schema, table, spec)
-            except Exception as e:
-                logger.debug("Bind pass could not stub %s: %s", original, e)
-            continue
-        if key not in existing:
+        columns = declared.get(key) or fetched.get(key)
+        if not columns:
             # Not a model and not in the catalog: leave it missing so the
             # binder reports "Table ... does not exist" on the line that
             # references it, which is the honest answer.
             continue
+        if schema not in created_schemas:
+            shadow.execute(f"CREATE SCHEMA IF NOT EXISTS {_quote_ident(schema)}")
+            created_schemas.add(schema)
         try:
-            cur.execute(
-                f"CREATE OR REPLACE VIEW {_quote_ident(shadow)}.{_quote_ident(schema)}."
-                f"{_quote_ident(table)} AS SELECT * FROM "
-                f"{_quote_ident(main_catalog)}.{_quote_ident(schema)}.{_quote_ident(table)}"
-            )
+            _create_typed_stub(shadow, schema, table, columns)
         except Exception as e:
-            logger.debug("Bind pass could not mirror %s: %s", original, e)
+            logger.debug("Bind pass could not seed %s: %s", original, e)
 
 
 # ---------------------------------------------------------------------------
@@ -544,6 +585,12 @@ def _shadow_body(model: SQLModel, snapshot_settings: object | None) -> str:
     )
 
 
+def _is_file_access_denied(exc: Exception) -> bool:
+    """True when the shadow's lockdown, not the model, refused the statement."""
+    text = str(exc)
+    return any(marker in text for marker in _FILE_ACCESS_MARKERS)
+
+
 def bind_models(
     conn: duckdb.DuckDBPyConnection,
     models: list[SQLModel],
@@ -551,23 +598,28 @@ def bind_models(
     base_tables: dict[str, list[tuple[str, str]]] | None = None,
     project_dir: Path | str | None = None,
 ) -> BindResult:
-    """Bind ``models`` against a throwaway shadow catalog and report back.
+    """Bind ``models`` against a private, locked-down shadow and report back.
+
+    No model SQL ever runs against ``conn``. The shadow is a separate
+    ``duckdb.connect(":memory:")`` instance with no attachment to the
+    warehouse, no file access and a locked configuration, and it is closed
+    before this returns.
 
     Args:
-        conn: A **writable** DuckDB connection. A cursor is taken off it; the
-            connection itself is never mutated beyond an ATTACH and DETACH of
-            a uniquely named in-memory catalog.
+        conn: The warehouse connection, used **only** as the catalog source
+            for base table column types. Read-only is fine; nothing is
+            written, attached or ``USE``d on it.
         models: The models to bind. Callers that only care about one model
             should pass :func:`ancestor_closure` of it, not the whole project.
         base_tables: Explicit ``schema.table -> [(column, type)]`` specs for
             base objects that are not in the catalog yet. Anything not listed
-            here is mirrored from the main catalog when it exists.
-        project_dir: Used to register Python macros on ``conn`` when it does
-            not already have them, so they resolve inside the shadow.
+            here is read from ``conn``'s catalog when it exists.
+        project_dir: Used to register the project's Python macros on the
+            shadow so they resolve while binding.
 
     Returns:
         A :class:`BindResult`. ``available`` is False, with a single warning,
-        when the backend cannot host a shadow catalog.
+        when a shadow connection could not be opened at all.
     """
     started = time.perf_counter()
     result = BindResult()
@@ -587,30 +639,24 @@ def bind_models(
         result.duration_ms = int((time.perf_counter() - started) * 1000)
         return result
 
-    shadow = f"shadow_{uuid.uuid4().hex[:8]}"
     try:
-        cur = conn.cursor()
-    except Exception as e:  # pragma: no cover - only a closed connection
+        shadow = duckdb.connect(":memory:")
+    except Exception as e:  # pragma: no cover - only under memory exhaustion
         return _unavailable(str(e), started)
 
-    attached = False
-    main_catalog = "memory"
     try:
         try:
-            main_catalog = cur.execute("SELECT current_database()").fetchone()[0]
-        except Exception as e:
-            return _unavailable(str(e), started)
-        try:
-            cur.execute(f"ATTACH ':memory:' AS {_quote_ident(shadow)}")
-            attached = True
-        except Exception as e:
-            # DuckLake attaches the catalog itself and has historically been
-            # picky about a second attach in-process. Degrade to a warning
-            # rather than failing the caller's validation run.
-            return _unavailable(str(e), started)
+            shadow.execute("SET threads = 1")
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("Bind pass could not pin the shadow to one thread")
 
-        _seed_extensions(cur, conn)
-        _seed_macros(conn, Path(project_dir) if project_dir else None)
+        # Everything that needs the outside world happens here, before the
+        # lockdown and before a single line of model SQL.
+        _load_extensions(shadow, conn)
+        _register_shadow_macros(
+            shadow, Path(project_dir) if project_dir else None
+        )
+
         # Snapshot meta column names are a project-level setting, and a
         # downstream model referring to them has to bind against the names
         # this project actually writes.
@@ -621,26 +667,13 @@ def bind_models(
             snapshot_settings = snapshot_settings_for(project_dir)
 
         for schema in sorted({m.schema for m in ordered}):
-            cur.execute(
-                f"CREATE SCHEMA IF NOT EXISTS {_quote_ident(shadow)}.{_quote_ident(schema)}"
-            )
-        _seed_base_tables(cur, shadow, main_catalog, ordered, base_tables)
+            shadow.execute(f"CREATE SCHEMA IF NOT EXISTS {_quote_ident(schema)}")
+        _seed_base_tables(shadow, conn, ordered, base_tables)
 
-        cur.execute(f"USE {_quote_ident(shadow)}")
-        # Keeping the main catalog on the search path behind the shadow is
-        # what makes CREATE MACRO aliases (the public names of the project's
-        # Python macros) resolve while the cursor is inside the shadow. The
-        # shadow comes first, so a model still shadows a stale built table of
-        # the same two-part name.
-        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(main_catalog)):
-            try:
-                cur.execute(
-                    f"SET search_path = '{shadow}.main,{main_catalog}.main'"
-                )
-            except Exception:
-                logger.debug("Bind pass could not extend the search path")
+        _lock_down(shadow)
 
         failed: set[str] = set()
+        skipped: set[str] = set()
         for model in ordered:
             broken = [d for d in model.depends_on if d in failed]
             if broken:
@@ -653,14 +686,39 @@ def bind_models(
                 ]
                 failed.add(model.full_name)
                 continue
+            unbound = [d for d in model.depends_on if d in skipped]
+            if unbound:
+                # The upstream was skipped, not broken. Reporting an error
+                # here would blame this model for the lockdown.
+                result.warnings.append(
+                    BindError(
+                        message=(
+                            f"{model.full_name}: upstream {unbound[0]} was "
+                            "skipped by the bind pass"
+                        ),
+                        kind="skipped",
+                    )
+                )
+                skipped.add(model.full_name)
+                continue
             view = f"{_quote_ident(model.schema)}.{_quote_ident(model.name)}"
             try:
-                cur.execute(
+                shadow.execute(
                     f"CREATE OR REPLACE VIEW {view} AS"
                     + _shadow_body(model, snapshot_settings)
                 )
-                rows = cur.execute(f"DESCRIBE {view}").fetchall()
+                rows = shadow.execute(f"DESCRIBE {view}").fetchall()
             except Exception as e:
+                if _is_file_access_denied(e):
+                    result.warnings.append(
+                        BindError(
+                            message=f"{model.full_name}: {FILE_ACCESS_MESSAGE}",
+                            raw=str(e),
+                            kind="skipped",
+                        )
+                    )
+                    skipped.add(model.full_name)
+                    continue
                 result.errors[model.full_name] = [
                     bind_error_from_exception(e, model.query)
                 ]
@@ -671,18 +729,9 @@ def bind_models(
             ]
     finally:
         try:
-            cur.execute(f"USE {_quote_ident(main_catalog)}")
-        except Exception:
-            logger.debug("Bind pass could not restore the default catalog")
-        if attached:
-            try:
-                cur.execute(f"DETACH {_quote_ident(shadow)}")
-            except Exception:
-                logger.warning("Bind pass could not detach %s", shadow)
-        try:
-            cur.close()
-        except Exception:
-            pass
+            shadow.close()
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("Bind pass could not close the shadow connection")
 
     result.duration_ms = int((time.perf_counter() - started) * 1000)
     return result
@@ -712,6 +761,31 @@ def as_validation_message(error: BindError) -> str:
 # ---------------------------------------------------------------------------
 # Buffer parsing
 # ---------------------------------------------------------------------------
+
+
+def read_only_rejection(content: str) -> str | None:
+    """Why ``content`` is not a safe read-only buffer, or None when it is.
+
+    Every surface that binds SQL supplied by a *caller* rather than read from
+    the project's own files runs this first: the ``/api/bind`` endpoint (read
+    permission) and the MCP ``bind_model`` tool when it is handed ``sql``.
+    Directive lines are blanked in place first, so ``@config`` and friends do
+    not read as SQL, and the check itself is the one ``/api/query`` uses, so
+    there is a single list of forbidden verbs and file-access functions.
+
+    A rejected buffer is never bound. ``havn validate --bind`` and
+    ``bind_model`` on a saved model name skip this: that is a local, trusted
+    user binding their own files, which may legitimately read a parquet file.
+    The bind pass itself is isolated and locked down either way.
+    """
+    from havn.engine.sql_analysis import strip_config_comments
+    from havn.engine.sql_safety import ReadOnlyQueryError, validate_read_only_query
+
+    try:
+        validate_read_only_query(strip_config_comments(content))
+    except ReadOnlyQueryError as e:
+        return str(e)
+    return None
 
 
 def model_from_buffer(

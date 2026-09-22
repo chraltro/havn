@@ -3,7 +3,17 @@
 ``POST /api/bind`` resolves an unsaved buffer through the DuckDB binder and
 returns diagnostics positioned in the file, plus the inferred output schema
 and the schema of each upstream relation. The editor calls it on a debounce,
-so everything here is read-permission and cursor-scoped.
+so everything here is read-permission and read-connection scoped.
+
+The buffer is arbitrary SQL from anyone with read permission, so it goes
+through :func:`validate_read_only_query` before it goes anywhere near a
+binder. A buffer that fails the validator is never bound: the response is
+HTTP 200 with ``ok: false`` and one ``source: "bind"`` error carrying the
+validator's reason and a null line, which is the shape the editor already
+renders as a whole-file diagnostic. Multi-statement buffers, mutations,
+``COPY``/``ATTACH`` and the file-access functions are all rejected there,
+and the bind pass itself (an isolated, locked-down in-memory shadow) is the
+second line of defence rather than the only one.
 
 ``POST /api/sql/ctes`` enumerates the CTEs in a buffer and builds a runnable
 preview query for each one by slicing the original text, so the preview keeps
@@ -44,20 +54,18 @@ class CteRequest(BaseModel):
 # --- Helpers ---
 
 
-def _bind_cursor():
-    """A cursor off the server's write connection.
+def _bind_connection():
+    """A read-only connection for the bind request.
 
-    The bind pass has to ATTACH an in-memory catalog, and DuckDB refuses that
-    on a read-only connection, which is what the read pool hands out. Taking a
-    cursor off the write connection does not enter the write queue: the queue
-    serializes work submitted to it, and a cursor runs independently. The
-    ATTACH is instance-scoped and therefore visible to the queue's own cursor,
-    which is exactly why every shadow gets a unique name and is detached in a
-    finally.
+    Everything this route does with the warehouse is a catalog read: name
+    validation, the base-table column types the shadow is seeded from, and the
+    persisted column fallbacks. The bind pass itself runs in its own in-memory
+    database, so a read-permission endpoint has no reason to hold a writable
+    handle on the warehouse.
     """
-    from havn.server.deps import _get_write_queue
+    from havn.server.deps import _get_read_pool
 
-    return _get_write_queue().cursor()
+    return _get_read_pool().connection()
 
 
 def _known_tables(project_models) -> set[str]:
@@ -114,6 +122,7 @@ def bind_endpoint(request: Request, req: BindRequest) -> dict:
         as_validation_message,
         bind_models,
         model_from_buffer,
+        read_only_rejection,
     )
     from havn.engine.transform.columns import describe_object, load_model_columns
 
@@ -131,6 +140,23 @@ def bind_endpoint(request: Request, req: BindRequest) -> dict:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # The buffer is caller-supplied SQL on a read-permission endpoint, so it
+    # is validated before it reaches any binder and is never executed when it
+    # fails. The answer is 200 with ok: false and one bind-source error, the
+    # shape the editor already renders as a whole-file diagnostic.
+    rejection = read_only_rejection(req.content)
+    if rejection is not None:
+        return {
+            "model": buffer_model.full_name if req.path else None,
+            "ok": False,
+            "errors": _errors_payload(
+                [("error", rejection, None, None, None, None, "bind")]
+            ),
+            "columns": [],
+            "upstream": {},
+            "duration_ms": 0,
+        }
+
     rows: list[tuple] = []
 
     # Name-level validation of the buffer alone, so a typo'd table name is
@@ -143,8 +169,7 @@ def bind_endpoint(request: Request, req: BindRequest) -> dict:
         project_models + [buffer_model], [buffer_model.full_name]
     )
 
-    cur = _bind_cursor()
-    try:
+    with _bind_connection() as cur:
         from havn.engine.transform import validate_models
 
         try:
@@ -208,8 +233,6 @@ def bind_endpoint(request: Request, req: BindRequest) -> dict:
             described = describe_object(cur, dep)
             if described:
                 upstream[key] = [{"name": n, "type": t} for n, t in described]
-    finally:
-        cur.close()
 
     errors = _errors_payload(rows)
     return {

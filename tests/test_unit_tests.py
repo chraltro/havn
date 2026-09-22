@@ -202,6 +202,58 @@ def test_passing_test(project):
     assert res.columns == ["customer_id", "name", "order_count"]
 
 
+@pytest.mark.parametrize(
+    "label,expression",
+    [
+        ("read_csv", "(SELECT count(*) FROM read_csv('{path}'))"),
+        ("read_text", "(SELECT count(*) FROM read_text('{path}'))"),
+        ("glob", "(SELECT count(*) FROM glob('{path}'))"),
+        ("replacement scan", "(SELECT count(*) FROM '{path}')"),
+    ],
+)
+def test_a_model_under_test_cannot_read_a_server_file(
+    project, tmp_path, label, expression
+):
+    """The in-memory test connection has no filesystem.
+
+    A unit test runs the model's own SQL, which on the server can be a file
+    someone with write permission just saved. Fixture rows are the whole
+    input; nothing legitimate needs the disk.
+    """
+    secret = tmp_path / "secret.csv"
+    secret.write_text("token\nhunter2\n")
+    expr = expression.format(path=secret)
+    (project / "transform" / "silver" / "customers.sql").write_text(
+        "@config materialized=table, schema=silver\n"
+        "@depends_on bronze.customers\n\n"
+        f"SELECT customer_id, name, {expr} AS order_count FROM bronze.customers\n"
+    )
+    res = only(run_unit_tests(project))
+    assert res.status == "error", (label, res.to_dict())
+    assert "hunter2" not in str(res.to_dict()), label
+
+
+def test_a_model_under_test_cannot_write_a_server_file(project, tmp_path):
+    target = tmp_path / "exfiltrated.csv"
+    from havn.engine.unit_tests import _prepare_connection
+
+    conn = duckdb.connect(":memory:")
+    try:
+        _prepare_connection(conn, project)
+        for statement in (
+            f"COPY (SELECT 1 AS a) TO '{target}'",
+            f"ATTACH '{target}' AS ex",
+            "INSTALL httpfs",
+            "LOAD httpfs",
+            "SET enable_external_access = true",
+        ):
+            with pytest.raises(duckdb.Error):
+                conn.execute(statement)
+    finally:
+        conn.close()
+    assert not target.exists()
+
+
 def test_dict_and_list_rows_are_equivalent(project):
     write_test(
         project,

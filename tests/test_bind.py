@@ -321,6 +321,238 @@ def test_base_tables_override_lets_an_absent_source_bind(conn, project):
     ]
 
 
+def test_base_tables_keep_their_real_types_including_nested_ones(conn, project):
+    """Seeded tables come from information_schema, which round-trips any type.
+
+    A struct, a list, a decimal and a column name that needs quoting all have
+    to survive the trip into the shadow, or a legitimate model reports a
+    spurious bind error.
+    """
+    conn.execute(
+        'CREATE TABLE landing.wide ('
+        '  "Order Id" INTEGER,'
+        "  payload STRUCT(a INTEGER, b VARCHAR),"
+        "  tags VARCHAR[],"
+        "  lookup MAP(VARCHAR, INTEGER),"
+        "  price DECIMAL(10,2)"
+        ")"
+    )
+    write(
+        project, "silver", "wide",
+        "@config materialized=table, schema=silver\n\n"
+        'SELECT "Order Id" AS order_id, payload.b AS b, tags[1] AS tag,\n'
+        "       lookup['x'] AS hit, price * 2 AS doubled\n"
+        "FROM landing.wide\n",
+    )
+    result = bind_project(conn, project)
+    assert messages(result, "silver.wide") == []
+    assert result.schemas["silver.wide"] == [
+        ("order_id", "INTEGER"),
+        ("b", "VARCHAR"),
+        ("tag", "VARCHAR"),
+        ("hit", "INTEGER"),
+        ("doubled", "DECIMAL(18,2)"),
+    ]
+
+
+def test_seeded_base_tables_are_empty(conn, project):
+    """Rows never leave the warehouse; the shadow sees the shape only."""
+    conn.execute("INSERT INTO landing.orders VALUES (1, 'a', 2.0, NULL, NULL)")
+    write(
+        project, "silver", "counted",
+        "@config materialized=table, schema=silver\n\n"
+        "SELECT COUNT(*) AS n FROM landing.orders\n",
+    )
+    result = bind_project(conn, project)
+    assert messages(result, "silver.counted") == []
+    # The bind pass reports shapes, not values: it must not have read a row.
+    assert result.schemas["silver.counted"] == [("n", "BIGINT")]
+
+
+def test_a_read_only_connection_is_enough(project, tmp_path):
+    """The catalog source is read only; the shadow does the binding."""
+    path = str(project / "warehouse.duckdb")
+    writer = duckdb.connect(path)
+    ensure_meta_table(writer)
+    writer.execute("CREATE SCHEMA IF NOT EXISTS landing")
+    writer.execute("CREATE TABLE landing.orders (order_id INTEGER, amount DOUBLE)")
+    writer.close()
+
+    write(
+        project, "silver", "ok",
+        "@config materialized=table, schema=silver\n\n"
+        "SELECT order_id, amount FROM landing.orders\n",
+    )
+    reader = duckdb.connect(path, read_only=True)
+    try:
+        result = bind_project(reader, project)
+    finally:
+        reader.close()
+    assert result.errors == {}
+    assert result.schemas["silver.ok"] == [
+        ("order_id", "INTEGER"),
+        ("amount", "DOUBLE"),
+    ]
+
+
+def test_concurrent_binds_do_not_interfere(conn, project):
+    """Each call owns its shadow, so parallel binds cannot collide."""
+    import threading
+
+    write(
+        project, "silver", "a",
+        "@config materialized=table, schema=silver\n\n"
+        "SELECT order_id FROM landing.orders\n",
+    )
+    write(
+        project, "silver", "b",
+        "@config materialized=table, schema=silver\n\n"
+        "SELECT customer FROM landing.orders\n",
+    )
+    models = discover_models(project / "transform")
+    results: list = []
+    errors: list = []
+    lock = threading.Lock()
+
+    def run(target: str) -> None:
+        try:
+            chain = ancestor_closure(models, [target])
+            bound = bind_models(conn.cursor(), chain, project_dir=project)
+            with lock:
+                results.append((target, bound))
+        except Exception as e:  # pragma: no cover - the failure we are testing for
+            with lock:
+                errors.append(e)
+
+    threads = [
+        threading.Thread(target=run, args=(name,))
+        for name in ("silver.a", "silver.b") * 4
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    assert len(results) == 8
+    for target, result in results:
+        assert result.errors == {}, (target, result.errors)
+        assert set(result.schemas) == {target}
+
+
+# --- lockdown ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "label,sql",
+    [
+        ("read_csv", "SELECT * FROM read_csv('/etc/passwd')"),
+        ("read_text", "SELECT * FROM read_text('/etc/passwd')"),
+        ("glob", "SELECT * FROM glob('/*')"),
+        ("read_json", "SELECT * FROM read_json_auto('/etc/passwd')"),
+    ],
+)
+def test_file_readers_cannot_bind_in_the_shadow(conn, project, label, sql):
+    write(project, "silver", "probe", f"@config schema=silver\n\n{sql}\n")
+    result = bind_project(conn, project)
+    assert messages(result, "silver.probe") == [], label
+    assert "silver.probe" not in result.schemas, label
+    assert any(
+        "file functions are not available" in w.message for w in result.warnings
+    ), (label, [w.message for w in result.warnings])
+
+
+def test_a_replacement_scan_finds_no_file(conn, project):
+    """``FROM '/etc/passwd'`` is a file read with no function call to catch.
+
+    With external access off DuckDB never reaches the replacement scan, so it
+    is an ordinary catalog miss and no file contents become column names.
+    """
+    write(
+        project, "silver", "probe",
+        "@config schema=silver\n\nSELECT * FROM '/etc/passwd'\n",
+    )
+    result = bind_project(conn, project)
+    found = messages(result, "silver.probe")
+    assert found and "does not exist" in found[0], found
+    assert "silver.probe" not in result.schemas
+    assert "root:" not in found[0]
+
+
+@pytest.mark.parametrize(
+    "label,statement",
+    [
+        ("ATTACH", "ATTACH '{path}' AS ex"),
+        ("COPY TO", "COPY (SELECT 1 AS a) TO '{path}'"),
+        ("INSTALL", "INSTALL httpfs"),
+        ("LOAD", "LOAD httpfs"),
+        ("unlock", "SET enable_external_access = true"),
+        ("relock", "SET lock_configuration = false"),
+    ],
+)
+def test_locked_shadow_refuses_escape_statements(tmp_path, label, statement):
+    """The statements the shadow must refuse, run directly against one."""
+    from havn.engine.transform.bind import _lock_down
+
+    shadow = duckdb.connect(":memory:")
+    try:
+        _lock_down(shadow)
+        target = tmp_path / "escape.out"
+        with pytest.raises(duckdb.Error):
+            shadow.execute(statement.format(path=str(target)))
+        assert not target.exists(), label
+    finally:
+        shadow.close()
+
+
+def test_a_file_reading_model_is_a_warning_not_an_error(conn, project, tmp_path):
+    """A legitimate read_parquet model is skipped with a clear diagnostic."""
+    write(
+        project, "silver", "from_file",
+        "@config materialized=table, schema=silver\n\n"
+        "SELECT * FROM read_parquet('data/x.parquet')\n",
+    )
+    write(
+        project, "gold", "downstream",
+        "@config materialized=table, schema=gold\n\n"
+        "SELECT * FROM silver.from_file\n",
+    )
+    result = bind_project(conn, project)
+
+    assert result.errors == {}
+    assert result.ok is True
+    assert "silver.from_file" not in result.schemas
+    warnings = [w.message for w in result.warnings]
+    assert (
+        "silver.from_file: file functions are not available in the bind pass; "
+        "this model is skipped" in warnings
+    ), warnings
+    # The downstream model is not blamed for the upstream being skipped.
+    assert "gold.downstream: upstream silver.from_file was skipped by the bind pass" in warnings
+    assert all(w.kind == "skipped" for w in result.warnings)
+
+
+def test_a_buffer_cannot_write_to_the_warehouse_through_the_shadow(conn, project):
+    """The multi-statement escape: a second statement must reach nothing."""
+    from havn.engine.transform.bind import model_from_buffer
+
+    buffer = model_from_buffer(
+        "@config schema=scratch\n\n"
+        "SELECT 1 AS a; CREATE TABLE landing.pwned AS SELECT 99\n",
+        path="transform/silver/probe.sql",
+        transform_dir=project / "transform",
+    )
+    bind_models(conn, [buffer], project_dir=project)
+    existing = {
+        r[0]
+        for r in conn.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'landing'"
+        ).fetchall()
+    }
+    assert "pwned" not in existing
+
+
 # --- cleanup -----------------------------------------------------------------
 
 

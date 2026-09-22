@@ -236,6 +236,34 @@ nothing is built. Three consequences are worth knowing:
   loaded extensions resolve inside the shadow, so they are not reported as
   unknown functions.
 
+### How the shadow is isolated
+
+The shadow is a private `:memory:` DuckDB database of its own, opened for the
+call and closed at the end of it. It is never attached to the warehouse, and
+no model SQL ever runs against a warehouse connection. The base objects your
+models read (landing tables, seeds, sources, models outside the bound chain)
+are recreated in it as **empty** tables with the real column types, read from
+`information_schema`; an empty table binds exactly like a populated one, so no
+warehouse row is ever copied in. The warehouse connection is only a catalog
+source, and a read-only one is enough.
+
+Before a single line of model SQL runs, the shadow loads its extensions,
+registers your macros, and then turns `enable_external_access` off and locks
+its configuration. From that point `read_csv`, `read_text`, `glob`, a bare
+`FROM '<path>'`, `COPY ... TO`, `ATTACH`, `INSTALL`/`LOAD` and any attempt to
+re-enable the switch all fail inside the shadow. That matters because
+`POST /api/bind` takes an unsaved buffer from anyone with **read** permission:
+the buffer is validated as a read-only single statement first, by the same
+check `/api/query` uses, and is never bound at all if it fails. So a bind
+request cannot write to the warehouse, cannot read or write a server file, and
+cannot be a way to run SQL.
+
+The cost is that a model which legitimately reads a file, such as
+`read_parquet('data/x.parquet')`, cannot be bound. Those are reported as a
+warning naming the model -- *file functions are not available in the bind
+pass; this model is skipped* -- and the model and anything downstream of it are
+skipped rather than reported as errors.
+
 Findings are reported as **bind errors**, with a line number:
 
 ```
@@ -283,7 +311,16 @@ will succeed.
   steps, the gate runs after ingest and before the first transform, so the
   landing tables it needs are already there.
 - `POST /api/bind`, which the editor calls on a debounce for live markers.
-- The `bind_model` MCP tool, for agents editing SQL.
+  Read permission, and the buffer goes through the read-only validator first;
+  a rejected buffer comes back as HTTP 200 with `"ok": false` and one error
+  carrying the reason.
+- The `bind_model` MCP tool, for agents editing SQL. SQL supplied to the tool
+  goes through the same validator; binding a model by name does not, because
+  that is the project's own file.
+
+`havn validate --bind` skips the read-only validator: that is a local, trusted
+user binding files they wrote, which may legitimately read a parquet file. It
+still gets the isolated, locked-down shadow.
 
 ## Combined Validation
 
