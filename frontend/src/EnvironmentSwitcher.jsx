@@ -48,47 +48,85 @@ export default function EnvironmentSwitcher({ showConfirm }) {
   // Single environment — just show a label, no dropdown
   if (env.available.length === 1) {
     return (
-      <div style={st.badge}>
-        <span style={st.dot} />
-        {env.active}
+      <div style={st.row}>
+        <div style={st.badge}>
+          <span style={st.dot} />
+          {env.active}
+        </div>
+        <DeferBadge defer={env.defer} />
       </div>
     );
   }
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen(!open)}
-        disabled={switching}
-        style={st.trigger}
-        aria-label="Switch environment"
-        aria-expanded={open}
-      >
-        <span style={st.dot} />
-        <span>{env.active}</span>
-        <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginLeft: 2 }}>
-          <path d="M1.5 3L4 5.5L6.5 3" />
-        </svg>
-      </button>
-      {open && (
-        <div style={st.dropdown}>
-          {env.available.map((e) => (
-            <button
-              key={e}
-              onClick={() => handleSwitch(e)}
-              style={e === env.active ? st.itemActive : st.item}
-            >
-              {e === env.active && <span style={st.check}>&#10003;</span>}
-              <span>{e}</span>
-            </button>
-          ))}
-        </div>
-      )}
+    <div style={st.row}>
+      <div ref={ref} style={{ position: "relative" }}>
+        <button
+          onClick={() => setOpen(!open)}
+          disabled={switching}
+          style={st.trigger}
+          aria-label="Switch environment"
+          aria-expanded={open}
+        >
+          <span style={st.dot} />
+          <span>{env.active}</span>
+          <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginLeft: 2 }}>
+            <path d="M1.5 3L4 5.5L6.5 3" />
+          </svg>
+        </button>
+        {open && (
+          <div style={st.dropdown}>
+            {env.available.map((e) => (
+              <button
+                key={e}
+                onClick={() => handleSwitch(e)}
+                style={e === env.active ? st.itemActive : st.item}
+              >
+                {e === env.active && <span style={st.check}>&#10003;</span>}
+                <span>{e}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <DeferBadge defer={env.defer} />
+    </div>
+  );
+}
+
+/**
+ * The active environment's defer target, if it has one.
+ *
+ * The dot is green when the target can be attached read-only right now and
+ * amber when it cannot, which is what decides whether the next `--defer` run
+ * starts at all. `lockable` is probed by opening the file, so it describes
+ * this instant; the tooltip points at `--defer-snapshot` for the amber case.
+ */
+export function DeferBadge({ defer }) {
+  if (!defer || !defer.target) return null;
+  const readable = !!defer.lockable;
+  const where = defer.path ? ` (${defer.path})` : "";
+  const title = readable
+    ? `Defer target: ${defer.target}${where}. Unbuilt upstreams are read from it. `
+      + "Readable now, so `havn transform --defer` will attach it read-only."
+    : `Defer target: ${defer.target}${where}. Not readable right now`
+      + `${defer.reason ? `: ${defer.reason}` : ""}. DuckDB refuses a read-only attach `
+      + "while another process holds the file open for writing. Use "
+      + "`havn transform --defer-snapshot` to read through a copy instead.";
+  return (
+    <div style={st.badge} title={title} data-testid="defer-badge">
+      <span
+        style={{ ...st.dot, background: readable ? "var(--havn-green)" : "var(--havn-yellow)" }}
+        data-testid="defer-dot"
+        data-state={readable ? "readable" : "locked"}
+      />
+      defer: {defer.target}
     </div>
   );
 }
 
 const st = {
+  row: { display: "inline-flex", alignItems: "center", gap: "6px" },
   badge: {
     display: "inline-flex", alignItems: "center", gap: "5px",
     padding: "3px 8px",
