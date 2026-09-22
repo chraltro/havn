@@ -558,26 +558,33 @@ def defer_session(
         if on_message is not None:
             on_message(message)
 
-    attach_defer_target(conn, path, alias=spec.alias)
-    say(f"defer: reading unbuilt models from '{spec.target}' ({origin})")
-
-    local = catalog_objects(conn) | {m.lower() for m in spec.local_models}
-
-    def report_redirects(redirected: list[str]) -> None:
-        say("defer: " + ", ".join(f"{r} -> {spec.alias}.{r}" for r in redirected))
-
-    rewriter = make_defer_rewriter(
-        conn,
-        spec.alias,
-        local,
-        report=report_redirects if spec.verbose else None,
-    )
-    _install_rewriter(rewriter)
+    # The snapshot copy is a whole warehouse in a temp dir, so its cleanup
+    # guards everything that follows, not just the body of the session. An
+    # ATTACH that fails -- the target went away, the alias is taken -- raises
+    # before the manager ever yields, and a cleanup that lived only in the
+    # inner finally would never run for it.
     try:
-        yield rewriter
+        attach_defer_target(conn, path, alias=spec.alias)
+        say(f"defer: reading unbuilt models from '{spec.target}' ({origin})")
+
+        local = catalog_objects(conn) | {m.lower() for m in spec.local_models}
+
+        def report_redirects(redirected: list[str]) -> None:
+            say("defer: " + ", ".join(f"{r} -> {spec.alias}.{r}" for r in redirected))
+
+        rewriter = make_defer_rewriter(
+            conn,
+            spec.alias,
+            local,
+            report=report_redirects if spec.verbose else None,
+        )
+        _install_rewriter(rewriter)
+        try:
+            yield rewriter
+        finally:
+            _install_rewriter(None)
+            detach_defer_target(conn, alias=spec.alias)
     finally:
-        _install_rewriter(None)
-        detach_defer_target(conn, alias=spec.alias)
         if snapshot is not None and snapshot.cleanup_dir is not None:
             shutil.rmtree(snapshot.cleanup_dir, ignore_errors=True)
 

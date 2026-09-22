@@ -511,6 +511,38 @@ def test_defer_snapshot_copies_the_database_when_it_is_free(project, prod_db):
             shutil.rmtree(snapshot.cleanup_dir, ignore_errors=True)
 
 
+def test_failed_attach_does_not_leak_the_snapshot_copy(
+    project, prod_db, dev_conn, monkeypatch
+):
+    """A snapshot is a whole warehouse in /tmp; a failed ATTACH must not keep it.
+
+    The copy is made before the attach, and the attach can fail for reasons
+    that have nothing to do with the copy. The cleanup has to cover that gap.
+    """
+    from havn.engine import defer as defer_mod
+
+    captured: dict[str, Path] = {}
+    real_snapshot = defer_mod.snapshot_defer_target
+
+    def spy(path, *, project_dir=None):
+        snapshot = real_snapshot(path, project_dir=project_dir)
+        captured["dir"] = snapshot.cleanup_dir
+        return snapshot
+
+    def refuse(*args, **kwargs):
+        raise DeferError("attach refused")
+
+    monkeypatch.setattr(defer_mod, "snapshot_defer_target", spy)
+    monkeypatch.setattr(defer_mod, "attach_defer_target", refuse)
+
+    with pytest.raises(DeferError):
+        with defer_session(dev_conn, _spec(project, prod_db, snapshot=True)):
+            pass
+
+    assert captured.get("dir") is not None
+    assert not captured["dir"].exists(), "the snapshot copy was left behind"
+
+
 def test_defer_snapshot_without_a_backup_says_so(project, prod_db):
     from havn.engine.defer import snapshot_defer_target
 
