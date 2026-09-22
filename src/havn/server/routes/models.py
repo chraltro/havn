@@ -157,6 +157,19 @@ def run_transform_endpoint(
     except DeferError as e:
         raise HTTPException(400, str(e)) from e
 
+    # Resolve the selection here so a mistyped selector is an error rather
+    # than an empty success. `run_transform` prints its warnings to the
+    # server's console and returns {}, which reached the caller as 200 with
+    # no results: indistinguishable from "everything was already up to date".
+    warnings = _selection_warnings(conn, req)
+    if warnings is not None and warnings["selected"] == 0:
+        reasons = "; ".join(warnings["warnings"])
+        raise HTTPException(
+            400,
+            f"No models matched: {reasons}" if reasons
+            else "No models matched the given selectors.",
+        )
+
     try:
         results = run_transform(
             conn,
@@ -167,10 +180,49 @@ def run_transform_endpoint(
             batch_range=batch_range,
             defer=defer_spec,
         )
-        return {"results": results}
     except Exception as e:
         logger.exception("Transform failed")
         raise HTTPException(400, f"Transform failed: {e}")
+
+    body: dict = {"results": results}
+    if warnings and warnings["warnings"]:
+        # Some selectors matched and some did not. The run went ahead, and the
+        # caller is told which of its selectors did nothing.
+        body["warnings"] = warnings["warnings"]
+    return body
+
+
+def _selection_warnings(conn, req: TransformRequest) -> dict | None:
+    """Resolve this request's selectors, or None when it selects everything.
+
+    Returns ``{"selected": <count>, "warnings": [...]}``. A failure to resolve
+    is reported as no information rather than as an error: the run itself is
+    the authority, and this check exists only to turn a silent empty result
+    into a 400.
+    """
+    if not req.targets and not req.exclude:
+        return None
+    if req.targets and list(req.targets) == ["all"]:
+        return None
+    from havn.engine.selectors import select_models
+
+    project_dir = _get_project_dir()
+    try:
+        models = _discover_models_cached(project_dir / "transform")
+        selection = select_models(
+            req.targets or ["all"],
+            models,
+            conn=conn,
+            project_dir=project_dir,
+            exclude=list(req.exclude) if req.exclude else None,
+        )
+    except Exception as e:
+        logger.debug("Could not pre-resolve the transform selection: %s", e)
+        return None
+    return {
+        "selected": len(selection.selected),
+        "warnings": list(selection.warnings),
+    }
 
 
 # --- Diff ---
