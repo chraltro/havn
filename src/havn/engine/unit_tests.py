@@ -720,6 +720,20 @@ def _run_case(
 
 
 def _prepare_connection(conn: duckdb.DuckDBPyConnection, project_dir: Path) -> None:
+    """Set up, then lock down, the in-memory connection a test case runs on.
+
+    A unit test runs the model's own SQL against fixture rows, and on the
+    server that SQL can come from a file anyone with write permission just
+    saved. Nothing about a mock run needs the disk or the network: the inputs
+    are fixture rows and the output is compared in memory. So once the
+    extensions and macros are in place, external access is turned off and the
+    configuration is locked, and a model under test can no longer reach a
+    server file through ``read_csv``, ``read_text`` or ``glob``, write one
+    with ``COPY ... TO``, or ``ATTACH`` another database.
+
+    Everything that needs the outside world therefore has to happen before the
+    last two statements.
+    """
     from havn.engine.macros import register_macros
 
     # Single-threaded with insertion order preserved: `ordered: true` compares
@@ -735,6 +749,8 @@ def _prepare_connection(conn: duckdb.DuckDBPyConnection, project_dir: Path) -> N
         except Exception:
             logger.debug("Extension %s not available for unit tests", ext)
     register_macros(conn, project_dir)
+    conn.execute("SET enable_external_access = false")
+    conn.execute("SET lock_configuration = true")
 
 
 def _selects_star(sql: str) -> bool:
