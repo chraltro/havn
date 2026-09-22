@@ -823,13 +823,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ model, column, new_name: newName, force, hashes }),
     }),
-  /** Save several files as one unit: all of them land, or none do. */
-  saveFiles: (files: { path: string; content: string; expected_hash?: string }[]) =>
-    request<{ status: string; files: { path: string; file_hash: string }[] }>("/files", {
-      method: "PUT",
-      body: JSON.stringify({ files }),
-    }),
-
   // Transform
   runTransform: (targets: string[] | null = null, force: boolean = false) =>
     request<TransformResult>("/transform", {
