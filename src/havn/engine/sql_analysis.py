@@ -568,6 +568,7 @@ def fetch_column_catalog(conn: Any) -> dict[str, list[str]]:
         rows = conn.execute(
             "SELECT table_schema || '.' || table_name, column_name "
             "FROM information_schema.columns "
+            "WHERE table_catalog = current_database() "
             "ORDER BY table_schema, table_name, ordinal_position"
         ).fetchall()
     except Exception as e:

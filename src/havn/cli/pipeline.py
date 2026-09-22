@@ -405,7 +405,8 @@ def transform(
                     try:
                         exists = conn.execute(
                             "SELECT COUNT(*) FROM information_schema.tables "
-                            "WHERE table_schema = ? AND table_name = ?",
+                            "WHERE table_catalog = current_database() "
+                            "AND table_schema = ? AND table_name = ?",
                             [parts[0], parts[1]],
                         ).fetchone()[0]
                         if exists:

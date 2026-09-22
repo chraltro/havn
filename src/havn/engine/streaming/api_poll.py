@@ -222,7 +222,8 @@ def _upsert_rows(
 
     exists = conn.execute(
         "SELECT COUNT(*) FROM information_schema.tables "
-        "WHERE table_schema = ? AND table_name = ?",
+        "WHERE table_catalog = current_database() "
+        "AND table_schema = ? AND table_name = ?",
         [schema, table],
     ).fetchone()[0] > 0
 

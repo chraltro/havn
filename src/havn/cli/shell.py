@@ -405,7 +405,8 @@ def _dispatch_slash(line: str, runner, state: _ShellState) -> bool:
         _run_and_render(
             runner,
             "SELECT schema_name FROM information_schema.schemata "
-            "WHERE schema_name NOT IN ('information_schema', '_havn', 'pg_catalog', 'main') "
+            "WHERE catalog_name = current_database() "
+            "AND schema_name NOT IN ('information_schema', '_havn', 'pg_catalog', 'main') "
             "ORDER BY 1",
             state,
         )
@@ -420,7 +421,8 @@ def _dispatch_slash(line: str, runner, state: _ShellState) -> bool:
         sql = (
             "SELECT table_schema, table_name "
             "FROM information_schema.tables "
-            f"WHERE table_type = '{ttype}' "
+            "WHERE table_catalog = current_database() "
+            f"AND table_type = '{ttype}' "
             f"AND table_schema NOT IN ('information_schema', '_havn'){schema_clause} "
             "ORDER BY 1, 2"
         )
@@ -437,7 +439,8 @@ def _dispatch_slash(line: str, runner, state: _ShellState) -> bool:
         sql = (
             "SELECT column_name, data_type, is_nullable "
             "FROM information_schema.columns "
-            f"WHERE table_schema = '{_sanitize(schema)}' "
+            "WHERE table_catalog = current_database() "
+            f"AND table_schema = '{_sanitize(schema)}' "
             f"AND table_name = '{_sanitize(table)}' "
             "ORDER BY ordinal_position"
         )

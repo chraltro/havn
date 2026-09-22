@@ -520,7 +520,8 @@ class MCPServer:
         cols = self._execute_readonly(
             "SELECT column_name, data_type, is_nullable "
             "FROM information_schema.columns "
-            f"WHERE table_schema = '{schema}' AND table_name = '{name}' "
+            "WHERE table_catalog = current_database() "
+            f"AND table_schema = '{schema}' AND table_name = '{name}' "
             "ORDER BY ordinal_position",
             max_rows=_MAX_QUERY_ROWS,
         )

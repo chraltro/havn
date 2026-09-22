@@ -779,8 +779,13 @@ def evaluate_contract(
             error=str(e),
         )
 
+    # Scoped to the current database: information_schema spans every attached
+    # one, so under --defer a model only the defer target holds looked present
+    # and the contract ran against the target's copy.
     exists = conn.execute(
-        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
+        "SELECT COUNT(*) FROM information_schema.tables "
+        "WHERE table_catalog = current_database() "
+        "AND table_schema = ? AND table_name = ?",
         [schema, name],
     ).fetchone()[0] > 0
 

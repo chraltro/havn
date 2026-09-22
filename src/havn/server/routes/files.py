@@ -410,7 +410,8 @@ def _drop_db_object(full_path: Path, file_path: str) -> str | None:
         # Look up the object type in information_schema
         rows = conn.execute(
             "SELECT table_type FROM information_schema.tables "
-            "WHERE table_schema = ? AND table_name = ?",
+            "WHERE table_catalog = current_database() "
+            "AND table_schema = ? AND table_name = ?",
             [schema, name],
         ).fetchall()
 

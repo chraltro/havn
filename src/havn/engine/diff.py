@@ -96,7 +96,8 @@ def _get_column_info(
     try:
         rows = conn.execute(
             "SELECT column_name, data_type FROM information_schema.columns "
-            "WHERE table_schema = ? AND table_name = ? "
+            "WHERE table_catalog = current_database() "
+            "AND table_schema = ? AND table_name = ? "
             "ORDER BY ordinal_position",
             [schema, table],
         ).fetchall()
@@ -174,11 +175,16 @@ def _serialize(value):
 
 
 def _table_exists(conn: duckdb.DuckDBPyConnection, schema: str, table: str) -> bool:
-    """Check if a table/view exists in the warehouse."""
+    """Check if a table/view exists in this warehouse.
+
+    Scoped to the current database: information_schema spans every attached
+    one, so a model only the defer target holds looked present here.
+    """
     try:
         result = conn.execute(
             "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = ? AND table_name = ?",
+            "WHERE table_catalog = current_database() "
+            "AND table_schema = ? AND table_name = ?",
             [schema, table],
         ).fetchone()
         return result[0] > 0 if result else False

@@ -259,7 +259,9 @@ def _evaluate_assertion(
     if re.search(r"\brow_count\b", expr):
         has_col = conn.execute(
             "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = ? AND table_name = ? AND lower(column_name) = 'row_count'",
+            "WHERE table_catalog = current_database() "
+            "AND table_schema = ? AND table_name = ? "
+            "AND lower(column_name) = 'row_count'",
             [model.schema, model.name],
         ).fetchone()[0]
         if not has_col:
@@ -298,9 +300,15 @@ def profile_model(
     table = model.full_name
 
     row_count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    # Scoped to the current database: information_schema spans every attached
+    # one, and a deferred run has the defer target attached. Without the
+    # filter a model the target also holds was profiled with both catalogs'
+    # columns (twice the column_count), or with a column that exists only
+    # there, which then failed the profile of a model that built fine.
     cols = conn.execute(
         "SELECT column_name FROM information_schema.columns "
-        "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+        "WHERE table_catalog = current_database() "
+        "AND table_schema = ? AND table_name = ? ORDER BY ordinal_position",
         [model.schema, model.name],
     ).fetchall()
     column_names = [c[0] for c in cols]

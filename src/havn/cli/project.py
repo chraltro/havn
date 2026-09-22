@@ -491,7 +491,8 @@ def status(
         try:
             rows = conn.execute(
                 "SELECT table_schema, table_name FROM information_schema.tables "
-                "WHERE table_schema NOT IN ('information_schema', '_havn') "
+                "WHERE table_catalog = current_database() "
+                "AND table_schema NOT IN ('information_schema', '_havn') "
                 "AND table_schema NOT LIKE 'pg_%' "
                 "AND table_schema NOT LIKE '__ducklake%' "
                 "AND table_name NOT LIKE 'ducklake_%'"
@@ -710,7 +711,8 @@ def context(
                 """
                 SELECT table_schema, table_name, table_type
                 FROM information_schema.tables
-                WHERE table_schema NOT IN ('information_schema', '_havn')
+                WHERE table_catalog = current_database()
+                  AND table_schema NOT IN ('information_schema', '_havn')
                 ORDER BY table_schema, table_name
                 """
             ).fetchall()

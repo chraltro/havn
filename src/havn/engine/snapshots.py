@@ -282,7 +282,8 @@ def _compute_checksum(
             schema, name = "main", model_name
         cols = warehouse_conn.execute(
             "SELECT column_name, data_type FROM information_schema.columns "
-            "WHERE table_schema = ? AND table_name = ? "
+            "WHERE table_catalog = current_database() "
+            "AND table_schema = ? AND table_name = ? "
             "ORDER BY ordinal_position",
             [schema, name],
         ).fetchall()
@@ -315,7 +316,8 @@ def _compute_schema_hash(
 
     cols = warehouse_conn.execute(
         "SELECT column_name, data_type FROM information_schema.columns "
-        "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+        "WHERE table_catalog = current_database() "
+        "AND table_schema = ? AND table_name = ? ORDER BY ordinal_position",
         [schema, name],
     ).fetchall()
 
