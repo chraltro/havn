@@ -775,7 +775,15 @@ export const api = {
     request(`/files/${source}/move`, { method: "POST", body: JSON.stringify({ destination }) }),
 
   // Models
-  listModels: () => request<ModelInfo[]>("/models"),
+  /**
+   * List models, optionally narrowed by a graph selector (`+gold.orders`,
+   * `tag:daily`, `state:modified+`, ...). The selector is resolved server
+   * side by the same code `havn ls` uses.
+   */
+  listModels: (select?: string) =>
+    request<ModelInfo[]>(
+      select ? `/models?select=${encodeURIComponent(select)}` : "/models",
+    ),
 
   // Editor diagnostics
   /** Shadow-bind an unsaved buffer: diagnostics plus inferred output/upstream schemas. */

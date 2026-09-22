@@ -15,6 +15,8 @@ interface PipelineState {
   runLint: (fix?: boolean) => Promise<void>;
   runCurrentScript: (scriptPath: string) => Promise<void>;
   runSingleModel: (modelName: string) => Promise<void>;
+  /** Run a graph selector (`+gold.orders`, `tag:daily`, ...) as one target. */
+  runSelection: (selector: string) => Promise<void>;
   runContracts: () => Promise<void>;
   runPipeline: (steps?: string[], force?: boolean) => Promise<void>;
 }
@@ -555,6 +557,16 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
     ),
   [startAndConnect]);
 
+  // A selector goes through as a single target: the server resolves it with
+  // the same code `havn transform <selector>` uses. No --force, because a
+  // selector already says what to rebuild.
+  const runSelection = useCallback((selector: string) =>
+    startAndConnect(
+      () => api.startTransform([selector], false),
+      `Running transform for ${selector}...`,
+    ),
+  [startAndConnect]);
+
   const runContracts = useCallback(() =>
     startAndConnect(
       () => api.startContracts(),
@@ -585,6 +597,7 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
         runLint,
         runCurrentScript,
         runSingleModel,
+        runSelection,
         runContracts,
         runPipeline,
       }}

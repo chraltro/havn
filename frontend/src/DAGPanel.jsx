@@ -1,6 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { api } from "./api";
 import { useHintTriggerFn } from "./HintSystem";
+import { usePipeline } from "./PipelineContext";
+
+/** Where the selector grammar is written down, for the input's tooltip. */
+const SELECTOR_HELP =
+  "Graph selector: +x, x+, +x+, n+x, @x, 'gold.fct_*', tag:daily, path:, "
+  + "config.<key>:, package:, state:modified+. "
+  + "Grammar: docs/transforms.md#selecting-models";
 
 const SCHEMA_COLORS = {
   landing: "#7c8fa0",
@@ -378,6 +385,15 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
   const [dagSearch, setDagSearch] = useState("");
   const [selectedNode, setSelectedNode] = useState(null);
 
+  // Selector preview: null means "no preview active", a Set means "these are
+  // the nodes the selector matched". An empty Set is a real answer (nothing
+  // matched) and still dims the graph, which is the honest reading.
+  const [selector, setSelector] = useState("");
+  const [selectorMatches, setSelectorMatches] = useState(null);
+  const [selectorError, setSelectorError] = useState(null);
+  const [previewing, setPreviewing] = useState(false);
+  const { runSelection } = usePipeline();
+
   // Column lineage state
   const [columnLineage, setColumnLineage] = useState(null); // {model, columns, depends_on}
   const [highlightedColumn, setHighlightedColumn] = useState(null); // column name being traced
@@ -555,6 +571,8 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
     if (!layout || !canvasRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
+    // jsdom (and any environment without a 2D backend) hands back null here.
+    if (!ctx) return;
     const { nodes, edges } = dag;
     const { positions, edgeRoutes } = layout;
 
@@ -691,6 +709,7 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
       const isHovered = hovered === n.id;
       const isSelected = selectedNode === n.id;
       const isSearchMatch = dagSearch && n.id.toLowerCase().includes(dagSearch.toLowerCase());
+      const isSelectorMatch = selectorMatches ? selectorMatches.has(n.id) : false;
       const isTable = n.type === "table";
       // Ephemeral models are never materialized: they are inlined into their
       // consumers as a CTE. A dashed outline says "nothing on disk here".
@@ -708,6 +727,8 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
         ctx.globalAlpha = 0.15;
       } else if (dagSearch && !isSearchMatch) {
         ctx.globalAlpha = 0.15;
+      } else if (selectorMatches && !isSelectorMatch) {
+        ctx.globalAlpha = 0.15;
       } else if (lineageSet && !isHovered) {
         ctx.globalAlpha = lineageSet.has(n.id) ? 1 : 0.25;
       } else {
@@ -719,8 +740,9 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
       // rather than a generic theme accent. Search matches stay accent-colored
       // so they read as a distinct "found it" affordance.
       ctx.fillStyle = isHovered || isSelected ? getCV("--havn-bg") : getCV("--havn-bg-secondary");
-      ctx.strokeStyle = isSearchMatch ? getCV("--havn-accent") : color;
-      ctx.lineWidth = isHovered || isSelected || isSearchMatch ? 2.5 : (isTable ? 2 : 1.5);
+      ctx.strokeStyle = isSearchMatch || isSelectorMatch ? getCV("--havn-accent") : color;
+      ctx.lineWidth =
+        isHovered || isSelected || isSearchMatch || isSelectorMatch ? 2.5 : (isTable ? 2 : 1.5);
 
       const r = 7;
       if (isHovered || isSelected) {
@@ -810,7 +832,7 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
 
     ctx.globalAlpha = 1;
     ctx.restore();
-  }, [dag, layout, hovered, rewindMode, currentSnaps, prevSnaps, selectedNode, scale, offsetX, offsetY, dagSearch, columnEdgeSet]);
+  }, [dag, layout, hovered, rewindMode, currentSnaps, prevSnaps, selectedNode, scale, offsetX, offsetY, dagSearch, columnEdgeSet, selectorMatches]);
 
   useEffect(() => {
     draw();
@@ -931,6 +953,28 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
     setScale(newScale);
   }
 
+  async function handlePreviewSelector() {
+    const text = selector.trim();
+    if (!text) { setSelectorMatches(null); setSelectorError(null); return; }
+    setPreviewing(true);
+    setSelectorError(null);
+    try {
+      const matched = await api.listModels(text);
+      setSelectorMatches(new Set((matched || []).map((m) => m.full_name)));
+    } catch (e) {
+      setSelectorMatches(null);
+      setSelectorError(e.message || "Selector failed");
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
+  function clearSelector() {
+    setSelector("");
+    setSelectorMatches(null);
+    setSelectorError(null);
+  }
+
   async function handleRestore(runId, modelName) {
     // Use the app's themed dialog instead of a blocking native alert(); both
     // paths fall back to alert() only if showConfirm wasn't provided.
@@ -1009,6 +1053,45 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
                 style={{ padding: "3px 8px", background: "var(--havn-bg)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", outline: "none", width: 140 }}
               />
               {dagSearch && <button onClick={() => setDagSearch("")} style={{ background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", padding: 0, lineHeight: 1 }}>&times;</button>}
+            </div>
+          )}
+          {!rewindMode && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                value={selector}
+                onChange={(e) => setSelector(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handlePreviewSelector(); }}
+                placeholder="+gold.orders, tag:daily, state:modified+"
+                title={SELECTOR_HELP}
+                aria-label="Graph selector"
+                data-testid="dag-selector-input"
+                style={{ padding: "3px 8px", background: "var(--havn-bg)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", outline: "none", width: 230 }}
+              />
+              <button
+                onClick={handlePreviewSelector}
+                disabled={!selector.trim() || previewing}
+                style={styles.selectorBtn}
+                title={SELECTOR_HELP}
+              >
+                {previewing ? "…" : "Preview"}
+              </button>
+              <button
+                onClick={() => runSelection(selector.trim())}
+                disabled={!selector.trim()}
+                style={styles.selectorBtn}
+                title="Run havn transform with this selector as its target"
+              >
+                Run selection
+              </button>
+              {selectorMatches && (
+                <span style={styles.selectorCount} data-testid="dag-selector-count">
+                  {selectorMatches.size} matched
+                  <button onClick={clearSelector} style={{ background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", padding: "0 0 0 4px", lineHeight: 1 }} aria-label="Clear selector preview">&times;</button>
+                </span>
+              )}
+              {selectorError && (
+                <span style={styles.selectorError} data-testid="dag-selector-error">{selectorError}</span>
+              )}
             </div>
           )}
           <button
@@ -1127,6 +1210,10 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
             onMouseLeave={() => { setHovered(null); isPanning.current = false; }}
             onClick={handleClick}
             onWheel={handleWheel}
+            // The highlight itself is painted on the canvas, so this attribute
+            // is the only place it is observable from the DOM. It is what the
+            // preview test asserts on.
+            data-selector-matches={selectorMatches ? [...selectorMatches].sort().join(",") : undefined}
             style={{ ...styles.canvas, cursor: "grab", width: "100%", height: "100%" }}
           />
           {/* Zoom controls */}
@@ -1254,6 +1341,9 @@ const styles = {
   emptyHint: { fontSize: 12, color: "var(--havn-text-dim)", lineHeight: 1.6, textAlign: "center" },
   emptyCode: { fontFamily: "var(--havn-font-mono)", fontSize: 11, background: "var(--havn-bg-secondary)", padding: "1px 5px", borderRadius: "var(--havn-radius)", border: "1px solid var(--havn-border-light)" },
   rewindBtn: { border: "1px solid var(--havn-btn-border)", borderRadius: "var(--havn-radius-lg)", padding: "4px 12px", fontSize: 11, fontWeight: 500, cursor: "pointer" },
+  selectorBtn: { border: "1px solid var(--havn-btn-border)", borderRadius: "var(--havn-radius-lg)", padding: "4px 10px", fontSize: 11, fontWeight: 500, cursor: "pointer", background: "transparent", color: "var(--havn-text-secondary)" },
+  selectorCount: { display: "inline-flex", alignItems: "center", fontSize: 10, color: "var(--havn-text-dim)", fontFamily: "var(--havn-font-mono)", whiteSpace: "nowrap" },
+  selectorError: { fontSize: 10, color: "var(--havn-red)", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   sliderContainer: { display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: "1px solid var(--havn-border)", background: "var(--havn-bg-secondary)", fontSize: 12, flexShrink: 0 },
   zoomControls: { position: "absolute", top: 8, right: 8, display: "flex", gap: 3, alignItems: "center", background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius-lg)", padding: "3px 4px", zIndex: 10 },
   zoomBtn: { background: "none", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: 12, fontWeight: 600, width: 28, height: 24, display: "flex", alignItems: "center", justifyContent: "center" },
