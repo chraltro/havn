@@ -11,7 +11,7 @@ import textwrap
 
 import pytest
 
-from havn.lint.linter import lint, lint_file
+from havn.lint.linter import LintRefused, lint, lint_file
 
 # Line 5 references a table that is not in the FROM clause (RF01). Lines 1-2
 # are a modern `@config` header, and the `@assert` below the SQL is a
@@ -98,3 +98,56 @@ def test_lint_fix_keeps_the_directive_header(tmp_path):
     assert "@config materialized=table, schema=gold" in written
     assert "@description A model to fix" in written
     assert "bronze.t" in written
+
+
+# ---------------------------------------------------------------------------
+# Installed packages
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def package_project(tmp_path):
+    """A project whose transform dir sits inside an installed package."""
+    pkg = tmp_path / "havn_packages" / "crm"
+    transform_dir = pkg / "transform" / "gold"
+    transform_dir.mkdir(parents=True)
+    sql_file = transform_dir / "model.sql"
+    sql_file.write_text(MODEL_SQL)
+    return pkg, sql_file
+
+
+def test_fix_refuses_a_path_inside_havn_packages(package_project):
+    """`havn packages install` rebuilds the checkout, so a fix there is lost."""
+    pkg, sql_file = package_project
+    before = sql_file.read_text()
+
+    with pytest.raises(LintRefused, match="havn_packages"):
+        lint(pkg / "transform", fix=True)
+    with pytest.raises(LintRefused, match="havn_packages"):
+        lint_file(sql_file, pkg, fix=True)
+
+    assert sql_file.read_text() == before
+
+
+def test_checking_a_path_inside_havn_packages_is_allowed(package_project):
+    """Only the rewrite is refused; reading the file is harmless."""
+    pkg, sql_file = package_project
+    count, violations, fixed = lint(pkg / "transform", fix=False)
+    assert fixed == 0
+    assert count == len(violations)
+
+
+def test_cli_lint_fix_refuses_inside_havn_packages(tmp_path):
+    from typer.testing import CliRunner
+
+    from havn.cli import app
+
+    pkg = tmp_path / "havn_packages" / "crm"
+    (pkg / "transform" / "gold").mkdir(parents=True)
+    (pkg / "transform" / "gold" / "model.sql").write_text(MODEL_SQL)
+    (pkg / "project.yml").write_text("name: crm\ndatabase:\n  path: warehouse.duckdb\n")
+
+    result = CliRunner().invoke(app, ["lint", "--fix", "-p", str(pkg)])
+    assert result.exit_code == 1
+    assert "havn_packages" in result.output
+    assert "packages install" in result.output

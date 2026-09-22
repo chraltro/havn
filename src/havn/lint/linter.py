@@ -11,6 +11,37 @@ from havn.engine.sql_analysis import _META_PREFIXES, strip_config_comments
 
 console = Console()
 
+PACKAGES_DIRNAME = "havn_packages"
+
+
+class LintRefused(Exception):
+    """A lint run was asked to rewrite a file it must not rewrite."""
+
+
+def _in_installed_package(path: Path) -> bool:
+    """True when ``path`` sits inside an installed package checkout.
+
+    ``havn_packages/`` is gitignored and rebuilt by ``havn packages install``,
+    so a fix written there is lost on the next install and never reaches the
+    package's own repository.
+    """
+    return PACKAGES_DIRNAME in Path(path).parts
+
+
+def _refuse_fixing_packages(path: Path) -> None:
+    """Refuse a ``--fix`` aimed inside ``havn_packages/``.
+
+    Lint deliberately does not walk installed packages; this is the case where
+    the user points it at one anyway.
+    """
+    if not _in_installed_package(path):
+        return
+    raise LintRefused(
+        f"Refusing to fix {path}: it is inside {PACKAGES_DIRNAME}/, which "
+        "'havn packages install' rebuilds, so the fix would be lost. Fix it "
+        "in the package's own repository and bump the rev in project.yml."
+    )
+
 
 def _header_line_count(lines: list[str]) -> int:
     """Length of the leading run of blank and directive lines.
@@ -104,6 +135,9 @@ def lint(
     # Import here to avoid hard dependency at module level
     from sqlfluff.core import FluffConfig, Linter
 
+    if fix:
+        _refuse_fixing_packages(transform_dir)
+
     sql_files = sorted(transform_dir.rglob("*.sql"))
     if not sql_files:
         console.print("[yellow]No SQL files found in transform/[/yellow]")
@@ -187,6 +221,9 @@ def lint_file(
         file_content is the (possibly fixed) SQL content.
     """
     from sqlfluff.core import FluffConfig, Linter
+
+    if fix:
+        _refuse_fixing_packages(sql_file)
 
     sqlfluff_file = project_dir / ".sqlfluff"
     if sqlfluff_file.exists():

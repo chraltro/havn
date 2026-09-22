@@ -710,6 +710,7 @@ def lint(
     ``.sqlfluff`` file overrides both.
     """
     from havn.config import load_project
+    from havn.lint.linter import LintRefused
     from havn.lint.linter import lint as run_lint
     from havn.lint.linter import print_violations
 
@@ -721,13 +722,17 @@ def lint(
     mode = "style+correctness" if style else "correctness-only"
     console.print(f"[bold]{action} SQL files ({mode})...[/bold]")
 
-    count, violations, fixed = run_lint(
-        transform_dir,
-        fix=fix,
-        dialect=config.lint.dialect,
-        rules=config.lint.rules or None,
-        style=style,
-    )
+    try:
+        count, violations, fixed = run_lint(
+            transform_dir,
+            fix=fix,
+            dialect=config.lint.dialect,
+            rules=config.lint.rules or None,
+            style=style,
+        )
+    except LintRefused as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
 
     print_violations(violations)
 

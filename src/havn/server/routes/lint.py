@@ -64,14 +64,19 @@ def lint_file_endpoint(request: Request, req: LintFileRequest) -> dict:
     if file_path.suffix != ".sql":
         raise HTTPException(status_code=400, detail="Not a SQL file")
 
-    count, violations, fixed, new_content = lint_file(
-        file_path,
-        project_dir=project_dir,
-        fix=req.fix,
-        dialect=config.lint.dialect,
-        rules=config.lint.rules or None,
-        content=req.content,
-    )
+    from havn.lint.linter import LintRefused
+
+    try:
+        count, violations, fixed, new_content = lint_file(
+            file_path,
+            project_dir=project_dir,
+            fix=req.fix,
+            dialect=config.lint.dialect,
+            rules=config.lint.rules or None,
+            content=req.content,
+        )
+    except LintRefused as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {
         "count": count,
         "violations": violations,
