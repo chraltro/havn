@@ -21,14 +21,21 @@ Mechanics:
    ``information_schema.columns`` fetch on the caller's warehouse connection
    (read-only is fine: this pass only reads the catalog). An empty table binds
    exactly like a populated one, and no row ever leaves the warehouse.
-3. Load the extensions the caller's connection has and register the project's
-   macros, so the shadow resolves every name the warehouse would.
+3. Load the extensions the caller's connection has, register the project's
+   macros, then ``SET enable_external_access = false`` and
+   ``SET lock_configuration = true`` **before any user SQL runs**. From that
+   point on ``read_csv``, ``read_text``, ``glob``, ``COPY ... TO``, ``ATTACH``,
+   ``INSTALL``/``LOAD`` and re-enabling the switch all fail inside the shadow.
 4. ``CREATE OR REPLACE VIEW schema.name AS <model.query>`` in topological
    order, with the model's SQL verbatim. The shadow holds only the models and
    their base tables, so a stale built table in the warehouse cannot win over
    the fresh definition. That is the property that makes this reflect the file
    rather than the last build.
 5. ``DESCRIBE`` each view for its ``(name, type)`` pairs.
+
+A model that legitimately reads a file (``read_parquet('data/x.parquet')``)
+cannot bind under the lockdown. That is reported as a warning naming the
+model, not as an error, and the model is skipped.
 
 What it catches: wrong arity, unknown functions, operator overload failures,
 missing columns (including on upstreams that were never built), missing
@@ -66,14 +73,29 @@ _BARE_FUNCTION = re.compile(r"with name ([A-Za-z_][A-Za-z0-9_]*) does not exist"
 
 UNAVAILABLE_MESSAGE = "bind pass unavailable on this backend"
 
+# What the shadow says about a model it cannot bind because the model reads a
+# file. The lockdown is deliberate, so this is a warning, not an error.
+FILE_ACCESS_MESSAGE = (
+    "file functions are not available in the bind pass; this model is skipped"
+)
+
+# DuckDB's own wording when the lockdown refuses something.
+_FILE_ACCESS_MARKERS = (
+    "file system operations are disabled",
+    "Loading external extensions is disabled",
+    "the configuration has been locked",
+)
+
 # What a DuckDB type name may look like: MAP(VARCHAR, INTEGER), DECIMAL(10,2),
 # STRUCT(a INTEGER), INTEGER[], STRUCT("a b" INTEGER). Deliberately no single
 # quotes, semicolons or dashes, so the text cannot close the DDL it goes into.
 _TYPE_TEXT = re.compile(r'[A-Za-z_"][A-Za-z0-9_ ,()\[\]".]*')
 
-# Extensions the shadow loads up front. ``connect()`` installs nothing itself
-# (DuckDB auto-loads what a query needs); these are the statically linked ones,
-# and the rest is copied from whatever the caller's connection already has.
+# Extensions the shadow loads before it locks itself down. ``connect()``
+# installs nothing itself (DuckDB auto-loads what a query needs), but
+# auto-loading is exactly what ``enable_external_access = false`` prevents, so
+# the statically linked ones are loaded up front and the rest is copied from
+# whatever the caller's connection already has.
 _BASE_EXTENSIONS = ("json", "parquet", "icu")
 
 _EXTENSION_NAME = re.compile(r"[a-z0-9_]+")
@@ -124,7 +146,7 @@ def ancestor_closure(
     Binding one model from the editor must not bind the other 999 in the
     project. ``depends_on`` is already resolved at discovery, so the closure
     is a plain walk. Names that are not models (landing tables, seeds) drop
-    out here and are seeded into the shadow as views instead.
+    out here and are seeded into the shadow as empty typed tables instead.
     """
     by_name = {m.full_name: m for m in models}
     wanted: set[str] = set()
@@ -344,7 +366,9 @@ def _load_extensions(
 ) -> None:
     """Load into the shadow what the caller's connection has, plus the basics.
 
-    A missing ``json`` or ``spatial`` would otherwise produce a spurious
+    Must run before the lockdown: ``enable_external_access = false`` blocks
+    both ``LOAD`` of an installed extension and DuckDB's own auto-loading. A
+    missing ``json`` or ``spatial`` would otherwise produce a spurious
     "function does not exist", which is worse than no check at all.
     """
     names = set(_BASE_EXTENSIONS)
@@ -371,8 +395,10 @@ def _register_shadow_macros(
 
     The shadow is its own DuckDB instance, so neither the scalar UDFs nor the
     public-name ``CREATE MACRO`` aliases come across from the warehouse: they
-    have to be registered here. The ``CREATE MACRO`` bodies for table macros
-    call ``json_each``, so extensions load first.
+    have to be registered here. Registration reads ``macros/*.py`` through
+    Python, not through DuckDB, so it needs no external access of its own --
+    but the ``CREATE MACRO`` bodies for table macros call ``json_each``, which
+    is why extensions load first and the lockdown comes last.
     """
     if project_dir is None:
         return
@@ -382,6 +408,17 @@ def _register_shadow_macros(
         register_macros(shadow, Path(project_dir))
     except Exception as e:
         logger.debug("Bind pass macro registration skipped: %s", e)
+
+
+def _lock_down(shadow: duckdb.DuckDBPyConnection) -> None:
+    """Take file, network and configuration access away from the shadow.
+
+    Runs before any model SQL. After this, ``read_csv``/``read_text``/``glob``
+    and the rest of the file functions, ``COPY ... TO``, ``ATTACH``,
+    ``INSTALL``/``LOAD`` and re-enabling the switch itself all fail to bind.
+    """
+    shadow.execute("SET enable_external_access = false")
+    shadow.execute("SET lock_configuration = true")
 
 
 def _create_typed_stub(
@@ -548,6 +585,12 @@ def _shadow_body(model: SQLModel, snapshot_settings: object | None) -> str:
     )
 
 
+def _is_file_access_denied(exc: Exception) -> bool:
+    """True when the shadow's lockdown, not the model, refused the statement."""
+    text = str(exc)
+    return any(marker in text for marker in _FILE_ACCESS_MARKERS)
+
+
 def bind_models(
     conn: duckdb.DuckDBPyConnection,
     models: list[SQLModel],
@@ -555,11 +598,12 @@ def bind_models(
     base_tables: dict[str, list[tuple[str, str]]] | None = None,
     project_dir: Path | str | None = None,
 ) -> BindResult:
-    """Bind ``models`` against a private in-memory shadow and report back.
+    """Bind ``models`` against a private, locked-down shadow and report back.
 
     No model SQL ever runs against ``conn``. The shadow is a separate
     ``duckdb.connect(":memory:")`` instance with no attachment to the
-    warehouse, and it is closed before this returns.
+    warehouse, no file access and a locked configuration, and it is closed
+    before this returns.
 
     Args:
         conn: The warehouse connection, used **only** as the catalog source
@@ -606,6 +650,8 @@ def bind_models(
         except Exception:  # pragma: no cover - defensive
             logger.debug("Bind pass could not pin the shadow to one thread")
 
+        # Everything that needs the outside world happens here, before the
+        # lockdown and before a single line of model SQL.
         _load_extensions(shadow, conn)
         _register_shadow_macros(
             shadow, Path(project_dir) if project_dir else None
@@ -624,7 +670,10 @@ def bind_models(
             shadow.execute(f"CREATE SCHEMA IF NOT EXISTS {_quote_ident(schema)}")
         _seed_base_tables(shadow, conn, ordered, base_tables)
 
+        _lock_down(shadow)
+
         failed: set[str] = set()
+        skipped: set[str] = set()
         for model in ordered:
             broken = [d for d in model.depends_on if d in failed]
             if broken:
@@ -637,6 +686,21 @@ def bind_models(
                 ]
                 failed.add(model.full_name)
                 continue
+            unbound = [d for d in model.depends_on if d in skipped]
+            if unbound:
+                # The upstream was skipped, not broken. Reporting an error
+                # here would blame this model for the lockdown.
+                result.warnings.append(
+                    BindError(
+                        message=(
+                            f"{model.full_name}: upstream {unbound[0]} was "
+                            "skipped by the bind pass"
+                        ),
+                        kind="skipped",
+                    )
+                )
+                skipped.add(model.full_name)
+                continue
             view = f"{_quote_ident(model.schema)}.{_quote_ident(model.name)}"
             try:
                 shadow.execute(
@@ -645,6 +709,16 @@ def bind_models(
                 )
                 rows = shadow.execute(f"DESCRIBE {view}").fetchall()
             except Exception as e:
+                if _is_file_access_denied(e):
+                    result.warnings.append(
+                        BindError(
+                            message=f"{model.full_name}: {FILE_ACCESS_MESSAGE}",
+                            raw=str(e),
+                            kind="skipped",
+                        )
+                    )
+                    skipped.add(model.full_name)
+                    continue
                 result.errors[model.full_name] = [
                     bind_error_from_exception(e, model.query)
                 ]
