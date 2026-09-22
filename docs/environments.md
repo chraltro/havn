@@ -165,8 +165,11 @@ Defer target: prod (/data/prod.duckdb)
 Defer target readable: no (locked by another process (/usr/bin/python3.11 (PID 10344)))
 ```
 
-The same answer is in `GET /api/environment` under `defer`. Both are readings
-of that instant; another process can take the lock a moment later.
+The same answer is in `GET /api/environment` under `defer`, and the web UI
+shows it next to the environment name in the header: a green dot when the
+target is readable, amber when it is not, with the path, the reason and the
+`--defer-snapshot` way out in the tooltip. All three are readings of that
+instant; another process can take the lock a moment later.
 
 ### Configuration
 

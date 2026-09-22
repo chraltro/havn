@@ -180,7 +180,10 @@ Things worth knowing while authoring:
   SQL it cannot parse cannot be namespaced.
 - **`havn lint` does not lint installed packages.** It walks the project's own
   `transform/` only, so `havn lint --fix` will never rewrite a file the next
-  install is going to overwrite. Lint your package in its own repository.
+  install is going to overwrite. Pointing it at one anyway, with
+  `havn lint --fix -p havn_packages/crm`, is refused with that reason rather
+  than obeyed. Checking a package file still reports its violations; only the
+  rewrite is refused. Lint your package in its own repository.
 
 ## Macros
 

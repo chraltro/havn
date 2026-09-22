@@ -109,11 +109,13 @@ source mapping against a written-out expectation. See
 | Glob selectors (`gold.fct_*`, `*.customers`) | Supported | fnmatch anywhere in the name, in either half. |
 | Selector methods (`tag:`, `path:`, `config.<key>:`, `state:modified`) | Supported | `state:modified` reads the same content and upstream hashes change detection uses. Comma intersects, e.g. `tag:daily,gold.*`. |
 | Selectors on the API and MCP | Supported | `POST /api/transform` takes `targets` and `exclude`; `GET /api/models?select=` filters the listing; the MCP `run_transform` and `list_models` tools take `select`. |
+| Selectors in the web UI | Supported | The DAG panel takes a selector, previews what it matches by highlighting those nodes, and runs it as the transform target. The grammar is in the input's tooltip. |
 | `result:` and `source_status:` selectors | Not supported | These need a stored result set from the previous run, which havn does not keep per model beyond its status. |
 | Environments | Supported | `havn env use <name>` switches the database path, connection overrides and defer target declared in `project.yml`. |
 | Defer to another environment | Partial | `environments.<name>.defer: <other>` plus `havn transform --defer` attaches that environment's warehouse read-only, so a dev run reads every model it has not built from there and writes only locally. The limitation is DuckDB's file lock: the attach fails whenever another process holds the target open for writing, which is whenever a run against it is going. Not removable, so `--defer-snapshot` defers to a consistent copy instead (`COPY FROM DATABASE`, or the newest verified backup when the target is locked). Unlike dbt, no manifest or `--state` is involved; what havn needs is the other environment's file. |
 | Defer on the DuckLake backend | Not supported | DuckLake already occupies the ATTACH slot defer would use. A deferred run on it stops with that message rather than half-working. |
 | Defer across machines | Not supported | The defer target is a warehouse file this machine can open. A remote environment would need a copy on local disk. |
+| Defer status in the web UI | Supported | The header shows the active environment's defer target with a green dot when the target can be attached read-only right now and amber when it cannot. The tooltip carries the path, why the probe failed, and the `--defer-snapshot` way out. It describes the instant it was fetched, since the lock can be taken a moment later. |
 | Scheduler | Supported | Cron schedules in job files, run by `havn schedule`, plus `havn watch` for rebuild on file change. |
 | Parallel execution | Supported | Independent models run concurrently by default; `--sequential` turns it off. |
 
@@ -145,7 +147,8 @@ The Monaco editor in `havn serve`.
 | Package macros | Supported | Registered between the built-in library and your project, so your macros win. Module names are package-scoped, so two packages can both ship `utils.py`. |
 | Package version ranges and resolution | Not supported | One pinned revision per package, no transitive dependencies and no solver. A package that itself needs a package says so in its README and you install both. |
 | Private package authentication | Partial | Whatever the machine's git already has: an SSH key, a credential helper, or a token in the URL. havn stores no credentials of its own. |
-| Linting installed packages | Not supported | `havn lint` walks the project's own `transform/` only. Rewriting a file the next install overwrites would be busywork; lint the package in its own repository. |
+| Package models in the rest of the tooling | Supported | Every command and endpoint that lists or builds the project's DAG sees package models: `transform`, `validate`, `ls` and the selectors, the DAG panel, docs, `diff`, the MCP tools, sentinel's impact analysis, Pipeline Rewind's downstream walk, both notebook paths, `@source_freshness`, and unit tests, which can target a package model by its namespaced name. The single-directory listing is kept only where one directory is genuinely what is meant, such as the PR diff comparing two checkouts. |
+| Linting installed packages | Not supported | `havn lint` walks the project's own `transform/` only. Rewriting a file the next install overwrites would be busywork; lint the package in its own repository. Pointing `--fix` inside `havn_packages/` is refused with that message rather than silently rewriting a file the next install replaces. Checking a package file still reports its violations. |
 
 ## Testing
 

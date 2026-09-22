@@ -19,7 +19,7 @@ pytest tests/
 
 # Lint SQL
 havn lint                       # check
-havn lint --fix                 # auto-fix
+havn lint --fix                 # auto-fix (refused inside havn_packages/)
 
 # Common commands
 havn init my-project            # scaffold new project
@@ -281,8 +281,13 @@ packages:
   `requires_havn`, and `schemas:` to override the prefix per schema).
 - `discover_all_models(project_dir, config)` in `engine/transform/discovery.py`
   is the multi-root entry point; `discover_models(transform_dir)` remains the
-  single-directory primitive. Anything that lists or builds the DAG uses the
-  former.
+  single-directory primitive. Anything that lists or builds the DAG for the
+  whole project uses the former, including sentinel, Pipeline Rewind, both
+  notebook paths, unit tests and `check_freshness(include_sources=True)`.
+  The primitive is right only where one directory is genuinely meant, such as
+  `engine/pr.py` diffing two checkouts.
+- `havn lint` does not walk `havn_packages/`, and `--fix` pointed inside one
+  is refused: the next install would overwrite it.
 - Package macros register between the stdlib and the project, under module names
   `havn_macros.<pkg>.<stem>`.
 

@@ -327,6 +327,11 @@ matched nothing is a warning and a non-zero exit, on both `havn ls` and
 to date. `havn transform -v` prints which selector matched what before it
 starts.
 
+The DAG panel in `havn serve` does the same thing visually. Type a selector
+into the input beside the model search, press **Preview** to highlight the
+nodes it matched and dim the rest, then **Run selection** to build exactly
+that set. The grammar is in the input's tooltip.
+
 ## Materialization
 
 ### View (Default)
