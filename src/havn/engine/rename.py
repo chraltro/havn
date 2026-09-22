@@ -70,6 +70,18 @@ _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # Directories whose YAML files name columns in plain text.
 _YAML_DIRS = ("metrics", "contracts")
 
+# Directive lines that name columns in text ``strip_config_comments`` blanks
+# before anything parses it, so no AST node ever points at them. They are
+# scanned as plain file text instead, which needs no offset map: a match in
+# the original file already is a file offset.
+_DIRECTIVE_PREFIXES = (
+    "@assert",
+    "@col",
+    "@grain",
+    "-- assert:",
+    "-- col:",
+)
+
 
 class RenameError(ValueError):
     """A rename cannot be planned or applied."""
@@ -568,6 +580,49 @@ def _yaml_sites(
     return sites, blocked
 
 
+def _directive_sites(
+    model: Any, root: Path | None, column: str
+) -> list[RenameSite]:
+    """Whole-word mentions of ``column`` on this model's directive lines.
+
+    ``@assert``, ``@col`` and ``@grain`` name columns in text that
+    ``strip_config_comments`` blanks out before the query is parsed, so the
+    index that walks the AST cannot see them. Left behind, an ``@assert
+    amount >= 0`` fails on the next build and a ``@col amount:`` silently
+    documents a column that no longer exists.
+
+    The offsets are into the original file, which is what a
+    :class:`RenameSite` carries, so no offset map is involved.
+    """
+    text = getattr(model, "sql", "") or ""
+    if not text:
+        return []
+    pattern = re.compile(rf"\b{re.escape(column)}\b", re.IGNORECASE)
+    path = _model_path(model, root)
+    sites: list[RenameSite] = []
+    offset = 0
+    for index, line in enumerate(text.split("\n"), start=1):
+        stripped = line.lstrip()
+        if any(stripped.startswith(prefix) for prefix in _DIRECTIVE_PREFIXES):
+            for match in pattern.finditer(line):
+                sites.append(
+                    RenameSite(
+                        model=model.full_name,
+                        path=path,
+                        line=index,
+                        col=match.start() + 1,
+                        start=offset + match.start(),
+                        end=offset + match.end(),
+                        clause="directive",
+                        kind="directive",
+                        resolved=True,
+                        text=match.group(0),
+                    )
+                )
+        offset += len(line) + 1
+    return sites
+
+
 def find_column_references(
     models: list[Any],
     target_model: str,
@@ -612,8 +667,21 @@ def find_column_references(
     report = ReferenceReport(target=target.full_name, column=column)
     root = Path(project_dir) if project_dir is not None else None
 
+    # Directive lines are scanned per model, once, as plain file text. The
+    # walk below can reach one model through two different producers, and a
+    # site spliced twice fails the apply, so the set keeps it to one visit.
+    scanned_directives: set[str] = set()
+
+    def scan_directives(model: Any) -> None:
+        key = model.full_name.lower()
+        if key in scanned_directives:
+            return
+        scanned_directives.add(key)
+        report.sites.extend(_directive_sites(model, root, column))
+
     # The definition, in the target itself.
     exports_own_name = _index_definition(report, target, root, column)
+    scan_directives(target)
 
     # Downstream, one hop at a time, carrying the column only where it keeps
     # its name.
@@ -636,6 +704,7 @@ def find_column_references(
                 if key in visited:
                     continue
                 visited.add(key)
+                scan_directives(child)
                 if _index_downstream(report, child, root, column, producing, schemas):
                     if child.full_name.lower() not in producing:
                         producing.add(child.full_name.lower())
