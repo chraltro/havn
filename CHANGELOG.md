@@ -253,6 +253,30 @@ none of them shipped in a released version.
   neighbour's column and reported success.
 - A built snapshot could not switch `hard_deletes` to `new_record`; the
   required `is_deleted` column is now added and backfilled.
+- Two concurrent transform runs in one process could interfere through the
+  defer rewriter: a run started without defer had another run's redirects
+  applied, and a short deferred run detached the target out from under a
+  longer one. The rewriter is scoped to the run and the attach is
+  refcounted; two runs deferring to different environments coexist.
+- `havn rename-column` did not see installed package models from the CLI
+  and, from the API, wrote edits into `havn_packages/` which the next
+  install deleted. Package sites are now blockers on both paths.
+- `POST /api/lint/file` let a viewer read `.sql` files in a sibling
+  directory through a prefix-based containment check, and returned file
+  contents on a check. Fixed, and `POST /api/bind` got the same
+  containment fix.
+- A `path:` package that was the project directory or an ancestor of
+  `havn_packages/` copied itself recursively; a failed copy escaped as a
+  traceback and left a partial checkout. Both refused or contained now, and
+  install removes checkouts the lock names but `packages:` no longer
+  declares.
+- `havn env show` crashed on an empty `environments:` block; `havn ls
+  state:modified` on a project with no warehouse listed nothing; `POST
+  /api/transform` returned 200 with empty results for a mistyped selector
+  (now 400 with the warnings); `havn lint --fix` prepended a blank line to
+  headerless files; a batch file write naming one file two ways wrote it
+  twice; `--defer-snapshot` leaked a warehouse copy in the temp directory
+  when the attach failed.
 
 ### First impression
 

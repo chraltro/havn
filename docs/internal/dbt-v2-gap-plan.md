@@ -896,3 +896,52 @@ Follow-ups that fell out of the work: switch `engine/sentinel.py`,
 `discover_all_models` so packages are covered there too; a selector input
 in the DAG panel; a frontend surface for the environment's defer status;
 DuckLake support for the bind pass and defer; the module renames above.
+
+## 13. Review round, 2026-09-22
+
+Four read-only reviews (transform engine, server and CLI, frontend, security)
+ran over the full diff after everything merged, followed by four fix rounds.
+Every finding was reproduced before it was fixed and every fix carries a
+test that failed first.
+
+What the reviews found, in order of weight:
+
+- `POST /api/bind` spliced a viewer's buffer into `CREATE VIEW` on a cursor
+  of the writable connection with no read-only validation. A viewer could
+  create a table in the real warehouse via a three-part name and a second
+  statement, `COPY` rows to a server path, read `/etc/passwd` line by line
+  through `read_csv` header sniffing, and `ATTACH` arbitrary files. Fixed by
+  redesign: the shadow is a private in-memory database seeded with empty
+  typed tables, external access is disabled and the configuration locked
+  before any model SQL, and the shared read-only validator runs first on the
+  API and MCP paths. This never shipped in a release.
+- The defer rewriter was process-global, so concurrent runs contaminated
+  each other. Now per run, attach refcounted, alias per target path.
+- Ephemeral inlining round-tripped `{start}`/`{end}` through sqlglot and
+  broke every microbatch model with an ephemeral upstream. Masking now wraps
+  every round trip.
+- The defer scoping pass (`table_catalog = current_database()`) had swept
+  execution.py but not the rest of the tree; about thirty probes were
+  scoped.
+- F2 rename applied disk offsets to a dirty buffer and corrupted it; a
+  CTE-local column could retarget a rename at an upstream model.
+- `incremental_strategy=append` bypassed `on_schema_change` and inserted
+  positionally.
+- A future `--event-time-end` poisoned the microbatch resume cursor.
+- Plus fourteen medium and low items listed in the CHANGELOG's "Fixed
+  before release" section.
+
+The pattern behind most of the high findings: an invariant introduced by one
+feature's author (defer's catalog scoping and placeholder masking, the
+security model of the query surfaces) that the other features' code paths
+did not know to honour. Pairwise feature interactions are where the residual
+risk sits; the conformance and scenario tests added in this round cover the
+pairs the reviewers named (defer with profiling, contracts, diff and unit
+tests; ephemeral with microbatch and defer; rename with packages and
+directives).
+
+Reviewers' remaining unverified notes, for a later pass: a fixed temp-file
+name in the atomic file writer could collide under two concurrent batch
+writes to the same path; `modelsCacheRef` in the frontend has no TTL; the
+sql providers are global so the Query panel's editor shares them; DuckLake
+was not exercised anywhere.
