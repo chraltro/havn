@@ -358,6 +358,31 @@ export function extractTableRefs(text) {
 }
 
 /**
+ * The key the binder uses for an upstream relation.
+ *
+ * POST /api/bind keys its `upstream` map by the lower-cased model name, while
+ * the buffer keeps whatever case the author typed and may quote either half.
+ * `FROM Bronze."Customers" c` names the same relation as `bronze.customers`,
+ * so both have to arrive at the same key.
+ */
+export function relationKey(schema, table) {
+  const clean = (part) => String(part || "").replace(/["`\[\]]/g, "").toLowerCase();
+  return `${clean(schema)}.${clean(table)}`;
+}
+
+/**
+ * An upstream relation's columns from a bind result, and the key they are
+ * filed under. Returns null when the binder reported no schema for it.
+ */
+export function upstreamSchema(bind, schema, table) {
+  const upstream = (bind && bind.upstream) || {};
+  const key = relationKey(schema, table);
+  if (Array.isArray(upstream[key])) return { key, columns: upstream[key] };
+  const match = Object.keys(upstream).find((k) => k.toLowerCase() === key);
+  return match ? { key: match, columns: upstream[match] || [] } : null;
+}
+
+/**
  * Resolve a hovered token to a column type using a bind result.
  *
  * Two cases resolve: a bare word that is one of the model's own output
@@ -374,10 +399,10 @@ export function resolveColumnType({ word, qualifier, bind, tableRefs = [] }) {
       (r) => (r.alias && r.alias.toLowerCase() === q) || (!r.alias && r.table.toLowerCase() === q),
     );
     if (!ref) return null;
-    const key = `${ref.schema}.${ref.table}`;
-    const columns = (bind.upstream || {})[key];
-    const col = (columns || []).find((c) => c.name.toLowerCase() === lower);
-    return col ? { name: col.name, type: col.type, source: key } : null;
+    const upstream = upstreamSchema(bind, ref.schema, ref.table);
+    if (!upstream) return null;
+    const col = upstream.columns.find((c) => c.name.toLowerCase() === lower);
+    return col ? { name: col.name, type: col.type, source: upstream.key } : null;
   }
   const col = (bind.columns || []).find((c) => c.name.toLowerCase() === lower);
   return col ? { name: col.name, type: col.type, source: bind.model || null } : null;
@@ -443,10 +468,10 @@ export function renameTargetAt({ word, qualifier, bind, tableRefs = [] }) {
       (r) => (r.alias && r.alias.toLowerCase() === q) || (!r.alias && r.table.toLowerCase() === q),
     );
     if (!ref) return null;
-    const key = `${ref.schema}.${ref.table}`;
-    const columns = (bind.upstream || {})[key] || [];
-    const hit = columns.find((c) => c.name.toLowerCase() === lower);
-    return hit ? { model: key, column: hit.name } : null;
+    const upstream = upstreamSchema(bind, ref.schema, ref.table);
+    if (!upstream) return null;
+    const hit = upstream.columns.find((c) => c.name.toLowerCase() === lower);
+    return hit ? { model: upstream.key, column: hit.name } : null;
   }
   const own = (bind.columns || []).find((c) => c.name.toLowerCase() === lower);
   if (own && bind.model) return { model: bind.model, column: own.name };
