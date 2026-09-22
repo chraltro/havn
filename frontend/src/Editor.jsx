@@ -118,6 +118,19 @@ function defineHavnThemes(monaco) {
 export const editorContext = {
   /** Project-relative path of the file in the editor, e.g. "transform/silver/customers.sql". */
   activeFile: null,
+  /**
+   * Whether the buffer on screen has unsaved edits.
+   *
+   * The rename plan is computed against the file on disk, so its offsets mean
+   * nothing once the buffer has moved. The providers refuse rather than splice
+   * a disk offset into text that is not on disk.
+   */
+  dirty: false,
+  /**
+   * Put a file's content back into the buffer, unmodified: (path, text) => void.
+   * Set by the component, used after a rename the API already wrote.
+   */
+  reloadFile: null,
   /** Latest bind result, keyed by project-relative path. Feeds hover types. */
   bindResults: new Map(),
   /** App navigation hook: (path, line, col) => void. Set by the component. */
@@ -448,38 +461,31 @@ export function renameTargetAt({ word, qualifier, bind, tableRefs = [] }) {
 }
 
 /**
- * The plan's edits for one open buffer, as a Monaco WorkspaceEdit.
+ * True when the buffer for `path` holds unsaved edits.
  *
- * Every file the rename touches is written by the API, which is the simpler
- * of the two options: Monaco would otherwise need a text model per file, and
- * creating models for files nobody opened leaks them. The editor holds one
- * file at a time, so the only buffer that can be out of step with disk is
- * this one, and this edit brings it back in line without a reload.
+ * The rename plan's offsets are offsets into the file on disk. A buffer that
+ * has moved since the last save is a different string, so those offsets point
+ * at the wrong characters and the rename must not touch it.
  */
-export function planToWorkspaceEdit(plan, model, path) {
-  const mine = ((plan && plan.edits) || []).filter((e) => e.path === path);
-  return {
-    edits: mine.map((edit) => ({
-      resource: model.uri,
-      versionId: undefined,
-      textEdit: {
-        range: rangeFromOffsets(model, edit.start, edit.end),
-        text: edit.new_text,
-      },
-    })),
-  };
+export function bufferIsDirty(path) {
+  if (!editorContext.dirty) return false;
+  return !editorContext.activeFile || path === editorContext.activeFile;
 }
 
-/** Monaco range for a [start, end) character span in a text model. */
-export function rangeFromOffsets(model, start, end) {
-  const from = model.getPositionAt(start);
-  const to = model.getPositionAt(end);
-  return {
-    startLineNumber: from.lineNumber,
-    startColumn: from.column,
-    endLineNumber: to.lineNumber,
-    endColumn: to.column,
-  };
+/** The message shown when a rename is refused because the buffer is dirty. */
+export const DIRTY_BUFFER_REJECTION = "Save the file before renaming";
+
+/**
+ * The file's content after a rename, as the server computed it.
+ *
+ * The plan carries the new content of every file it touches, so the open
+ * buffer can be replaced wholesale instead of being spliced: a whole-file
+ * swap cannot land an offset in the wrong place, and it leaves the buffer
+ * equal to what the API just wrote to disk.
+ */
+export function renamedContentFor(plan, path) {
+  const hit = ((plan && plan.files) || []).find((f) => f.path === path);
+  return hit && typeof hit.content === "string" ? hit.content : null;
 }
 
 /** One line per blocker for the confirmation dialog. */
@@ -904,6 +910,7 @@ loader.init().then((monaco) => {
       if (!isTransformSql(path)) {
         return { rejectReason: "Only columns in transform models can be renamed" };
       }
+      if (bufferIsDirty(path)) return { rejectReason: DIRTY_BUFFER_REJECTION };
       const target = renameTargetAt({
         word: word.word,
         qualifier: qualifierBefore(model.getLineContent(position.lineNumber), word),
@@ -923,6 +930,7 @@ loader.init().then((monaco) => {
       const path = pathFromUri(model.uri);
       const word = model.getWordAtPosition(position);
       if (!word) return { edits: [], rejectReason: "Nothing to rename here" };
+      if (bufferIsDirty(path)) return { edits: [], rejectReason: DIRTY_BUFFER_REJECTION };
       const target = renameTargetAt({
         word: word.word,
         qualifier: qualifierBefore(model.getLineContent(position.lineNumber), word),
@@ -969,10 +977,25 @@ loader.init().then((monaco) => {
       } catch (e) {
         return { edits: [], rejectReason: e.message };
       }
+      // The API wrote every file, this one included. Reload the buffer from
+      // what the server produced rather than replaying the plan's offsets
+      // into it: the buffer is then byte for byte what is on disk, and the
+      // editor has nothing left to save.
+      let renamed = renamedContentFor(plan, path);
+      if (renamed == null) {
+        try {
+          renamed = (await api.readFile(path)).content;
+        } catch {
+          renamed = null;
+        }
+      }
+      if (renamed != null && editorContext.reloadFile) editorContext.reloadFile(path, renamed);
       window.dispatchEvent(
         new CustomEvent("havn-files-changed", { detail: { paths: (plan.files || []).map((f) => f.path) } }),
       );
-      return planToWorkspaceEdit(plan, model, path);
+      // Nothing for Monaco to splice: every file, including this buffer, is
+      // already at its new content.
+      return { edits: [] };
     },
   });
 
@@ -1029,7 +1052,7 @@ loader.init().then((monaco) => {
   });
 });
 
-export default function Editor({ content, language, onChange, activeFile, onMount, goToLine, onFormat, onPreview, onOpenModel, onPreviewCte, onStatus }) {
+export default function Editor({ content, language, onChange, activeFile, dirty, onReloadFile, onMount, goToLine, onFormat, onPreview, onOpenModel, onPreviewCte, onStatus }) {
   const { themeId } = useTheme();
   const monacoTheme = `havn-${themeId}`;
   const editorRef = useRef(null);
@@ -1067,6 +1090,8 @@ export default function Editor({ content, language, onChange, activeFile, onMoun
 
   // Keep the module-level provider context pointed at the file on screen.
   editorContext.activeFile = activeFile || null;
+  editorContext.dirty = !!dirty;
+  editorContext.reloadFile = onReloadFile || null;
   editorContext.openModel = onOpenModel || null;
   editorContext.previewSql = onPreviewCte || null;
   editorContext.showReferences = setColumnRefs;

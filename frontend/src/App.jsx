@@ -1296,6 +1296,15 @@ function AppContent() {
                         setDirty(true);
                       }}
                       activeFile={activeFile}
+                      dirty={dirty}
+                      onReloadFile={(path, text) => {
+                        // A column rename wrote this file. The buffer is
+                        // replaced with what the server wrote, so there is
+                        // nothing left to save.
+                        if (path !== activeFileRef.current) return;
+                        setFileContent(text);
+                        setDirty(false);
+                      }}
                       onMount={(editor) => { editorRef.current = editor; }}
                       goToLine={goToLine}
                       onFormat={activeFile?.endsWith(".sql") ? formatCurrentFile : undefined}
