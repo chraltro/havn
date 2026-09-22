@@ -59,6 +59,18 @@ def _header_line_count(lines: list[str]) -> int:
     return count
 
 
+def _rejoin_header(lines: list[str], header_count: int, fixed_sql: str) -> str:
+    """Put the directive header back on top of SQLFluff's rewritten body.
+
+    A file with no header at all gets nothing put back. Joining an empty
+    header list and then adding the separator prepended a blank line to every
+    such file on each ``--fix``.
+    """
+    if header_count <= 0:
+        return fixed_sql
+    return "\n".join(lines[:header_count]) + "\n" + fixed_sql
+
+
 def _lint_text(sql: str) -> str:
     """The text to hand SQLFluff: the file with its directive lines blanked.
 
@@ -180,7 +192,7 @@ def lint(
             violations_before = len(fix_result.get_violations())
             fixed_sql, changed = fix_result.fix_string()
             if changed:
-                sql = "\n".join(lines[:header_count]) + "\n" + fixed_sql
+                sql = _rejoin_header(lines, header_count, fixed_sql)
                 sql_file.write_text(sql)
                 total_fixed += violations_before - len(
                     linter.lint_string(fixed_sql).get_violations()
@@ -254,7 +266,7 @@ def lint_file(
         violations_before = len(fix_result.get_violations())
         fixed_sql, changed = fix_result.fix_string()
         if changed:
-            final_content = "\n".join(lines[:header_count]) + "\n" + fixed_sql
+            final_content = _rejoin_header(lines, header_count, fixed_sql)
             sql_file.write_text(final_content)
             total_fixed = violations_before - len(
                 linter.lint_string(fixed_sql).get_violations()
