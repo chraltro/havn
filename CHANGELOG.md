@@ -183,7 +183,15 @@ in `docs/internal/dbt-v2-gap-plan.md`.
 - `havn packages install|list|remove`, a `package:` selector, `GET
   /api/packages`, `POST /api/packages/install`; package models are labelled
   in the DAG panel and the file tree, and the editor warns that the next
-  install overwrites edits to an installed file.
+  install overwrites edits to an installed file. Package models are visible
+  to every command and endpoint that lists or builds the DAG, including
+  sentinel, Pipeline Rewind, the notebook paths, promote-to-model, unit
+  tests and freshness reporting. `havn lint --fix` refuses a path inside
+  `havn_packages/`.
+- The DAG panel takes a graph selector: Preview highlights the matching
+  nodes, Run selection builds exactly that set. The header shows the active
+  environment's defer target with a green or amber dot for whether it can be
+  attached right now.
 
 ### First impression
 
