@@ -617,3 +617,176 @@ def test_the_bind_pass_survives_an_unreadable_begin(tmp_path):
 
     assert result.ok, result.errors
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# A future --event-time-end must not poison the resume cursor
+# ---------------------------------------------------------------------------
+
+
+def test_a_future_end_does_not_stall_later_runs():
+    """Backfill four days ahead, then a plain run must still ingest today.
+
+    The future windows used to be recorded as done with zero rows, so
+    max(window_start) landed past today and every ordinary run afterwards
+    computed an empty window list and quietly ingested nothing.
+    """
+    conn = duckdb.connect(":memory:")
+    ensure_meta_table(conn)
+    conn.execute("CREATE SCHEMA landing")
+    conn.execute("CREATE SCHEMA gold")
+    conn.execute("CREATE TABLE landing.events (id INTEGER, event_at TIMESTAMP)")
+    now = datetime.utcnow()
+    conn.execute(
+        "INSERT INTO landing.events VALUES (1, ?)", [now - timedelta(days=1)]
+    )
+    model = make_model(begin=(now - timedelta(days=2)).strftime("%Y-%m-%d"))
+
+    try:
+        _execute_microbatch(
+            conn, model,
+            batch_range=BatchRange(
+                now - timedelta(days=2), now + timedelta(days=4)
+            ),
+        )
+        assert conn.execute("SELECT count(*) FROM gold.events").fetchone() == (1,)
+        # Nothing beyond the window holding now was recorded.
+        assert max(w for w, _, _ in batch_state(conn)) <= now
+
+        conn.execute("INSERT INTO landing.events VALUES (2, ?)", [now])
+        _execute_microbatch(conn, model)
+
+        assert conn.execute(
+            "SELECT id FROM gold.events ORDER BY id"
+        ).fetchall() == [(1,), (2,)]
+    finally:
+        conn.close()
+
+
+def test_a_window_that_has_not_closed_is_never_a_resume_barrier(events):
+    """A recorded window whose end is still ahead is redone, not skipped."""
+    from havn.engine.transform.execution import _batch_resume_start
+
+    now = datetime.utcnow()
+    today = truncate_to_batch(now, "day")
+    model = make_model(begin=(today - timedelta(days=3)).strftime("%Y-%m-%d"))
+    for offset in range(-3, 3):
+        window_start = today + timedelta(days=offset)
+        events.execute(
+            "INSERT INTO _havn.batch_state "
+            '(model_path, window_start, window_end, status, "rows") '
+            "VALUES (?, ?, ?, 'done', 0)",
+            [model.full_name, window_start, window_start + timedelta(days=1)],
+        )
+
+    resume = _batch_resume_start(
+        events, model, today - timedelta(days=3), "day", 0
+    )
+
+    assert resume == today
+
+
+def test_an_outer_transaction_is_refused_before_the_first_window(events):
+    """Per-window transactions cannot degrade into one silent outer one."""
+    model = make_model()
+    events.execute("BEGIN TRANSACTION")
+    try:
+        with pytest.raises(MicrobatchError, match="transaction is already open"):
+            _execute_microbatch(
+                events, model,
+                batch_range=BatchRange(datetime(2024, 1, 1), datetime(2024, 1, 6)),
+            )
+    finally:
+        events.execute("ROLLBACK")
+
+    assert events.execute(
+        "SELECT COUNT(*) FROM information_schema.tables "
+        "WHERE table_catalog = current_database() "
+        "AND table_schema = 'gold' AND table_name = 'events'"
+    ).fetchone() == (0,)
+
+
+def test_a_future_window_is_not_recorded(events):
+    from havn.engine.transform.execution import _record_batch
+
+    ahead = datetime.utcnow() + timedelta(days=3)
+    _record_batch(
+        events, "gold.events", (ahead, ahead + timedelta(days=1)), "done", 0, None
+    )
+
+    assert batch_state(events) == []
+
+
+# ---------------------------------------------------------------------------
+# Ephemeral upstreams: the window placeholders must survive inlining
+# ---------------------------------------------------------------------------
+
+
+def test_ephemeral_upstream_keeps_the_window_placeholders(tmp_path):
+    """Inlining round-trips the SQL through sqlglot, which eats ``{start}``.
+
+    Without masking, ``{start}`` comes back out as ``{'start': start}`` and
+    every window fails to bind, so a microbatch model with an ephemeral
+    upstream could never build.
+    """
+    transform = write_project(
+        tmp_path,
+        {
+            "bronze/clean_events.sql": (
+                "@config materialized=ephemeral, schema=bronze\n\n"
+                "SELECT id, event_at FROM landing.events WHERE id >= 0\n"
+            ),
+            "gold/events.sql": (
+                "@config materialized=incremental, "
+                "incremental_strategy=microbatch, event_time=event_at, "
+                "batch_size=day, begin=2024-01-01\n\n"
+                "SELECT id, event_at FROM bronze.clean_events\n"
+                "WHERE event_at >= {start} AND event_at < {end}\n"
+            ),
+        },
+    )
+    conn = duckdb.connect(str(tmp_path / "warehouse.duckdb"))
+    conn.execute("CREATE SCHEMA landing")
+    conn.execute("CREATE TABLE landing.events (id INTEGER, event_at TIMESTAMP)")
+    for i in range(4):
+        conn.execute(
+            "INSERT INTO landing.events VALUES (?, ?)",
+            [i, datetime(2024, 1, 1) + timedelta(days=i)],
+        )
+
+    results = run_transform(
+        conn, transform, project_dir=tmp_path,
+        batch_range=BatchRange(datetime(2024, 1, 1), datetime(2024, 1, 3)),
+    )
+
+    assert results["gold.events"] == "built"
+    assert conn.execute("SELECT count(*) FROM gold.events").fetchone() == (2,)
+    conn.close()
+
+
+def test_inline_ephemeral_leaves_placeholders_alone():
+    """The placeholders come back out of inlining spelled as they went in."""
+    from havn.engine.transform.inline import inline_ephemeral
+
+    eph = SQLModel(
+        path=Path("transform/bronze/clean.sql"),
+        name="clean",
+        schema="bronze",
+        full_name="bronze.clean",
+        sql="",
+        query="SELECT id, event_at FROM landing.events",
+        materialized="ephemeral",
+    )
+    consumer = make_model(
+        "SELECT id, event_at FROM bronze.clean "
+        "WHERE event_at >= {start} AND event_at < {end}",
+        depends_on=["bronze.clean"],
+    )
+
+    resolved = inline_ephemeral(
+        consumer, {"bronze.clean": eph, "gold.events": consumer}
+    )
+
+    assert "{start}" in resolved
+    assert "{end}" in resolved
+    assert "'start'" not in resolved

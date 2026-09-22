@@ -90,7 +90,8 @@ def migrate(
         for schema in _MIGRATE_SCHEMAS:
             rows = src_conn.execute(
                 "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema = ? AND table_type = 'BASE TABLE' "
+                "WHERE table_catalog = current_database() "
+                "AND table_schema = ? AND table_type = 'BASE TABLE' "
                 "ORDER BY table_name",
                 [schema],
             ).fetchall()

@@ -509,10 +509,15 @@ def _parse_expect(raw: Any, label: str) -> ExpectedRows:
 # --------------------------------------------------------------------------
 
 
+# Scoped to the current database: information_schema spans every attached
+# one, so with a defer target attached the snapshot folded that warehouse's
+# columns into the same schema.table key and a mock was typed from, or warned
+# against, the other environment's shape.
 CATALOG_SQL = (
     "SELECT lower(table_schema), lower(table_name), column_name, data_type "
     "FROM information_schema.columns "
-    "WHERE table_schema NOT IN ('information_schema', 'pg_catalog') "
+    "WHERE table_catalog = current_database() "
+    "AND table_schema NOT IN ('information_schema', 'pg_catalog') "
     "ORDER BY table_schema, table_name, ordinal_position"
 )
 

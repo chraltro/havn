@@ -11,6 +11,7 @@ import subprocess
 import sys
 import textwrap
 import time
+from datetime import datetime
 from pathlib import Path
 
 import duckdb
@@ -268,6 +269,54 @@ def test_ephemeral_upstream_is_inlined_not_redirected(project, prod_db, dev_conn
     )
     assert results["bronze.recent"] == "inlined"
     assert dev_conn.execute("SELECT id FROM silver.recent_customers").fetchall() == [(1,)]
+
+
+def test_ephemeral_plus_defer_plus_microbatch(project, prod_db, dev_conn):
+    """An inlined ephemeral must not cost a microbatch model its window.
+
+    Inlining round-trips the SQL through sqlglot before the defer rewriter
+    sees it. Unmasked, ``{start}`` comes back as ``{'start': start}`` and the
+    window substitution finds nothing, so every window fails to bind.
+    """
+    prod = duckdb.connect(str(prod_db))
+    prod.execute(
+        "CREATE TABLE landing.events AS "
+        "SELECT 1 AS id, TIMESTAMP '2024-01-01 06:00:00' AS event_at "
+        "UNION ALL SELECT 2, TIMESTAMP '2024-01-02 06:00:00'"
+    )
+    prod.close()
+
+    _model(
+        project,
+        "clean_events",
+        "@config materialized=ephemeral, schema=bronze\n\n"
+        "SELECT id, event_at FROM landing.events WHERE id > 0\n",
+        schema="bronze",
+    )
+    _model(
+        project,
+        "events",
+        "@config materialized=incremental, incremental_strategy=microbatch, "
+        "schema=gold, event_time=event_at, batch_size=day, begin=2024-01-01\n\n"
+        "SELECT id, event_at FROM bronze.clean_events\n"
+        "WHERE event_at >= {start} AND event_at < {end}\n",
+        schema="gold",
+    )
+
+    from havn.engine.transform import BatchRange
+
+    results = run_transform(
+        dev_conn,
+        project / "transform",
+        project_dir=project,
+        defer=_spec(project, prod_db),
+        batch_range=BatchRange(datetime(2024, 1, 1), datetime(2024, 1, 3)),
+    )
+
+    assert results["gold.events"] == "built"
+    assert dev_conn.execute(
+        "SELECT id FROM gold.events ORDER BY id"
+    ).fetchall() == [(1,), (2,)]
 
 
 def test_incremental_model_that_also_exists_in_the_target(project, prod_db, dev_conn):

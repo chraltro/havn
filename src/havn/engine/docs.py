@@ -40,7 +40,8 @@ def generate_docs(
     schemas = conn.execute("""
         SELECT DISTINCT table_schema
         FROM information_schema.tables
-        WHERE table_schema NOT IN ('information_schema', '_havn')
+        WHERE table_catalog = current_database()
+          AND table_schema NOT IN ('information_schema', '_havn')
         ORDER BY
             CASE table_schema
                 WHEN 'landing' THEN 1
@@ -61,7 +62,7 @@ def generate_docs(
         tables = conn.execute("""
             SELECT table_name, table_type
             FROM information_schema.tables
-            WHERE table_schema = ?
+            WHERE table_catalog = current_database() AND table_schema = ?
             ORDER BY table_name
         """, [schema_name]).fetchall()
         lines.append(f"### {schema_name}\n")
@@ -78,7 +79,7 @@ def generate_docs(
         tables = conn.execute("""
             SELECT table_name, table_type
             FROM information_schema.tables
-            WHERE table_schema = ?
+            WHERE table_catalog = current_database() AND table_schema = ?
             ORDER BY table_name
         """, [schema_name]).fetchall()
 
@@ -114,7 +115,8 @@ def generate_docs(
             cols = conn.execute("""
                 SELECT column_name, data_type, is_nullable, column_default
                 FROM information_schema.columns
-                WHERE table_schema = ? AND table_name = ?
+                WHERE table_catalog = current_database()
+                  AND table_schema = ? AND table_name = ?
                 ORDER BY ordinal_position
             """, [schema_name, table_name]).fetchall()
 
@@ -220,7 +222,8 @@ def generate_structured_docs(
     schemas_raw = conn.execute("""
         SELECT DISTINCT table_schema
         FROM information_schema.tables
-        WHERE table_schema NOT IN ('information_schema', '_havn')
+        WHERE table_catalog = current_database()
+          AND table_schema NOT IN ('information_schema', '_havn')
         ORDER BY
             CASE table_schema
                 WHEN 'landing' THEN 1
@@ -239,7 +242,7 @@ def generate_structured_docs(
         tables_raw = conn.execute("""
             SELECT table_name, table_type
             FROM information_schema.tables
-            WHERE table_schema = ?
+            WHERE table_catalog = current_database() AND table_schema = ?
             ORDER BY table_name
         """, [schema_name]).fetchall()
 
@@ -266,7 +269,8 @@ def generate_structured_docs(
             cols_raw = conn.execute("""
                 SELECT column_name, data_type, is_nullable
                 FROM information_schema.columns
-                WHERE table_schema = ? AND table_name = ?
+                WHERE table_catalog = current_database()
+                  AND table_schema = ? AND table_name = ?
                 ORDER BY ordinal_position
             """, [schema_name, table_name]).fetchall()
 

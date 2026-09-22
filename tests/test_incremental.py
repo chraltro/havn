@@ -465,6 +465,93 @@ class TestOnSchemaChangeFail:
         assert db.execute("SELECT COUNT(*) FROM silver.m").fetchone()[0] == 2
 
 
+class TestAppendHonoursOnSchemaChange:
+    """append used to write positionally and skip the policy entirely.
+
+    ``INSERT INTO target <query>`` matches columns by position, so reordering
+    a projection quietly wrote each value into its neighbour's column, and a
+    column added, dropped or retyped never reached _plan_schema_change.
+    """
+
+    def test_reordered_projection_lands_in_the_right_columns(
+        self, db, transform_dir
+    ):
+        _first_run(db, transform_dir, "m", "append_new_columns", "append")
+
+        results = _second_run(
+            db, transform_dir, "m", "SELECT 20 AS qty, 'b' AS name, 2 AS id"
+        )
+
+        assert results["silver.m"] == "built"
+        assert [c for c, _ in _columns(db, "m")] == ["id", "name", "qty"]
+        assert db.execute(
+            "SELECT id, name, qty FROM silver.m ORDER BY id"
+        ).fetchall() == [(1, "a", 10), (2, "b", 20)]
+
+    def test_fail_policy_refuses_a_dropped_column_before_any_write(
+        self, db, transform_dir
+    ):
+        _first_run(db, transform_dir, "m", "fail", "append")
+
+        results = _second_run(db, transform_dir, "m", REMOVED)
+
+        assert results["silver.m"] == "error"
+        _assert_untouched(db, "m")
+        assert "on_schema_change=fail" in _last_error(db, "m")
+
+    def test_added_column_is_appended(self, db, transform_dir):
+        _first_run(db, transform_dir, "m", "append_new_columns", "append")
+
+        results = _second_run(db, transform_dir, "m", ADDED)
+
+        assert results["silver.m"] == "built"
+        assert [c for c, _ in _columns(db, "m")] == ["id", "name", "qty", "extra"]
+        assert db.execute(
+            "SELECT id, extra FROM silver.m ORDER BY id"
+        ).fetchall() == [(1, None), (2, "x")]
+
+    def test_default_policy_refuses_a_removed_column(self, db, transform_dir):
+        _first_run(db, transform_dir, "m", "append_new_columns", "append")
+
+        results = _second_run(db, transform_dir, "m", REMOVED)
+
+        assert results["silver.m"] == "error"
+        _assert_untouched(db, "m")
+
+    def test_ignore_writes_only_the_shared_columns(self, db, transform_dir):
+        _first_run(db, transform_dir, "m", "ignore", "append")
+
+        results = _second_run(db, transform_dir, "m", ADDED)
+
+        assert results["silver.m"] == "built"
+        assert [c for c, _ in _columns(db, "m")] == ["id", "name", "qty"]
+        assert db.execute(
+            "SELECT id, name, qty FROM silver.m ORDER BY id"
+        ).fetchall() == [(1, "a", 10), (2, "b", 20)]
+
+    def test_a_model_without_a_unique_key_takes_the_same_path(
+        self, db, transform_dir
+    ):
+        """No unique_key shares the append branch, so it shares the fix."""
+        db.execute(f"CREATE OR REPLACE TABLE landing.n AS {RUN1}")
+        (transform_dir / "silver" / "n.sql").write_text(
+            "@config materialized=incremental, schema=silver\n"
+            "@depends_on landing.n\n\nSELECT * FROM landing.n\n"
+        )
+        assert run_transform(db, transform_dir, force=True)["silver.n"] == "built"
+
+        db.execute(
+            "CREATE OR REPLACE TABLE landing.n AS "
+            "SELECT 20 AS qty, 'b' AS name, 2 AS id"
+        )
+        results = run_transform(db, transform_dir, force=True)
+
+        assert results["silver.n"] == "built"
+        assert db.execute(
+            "SELECT id, name, qty FROM silver.n ORDER BY id"
+        ).fetchall() == [(1, "a", 10), (2, "b", 20)]
+
+
 class TestOnSchemaChangeSyncAllColumns:
     """Add, drop and retype the target so it matches the query."""
 

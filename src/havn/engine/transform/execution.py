@@ -334,6 +334,16 @@ def parse_event_time(value: str | datetime, label: str = "timestamp") -> datetim
     )
 
 
+def utc_now() -> datetime:
+    """The naive UTC wall clock every window boundary is measured against.
+
+    One function so a test can move the clock, and so "now" means the same
+    thing to the window computation, the resume cursor and the state writer
+    within a single run.
+    """
+    return datetime.utcnow()
+
+
 def truncate_to_batch(ts: datetime, batch_size: str) -> datetime:
     """Round ``ts`` down to the start of its window."""
     if batch_size == "hour":
@@ -457,27 +467,39 @@ def _batch_resume_start(
 ) -> datetime:
     """Where the next ordinary run starts.
 
-    The first window that is not ``done`` if there is one, otherwise the
-    window after the last one recorded; then ``lookback`` windows further
-    back, so rows that arrived late for an already-processed window are
-    picked up. Never earlier than ``begin``.
+    Only *closed* windows count: one whose end is still in the future has not
+    finished happening, so however it was recorded it has to be processed
+    again. Among those, the first that is not ``done`` if there is one,
+    otherwise the window after the last one recorded; then ``lookback``
+    windows further back, so rows that arrived late for an already-processed
+    window are picked up. Never earlier than ``begin``.
+
+    Reading open windows as finished is what poisoned the cursor. A backfill
+    with ``--event-time-end`` in the future recorded those windows as done
+    with zero rows, ``max(window_start)`` then landed past today, and every
+    ordinary run afterwards computed an empty window list and ingested
+    nothing until the wall clock caught up. Runs no longer write a future
+    window at all, and this filter also un-poisons a warehouse that already
+    holds some.
     """
     try:
         rows = conn.execute(
-            "SELECT window_start, status FROM _havn.batch_state "
+            "SELECT window_start, window_end, status FROM _havn.batch_state "
             "WHERE model_path = ?",
             [model.full_name],
         ).fetchall()
     except Exception as e:
         logger.debug("No batch_state for %s yet: %s", model.full_name, e)
         return begin
-    if not rows:
+    now = utc_now()
+    closed = [(r[0], r[2]) for r in rows if r[1] is not None and r[1] <= now]
+    if not closed:
         return begin
-    pending = [r[0] for r in rows if r[1] != "done"]
+    pending = [start for start, status in closed if status != "done"]
     if pending:
         resume = min(pending)
     else:
-        resume = shift_batch(max(r[0] for r in rows), batch_size, 1)
+        resume = shift_batch(max(start for start, _ in closed), batch_size, 1)
     resume = shift_batch(truncate_to_batch(resume, batch_size), batch_size, -lookback)
     return max(resume, truncate_to_batch(begin, batch_size))
 
@@ -490,7 +512,18 @@ def _record_batch(
     rows: int,
     run_id: str | None,
 ) -> None:
-    """Replace this window's row in ``_havn.batch_state``."""
+    """Replace this window's row in ``_havn.batch_state``.
+
+    A window that has not started yet is never recorded. Writing one would
+    put the resume cursor past today, and the model would then sit idle until
+    the wall clock reached it.
+    """
+    if window[0] > utc_now():
+        logger.debug(
+            "%s: refusing to record batch window %s, which is in the future",
+            model_path, window[0],
+        )
+        return
     conn.execute(
         "DELETE FROM _havn.batch_state WHERE model_path = ? AND window_start = ?",
         [model_path, window[0]],
@@ -537,17 +570,31 @@ def _execute_microbatch(
         [model.schema, model.name],
     ).fetchone()[0] > 0
 
+    now = utc_now()
     if batch_range is not None and batch_range.is_set:
         window_start = batch_range.start or begin
-        window_end = batch_range.end or datetime.utcnow()
+        window_end = batch_range.end or now
     elif force or not exists:
         # --force reprocesses the model from `begin`. Recorded state is left
         # in place and overwritten window by window, so an interrupted force
         # still resumes sensibly.
-        window_start, window_end = begin, datetime.utcnow()
+        window_start, window_end = begin, now
     else:
         window_start = _batch_resume_start(conn, model, begin, batch_size, lookback)
-        window_end = datetime.utcnow()
+        window_end = now
+
+    # An end past now is clamped rather than refused: asking for "everything
+    # up to next Friday" is a reasonable thing to type, and the windows after
+    # now hold nothing anyway. Running them would record empty windows as
+    # done and leave the resume cursor sitting in the future, so the model
+    # would ingest nothing until the wall clock caught up.
+    if window_end > now:
+        logger.warning(
+            "%s: event-time end %s is in the future; processing up to %s "
+            "instead. Windows after now are not run and not recorded.",
+            model.full_name, window_end, now,
+        )
+        window_end = now
 
     windows = compute_batch_windows(window_start, window_end, batch_size)
     if not windows:
@@ -570,6 +617,22 @@ def _execute_microbatch(
         "%s: %d microbatch window(s) of one %s, %s to %s",
         model.full_name, len(windows), batch_size, windows[0][0], windows[-1][1],
     )
+
+    # One transaction per window is the whole contract: window 17 failing
+    # leaves 1 to 16 committed and recorded, and the next run resumes at 17.
+    # An outer transaction the caller already opened would silently take that
+    # away, committing everything at once or nothing at all, while the
+    # failure message still promised the earlier windows were safe. No caller
+    # does this today; refusing keeps it that way.
+    if not _begin_transaction(conn):
+        raise MicrobatchError(
+            f"Model {model.full_name}: a transaction is already open on this "
+            "connection. A microbatch model gives each window its own "
+            "transaction so a failure part way through keeps the windows "
+            "before it, which an outer transaction would undo. Run it "
+            "outside the transaction."
+        )
+    conn.execute("ROLLBACK")
 
     for index, window in enumerate(windows, start=1):
         w_start, w_end = window
@@ -971,6 +1034,11 @@ def _execute_snapshot(
     # every historical row, exactly as dbt does it), a removed or retyped one
     # is refused, because rewriting history in place is not something a
     # snapshot is allowed to do quietly.
+    #
+    # Every meta name is held out, not only the ones this run writes.
+    # Otherwise switching hard_deletes away from new_record left is_deleted
+    # looking like a user column the query had dropped, and the policy
+    # refused the write for good.
     from dataclasses import replace as _replace
 
     target_cols = [
@@ -982,8 +1050,14 @@ def _execute_snapshot(
             [model.schema, model.name],
         ).fetchall()
     ]
-    meta_lower = {m.lower() for m in meta_names}
+    meta_lower = {m.lower() for m in st.names(with_deleted=True)}
     user_target_cols = [(n, t) for n, t in target_cols if n.lower() not in meta_lower]
+    target_lower = {n.lower() for n, _ in target_cols}
+    # A target built under hard_deletes=ignore or invalidate has no
+    # is_deleted column. Switching to new_record makes it required, and the
+    # evolution plan above never sees a meta column, so without this the
+    # tombstone INSERT failed to bind on every run from then on.
+    add_is_deleted = track_deleted and st.is_deleted.lower() not in target_lower
     plan = _plan_schema_change(
         _replace(model, on_schema_change="append_new_columns"),
         user_target_cols,
@@ -1013,6 +1087,23 @@ def _execute_snapshot(
         _apply_schema_plan(conn, model, plan)
         if actions is not None:
             actions.extend(plan.describe())
+
+        if add_is_deleted:
+            conn.execute(
+                f'ALTER TABLE {model.full_name} ADD COLUMN "{st.is_deleted}" '
+                "BOOLEAN DEFAULT FALSE"
+            )
+            # Explicit, rather than trusting the DEFAULT to reach rows that
+            # are already there: every version written before the switch was
+            # a live one, so none of them is a tombstone.
+            conn.execute(
+                f'UPDATE {model.full_name} SET "{st.is_deleted}" = FALSE '
+                f'WHERE "{st.is_deleted}" IS NULL'
+            )
+            line = f"added column {st.is_deleted} BOOLEAN"
+            logger.info("%s: %s", model.full_name, line)
+            if actions is not None:
+                actions.append(line)
 
         # 1. Close the current version of every key whose source row changed.
         conn.execute(
@@ -1215,8 +1306,44 @@ def _execute_incremental(
         ddl = f"CREATE TABLE {model.full_name} AS\n{query}"
         conn.execute(ddl)
     elif strategy == "append" or not model.unique_key:
-        # Append-only: just insert
-        conn.execute(f"INSERT INTO {model.full_name}\n{query}")
+        # Append-only. It still goes through staging, because a bare
+        # ``INSERT INTO target <query>`` matches columns by position: a
+        # reordered projection wrote region into amount and amount into
+        # region without a word, and a new or dropped column ignored
+        # on_schema_change entirely. Staging gives the same schema diff and
+        # the same policy as every other strategy, plus an explicit column
+        # list so order stops mattering.
+        validate_identifier(model.name, "staging table name")
+        staging_name = f"_havn_staging_{model.name}"
+        conn.execute(f"CREATE OR REPLACE TEMP TABLE {staging_name} AS\n{query}")
+        plan = _plan_schema_change(
+            model,
+            _table_columns(conn, model.schema, model.name),
+            _temp_columns(conn, staging_name),
+            [],
+        )
+        cols = ", ".join(f'"{c}"' for c in plan.columns)
+        owns_tx = _begin_transaction(conn)
+        try:
+            _apply_schema_plan(conn, model, plan)
+            if actions is not None:
+                actions.extend(plan.describe())
+            conn.execute(
+                f"INSERT INTO {model.full_name} ({cols}) "
+                f"SELECT {cols} FROM {staging_name}"
+            )
+            conn.execute(f"DROP TABLE IF EXISTS {staging_name}")
+            if owns_tx:
+                conn.execute("COMMIT")
+        except Exception:
+            if owns_tx:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception as rb_err:
+                    logger.debug(
+                        "Rollback after failed append insert failed: %s", rb_err
+                    )
+            raise
     else:
         # Strategies that need staging: delete+insert, merge
         keys = [k.strip() for k in model.unique_key.split(",") if k.strip()]

@@ -191,7 +191,8 @@ def capture_source_schema(
             """
             SELECT column_name, data_type, is_nullable, ordinal_position
             FROM information_schema.columns
-            WHERE table_schema = ? AND table_name = ?
+            WHERE table_catalog = current_database()
+              AND table_schema = ? AND table_name = ?
             ORDER BY ordinal_position
             """,
             [schema, name],

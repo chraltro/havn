@@ -18,12 +18,74 @@ that quietly does nothing would run the query against production data.
 
 from __future__ import annotations
 
+import re
+from typing import Callable
+
 import sqlglot
 from sqlglot import exp
 
 
 class SQLRewriteError(ValueError):
     """The SQL could not be parsed, so its table references cannot be rewritten."""
+
+
+# Model SQL carries ``{this}``, ``{start}`` and ``{end}`` placeholders that are
+# substituted long after the query is resolved. sqlglot parses ``{start}`` as a
+# struct literal and regenerates it as ``{'start': start}``, which the later
+# substitution can no longer find. Every round trip of model SQL therefore
+# masks them into a plain identifier first and puts them back afterwards.
+_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_PLACEHOLDER_TOKEN = "__havn_ph_{}__"
+
+
+def mask_placeholders(sql: str) -> tuple[str, Callable[[str], str]]:
+    """Hide ``{this}`` / ``{start}`` / ``{end}`` from the SQL parser.
+
+    Returns the masked SQL and the function that puts the placeholders back.
+    Without this an incremental or microbatch model would come out of a
+    sqlglot round trip with ``{'start': start}`` where its placeholder used to
+    be, and :func:`substitute_batch_window` would find nothing to replace.
+
+    When the SQL holds no placeholder the original string is returned with an
+    identity restore, so the common case costs one regex scan and no copy.
+    """
+    found: list[str] = []
+
+    def _mask(match: re.Match) -> str:
+        found.append(match.group(1))
+        return _PLACEHOLDER_TOKEN.format(match.group(1))
+
+    masked = _PLACEHOLDER_RE.sub(_mask, sql)
+    if not found:
+        return sql, _identity
+
+    def restore(out: str) -> str:
+        for name in found:
+            out = out.replace(_PLACEHOLDER_TOKEN.format(name), "{" + name + "}")
+        return out
+
+    return masked, restore
+
+
+def _identity(out: str) -> str:
+    return out
+
+
+_MASKED_RE = re.compile(r"__havn_ph_([A-Za-z_][A-Za-z0-9_]*)__")
+
+
+def unmask_placeholders(sql: str) -> str:
+    """Turn every mask token in ``sql`` back into its ``{placeholder}``.
+
+    The counterpart to :func:`mask_placeholders` for callers that mask several
+    separate queries and stitch the results into one string, where no single
+    restore closure covers the whole output. Ephemeral inlining is the case:
+    the consumer's query and each upstream's query are masked independently
+    and come back as one SQL statement.
+    """
+    if "__havn_ph_" not in sql:
+        return sql
+    return _MASKED_RE.sub(lambda m: "{" + m.group(1) + "}", sql)
 
 
 def table_key(table: exp.Table) -> str:
@@ -55,7 +117,8 @@ def find_table_refs(
     author already pointed at a specific database must not be pointed
     somewhere else.
     """
-    tree = _parse(sql, dialect)
+    masked, _ = mask_placeholders(sql)
+    tree = _parse(masked, dialect)
     cte_names = _cte_names(tree)
     seen: list[str] = []
     for table in tree.find_all(exp.Table):
@@ -100,7 +163,8 @@ def rewrite_table_refs(
     if not mapping:
         return sql
 
-    tree = _parse(sql, dialect)
+    masked, restore = mask_placeholders(sql)
+    tree = _parse(masked, dialect)
     cte_names = _cte_names(tree)
     lookup = {str(k).lower(): v for k, v in mapping.items()}
 
@@ -117,7 +181,7 @@ def rewrite_table_refs(
             replacement.set("alias", exp.TableAlias(this=exp.to_identifier(alias)))
         table.replace(replacement)
 
-    return tree.sql(dialect=dialect)
+    return restore(tree.sql(dialect=dialect))
 
 
 def _parse(sql: str, dialect: str):

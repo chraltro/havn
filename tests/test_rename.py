@@ -512,6 +512,127 @@ def test_the_project_still_discovers_and_binds_after_a_rename(project, models, s
         conn.close()
 
 
+# ---------------------------------------------------------------------------
+# Directive lines
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def directives_project(project):
+    """``@col`` on the defining model, ``@assert`` and ``@grain`` downstream."""
+    write(
+        project,
+        "bronze",
+        "customers",
+        "@config materialized=table\n"
+        "@description raw customers\n"
+        "@col customer_id: the customer's surrogate key\n"
+        "\n"
+        "SELECT\n"
+        "    id AS customer_id,\n"
+        "    name,\n"
+        "    region\n"
+        "FROM landing.customers\n",
+    )
+    write(
+        project,
+        "silver",
+        "customers",
+        "@config materialized=table\n"
+        "@assert customer_id IS NOT NULL\n"
+        "@grain customer_id\n"
+        "\n"
+        "SELECT\n"
+        "    c.customer_id,\n"
+        "    c.name,\n"
+        "    COUNT(o.order_id) AS order_count\n"
+        "FROM bronze.customers c\n"
+        "LEFT JOIN bronze.orders o ON c.customer_id = o.customer_ref\n"
+        "WHERE c.customer_id > 0\n"
+        "GROUP BY c.customer_id, c.name\n",
+    )
+    return project
+
+
+def test_directive_lines_are_indexed_as_sites(directives_project, schemas):
+    models = discover_models(directives_project / "transform")
+    report = index(directives_project, models, schemas)
+
+    directives = [s for s in report.sites if s.kind == "directive"]
+    assert {(s.path, s.line) for s in directives} == {
+        ("transform/bronze/customers.sql", 3),
+        ("transform/silver/customers.sql", 2),
+        ("transform/silver/customers.sql", 3),
+    }
+    for site in directives:
+        text = (directives_project / site.path).read_text()
+        assert text[site.start : site.end] == "customer_id"
+
+
+def test_directive_lines_are_rewritten_and_the_project_still_builds(
+    directives_project, schemas
+):
+    from havn.engine.database import ensure_meta_table
+    from havn.engine.transform import run_transform
+
+    models = discover_models(directives_project / "transform")
+    report = index(directives_project, models, schemas)
+    apply_rename(
+        directives_project,
+        plan_rename(report, "customer_id", "cust_id", schemas=schemas),
+    )
+
+    bronze = (directives_project / "transform/bronze/customers.sql").read_text()
+    silver = (directives_project / "transform/silver/customers.sql").read_text()
+    assert "@col cust_id: the customer's surrogate key" in bronze
+    assert "@assert cust_id IS NOT NULL" in silver
+    assert "@grain cust_id" in silver
+    assert "customer_id" not in bronze
+    assert "customer_id" not in silver
+
+    conn = duckdb.connect(str(directives_project / "warehouse.duckdb"))
+    try:
+        ensure_meta_table(conn)
+        conn.execute("CREATE SCHEMA landing")
+        conn.execute(
+            "CREATE TABLE landing.customers AS SELECT 1 AS id, 'a' AS name, "
+            "'north' AS region"
+        )
+        conn.execute(
+            "CREATE TABLE landing.orders AS SELECT 1 AS order_id, 1 AS cust, "
+            "CAST(5.0 AS DOUBLE) AS amount"
+        )
+        results = run_transform(
+            conn,
+            directives_project / "transform",
+            project_dir=directives_project,
+        )
+        assert set(results.values()) == {"built"}, results
+        assert conn.execute(
+            "SELECT cust_id FROM silver.customers"
+        ).fetchall() == [(1,)]
+    finally:
+        conn.close()
+
+
+def test_a_directive_naming_another_column_is_left_alone(directives_project, schemas):
+    path = directives_project / "transform" / "silver" / "customers.sql"
+    path.write_text(
+        path.read_text().replace(
+            "@grain customer_id\n", "@grain customer_id\n@assert order_count >= 0\n"
+        )
+    )
+    models = discover_models(directives_project / "transform")
+
+    report = index(directives_project, models, schemas)
+    apply_rename(
+        directives_project,
+        plan_rename(report, "customer_id", "cust_id", schemas=schemas),
+    )
+
+    assert "@assert order_count >= 0" in path.read_text()
+
+
 def test_a_stale_file_fails_the_apply_before_anything_is_written(
     project, models, schemas
 ):
