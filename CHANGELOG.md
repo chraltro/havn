@@ -232,6 +232,27 @@ none of them shipped in a released version.
 - The editor kept one Monaco model per file ever opened, kept the previous
   file's error count after a switch, and claimed Monaco's own `inmemory:`
   buffers in its file opener.
+- Microbatch models with an ephemeral upstream could never build: inlining
+  round-tripped the SQL through sqlglot and turned `{start}` into
+  `{'start': start}`. Placeholder masking now wraps every round trip of
+  model SQL, inlining and defer alike.
+- Catalog probes across the engine, CLI, MCP server and API describe only
+  the current database. Under `--defer`, a model the target also holds was
+  profiled with both warehouses' columns, `havn diff` reported columns that
+  were never local, and unit-test mocks were typed from the other
+  environment.
+- A microbatch backfill with `--event-time-end` in the future stranded the
+  model: future windows were recorded as done and later runs found no
+  window to process. The range is clamped to now, future windows are never
+  recorded, and the resume cursor reads only closed windows.
+- `havn rename-column` left `@assert`, `@col` and `@grain` lines untouched,
+  so the next build failed its own assertion. Directive lines are renamed
+  too.
+- `incremental_strategy=append` bypassed `on_schema_change` and inserted
+  positionally, so a reordered projection wrote every value into its
+  neighbour's column and reported success.
+- A built snapshot could not switch `hard_deletes` to `new_record`; the
+  required `is_deleted` column is now added and backfilled.
 
 ### First impression
 
