@@ -16,7 +16,12 @@ from pydantic import BaseModel, Field
 
 from havn.config import load_project
 from havn.engine.database import ensure_meta_table
-from havn.engine.transform import build_dag, discover_models, run_transform
+from havn.engine.transform import (
+    build_dag,
+    discover_all_models,
+    discover_models,
+    run_transform,
+)
 
 logger = logging.getLogger("havn.server")
 
@@ -124,7 +129,6 @@ def _discover_models_cached(transform_dir: Path):
     file under ``transform/``.
     """
     from havn.engine.packages import lock_path, package_roots
-    from havn.engine.transform.discovery import discover_all_models
 
     project_dir = transform_dir.parent
     roots = package_roots(project_dir) if transform_dir.name == "transform" else []

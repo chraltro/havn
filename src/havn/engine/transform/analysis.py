@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import logging
 import re
+from pathlib import Path
 
 import duckdb
 
@@ -1004,7 +1005,7 @@ def check_freshness(
     *,
     include_sources: bool = False,
     source_min_rows: int = 0,
-    transform_dir = None,
+    transform_dir: Path | None = None,
 ) -> list[dict]:
     """Check freshness of all models. Returns stale models.
 
@@ -1032,9 +1033,9 @@ def check_freshness(
     source_specs_by_model: dict[str, list[dict]] = {}
     if include_sources and transform_dir is not None:
         try:
-            from .discovery import discover_models
+            from .discovery import discover_all_models
 
-            for m in discover_models(transform_dir):
+            for m in discover_all_models(Path(transform_dir).parent):
                 if m.source_freshness:
                     source_specs_by_model[m.full_name] = m.source_freshness
         except Exception as e:

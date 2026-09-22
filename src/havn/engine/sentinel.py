@@ -527,13 +527,13 @@ def analyze_impact(
     if config is None:
         config = SentinelConfig()
 
-    from havn.engine.transform import build_dag, discover_models
+    from havn.engine.transform import build_dag, discover_all_models
 
     transform_dir = project_dir / "transform"
     if not transform_dir.exists():
         return []
 
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir)
     if not models:
         return []
 
@@ -801,13 +801,13 @@ def run_sentinel_check(
 
 def get_source_names_from_models(project_dir: Path) -> list[str]:
     """Extract all source table names referenced by models in the DAG."""
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
     transform_dir = project_dir / "transform"
     if not transform_dir.exists():
         return []
 
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir)
     model_names = {m.full_name for m in models}
 
     sources = set()

@@ -657,3 +657,179 @@ def test_api_install_endpoint(tmp_path):
     finally:
         reset_shared_conn()
         invalidate_config_cache()
+
+
+# ---------------------------------------------------------------------------
+# Whole-project callers see package models
+#
+# Every caller below lists or builds the DAG for the project as a whole, so a
+# package model has to be in the list. The single-directory primitive stays
+# right for callers that genuinely mean one directory (discovery's own tests,
+# the importer, the PR diff), and those are left alone.
+# ---------------------------------------------------------------------------
+
+
+_SOURCE_PACKAGE_FILES = {
+    "havn_package.yml": "name: crm\nversion: 0.1.0\n",
+    "transform/silver/enriched.sql": (
+        "@config materialized=table, schema=silver\n\n"
+        "SELECT event_id, payload FROM landing.raw_events\n"
+    ),
+}
+
+
+def test_sentinel_impact_analysis_covers_package_models(tmp_path):
+    from havn.engine.sentinel import SchemaChange, analyze_impact
+
+    project, _, _ = _installed_project(tmp_path, files=_SOURCE_PACKAGE_FILES)
+    records = analyze_impact(
+        project,
+        "landing.raw_events",
+        [
+            SchemaChange(
+                change_type="column_removed",
+                severity="breaking",
+                column_name="payload",
+            )
+        ],
+    )
+    assert "crm_silver.enriched" in {r.model_name for r in records}
+
+
+def test_sentinel_source_names_cover_package_models(tmp_path):
+    from havn.engine.sentinel import get_source_names_from_models
+
+    project, _, _ = _installed_project(tmp_path, files=_SOURCE_PACKAGE_FILES)
+    assert "landing.raw_events" in get_source_names_from_models(project)
+
+
+def test_rewind_downstream_covers_package_models(tmp_path):
+    from havn.engine.snapshots import get_downstream_models
+
+    project, _, _ = _installed_project(tmp_path)
+    downstream = get_downstream_models("crm_bronze.contacts", project / "transform")
+    assert downstream == ["crm_silver.customers"]
+
+
+def test_debug_notebook_covers_package_models(tmp_path):
+    from havn.engine.notebook import generate_debug_notebook
+
+    project, _, _ = _installed_project(tmp_path)
+    conn = duckdb.connect()
+    try:
+        notebook = generate_debug_notebook(
+            conn,
+            "crm_silver.customers",
+            project / "transform",
+            error_message="boom",
+        )
+    finally:
+        conn.close()
+    sources = " ".join(str(c.get("source", "")) for c in notebook["cells"])
+    assert "crm_silver.customers" in sources
+
+
+def test_model_to_notebook_covers_package_models(tmp_path):
+    from havn.engine.notebook import model_to_notebook
+
+    project, _, _ = _installed_project(tmp_path)
+    notebook_dir = project / "notebooks"
+    notebook_dir.mkdir()
+    conn = duckdb.connect()
+    try:
+        notebook = model_to_notebook(
+            conn, "crm_silver.customers", project / "transform", notebook_dir
+        )
+    finally:
+        conn.close()
+    sources = " ".join(str(c.get("source", "")) for c in notebook["cells"])
+    assert "crm_bronze.contacts" in sources
+
+
+def test_check_freshness_covers_package_source_specs(tmp_path):
+    from havn.engine.transform.analysis import check_freshness
+
+    files = {
+        "havn_package.yml": "name: crm\nversion: 0.1.0\n",
+        "transform/silver/enriched.sql": (
+            "@config materialized=table, schema=silver\n"
+            "@source_freshness landing.raw_events, max_age=24h, on=ts\n\n"
+            "SELECT event_id FROM landing.raw_events\n"
+        ),
+    }
+    project, _, _ = _installed_project(tmp_path, files=files)
+    conn = duckdb.connect(str(project / "warehouse.duckdb"))
+    try:
+        conn.execute("CREATE SCHEMA IF NOT EXISTS landing")
+        conn.execute(
+            "CREATE TABLE landing.raw_events AS "
+            "SELECT 1 AS event_id, current_timestamp AS ts"
+        )
+        run_transform(conn, project / "transform", project_dir=project)
+        rows = {
+            r["model"]: r
+            for r in check_freshness(
+                conn, include_sources=True, transform_dir=project / "transform"
+            )
+        }
+    finally:
+        conn.close()
+    sources = rows["crm_silver.enriched"]["sources"]
+    assert [s["table"] for s in sources] == ["landing.raw_events"]
+
+
+def test_unit_tests_can_target_a_package_model(tmp_path):
+    from havn.engine.unit_tests import run_unit_tests
+
+    project, _, _ = _installed_project(tmp_path)
+    _write(
+        project / "tests" / "unit" / "crm_customers.yml",
+        "model: crm_silver.customers\n"
+        "tests:\n"
+        "  - name: passes the package model through\n"
+        "    given:\n"
+        "      crm_bronze.contacts:\n"
+        "        rows:\n"
+        "          - {id: 7, email: 'x@y.com'}\n"
+        "    expect:\n"
+        "      rows:\n"
+        "        - {id: 7, email: 'x@y.com'}\n",
+    )
+    result = run_unit_tests(project)
+    assert result.load_errors == []
+    assert len(result.results) == 1, result.to_dict()
+    assert result.results[0].passed, result.to_dict()
+
+
+def test_promote_to_model_dag_check_covers_package_models(tmp_path):
+    """Promoting onto a name a package already claims has to be reported."""
+    import havn.server.app as server_app
+    from havn.server.deps import invalidate_config_cache, reset_shared_conn
+
+    files = {
+        "havn_package.yml": "name: crm\nversion: 0.1.0\nschemas:\n  bronze: bronze\n",
+        "transform/bronze/contacts.sql": (
+            "@config materialized=table, schema=bronze\n\nSELECT 1 AS id\n"
+        ),
+    }
+    project, _, _ = _installed_project(tmp_path, files=files)
+    reset_shared_conn()
+    invalidate_config_cache()
+    server_app.PROJECT_DIR = project
+    server_app.AUTH_ENABLED = False
+    client = TestClient(server_app.app)
+    try:
+        resp = client.post(
+            "/api/notebooks/promote-to-model",
+            json={
+                "sql_source": "SELECT 2 AS id",
+                "model_name": "contacts",
+                "target_schema": "bronze",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        warnings = resp.json()["validation_warnings"]
+        assert any("bronze.contacts" in w for w in warnings), warnings
+    finally:
+        reset_shared_conn()
+        invalidate_config_cache()

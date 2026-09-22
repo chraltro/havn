@@ -567,7 +567,7 @@ def run_unit_tests(
             already listed them).
         sample_limit: Max differing rows reported per test.
     """
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
     started = time.perf_counter()
     if cases is None:
@@ -584,7 +584,7 @@ def run_unit_tests(
         result.duration_ms = int((time.perf_counter() - started) * 1000)
         return result
 
-    models = {m.full_name.lower(): m for m in discover_models(Path(project_dir) / "transform")}
+    models = {m.full_name.lower(): m for m in discover_all_models(Path(project_dir))}
     by_short: dict[str, Any] = {}
     for m in models.values():
         by_short.setdefault(m.name.lower(), m)
