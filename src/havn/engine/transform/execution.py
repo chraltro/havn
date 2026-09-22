@@ -334,6 +334,16 @@ def parse_event_time(value: str | datetime, label: str = "timestamp") -> datetim
     )
 
 
+def utc_now() -> datetime:
+    """The naive UTC wall clock every window boundary is measured against.
+
+    One function so a test can move the clock, and so "now" means the same
+    thing to the window computation, the resume cursor and the state writer
+    within a single run.
+    """
+    return datetime.utcnow()
+
+
 def truncate_to_batch(ts: datetime, batch_size: str) -> datetime:
     """Round ``ts`` down to the start of its window."""
     if batch_size == "hour":
@@ -457,27 +467,39 @@ def _batch_resume_start(
 ) -> datetime:
     """Where the next ordinary run starts.
 
-    The first window that is not ``done`` if there is one, otherwise the
-    window after the last one recorded; then ``lookback`` windows further
-    back, so rows that arrived late for an already-processed window are
-    picked up. Never earlier than ``begin``.
+    Only *closed* windows count: one whose end is still in the future has not
+    finished happening, so however it was recorded it has to be processed
+    again. Among those, the first that is not ``done`` if there is one,
+    otherwise the window after the last one recorded; then ``lookback``
+    windows further back, so rows that arrived late for an already-processed
+    window are picked up. Never earlier than ``begin``.
+
+    Reading open windows as finished is what poisoned the cursor. A backfill
+    with ``--event-time-end`` in the future recorded those windows as done
+    with zero rows, ``max(window_start)`` then landed past today, and every
+    ordinary run afterwards computed an empty window list and ingested
+    nothing until the wall clock caught up. Runs no longer write a future
+    window at all, and this filter also un-poisons a warehouse that already
+    holds some.
     """
     try:
         rows = conn.execute(
-            "SELECT window_start, status FROM _havn.batch_state "
+            "SELECT window_start, window_end, status FROM _havn.batch_state "
             "WHERE model_path = ?",
             [model.full_name],
         ).fetchall()
     except Exception as e:
         logger.debug("No batch_state for %s yet: %s", model.full_name, e)
         return begin
-    if not rows:
+    now = utc_now()
+    closed = [(r[0], r[2]) for r in rows if r[1] is not None and r[1] <= now]
+    if not closed:
         return begin
-    pending = [r[0] for r in rows if r[1] != "done"]
+    pending = [start for start, status in closed if status != "done"]
     if pending:
         resume = min(pending)
     else:
-        resume = shift_batch(max(r[0] for r in rows), batch_size, 1)
+        resume = shift_batch(max(start for start, _ in closed), batch_size, 1)
     resume = shift_batch(truncate_to_batch(resume, batch_size), batch_size, -lookback)
     return max(resume, truncate_to_batch(begin, batch_size))
 
@@ -490,7 +512,18 @@ def _record_batch(
     rows: int,
     run_id: str | None,
 ) -> None:
-    """Replace this window's row in ``_havn.batch_state``."""
+    """Replace this window's row in ``_havn.batch_state``.
+
+    A window that has not started yet is never recorded. Writing one would
+    put the resume cursor past today, and the model would then sit idle until
+    the wall clock reached it.
+    """
+    if window[0] > utc_now():
+        logger.debug(
+            "%s: refusing to record batch window %s, which is in the future",
+            model_path, window[0],
+        )
+        return
     conn.execute(
         "DELETE FROM _havn.batch_state WHERE model_path = ? AND window_start = ?",
         [model_path, window[0]],
@@ -537,17 +570,31 @@ def _execute_microbatch(
         [model.schema, model.name],
     ).fetchone()[0] > 0
 
+    now = utc_now()
     if batch_range is not None and batch_range.is_set:
         window_start = batch_range.start or begin
-        window_end = batch_range.end or datetime.utcnow()
+        window_end = batch_range.end or now
     elif force or not exists:
         # --force reprocesses the model from `begin`. Recorded state is left
         # in place and overwritten window by window, so an interrupted force
         # still resumes sensibly.
-        window_start, window_end = begin, datetime.utcnow()
+        window_start, window_end = begin, now
     else:
         window_start = _batch_resume_start(conn, model, begin, batch_size, lookback)
-        window_end = datetime.utcnow()
+        window_end = now
+
+    # An end past now is clamped rather than refused: asking for "everything
+    # up to next Friday" is a reasonable thing to type, and the windows after
+    # now hold nothing anyway. Running them would record empty windows as
+    # done and leave the resume cursor sitting in the future, so the model
+    # would ingest nothing until the wall clock caught up.
+    if window_end > now:
+        logger.warning(
+            "%s: event-time end %s is in the future; processing up to %s "
+            "instead. Windows after now are not run and not recorded.",
+            model.full_name, window_end, now,
+        )
+        window_end = now
 
     windows = compute_batch_windows(window_start, window_end, batch_size)
     if not windows:

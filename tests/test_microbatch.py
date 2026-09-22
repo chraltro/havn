@@ -620,6 +620,84 @@ def test_the_bind_pass_survives_an_unreadable_begin(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# A future --event-time-end must not poison the resume cursor
+# ---------------------------------------------------------------------------
+
+
+def test_a_future_end_does_not_stall_later_runs():
+    """Backfill four days ahead, then a plain run must still ingest today.
+
+    The future windows used to be recorded as done with zero rows, so
+    max(window_start) landed past today and every ordinary run afterwards
+    computed an empty window list and quietly ingested nothing.
+    """
+    conn = duckdb.connect(":memory:")
+    ensure_meta_table(conn)
+    conn.execute("CREATE SCHEMA landing")
+    conn.execute("CREATE SCHEMA gold")
+    conn.execute("CREATE TABLE landing.events (id INTEGER, event_at TIMESTAMP)")
+    now = datetime.utcnow()
+    conn.execute(
+        "INSERT INTO landing.events VALUES (1, ?)", [now - timedelta(days=1)]
+    )
+    model = make_model(begin=(now - timedelta(days=2)).strftime("%Y-%m-%d"))
+
+    try:
+        _execute_microbatch(
+            conn, model,
+            batch_range=BatchRange(
+                now - timedelta(days=2), now + timedelta(days=4)
+            ),
+        )
+        assert conn.execute("SELECT count(*) FROM gold.events").fetchone() == (1,)
+        # Nothing beyond the window holding now was recorded.
+        assert max(w for w, _, _ in batch_state(conn)) <= now
+
+        conn.execute("INSERT INTO landing.events VALUES (2, ?)", [now])
+        _execute_microbatch(conn, model)
+
+        assert conn.execute(
+            "SELECT id FROM gold.events ORDER BY id"
+        ).fetchall() == [(1,), (2,)]
+    finally:
+        conn.close()
+
+
+def test_a_window_that_has_not_closed_is_never_a_resume_barrier(events):
+    """A recorded window whose end is still ahead is redone, not skipped."""
+    from havn.engine.transform.execution import _batch_resume_start
+
+    now = datetime.utcnow()
+    today = truncate_to_batch(now, "day")
+    model = make_model(begin=(today - timedelta(days=3)).strftime("%Y-%m-%d"))
+    for offset in range(-3, 3):
+        window_start = today + timedelta(days=offset)
+        events.execute(
+            "INSERT INTO _havn.batch_state "
+            '(model_path, window_start, window_end, status, "rows") '
+            "VALUES (?, ?, ?, 'done', 0)",
+            [model.full_name, window_start, window_start + timedelta(days=1)],
+        )
+
+    resume = _batch_resume_start(
+        events, model, today - timedelta(days=3), "day", 0
+    )
+
+    assert resume == today
+
+
+def test_a_future_window_is_not_recorded(events):
+    from havn.engine.transform.execution import _record_batch
+
+    ahead = datetime.utcnow() + timedelta(days=3)
+    _record_batch(
+        events, "gold.events", (ahead, ahead + timedelta(days=1)), "done", 0, None
+    )
+
+    assert batch_state(events) == []
+
+
+# ---------------------------------------------------------------------------
 # Ephemeral upstreams: the window placeholders must survive inlining
 # ---------------------------------------------------------------------------
 
