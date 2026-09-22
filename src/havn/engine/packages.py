@@ -197,7 +197,7 @@ class InstallResult:
     path: Path
     ref: str = ""  # the requested rev, or the source path for local packages
     commit: str = ""  # resolved commit, "" for local packages
-    status: str = "installed"  # "installed", "unchanged" or "error"
+    status: str = "installed"  # "installed", "unchanged", "removed" or "error"
     message: str = ""
     warnings: list[str] = field(default_factory=list)
 
@@ -427,13 +427,53 @@ def _clone(url: str, rev: str, dest: Path) -> list[str]:
     return warnings
 
 
-def _copy_local(source: Path, dest: Path) -> None:
+def _check_local_source(source: Path, dest: Path) -> None:
+    """Refuse a ``path:`` package that contains the destination.
+
+    ``path: .`` or ``path: ..`` names a directory that holds
+    ``havn_packages/`` itself, so ``copytree`` copies the growing destination
+    into itself and recurses until the path length gives out. The comparison
+    is on resolved paths, and covers the destination and every ancestor of it.
+
+    This runs before anything is written, so a refusal leaves whatever was
+    installed before exactly as it was.
+    """
     if not source.is_dir():
         raise PackageError(f"local package path does not exist: {source}")
+
+    dest_resolved = dest.resolve() if dest.exists() else dest.absolute()
+    packages_root = dest_resolved.parent
+    for inside in (dest_resolved, packages_root):
+        if inside == source or source in inside.parents:
+            raise PackageError(
+                f"local package path {source} contains {packages_root}, so "
+                "installing it would copy the package directory into itself. "
+                "Point 'path:' at the package itself, not at the project or a "
+                "parent of it."
+            )
+
+
+def _copy_local(source: Path, dest: Path) -> None:
+    """Copy a ``path:`` package into ``dest``.
+
+    Symlinks are copied as symlinks rather than followed: following one out of
+    the package would copy whatever it points at into the checkout, and a
+    dangling one raises ``shutil.Error`` part way through the copy.
+    """
     if dest.exists():
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, dest, ignore=_COPY_IGNORE)
+    shutil.copytree(source, dest, ignore=_COPY_IGNORE, symlinks=True)
+
+
+def _discard_partial(dest: Path) -> None:
+    """Remove a checkout an install left half-written."""
+    if not dest.exists():
+        return
+    try:
+        shutil.rmtree(dest)
+    except OSError as exc:
+        logger.warning("Could not remove the partial checkout at %s: %s", dest, exc)
 
 
 def _install_one(
@@ -448,8 +488,16 @@ def _install_one(
     if pkg.path:
         source = Path(pkg.path)
         if not source.is_absolute():
-            source = (project_dir / source).resolve()
-        _copy_local(source, dest)
+            source = project_dir / source
+        source = source.resolve()
+        _check_local_source(source, dest)
+        try:
+            _copy_local(source, dest)
+        except (shutil.Error, OSError):
+            # A copy that stopped part way leaves a directory that looks
+            # installed and is not. Nothing is better than half.
+            _discard_partial(dest)
+            raise
         return InstallResult(
             name=pkg.name,
             source="path",
@@ -496,9 +544,17 @@ def _install_one(
                 status="unchanged",
             )
 
-    warnings = _clone(url, target, dest)
-    commit = _resolve_head(dest)
+    try:
+        warnings = _clone(url, target, dest)
+        commit = _resolve_head(dest)
+    except (PackageError, shutil.Error, OSError):
+        # A clone that succeeded and a checkout that did not leaves a
+        # directory at the wrong revision, which the next run would treat as
+        # installed.
+        _discard_partial(dest)
+        raise
     if not commit:
+        _discard_partial(dest)
         raise PackageError(f"package '{pkg.name}': could not resolve the cloned commit")
     return InstallResult(
         name=pkg.name,
@@ -527,6 +583,11 @@ def install_packages(
     A package that fails to install is reported as an error result rather than
     raised, so one bad source does not hide what the others did. The lock
     keeps the previous entry for a failed package.
+
+    A package that the lock still names but ``packages:`` no longer declares
+    is removed, checkout and lock entry both, the same as
+    ``havn packages remove`` would. Leaving it installed means the DAG keeps
+    building models the project has stopped asking for.
     """
     project_dir = Path(project_dir)
     locked = read_lock(project_dir)
@@ -537,10 +598,36 @@ def install_packages(
     if not packages and not lock_path(project_dir).is_file():
         return results
 
+    declared = {pkg.name for pkg in packages}
+    for name in sorted(set(locked) - declared):
+        dest = packages_dir(project_dir) / name
+        existed = dest.is_dir()
+        _discard_partial(dest)
+        results.append(
+            InstallResult(
+                name=name,
+                source=locked[name].source,
+                path=dest,
+                ref=locked[name].rev or locked[name].path or "",
+                status="removed",
+                message=(
+                    "no longer declared in project.yml; checkout removed"
+                    if existed
+                    else "no longer declared in project.yml; lock entry removed"
+                ),
+            )
+        )
+
     for pkg in packages:
         try:
             result = _install_one(project_dir, pkg, locked.get(pkg.name), upgrade=upgrade)
-        except PackageError as exc:
+        except (PackageError, shutil.Error, OSError) as exc:
+            # shutil.Error and OSError reach here from a real filesystem: a
+            # dangling symlink, an unreadable file, a full disk. They used to
+            # escape as a traceback, so the lock was never written and the
+            # other packages' results were lost with it. The partial checkout
+            # itself is cleaned up by _install_one, which knows what it
+            # touched.
             results.append(
                 InstallResult(
                     name=pkg.name,

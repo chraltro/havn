@@ -41,6 +41,29 @@ must be unique within a project.
 `havn packages remove` deletes the checkout but leaves `project.yml` alone. Take
 the `packages:` entry out yourself, or the next install brings the package back.
 
+Taking the entry out is enough on its own: the next `havn packages install`
+removes any checkout the lock still names but `project.yml` no longer declares,
+and drops its lock entry, so the DAG stops building models the project has
+stopped asking for.
+
+### What a `path:` entry may point at
+
+`path:` is resolved against the project directory and copied into
+`havn_packages/<name>/`. Two rules:
+
+- **It must not contain `havn_packages/`.** `path: .` or `path: ..` names a
+  directory that holds the destination, so the copy would copy the growing
+  destination into itself until the path length gives out. Both are refused
+  with the reason, before anything is written. Point `path:` at the package
+  itself.
+- **Symlinks are copied as symlinks, not followed.** Following one would copy
+  whatever is on the other end into the checkout, which is not what the
+  package published.
+
+A copy that fails part way (an unreadable file, a full disk) is reported as an
+error for that package, the half-written checkout is removed, and the other
+packages still install and still get their lock entries.
+
 ### Which sources a `git:` entry may name
 
 A `git:` URL must be `https://`, `ssh://`, or the scp-like `git@host:path`.

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from pathlib import Path
 
 import duckdb
 import pytest
@@ -415,6 +416,99 @@ def test_local_path_package_is_copied(tmp_path):
     # The package's own .git must not travel into the host project.
     assert not (installed / ".git").exists()
     assert read_lock(project)["shared"].source == "path"
+
+
+@pytest.mark.parametrize("relative", [".", ".."])
+def test_local_path_package_refuses_to_swallow_itself(tmp_path, relative):
+    """`path: .` copied the growing havn_packages/ into itself, forty deep."""
+    project = _make_project(
+        tmp_path, f"packages:\n  - name: selfie\n    path: {relative}\n"
+    )
+    _write(
+        project / "transform" / "silver" / "x.sql",
+        "@config materialized=table, schema=silver\n\nSELECT 1 AS a\n",
+    )
+    results = install_packages(project, load_project(project))
+
+    assert results[0].status == "error"
+    assert "into itself" in results[0].message
+    nested = project / "havn_packages" / "selfie" / "havn_packages"
+    assert not nested.exists()
+
+
+def test_local_path_package_keeps_symlinks_as_symlinks(tmp_path):
+    """A followed symlink copies whatever is on the other end into the checkout.
+
+    A dangling one is worse: copytree raises part way through, which used to
+    escape install_packages as a traceback.
+    """
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("classified\n")
+
+    source = tmp_path / "shared"
+    _write(
+        source / "transform" / "silver" / "dim_date.sql",
+        "@config materialized=table, schema=silver\n\nSELECT 1 AS day_key\n",
+    )
+    (source / "link").symlink_to(outside, target_is_directory=True)
+    (source / "broken").symlink_to(tmp_path / "does-not-exist")
+
+    project = _make_project(tmp_path, f"packages:\n  - name: shared\n    path: {source}\n")
+    results = install_packages(project, load_project(project))
+
+    assert results[0].status == "installed", results[0].message
+    installed = project / "havn_packages" / "shared"
+    assert (installed / "link").is_symlink()
+    assert os.readlink(installed / "link") == str(outside)
+    assert (installed / "broken").is_symlink()
+
+
+def test_a_failed_copy_is_an_error_result_not_a_traceback(tmp_path, monkeypatch):
+    """install_packages caught only PackageError, so an OSError escaped it."""
+    source = tmp_path / "shared"
+    _write(
+        source / "transform" / "silver" / "dim_date.sql",
+        "@config materialized=table, schema=silver\n\nSELECT 1 AS day_key\n",
+    )
+    project = _make_project(tmp_path, f"packages:\n  - name: shared\n    path: {source}\n")
+
+    import havn.engine.packages as packages_mod
+
+    def explode(src, dst, **kwargs):
+        # Leave a half-written checkout behind, as a real failure would.
+        Path(dst).mkdir(parents=True, exist_ok=True)
+        (Path(dst) / "half.sql").write_text("SELECT 1\n")
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(packages_mod.shutil, "copytree", explode)
+    results = install_packages(project, load_project(project))
+
+    assert results[0].status == "error"
+    assert "disk went away" in results[0].message
+    # The lock was still written, and the partial checkout is gone.
+    assert (project / "havn_packages.lock").is_file()
+    assert not (project / "havn_packages" / "shared").exists()
+
+
+def test_install_removes_a_package_the_project_no_longer_declares(tmp_path):
+    bare, _ = _make_package_repo(tmp_path)
+    project = _make_project(
+        tmp_path, f"packages:\n  - name: crm\n    git: {bare}\n    rev: v1.0.0\n"
+    )
+    install_packages(project, load_project(project))
+    assert (project / "havn_packages" / "crm").is_dir()
+
+    # Drop the packages: block, keeping the lock.
+    (project / "project.yml").write_text(
+        "name: testproj\ndatabase:\n  path: warehouse.duckdb\n"
+    )
+    results = install_packages(project, load_project(project))
+
+    assert [r.status for r in results] == ["removed"]
+    assert not (project / "havn_packages" / "crm").exists()
+    assert read_lock(project) == {}
+    assert discover_all_models(project) == []
 
 
 def test_remove_package_deletes_checkout_and_lock_entry(tmp_path):

@@ -112,10 +112,15 @@ def install(
 
     results = install_packages(project_dir, config, upgrade=upgrade)
     failed = 0
+    removed = 0
     for result in results:
         if result.status == "error":
             failed += 1
             console.print(f"  [red]fail[/red]  {result.name}: {result.message}")
+            continue
+        if result.status == "removed":
+            removed += 1
+            console.print(f"  [yellow]removed[/yellow]  {result.name}: {result.message}")
             continue
         detail = result.commit[:12] if result.commit else result.ref
         label = "[dim]unchanged[/dim]" if result.status == "unchanged" else "[green]ok[/green]"
@@ -123,8 +128,9 @@ def install(
         for warning in result.warnings:
             console.print(f"        [yellow]{warning}[/yellow]")
 
+    installed = len(results) - failed - removed
     console.print(
-        f"[dim]{len(results) - failed}/{len(results)} package(s) installed; "
+        f"[dim]{installed}/{len(results) - removed} package(s) installed; "
         "lock written to havn_packages.lock[/dim]"
     )
     if failed:
