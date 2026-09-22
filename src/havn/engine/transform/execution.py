@@ -1018,6 +1018,11 @@ def _execute_snapshot(
     # every historical row, exactly as dbt does it), a removed or retyped one
     # is refused, because rewriting history in place is not something a
     # snapshot is allowed to do quietly.
+    #
+    # Every meta name is held out, not only the ones this run writes.
+    # Otherwise switching hard_deletes away from new_record left is_deleted
+    # looking like a user column the query had dropped, and the policy
+    # refused the write for good.
     from dataclasses import replace as _replace
 
     target_cols = [
@@ -1029,8 +1034,14 @@ def _execute_snapshot(
             [model.schema, model.name],
         ).fetchall()
     ]
-    meta_lower = {m.lower() for m in meta_names}
+    meta_lower = {m.lower() for m in st.names(with_deleted=True)}
     user_target_cols = [(n, t) for n, t in target_cols if n.lower() not in meta_lower]
+    target_lower = {n.lower() for n, _ in target_cols}
+    # A target built under hard_deletes=ignore or invalidate has no
+    # is_deleted column. Switching to new_record makes it required, and the
+    # evolution plan above never sees a meta column, so without this the
+    # tombstone INSERT failed to bind on every run from then on.
+    add_is_deleted = track_deleted and st.is_deleted.lower() not in target_lower
     plan = _plan_schema_change(
         _replace(model, on_schema_change="append_new_columns"),
         user_target_cols,
@@ -1060,6 +1071,23 @@ def _execute_snapshot(
         _apply_schema_plan(conn, model, plan)
         if actions is not None:
             actions.extend(plan.describe())
+
+        if add_is_deleted:
+            conn.execute(
+                f'ALTER TABLE {model.full_name} ADD COLUMN "{st.is_deleted}" '
+                "BOOLEAN DEFAULT FALSE"
+            )
+            # Explicit, rather than trusting the DEFAULT to reach rows that
+            # are already there: every version written before the switch was
+            # a live one, so none of them is a tombstone.
+            conn.execute(
+                f'UPDATE {model.full_name} SET "{st.is_deleted}" = FALSE '
+                f'WHERE "{st.is_deleted}" IS NULL'
+            )
+            line = f"added column {st.is_deleted} BOOLEAN"
+            logger.info("%s: %s", model.full_name, line)
+            if actions is not None:
+                actions.append(line)
 
         # 1. Close the current version of every key whose source row changed.
         conn.execute(

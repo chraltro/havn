@@ -783,3 +783,85 @@ def test_bind_pass_exposes_is_deleted_for_new_record(tmp_path):
 
     assert result.ok, result.errors
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Switching hard_deletes on a built snapshot
+# ---------------------------------------------------------------------------
+
+
+def test_switching_to_new_record_adds_the_is_deleted_column(customers):
+    """A target built under ignore has no is_deleted, and needs one.
+
+    The evolution plan holds every meta column out of the diff, so nothing
+    ever added it: the tombstone INSERT failed to bind on this run and on
+    every run after it.
+    """
+    seed(customers, [(1, "Ann", "gold"), (3, "Cy", "bronze")])
+    _execute_snapshot(customers, make_model(BASE_QUERY, hard_deletes="ignore"))
+    assert "is_deleted" not in [
+        r[0] for r in customers.execute("DESCRIBE silver.dim_customer").fetchall()
+    ]
+
+    seed(customers, [(1, "Ann", "gold")])
+    _execute_snapshot(customers, make_model(BASE_QUERY, hard_deletes="new_record"))
+
+    assert history(customers, "is_deleted") == [
+        (1, "Ann", "gold", True, False),
+        (3, "Cy", "bronze", False, False),
+        (3, "Cy", "bronze", True, True),
+    ]
+
+
+def test_switching_to_new_record_backfills_existing_rows_to_false(customers):
+    seed(customers, [(1, "Ann", "gold")])
+    _execute_snapshot(customers, make_model(BASE_QUERY, hard_deletes="ignore"))
+    seed(customers, [(1, "Ann", "platinum")])
+
+    _execute_snapshot(customers, make_model(BASE_QUERY, hard_deletes="new_record"))
+
+    assert customers.execute(
+        "SELECT count(*) FROM silver.dim_customer WHERE is_deleted IS NULL"
+    ).fetchone() == (0,)
+    assert history(customers, "is_deleted") == [
+        (1, "Ann", "gold", False, False),
+        (1, "Ann", "platinum", True, False),
+    ]
+
+
+def test_switching_to_new_record_names_the_configured_meta_column(customers):
+    from havn.engine.transform.execution import SnapshotSettings
+
+    settings = SnapshotSettings(is_deleted="deleted_flag")
+    seed(customers, [(1, "Ann", "gold"), (3, "Cy", "bronze")])
+    _execute_snapshot(
+        customers, make_model(BASE_QUERY, hard_deletes="ignore"), settings=settings
+    )
+
+    seed(customers, [(1, "Ann", "gold")])
+    _execute_snapshot(
+        customers,
+        make_model(BASE_QUERY, hard_deletes="new_record"),
+        settings=settings,
+    )
+
+    assert customers.execute(
+        "SELECT count(*) FROM silver.dim_customer WHERE deleted_flag"
+    ).fetchone() == (1,)
+
+
+def test_switching_away_from_new_record_leaves_the_column_in_place(customers):
+    """is_deleted must not read as a user column the query dropped."""
+    seed(customers, [(1, "Ann", "gold")])
+    _execute_snapshot(customers, make_model(BASE_QUERY, hard_deletes="new_record"))
+
+    seed(customers, [(1, "Ann", "platinum")])
+    _execute_snapshot(customers, make_model(BASE_QUERY, hard_deletes="ignore"))
+
+    assert "is_deleted" in [
+        r[0] for r in customers.execute("DESCRIBE silver.dim_customer").fetchall()
+    ]
+    assert history(customers) == [
+        (1, "Ann", "gold", False),
+        (1, "Ann", "platinum", True),
+    ]
