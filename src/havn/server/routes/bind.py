@@ -130,8 +130,12 @@ def bind_endpoint(request: Request, req: BindRequest) -> dict:
     transform_dir = project_dir / "transform"
 
     if req.path:
+        # By path parts, not by string prefix: `/proj-backup` starts with
+        # `/proj`, so a prefix test let a sibling directory through.
         candidate = (project_dir / req.path).resolve()
-        if not str(candidate).startswith(str(project_dir.resolve())):
+        try:
+            candidate.relative_to(project_dir.resolve())
+        except ValueError:
             raise HTTPException(status_code=400, detail="Path outside project directory")
     try:
         buffer_model = model_from_buffer(

@@ -100,6 +100,50 @@ def test_lint_fix_keeps_the_directive_header(tmp_path):
     assert "bronze.t" in written
 
 
+HEADERLESS_SQL = textwrap.dedent("""\
+    SELECT DISTINCT(t.id) AS id
+    FROM bronze.t AS t
+""")
+
+
+def test_lint_file_fix_does_not_prepend_a_blank_line(tmp_path):
+    """A file with no directive header gained a leading newline on every fix."""
+    transform_dir = tmp_path / "transform"
+    (transform_dir / "gold").mkdir(parents=True)
+    sql_file = transform_dir / "gold" / "bare.sql"
+    sql_file.write_text(HEADERLESS_SQL)
+
+    _, _, _, content = lint_file(sql_file, tmp_path, fix=True)
+
+    assert not content.startswith("\n")
+    assert not sql_file.read_text().startswith("\n")
+    assert sql_file.read_text().startswith("SELECT")
+
+
+def test_lint_fix_does_not_prepend_a_blank_line(tmp_path):
+    """The same through the directory-walking entry point."""
+    transform_dir = tmp_path / "transform"
+    (transform_dir / "gold").mkdir(parents=True)
+    sql_file = transform_dir / "gold" / "bare.sql"
+    sql_file.write_text(HEADERLESS_SQL)
+
+    lint(transform_dir, fix=True)
+
+    assert sql_file.read_text().startswith("SELECT")
+
+
+def test_repeated_fixes_do_not_accumulate_blank_lines(tmp_path):
+    transform_dir = tmp_path / "transform"
+    (transform_dir / "gold").mkdir(parents=True)
+    sql_file = transform_dir / "gold" / "bare.sql"
+    sql_file.write_text(HEADERLESS_SQL)
+
+    lint_file(sql_file, tmp_path, fix=True)
+    once = sql_file.read_text()
+    lint_file(sql_file, tmp_path, fix=True)
+    assert sql_file.read_text() == once
+
+
 # ---------------------------------------------------------------------------
 # Installed packages
 # ---------------------------------------------------------------------------

@@ -953,6 +953,45 @@ def test_lint_file_check_allows_a_viewer(bind_client, viewer):
     assert resp.status_code == 200, resp.text
 
 
+def test_lint_file_check_returns_no_file_contents(bind_client, viewer):
+    """A check is a diagnostics poll, not a file read.
+
+    `final_content` is the whole file, and the endpoint dropped to read
+    permission, so returning it handed a viewer any .sql file in the project.
+    """
+    resp = bind_client.post("/api/lint/file", json={
+        "path": "transform/silver/orders.sql",
+        "fix": False,
+    })
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["content"] is None
+
+
+def test_lint_file_refuses_a_sibling_directory(bind_client, viewer, bind_project):
+    """`/proj-backup` starts with `/proj`, so a prefix test let it through."""
+    sibling = bind_project.parent / f"{bind_project.name}-backup"
+    (sibling / "transform").mkdir(parents=True)
+    secret = sibling / "transform" / "secret.sql"
+    secret.write_text("SELECT 'classified' AS leaked\n")
+
+    resp = bind_client.post("/api/lint/file", json={
+        "path": f"../{sibling.name}/transform/secret.sql",
+        "fix": False,
+    })
+    assert resp.status_code in (400, 404), resp.text
+    assert "classified" not in resp.text
+
+
+def test_bind_refuses_a_sibling_directory(bind_client, viewer, bind_project):
+    sibling = bind_project.parent / f"{bind_project.name}-backup"
+    sibling.mkdir(exist_ok=True)
+    resp = bind_client.post("/api/bind", json={
+        "path": f"../{sibling.name}/transform/x.sql",
+        "content": "SELECT 1 AS a\n",
+    })
+    assert resp.status_code in (400, 404), resp.text
+
+
 def test_prebuild_gate_runs_after_ingest_and_blocks_the_transform(tmp_path):
     """A run with ingest used to skip the gate entirely.
 

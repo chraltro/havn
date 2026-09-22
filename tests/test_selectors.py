@@ -795,6 +795,44 @@ def test_cli_ls_needs_no_warehouse(dag_project):
     assert "silver.customers" in result.output
 
 
+def test_cli_ls_state_modified_without_a_warehouse_matches_everything(dag_project):
+    """`ls` said "state: selectors match every model" and then selected none.
+
+    `havn transform state:modified` on the same project opens (and creates)
+    the warehouse, finds no model_state and builds everything, so `ls` has to
+    give the same answer -- without creating the file.
+    """
+    assert not (dag_project / "warehouse.duckdb").exists()
+    result = _invoke(
+        "ls", "state:modified", "--names", "--project", str(dag_project)
+    )
+    assert result.exit_code == 0, result.output
+    assert set(result.output.split()) >= set(ALL_MODELS)
+    # Listing is not building: no warehouse was created on the way.
+    assert not (dag_project / "warehouse.duckdb").exists()
+
+
+def test_cli_ls_and_transform_agree_on_state_modified(dag_project):
+    """The two commands answer the same selector the same way.
+
+    The build itself fails on this fixture (the landing tables only exist
+    after ``_build`` creates them), which does not matter: what is compared is
+    the selection each command made, and every selected model is named in the
+    transform output whether it built or failed.
+    """
+    listed = _invoke(
+        "ls", "state:modified", "--names", "--project", str(dag_project)
+    )
+    assert listed.exit_code == 0, listed.output
+    selected = set(listed.output.split()) & set(ALL_MODELS)
+    assert selected
+
+    built = _invoke("transform", "state:modified", "--project", str(dag_project))
+    assert "No models matched targets" not in built.output
+    for name in sorted(selected):
+        assert name in built.output
+
+
 # ---------------------------------------------------------------------------
 # API
 # ---------------------------------------------------------------------------
@@ -863,3 +901,39 @@ def test_api_transform_exact_name_still_works(dag_client):
     )
     assert resp.status_code == 200, resp.text
     assert sorted(resp.json()["results"]) == ["gold.fct_events"]
+
+
+@pytest.mark.parametrize(
+    "selector", ["taggg:zzz", "state:bogus", "config.:x", "gold.no_such_model"]
+)
+def test_api_transform_400s_on_a_selector_that_matched_nothing(dag_client, selector):
+    """A mistyped selector used to be 200 with an empty results object.
+
+    That is the same answer as "everything was already up to date", so a typo
+    in a scheduled call looked like a clean run forever.
+    """
+    resp = dag_client.post(
+        "/api/transform", json={"targets": [selector], "force": True}
+    )
+    assert resp.status_code == 400, resp.text
+    assert "No models matched" in resp.json()["detail"]
+
+
+def test_api_transform_reports_a_partly_matching_selection(dag_client):
+    """One good selector and one bad: the run happens, the bad one is named."""
+    resp = dag_client.post(
+        "/api/transform",
+        json={"targets": ["gold.fct_events", "taggg:zzz"], "force": True},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert sorted(body["results"]) == ["gold.fct_events"]
+    assert any("taggg" in w for w in body["warnings"])
+
+
+def test_api_transform_has_no_warnings_when_everything_matched(dag_client):
+    resp = dag_client.post(
+        "/api/transform", json={"targets": ["gold.fct_events"], "force": True}
+    )
+    assert resp.status_code == 200, resp.text
+    assert "warnings" not in resp.json()

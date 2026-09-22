@@ -56,7 +56,9 @@ def env(
     if action == "list":
         config_path = project_dir / "project.yml"
         raw = yaml.safe_load(config_path.read_text()) or {}
-        environments = raw.get("environments", {})
+        # `environments:` with nothing under it parses as None, not {}, so
+        # every read of it has to fall back explicitly.
+        environments = raw.get("environments") or {}
 
         if not environments:
             console.print("[dim]No environments defined in project.yml.[/dim]")
@@ -76,8 +78,9 @@ def env(
         for env_name, env_raw in environments.items():
             is_active = env_name == active
             marker = "[green]*[/green]" if is_active else ""
-            db_path = env_raw.get("database", {}).get("path", "")
-            conns = ", ".join(env_raw.get("connections", {}).keys()) or "-"
+            env_raw = env_raw or {}
+            db_path = (env_raw.get("database") or {}).get("path", "")
+            conns = ", ".join((env_raw.get("connections") or {}).keys()) or "-"
             tbl.add_row(marker, env_name, db_path or "-", conns)
 
         console.print(tbl)
@@ -94,7 +97,7 @@ def env(
         # Validate the environment exists in project.yml
         config_path = project_dir / "project.yml"
         raw = yaml.safe_load(config_path.read_text()) or {}
-        environments = raw.get("environments", {})
+        environments = raw.get("environments") or {}
 
         if name not in environments:
             console.print(f"[red]Environment '{name}' not found in project.yml.[/red]")
@@ -122,16 +125,16 @@ def env(
         if active:
             config_path = project_dir / "project.yml"
             raw = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
-            env_raw = (raw or {}).get("environments", {}).get(active, {}) or {}
+            raw = raw or {}
+            environments = raw.get("environments") or {}
+            env_raw = environments.get(active) or {}
             target = env_raw.get("defer")
             if target:
                 from havn.engine.defer import target_lockable
 
                 target_path = (
-                    ((raw or {}).get("environments", {}).get(target, {}) or {})
-                    .get("database", {})
-                    .get("path")
-                    or (raw or {}).get("database", {}).get("path", "warehouse.duckdb")
+                    ((environments.get(target) or {}).get("database") or {}).get("path")
+                    or (raw.get("database") or {}).get("path", "warehouse.duckdb")
                 )
                 resolved = Path(target_path)
                 if not resolved.is_absolute():

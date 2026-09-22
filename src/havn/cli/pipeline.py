@@ -215,12 +215,22 @@ def ls(
     # make `havn ls` fail in a project that has never been built.
     conn = None
     if any("state:" in s for s in selectors + exclusions):
-        if not _warehouse_exists(config, project_dir):
+        if _warehouse_exists(config, project_dir):
+            conn = open_warehouse(config, project_dir)
+        else:
+            # Nothing has ever been built, so every model is modified. That is
+            # what `havn transform state:modified` answers on the same project,
+            # because it opens (and thereby creates) the warehouse and finds no
+            # model_state. `ls` must not create a file as a side effect of
+            # listing, so it reads an empty in-memory database instead, which
+            # gives the same answer. Passing conn=None would select nothing and
+            # exit 1, contradicting the line printed right here.
+            import duckdb
+
+            conn = duckdb.connect()
             console.print(
                 "[yellow]No warehouse yet; state: selectors match every model.[/yellow]"
             )
-        else:
-            conn = open_warehouse(config, project_dir)
 
     try:
         selection = select_models(

@@ -68,11 +68,15 @@ def rename_column(
         find_column_references,
         plan_rename,
     )
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir, env)
-    models = discover_models(project_dir / "transform")
+    # The whole project, packages included. A package model that reads the
+    # renamed column is never edited -- the index reports it as a blocker --
+    # but it has to be visible, or the CLI would rename the project and leave
+    # the package reading a column that no longer exists.
+    models = discover_all_models(project_dir, config)
     schemas = _schemas(project_dir, config, models)
 
     try:

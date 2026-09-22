@@ -6,6 +6,7 @@ import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Callable
 
 import duckdb
 from rich.console import Console
@@ -144,19 +145,27 @@ def run_transform(
     # the context manager's finally, so a crash mid-run still releases it.
     # Parallel workers open their own connections to this same file, which
     # DuckDB serves from one shared instance, so they inherit the attach.
-    with _defer_context(conn, defer, models):
+    #
+    # The rewriter the session yields belongs to this run alone and is passed
+    # explicitly all the way down to ``resolve_query``. It is never stashed
+    # anywhere another run could read it: two runs can be in flight in one
+    # process (``POST /api/transform`` and the scheduler both run outside the
+    # pipeline lock), and a run with ``defer=None`` must build exactly what it
+    # would have built alone.
+    with _defer_context(conn, defer, models) as query_rewriter:
         if parallel:
             return _run_transform_parallel(
                 conn, models, force, max_workers, db_path=db_path,
                 project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
                 pipeline_run_id=pipeline_run_id, db_config=db_config,
                 all_models=all_models, batch_range=batch_range,
+                query_rewriter=query_rewriter,
             )
         return _run_transform_sequential(
             conn, models, force,
             project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
             pipeline_run_id=pipeline_run_id, all_models=all_models,
-            batch_range=batch_range,
+            batch_range=batch_range, query_rewriter=query_rewriter,
         )
 
 
@@ -165,11 +174,15 @@ def _defer_context(
     defer: object | None,
     models: list[SQLModel],
 ):
-    """The defer session for this run, or a no-op context when not deferring."""
+    """The defer session for this run, or a no-op context when not deferring.
+
+    Either way the context yields what the run should use as its query
+    rewriter: the deferred run's redirects, or None.
+    """
     if defer is None:
         from contextlib import nullcontext
 
-        return nullcontext()
+        return nullcontext(None)
     from havn.engine.defer import defer_session
 
     defer.local_models = {m.full_name for m in models}
@@ -266,12 +279,15 @@ def _run_transform_sequential(
     pipeline_run_id: str | None = None,
     all_models: list[SQLModel] | None = None,
     batch_range: BatchRange | None = None,
+    query_rewriter: Callable[[str], str] | None = None,
 ) -> dict[str, str]:
     """Run models sequentially (original behavior + assertions + profiling).
 
     ``all_models`` is the full project; ``models`` is the subset to execute.
     Upstream hashes are computed over the former so a targeted run does not
     corrupt change detection.
+
+    ``query_rewriter`` is this run's defer rewriter, or None.
     """
     ordered, model_map = _hash_full_dag(models, all_models)
     # Collect profiles for anomaly detection at end of run
@@ -394,6 +410,7 @@ def _run_transform_sequential(
                 batch_range=batch_range,
                 force=force,
                 run_id=pipeline_run_id,
+                query_rewriter=query_rewriter,
             )
             _update_state(conn, model, duration_ms, row_count)
             log_run(
@@ -510,6 +527,7 @@ def _run_transform_parallel(
     db_config: object | None = None,
     all_models: list[SQLModel] | None = None,
     batch_range: BatchRange | None = None,
+    query_rewriter: Callable[[str], str] | None = None,
 ) -> dict[str, str]:
     """Run models in parallel by DAG tiers.
 
@@ -519,6 +537,9 @@ def _run_transform_parallel(
 
     ``all_models`` is the full project; ``models`` is the subset to execute.
     Tiers are built from the subset, hashes from the full DAG.
+
+    ``query_rewriter`` is this run's defer rewriter, or None. Workers are
+    threads within this run and receive it as an argument.
     """
     # ``model_map`` covers the whole project: workers re-derive each model's
     # upstream hash from it, so a targeted run must not hand them a map that
@@ -550,6 +571,7 @@ def _run_transform_parallel(
                 conn, models, force,
                 project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
                 pipeline_run_id=pipeline_run_id, all_models=all_models,
+                query_rewriter=query_rewriter,
             )
 
     # Resolve database path explicitly (only used when db_config is None).
@@ -567,6 +589,7 @@ def _run_transform_parallel(
             conn, models, force,
             project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
             pipeline_run_id=pipeline_run_id, all_models=all_models,
+            query_rewriter=query_rewriter,
         )
 
     results: dict[str, str] = {}
@@ -681,6 +704,7 @@ def _run_transform_parallel(
                     batch_range=batch_range,
                     force=force,
                     run_id=pipeline_run_id,
+                    query_rewriter=query_rewriter,
                 )
                 _update_state(conn, model, duration_ms, row_count)
                 log_run(
@@ -747,7 +771,7 @@ def _run_transform_parallel(
                         _execute_single_model,
                         db_path_str, model, force, model_map,
                         db_config, project_dir, pipeline_run_id,
-                        batch_range,
+                        batch_range, query_rewriter,
                     ): model
                     for model in tier
                 }

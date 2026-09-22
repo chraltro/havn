@@ -10,6 +10,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -421,7 +422,8 @@ def test_detached_after_the_run(project, prod_db, dev_conn):
         defer=_spec(project, prod_db),
     )
     attached = dev_conn.execute(
-        "SELECT count(*) FROM duckdb_databases() WHERE database_name = 'havn_defer'"
+        "SELECT count(*) FROM duckdb_databases() "
+        "WHERE database_name LIKE 'havn_defer%'"
     ).fetchone()[0]
     assert attached == 0
 
@@ -511,6 +513,38 @@ def test_defer_snapshot_copies_the_database_when_it_is_free(project, prod_db):
             shutil.rmtree(snapshot.cleanup_dir, ignore_errors=True)
 
 
+def test_failed_attach_does_not_leak_the_snapshot_copy(
+    project, prod_db, dev_conn, monkeypatch
+):
+    """A snapshot is a whole warehouse in /tmp; a failed ATTACH must not keep it.
+
+    The copy is made before the attach, and the attach can fail for reasons
+    that have nothing to do with the copy. The cleanup has to cover that gap.
+    """
+    from havn.engine import defer as defer_mod
+
+    captured: dict[str, Path] = {}
+    real_snapshot = defer_mod.snapshot_defer_target
+
+    def spy(path, *, project_dir=None):
+        snapshot = real_snapshot(path, project_dir=project_dir)
+        captured["dir"] = snapshot.cleanup_dir
+        return snapshot
+
+    def refuse(*args, **kwargs):
+        raise DeferError("attach refused")
+
+    monkeypatch.setattr(defer_mod, "snapshot_defer_target", spy)
+    monkeypatch.setattr(defer_mod, "attach_defer_target", refuse)
+
+    with pytest.raises(DeferError):
+        with defer_session(dev_conn, _spec(project, prod_db, snapshot=True)):
+            pass
+
+    assert captured.get("dir") is not None
+    assert not captured["dir"].exists(), "the snapshot copy was left behind"
+
+
 def test_defer_snapshot_without_a_backup_says_so(project, prod_db):
     from havn.engine.defer import snapshot_defer_target
 
@@ -598,13 +632,192 @@ def test_rewriter_keeps_placeholders_intact(project, prod_db, dev_conn):
         dev_conn.execute("DETACH havn_defer")
 
 
-def test_session_installs_and_clears_the_process_rewriter(project, prod_db, dev_conn):
-    from havn.engine.defer import active_query_rewriter
+def test_session_yields_a_rewriter_and_stores_it_nowhere(project, prod_db, dev_conn):
+    """The rewriter is a value the run carries, not process state.
 
-    assert active_query_rewriter() is None
+    Anything global here is a bug: two transform runs can be in flight in one
+    process, and one of them may not be deferring at all.
+    """
+    from havn.engine import defer as defer_mod
+
+    with defer_session(dev_conn, _spec(project, prod_db)) as rewrite:
+        assert callable(rewrite)
+        assert "bronze.customers" in rewrite("SELECT * FROM bronze.customers")
+
+    assert not hasattr(defer_mod, "active_query_rewriter")
+    assert not hasattr(defer_mod, "_active_rewriter")
+
+
+# ---------------------------------------------------------------------------
+# Two runs in one process: POST /api/transform and the scheduler both run
+# outside the pipeline lock, so this is the shape `havn serve` actually has.
+# ---------------------------------------------------------------------------
+
+
+def _attached_targets(conn) -> int:
+    return conn.execute(
+        "SELECT count(*) FROM duckdb_databases() "
+        "WHERE database_name LIKE 'havn_defer%'"
+    ).fetchone()[0]
+
+
+def test_a_concurrent_run_without_defer_is_never_redirected(
+    project, prod_db, dev_conn
+):
+    """Scenario (a): a run that passed defer=None read the other environment.
+
+    dev has no bronze.customers; prod does. The non-deferred run must fail
+    with DuckDB's own error rather than quietly building from prod because
+    some other run happened to be deferring at that moment.
+    """
+    _model(
+        project,
+        "plain",
+        "@config materialized=table, schema=silver\n\nSELECT * FROM bronze.customers\n",
+    )
     with defer_session(dev_conn, _spec(project, prod_db)):
-        assert active_query_rewriter() is not None
-    assert active_query_rewriter() is None
+        other = duckdb.connect(str(project / "dev.duckdb"))
+        try:
+            results = run_transform(
+                other, project / "transform", project_dir=project, defer=None
+            )
+        finally:
+            other.close()
+
+    assert results["silver.plain"] == "error"
+    assert dev_conn.execute(
+        "SELECT count(*) FROM information_schema.tables "
+        "WHERE table_catalog = current_database() AND table_schema = 'silver'"
+    ).fetchone()[0] == 0
+
+
+def test_a_concurrent_run_without_defer_is_never_redirected_across_threads(
+    project, prod_db, dev_conn
+):
+    """The same, with the non-deferred run on its own thread."""
+    _model(
+        project,
+        "plain",
+        "@config materialized=table, schema=silver\n\nSELECT * FROM bronze.customers\n",
+    )
+    outcome: dict[str, object] = {}
+
+    def plain_run() -> None:
+        other = duckdb.connect(str(project / "dev.duckdb"))
+        try:
+            outcome["results"] = run_transform(
+                other, project / "transform", project_dir=project, defer=None
+            )
+        finally:
+            other.close()
+
+    with defer_session(dev_conn, _spec(project, prod_db)):
+        thread = threading.Thread(target=plain_run)
+        thread.start()
+        thread.join(timeout=60)
+    assert not thread.is_alive()
+    assert outcome["results"]["silver.plain"] == "error"
+
+
+def test_a_short_deferred_run_does_not_detach_under_a_long_one(
+    project, prod_db, dev_conn
+):
+    """Scenario (b): the short run's finally used to DETACH mid-flight.
+
+    The long run's remaining models then failed with "Table with name
+    bronze.orders does not exist". The attach is refcounted, so only the last
+    session out detaches.
+    """
+    with defer_session(dev_conn, _spec(project, prod_db)) as long_rewrite:
+        with defer_session(dev_conn, _spec(project, prod_db)):
+            pass
+        # The short session is over; the long one still has work to do.
+        assert _attached_targets(dev_conn) == 1
+        sql = long_rewrite("SELECT id FROM bronze.customers ORDER BY id")
+        assert dev_conn.execute(sql).fetchall() == [(1,), (2,)]
+
+    assert _attached_targets(dev_conn) == 0
+
+
+def test_a_short_deferred_run_on_another_thread_does_not_detach(
+    project, prod_db, dev_conn
+):
+    """The same, with the short run on its own thread and connection."""
+    done = threading.Event()
+
+    def short_run() -> None:
+        other = duckdb.connect(str(project / "dev.duckdb"))
+        try:
+            with defer_session(other, _spec(project, prod_db)):
+                pass
+        finally:
+            other.close()
+            done.set()
+
+    with defer_session(dev_conn, _spec(project, prod_db)) as long_rewrite:
+        thread = threading.Thread(target=short_run)
+        thread.start()
+        assert done.wait(timeout=60)
+        thread.join(timeout=60)
+
+        sql = long_rewrite("SELECT id FROM bronze.customers ORDER BY id")
+        assert dev_conn.execute(sql).fetchall() == [(1,), (2,)]
+
+    assert _attached_targets(dev_conn) == 0
+
+
+def test_two_deferred_runs_with_different_targets_coexist(project, prod_db, dev_conn):
+    """One alias for two targets silently gave the second run the first's data."""
+    staging_db = project / "staging.duckdb"
+    staging = duckdb.connect(str(staging_db))
+    staging.execute("CREATE SCHEMA bronze")
+    staging.execute("CREATE TABLE bronze.customers AS SELECT 7 AS id, 'staging' AS email")
+    staging.close()
+
+    prod_spec = _spec(project, prod_db)
+    staging_spec = DeferSpec(
+        target="staging", path=staging_db, project_dir=project
+    )
+
+    with defer_session(dev_conn, prod_spec) as to_prod:
+        with defer_session(dev_conn, staging_spec) as to_staging:
+            assert _attached_targets(dev_conn) == 2
+            prod_rows = dev_conn.execute(
+                to_prod("SELECT id FROM bronze.customers ORDER BY id")
+            ).fetchall()
+            staging_rows = dev_conn.execute(
+                to_staging("SELECT id FROM bronze.customers ORDER BY id")
+            ).fetchall()
+    assert prod_rows == [(1,), (2,)]
+    assert staging_rows == [(7,)]
+    assert _attached_targets(dev_conn) == 0
+
+
+def test_parallel_workers_inside_a_deferred_run_still_redirect(
+    project, prod_db, dev_conn
+):
+    """Workers are threads in this run, so the rewriter reaches them as an arg."""
+    for name in ("alpha", "beta", "gamma"):
+        _model(
+            project,
+            name,
+            "@config materialized=table, schema=silver\n\n"
+            f"SELECT id, '{name}' AS tag FROM bronze.customers\n",
+        )
+    results = run_transform(
+        dev_conn,
+        project / "transform",
+        parallel=True,
+        max_workers=3,
+        db_path=str(project / "dev.duckdb"),
+        project_dir=project,
+        defer=_spec(project, prod_db),
+    )
+    assert set(results.values()) == {"built"}
+    for name in ("alpha", "beta", "gamma"):
+        assert dev_conn.execute(
+            f"SELECT count(*) FROM silver.{name}"
+        ).fetchone()[0] == 2
 
 
 # ---------------------------------------------------------------------------

@@ -874,6 +874,198 @@ def test_batch_file_write_is_all_or_nothing(client, project):
     assert "customer_id" in (project / first).read_text()
 
 
+# ---------------------------------------------------------------------------
+# Installed packages
+#
+# A package checkout is deleted and rebuilt by the next `havn packages
+# install`, so an edit written there is lost and the project stops building.
+# Package models must be visible to the index (they read the column) and must
+# never be written to.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def project_with_package(project):
+    """``project``, plus an installed package reading bronze.customers."""
+    pkg = project / "havn_packages" / "crm"
+    (pkg / "transform" / "silver").mkdir(parents=True)
+    (pkg / "havn_package.yml").write_text("name: crm\nversion: 1.0.0\n")
+    (pkg / "transform" / "silver" / "contacts.sql").write_text(
+        "@config materialized=table, schema=silver\n"
+        "\n"
+        "SELECT customer_id, name\n"
+        "FROM bronze.customers\n"
+        "WHERE customer_id IS NOT NULL\n"
+    )
+    (project / "havn_packages.lock").write_text(
+        "packages:\n"
+        "  - name: crm\n"
+        "    source: path\n"
+        "    path: ../crm\n"
+        "    rev: local\n"
+        "    commit: local\n"
+    )
+    return project
+
+
+def _package_file(project):
+    return project / "havn_packages" / "crm" / "transform" / "silver" / "contacts.sql"
+
+
+def test_package_sites_are_blocked_not_edited(project_with_package, schemas):
+    from havn.engine.transform import discover_all_models
+
+    models = discover_all_models(project_with_package)
+    assert any(m.package == "crm" for m in models)
+
+    report = find_column_references(
+        models,
+        "bronze.customers",
+        "customer_id",
+        schemas=schemas,
+        project_dir=project_with_package,
+    )
+    package_blockers = [
+        b for b in report.blocked if b.reason == "installed_package"
+    ]
+    assert package_blockers, "the package reference was not reported"
+    assert "edit the package source" in package_blockers[0].message
+    assert not [s for s in report.sites if "havn_packages" in s.path]
+
+    # Not even --force writes into the checkout.
+    edits = plan_rename(report, "customer_id", "cust_id", force=True, schemas=schemas)
+    assert edits
+    assert not [e for e in edits if "havn_packages" in e.path]
+
+
+def test_apply_rename_refuses_a_package_path(project_with_package):
+    from havn.engine.rename import FileEdit
+
+    edit = FileEdit(
+        path="havn_packages/crm/transform/silver/contacts.sql",
+        start=0,
+        end=6,
+        old_text="SELECT",
+        new_text="select",
+    )
+    with pytest.raises(RenameError, match="edit the package source"):
+        apply_rename(project_with_package, [edit])
+
+
+def test_cli_sees_package_models_and_leaves_them_alone(project_with_package):
+    before = _package_file(project_with_package).read_text()
+    result = runner.invoke(
+        app,
+        ["rename-column", "bronze.customers", "customer_id", "cust_id",
+         "-p", str(project_with_package)],
+    )
+    # The package reference is a blocker, so the rename stops and says why.
+    assert result.exit_code == 1
+    assert "package" in result.output
+    assert _package_file(project_with_package).read_text() == before
+    assert "customer_id" in (
+        project_with_package / "transform" / "bronze" / "customers.sql"
+    ).read_text()
+
+
+def test_cli_force_renames_the_project_and_not_the_package(project_with_package):
+    before = _package_file(project_with_package).read_text()
+    result = runner.invoke(
+        app,
+        ["rename-column", "bronze.customers", "customer_id", "cust_id",
+         "--force", "--yes", "-p", str(project_with_package)],
+    )
+    assert result.exit_code == 0, result.output
+    assert "cust_id" in (
+        project_with_package / "transform" / "bronze" / "customers.sql"
+    ).read_text()
+    assert _package_file(project_with_package).read_text() == before
+
+
+@pytest.fixture
+def package_client(project_with_package):
+    from fastapi.testclient import TestClient
+
+    import havn.server.app as server_app
+    from havn.server.deps import reset_shared_conn
+
+    duckdb.connect(str(project_with_package / "warehouse.duckdb")).close()
+    reset_shared_conn()
+    server_app.PROJECT_DIR = project_with_package
+    server_app.AUTH_ENABLED = False
+    yield TestClient(server_app.app)
+    reset_shared_conn()
+
+
+def test_api_plan_never_edits_inside_a_package(package_client, project_with_package):
+    r = package_client.post(
+        "/api/rename/plan",
+        json={
+            "model": "bronze.customers",
+            "column": "customer_id",
+            "new_name": "cust_id",
+            "force": True,
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert not [e for e in body["edits"] if "havn_packages" in e["path"]]
+    assert not [f for f in body["files"] if "havn_packages" in f["path"]]
+    assert any(b["reason"] == "installed_package" for b in body["blocked"])
+
+
+def test_api_apply_never_writes_inside_a_package(package_client, project_with_package):
+    before = _package_file(project_with_package).read_text()
+    r = package_client.post(
+        "/api/rename/apply",
+        json={
+            "model": "bronze.customers",
+            "column": "customer_id",
+            "new_name": "cust_id",
+            "force": True,
+            "hashes": {},
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert _package_file(project_with_package).read_text() == before
+
+
+def test_batch_file_write_rejects_a_duplicate_path(client):
+    path = "transform/bronze/customers.sql"
+    r = client.put(
+        "/api/files",
+        json={
+            "files": [
+                {"path": path, "content": "SELECT 1 AS a\n"},
+                {"path": path, "content": "SELECT 2 AS b\n"},
+            ]
+        },
+    )
+    assert r.status_code == 400
+    assert "Duplicate path" in r.json()["detail"]
+
+
+def test_batch_file_write_rejects_two_spellings_of_one_path(client, project):
+    """`a/b.sql` and `a/./b.sql` are one file, and the check compared strings.
+
+    Both writes went through, so the last one silently won and the other's
+    hash check was made against content that had already been replaced.
+    """
+    original = (project / "transform" / "bronze" / "customers.sql").read_text()
+    r = client.put(
+        "/api/files",
+        json={
+            "files": [
+                {"path": "transform/bronze/customers.sql", "content": "SELECT 1 AS a\n"},
+                {"path": "transform/bronze/./customers.sql", "content": "SELECT 2 AS b\n"},
+            ]
+        },
+    )
+    assert r.status_code == 400
+    assert "Duplicate path" in r.json()["detail"]
+    assert (project / "transform" / "bronze" / "customers.sql").read_text() == original
+
+
 def test_batch_file_write_saves_both_files(client, project):
     r = client.put(
         "/api/files",

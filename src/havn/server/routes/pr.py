@@ -331,12 +331,14 @@ def pr_lineage_impact_endpoint(pr_id: str, request: Request):
     _require_permission(request, "read")
     from havn.engine.git import diff_files_between
     from havn.engine.pr import _compute_lineage_impact, get_pr
-    from havn.engine.transform.discovery import build_dag, discover_models
+    from havn.engine.transform.discovery import build_dag, discover_all_models
 
     project_dir = _get_project_dir()
     pr = get_pr(project_dir, pr_id)
     if pr is None:
         raise HTTPException(404, f"PR '{pr_id}' not found")
     files = diff_files_between(project_dir, pr.base_ref, pr.head_ref)
-    dag = build_dag(discover_models(project_dir / "transform"))
+    # Packages are part of the DAG, so a package model that reads a changed
+    # project model is part of the impact.
+    dag = build_dag(discover_all_models(project_dir))
     return _compute_lineage_impact(files, dag, project_dir)

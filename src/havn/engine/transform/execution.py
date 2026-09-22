@@ -544,6 +544,7 @@ def _execute_microbatch(
     batch_range: BatchRange | None = None,
     force: bool = False,
     run_id: str | None = None,
+    query_rewriter: Callable[[str], str] | None = None,
 ) -> tuple[int, int]:
     """Run a microbatch model one event-time window at a time.
 
@@ -612,7 +613,7 @@ def _execute_microbatch(
 
     validate_identifier(model.name, "staging table name")
     staging = f"_havn_batch_{model.name}"
-    base_query = resolve_query(model, model_map)
+    base_query = resolve_query(model, model_map, query_rewriter)
     logger.info(
         "%s: %d microbatch window(s) of one %s, %s to %s",
         model.full_name, len(windows), batch_size, windows[0][0], windows[-1][1],
@@ -871,6 +872,7 @@ def _execute_snapshot(
     actions: list[str] | None = None,
     model_map: dict[str, SQLModel] | None = None,
     settings: SnapshotSettings | None = None,
+    query_rewriter: Callable[[str], str] | None = None,
 ) -> tuple[int, int]:
     """Merge the model's current rows into an SCD2 history table.
 
@@ -937,7 +939,7 @@ def _execute_snapshot(
         [model.schema, model.name],
     ).fetchone()[0] > 0
 
-    query = resolve_query(model, model_map)
+    query = resolve_query(model, model_map, query_rewriter)
     conn.execute(f"CREATE OR REPLACE TEMP TABLE {staging} AS\n{query}")
     staging_cols = conn.execute(
         "SELECT column_name, data_type FROM information_schema.columns "
@@ -1195,9 +1197,11 @@ def resolve_query(
 
     ``query_rewriter`` is the run's last word on the SQL, applied after
     inlining so that an inlined ephemeral upstream has already stopped being a
-    table reference. A deferred run installs one (see
-    :mod:`havn.engine.defer`); when the caller passes none, whatever the
-    current run installed is used, and outside a deferred run that is nothing.
+    table reference. A deferred run builds one (see :mod:`havn.engine.defer`)
+    and hands it down from ``run_transform``. It is an argument and nothing
+    else: there is no process-wide slot to fall back on, because two transform
+    runs can be in flight at once and a run that did not ask to defer must
+    never have another run's redirects applied to its models.
     """
     if not model_map:
         query = model.query
@@ -1206,10 +1210,6 @@ def resolve_query(
 
         query = inline_ephemeral(model, model_map)
 
-    if query_rewriter is None:
-        from havn.engine.defer import active_query_rewriter
-
-        query_rewriter = active_query_rewriter()
     return query_rewriter(query) if query_rewriter is not None else query
 
 
@@ -1222,6 +1222,7 @@ def _execute_incremental(
     batch_range: BatchRange | None = None,
     force: bool = False,
     run_id: str | None = None,
+    query_rewriter: Callable[[str], str] | None = None,
 ) -> tuple[int, int]:
     """Execute an incremental model.
 
@@ -1239,6 +1240,7 @@ def _execute_incremental(
         return _execute_microbatch(
             conn, model, actions, model_map,
             batch_range=batch_range, force=force, run_id=run_id,
+            query_rewriter=query_rewriter,
         )
 
     conn.execute(f"CREATE SCHEMA IF NOT EXISTS {model.schema}")
@@ -1269,7 +1271,7 @@ def _execute_incremental(
     # silently lost forever; the dedup on unique_key absorbs the re-read. For
     # append-only loads there is no dedup, so we keep strict ``>`` to avoid
     # inserting duplicates of the boundary rows.
-    query = resolve_query(model, model_map)
+    query = resolve_query(model, model_map, query_rewriter)
     incremental_filter = model.incremental_filter
     if model.watermark and not incremental_filter:
         wm = model.watermark.strip()
@@ -1521,6 +1523,7 @@ def execute_model(
     batch_range: BatchRange | None = None,
     force: bool = False,
     run_id: str | None = None,
+    query_rewriter: Callable[[str], str] | None = None,
 ) -> tuple[int, int]:
     """Execute a single model. Returns (duration_ms, row_count).
 
@@ -1535,6 +1538,10 @@ def execute_model(
     ``snapshot_settings`` names the meta columns a ``materialized=snapshot``
     model writes. Omitting it uses havn's default names, which is what every
     caller that has no project config in hand wants.
+
+    ``query_rewriter`` is the deferred run's redirect table, passed down from
+    ``run_transform``. Omitting it means "no defer", including while another
+    run in this process is deferring.
     """
     from havn.engine.observability import ROWS_PROCESSED, TRANSFORM_DURATION
     from havn.engine.resource_manager import get_resource_manager
@@ -1553,16 +1560,18 @@ def execute_model(
             duration_ms, row_count = _execute_incremental(
                 conn, model, actions, model_map,
                 batch_range=batch_range, force=force, run_id=run_id,
+                query_rewriter=query_rewriter,
             )
         elif model.materialized == "snapshot":
             duration_ms, row_count = _execute_snapshot(
-                conn, model, actions, model_map, snapshot_settings
+                conn, model, actions, model_map, snapshot_settings,
+                query_rewriter=query_rewriter,
             )
         else:
             conn.execute(f"CREATE SCHEMA IF NOT EXISTS {model.schema}")
             start = time.perf_counter()
             _drop_conflicting(conn, model.schema, model.name, model.materialized)
-            query = resolve_query(model, model_map)
+            query = resolve_query(model, model_map, query_rewriter)
 
             if model.materialized == "view":
                 ddl = f"CREATE OR REPLACE VIEW {model.full_name} AS\n{query}"
@@ -1633,12 +1642,18 @@ def _execute_single_model(
     project_dir: object | None = None,
     pipeline_run_id: str | None = None,
     batch_range: BatchRange | None = None,
+    query_rewriter: Callable[[str], str] | None = None,
 ) -> tuple[str, ModelResult]:
     """Execute a single model in its own connection (for parallel execution).
 
     If ``db_config`` is provided, the connection is opened through the
     warehouse backend (supports DuckLake). Otherwise falls back to the
     plain ``db_path`` open for the DuckDB backend.
+
+    ``query_rewriter`` is the deferred run's rewriter. Workers are threads
+    inside one run, so it arrives as an argument rather than through any
+    per-thread or process-wide state: a worker of a non-deferred run gets
+    None even while another run is deferring.
 
     Returns (model_full_name, ModelResult).
     """
@@ -1676,6 +1691,7 @@ def _execute_single_model(
             batch_range=batch_range,
             force=force,
             run_id=pipeline_run_id,
+            query_rewriter=query_rewriter,
         )
         _update_state(conn, model, duration_ms, row_count)
         log_run(

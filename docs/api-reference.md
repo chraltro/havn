@@ -198,6 +198,15 @@ working.
 {"targets": ["state:modified+"], "exclude": ["tag:expensive"]}
 ```
 
+A selector that matches nothing is a 400 naming it, not an empty success: a
+typo would otherwise be indistinguishable from "everything was already up to
+date". When some selectors matched and others did not, the run goes ahead and
+the response carries the rest:
+
+```json
+{"results": {"gold.orders": "built"}, "warnings": ["Unknown selector method 'taggg'."]}
+```
+
 ### POST /api/models/create
 
 Create a new SQL model file.
