@@ -618,6 +618,22 @@ def _execute_microbatch(
         model.full_name, len(windows), batch_size, windows[0][0], windows[-1][1],
     )
 
+    # One transaction per window is the whole contract: window 17 failing
+    # leaves 1 to 16 committed and recorded, and the next run resumes at 17.
+    # An outer transaction the caller already opened would silently take that
+    # away, committing everything at once or nothing at all, while the
+    # failure message still promised the earlier windows were safe. No caller
+    # does this today; refusing keeps it that way.
+    if not _begin_transaction(conn):
+        raise MicrobatchError(
+            f"Model {model.full_name}: a transaction is already open on this "
+            "connection. A microbatch model gives each window its own "
+            "transaction so a failure part way through keeps the windows "
+            "before it, which an outer transaction would undo. Run it "
+            "outside the transaction."
+        )
+    conn.execute("ROLLBACK")
+
     for index, window in enumerate(windows, start=1):
         w_start, w_end = window
         query = substitute_batch_window(base_query, w_start, w_end)

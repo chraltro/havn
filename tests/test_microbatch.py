@@ -686,6 +686,26 @@ def test_a_window_that_has_not_closed_is_never_a_resume_barrier(events):
     assert resume == today
 
 
+def test_an_outer_transaction_is_refused_before_the_first_window(events):
+    """Per-window transactions cannot degrade into one silent outer one."""
+    model = make_model()
+    events.execute("BEGIN TRANSACTION")
+    try:
+        with pytest.raises(MicrobatchError, match="transaction is already open"):
+            _execute_microbatch(
+                events, model,
+                batch_range=BatchRange(datetime(2024, 1, 1), datetime(2024, 1, 6)),
+            )
+    finally:
+        events.execute("ROLLBACK")
+
+    assert events.execute(
+        "SELECT COUNT(*) FROM information_schema.tables "
+        "WHERE table_catalog = current_database() "
+        "AND table_schema = 'gold' AND table_name = 'events'"
+    ).fetchone() == (0,)
+
+
 def test_a_future_window_is_not_recorded(events):
     from havn.engine.transform.execution import _record_batch
 
