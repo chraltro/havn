@@ -795,6 +795,44 @@ def test_cli_ls_needs_no_warehouse(dag_project):
     assert "silver.customers" in result.output
 
 
+def test_cli_ls_state_modified_without_a_warehouse_matches_everything(dag_project):
+    """`ls` said "state: selectors match every model" and then selected none.
+
+    `havn transform state:modified` on the same project opens (and creates)
+    the warehouse, finds no model_state and builds everything, so `ls` has to
+    give the same answer -- without creating the file.
+    """
+    assert not (dag_project / "warehouse.duckdb").exists()
+    result = _invoke(
+        "ls", "state:modified", "--names", "--project", str(dag_project)
+    )
+    assert result.exit_code == 0, result.output
+    assert set(result.output.split()) >= set(ALL_MODELS)
+    # Listing is not building: no warehouse was created on the way.
+    assert not (dag_project / "warehouse.duckdb").exists()
+
+
+def test_cli_ls_and_transform_agree_on_state_modified(dag_project):
+    """The two commands answer the same selector the same way.
+
+    The build itself fails on this fixture (the landing tables only exist
+    after ``_build`` creates them), which does not matter: what is compared is
+    the selection each command made, and every selected model is named in the
+    transform output whether it built or failed.
+    """
+    listed = _invoke(
+        "ls", "state:modified", "--names", "--project", str(dag_project)
+    )
+    assert listed.exit_code == 0, listed.output
+    selected = set(listed.output.split()) & set(ALL_MODELS)
+    assert selected
+
+    built = _invoke("transform", "state:modified", "--project", str(dag_project))
+    assert "No models matched targets" not in built.output
+    for name in sorted(selected):
+        assert name in built.output
+
+
 # ---------------------------------------------------------------------------
 # API
 # ---------------------------------------------------------------------------
