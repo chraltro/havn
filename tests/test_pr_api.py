@@ -240,6 +240,41 @@ def test_api_build_starts_background(client):
     assert resp.json()["status"] == "started"
 
 
+def test_api_lineage_impact_covers_package_models(client, project):
+    """A package model reading a changed project model is part of the impact.
+
+    Package checkouts are gitignored, so they never show up in the diff
+    themselves; they matter because they read what the diff changed.
+    """
+    pkg = project / "havn_packages" / "crm" / "transform" / "silver"
+    pkg.mkdir(parents=True)
+    (project / "havn_packages" / "crm" / "havn_package.yml").write_text(
+        "name: crm\nversion: 1.0.0\n"
+    )
+    (pkg / "enriched.sql").write_text(
+        "@config materialized=table, schema=silver\n\n"
+        "SELECT * FROM bronze.customers\n"
+    )
+    (project / "havn_packages.lock").write_text(
+        "packages:\n"
+        "  - name: crm\n"
+        "    source: path\n"
+        "    path: ../crm\n"
+        "    rev: local\n"
+        "    commit: local\n"
+    )
+
+    pr = client.post(
+        "/api/prs",
+        json={"title": "T", "description": "", "base_ref": "main", "head_ref": "feature/x"},
+    ).json()
+    resp = client.get(f"/api/prs/{pr['id']}/lineage-impact")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["changed"] == ["bronze.customers"]
+    assert "crm_silver.enriched" in body["impacted"]
+
+
 def test_api_merge_refuses_without_approval(client):
     pr = client.post(
         "/api/prs",

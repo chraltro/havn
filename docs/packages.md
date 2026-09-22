@@ -197,6 +197,13 @@ Things worth knowing while authoring:
   `havn lint --fix -p havn_packages/crm`, is refused with that reason rather
   than obeyed. Checking a package file still reports its violations; only the
   rewrite is refused. Lint your package in its own repository.
+- **`havn rename-column` never writes inside a package.** It does read them:
+  a package model that reads the renamed column is reported as a blocker
+  (`installed package; edit the package source`) with the file and line, so
+  the rename tells you what it would break instead of leaving you to find out
+  at the next build. `--force` renames the project and still leaves the
+  checkout alone, because the next install would delete the edit. Make the
+  matching change in the package's own repository and bump the pinned `rev`.
 
 ## Macros
 
