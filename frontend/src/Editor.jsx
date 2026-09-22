@@ -1252,6 +1252,18 @@ export default function Editor({ content, language, onChange, activeFile, dirty,
     if (resolve) resolve(proceed);
   }
 
+  /**
+   * Answer "no" for a dialog nobody can answer any more.
+   *
+   * A rename waits on these promises. If the file changes under the dialog,
+   * or the editor unmounts while it is up, nothing will ever click a button
+   * and the rename would wait forever, holding Monaco's rename session open.
+   */
+  function settlePendingDialogs() {
+    if (blockerResolveRef.current) answerBlockers(false);
+    if (targetResolveRef.current) answerTarget(false);
+  }
+
   // Keep the module-level provider context pointed at the file on screen.
   editorContext.activeFile = activeFile || null;
   editorContext.dirty = !!dirty;
@@ -1274,6 +1286,10 @@ export default function Editor({ content, language, onChange, activeFile, dirty,
   useEffect(() => {
     if (isTransformSql(activeFile)) getModelsCache();
   }, [activeFile]);
+
+  // The dialogs belong to the rename that opened them, and that rename is
+  // about the file on screen.
+  useEffect(() => settlePendingDialogs, [activeFile]);
 
   // --- Keep the number of live text models bounded ---
   // Every file opened gets its own model and @monaco-editor/react keeps it
