@@ -70,18 +70,64 @@ def _validate_rev(rev: str) -> bool:
     return bool(_SAFE_REV_RE.match(rev))
 
 
-def _validate_git_url(url: str) -> bool:
-    """Validate a git remote URL.
+# A ``git:`` source may only speak one of these. Everything else git would
+# accept is either an arbitrary-command transport (``ext::sh -c ...``), a way
+# to read the server's own disk (``file://``, a bare local path) or a
+# cleartext protocol (``git://``, ``http://``).
+_ALLOWED_GIT_SCHEMES = ("https://", "ssh://")
 
-    Anything is a valid git remote, including a local path, so this only
-    rejects what would be dangerous as a subprocess argument: a leading dash
-    (read as an option), embedded NUL or newline, or an absurd length.
+# ``git@github.com:owner/repo.git`` -- scp-like syntax, the common SSH remote.
+_SCP_LIKE_RE = re.compile(
+    r"^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:(?![/\\])[A-Za-z0-9._/~-]+$"
+)
+
+# A test seam, never true in production and deliberately not settable from
+# project.yml, the CLI, the API or the environment: havn's own package tests
+# clone from bare repositories in a temp directory so they exercise the real
+# ``git clone``/``git checkout`` paths without a network. A local directory as
+# a package source is supported for users through ``path:``, which is resolved
+# against the project directory instead of being handed to git.
+_ALLOW_LOCAL_GIT_REMOTES = False
+
+
+def _validate_git_url(url: str) -> bool:
+    """Validate a ``git:`` remote URL.
+
+    Installing a package runs ``git clone`` with this string and then imports
+    the result's Python macros, so the transport is part of the trust
+    boundary. Only ``https://``, ``ssh://`` and the scp-like ``git@host:path``
+    are accepted.
+
+    Everything else git understands is refused on purpose:
+
+    - ``ext::<command>`` makes git run an arbitrary shell command as the
+      transport, so a project.yml could execute code on whoever installs it.
+    - ``file://`` and a bare local path turn a package entry into a read of
+      the server's own filesystem. A local directory is a legitimate source,
+      but it belongs under ``path:``, which is resolved against the project
+      directory rather than handed to git.
+    - ``git://`` and ``http://`` are unauthenticated cleartext, so the code
+      that gets imported is whatever the network returned.
+
+    A leading dash (which git reads as an option), embedded NUL or newline,
+    and absurd lengths are still rejected before any of that.
     """
     if not url or len(url) > 2000:
         return False
     if url.startswith("-"):
         return False
-    return not any(c in url for c in ("\x00", "\n", "\r"))
+    if any(c in url for c in ("\x00", "\n", "\r")):
+        return False
+    lowered = url.lower()
+    if lowered.startswith(_ALLOWED_GIT_SCHEMES):
+        return True
+    # Anything else carrying a transport marker is refused by name, including
+    # git's "<transport>::<address>" form.
+    if "::" in url or "://" in url:
+        return False
+    if _SCP_LIKE_RE.match(url):
+        return True
+    return _ALLOW_LOCAL_GIT_REMOTES and Path(url).is_dir()
 
 
 def _run_git(cwd: Path, *args: str, timeout: int = _GIT_TIMEOUT) -> subprocess.CompletedProcess:
@@ -415,7 +461,11 @@ def _install_one(
     url = pkg.git or ""
     rev = pkg.rev or ""
     if not _validate_git_url(url):
-        raise PackageError(f"package '{pkg.name}': invalid git URL {url!r}")
+        raise PackageError(
+            f"package '{pkg.name}': invalid git URL {url!r}. A git source must "
+            "be https://, ssh:// or git@host:path. For a package on this "
+            "machine use 'path:' instead of 'git:'."
+        )
     if not _validate_rev(rev):
         raise PackageError(f"package '{pkg.name}': invalid rev {rev!r}")
 

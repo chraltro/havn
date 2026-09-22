@@ -41,6 +41,19 @@ must be unique within a project.
 `havn packages remove` deletes the checkout but leaves `project.yml` alone. Take
 the `packages:` entry out yourself, or the next install brings the package back.
 
+### Which sources a `git:` entry may name
+
+A `git:` URL must be `https://`, `ssh://`, or the scp-like `git@host:path`.
+Nothing else is accepted, and the install fails with the reason:
+
+- `ext::<command>` tells git to run that command as the transport, which would
+  execute whatever a `project.yml` asked for on the machine installing it.
+- `file://` and a bare local path turn a package entry into a read of the
+  installing machine's own disk. A package that lives on this machine is a
+  `path:` entry, which is resolved against the project directory.
+- `git://` and `http://` are unauthenticated cleartext, so the code that ends
+  up being imported is whatever the network returned.
+
 ## Pinning
 
 `rev` is required for a git package, and it can be a tag, a commit SHA or a
