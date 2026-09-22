@@ -116,6 +116,31 @@ def test_env_show_default(project_with_envs):
     assert "default" in result.output
 
 
+PROJECT_YML_NULL_ENVS = """\
+name: test-project
+database:
+  path: warehouse.duckdb
+environments:
+"""
+
+
+@pytest.fixture()
+def project_null_envs(tmp_path: Path, monkeypatch):
+    """`environments:` with nothing under it, which YAML reads as None."""
+    (tmp_path / "project.yml").write_text(PROJECT_YML_NULL_ENVS)
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+@pytest.mark.parametrize("action", ["show", "list"])
+def test_env_survives_a_null_environments_block(project_null_envs, action):
+    """`.get("environments", {})` returned None, and env show crashed on it."""
+    (project_null_envs / ".havn-env").write_text("dev\n")
+    result = runner.invoke(app, ["env", action])
+    assert result.exception is None, result.exception
+    assert result.exit_code == 0, result.output
+
+
 # --- env reset ---
 
 def test_env_reset_deletes_file(project_with_envs):
