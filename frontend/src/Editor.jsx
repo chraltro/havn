@@ -4,6 +4,7 @@ import { useTheme } from "./ThemeProvider";
 import { COLOR_THEMES } from "./themes";
 import { api, getMacros } from "./api";
 import { packageOfPath } from "./FileTree";
+import { notifyFilesChanged } from "./filesChanged";
 
 // ---------------------------------------------------------------------------
 // Custom Monaco themes derived from havn COLOR_THEMES
@@ -1090,9 +1091,7 @@ loader.init().then((monaco) => {
         }
       }
       if (renamed != null && editorContext.reloadFile) editorContext.reloadFile(path, renamed);
-      window.dispatchEvent(
-        new CustomEvent("havn-files-changed", { detail: { paths: (plan.files || []).map((f) => f.path) } }),
-      );
+      notifyFilesChanged((plan.files || []).map((f) => f.path));
       // Nothing for Monaco to splice: every file, including this buffer, is
       // already at its new content.
       return { edits: [] };

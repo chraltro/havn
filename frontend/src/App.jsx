@@ -23,6 +23,7 @@ import WikiPanel from "./WikiPanel";
 import LoginPage from "./LoginPage";
 import ResizeHandle from "./ResizeHandle";
 import useResizable from "./useResizable";
+import { useFilesChanged } from "./filesChanged";
 import SortableTable from "./SortableTable";
 import Onboarding from "./Onboarding";
 import ErrorBoundary from "./ErrorBoundary";
@@ -834,6 +835,13 @@ function AppContent() {
   // Keep refs in sync for use in callbacks with stale closures
   activeFileRef.current = activeFile;
   dirtyRef.current = dirty;
+
+  // A column rename rewrites files the editor never opened, so the tree and
+  // the cached model list both went stale when it returned.
+  useFilesChanged(() => {
+    modelsCacheRef.current = null;
+    loadFiles();
+  });
 
   // Reload the currently open file from disk (used when agent edits it)
   async function reloadActiveFile() {
