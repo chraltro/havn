@@ -255,6 +255,10 @@ The warehouse is a single DuckDB file. Copy it, back it up, version it - it's ju
 | Single-file database | Yes | No | No | No |
 | AI-native | Yes | No | Partial | No |
 | Data stays on your machine | Yes | Depends | No | No |
+| Type checking + column lineage | Offline, no login | Needs `dbt login` | Cloud only | Cloud only |
+| Unit tests without a warehouse | Yes | Experimental, needs upstreams | No | No |
+
+The type checking is a bind pass: `havn validate` hands each model to DuckDB's binder against a shadow catalog, so a missing table, an unknown column or a type mismatch is caught before anything runs. It does not execute the query, so value conversions are not caught - a `VARCHAR` column that happens to hold `'n/a'` still fails its `CAST` when the model builds.
 
 havn is the right choice when you want a complete data platform without the infrastructure overhead. It's not trying to replace Snowflake at 10TB scale - it's the best tool for teams working with data that fits on a single machine (which is most teams).
 
