@@ -213,6 +213,24 @@ Package macro modules are keyed `havn_macros.<pkg>.<file>`, so a package and
 your project can both ship `macros/utils.py` without one silently replacing the
 other. `havn macros` attributes each macro to the package it came from.
 
+## Packages are trusted code
+
+Installing a package is not only fetching SQL. A package's `macros/*.py` are
+imported as Python modules and registered as DuckDB functions the moment macro
+registration runs, which is on every connection havn opens: the CLI, the
+server, a pipeline run. Import happens at module level, so the package's code
+executes on your machine whether or not any model calls one of its macros.
+
+So treat a package the way you would treat a dependency you `pip install`, not
+the way you would treat a data file:
+
+- Read what you are installing before you pin it, and pin it to a tag or a
+  commit rather than a branch, so what you reviewed is what you get.
+- `havn packages install` is an `execute`-permission endpoint on the server.
+  Whoever can call it can run code on the server.
+- `git:` sources are restricted to `https://`, `ssh://` and `git@host:path`
+  for this reason. A package on this machine belongs under `path:`.
+
 ## Editing an installed package
 
 `havn_packages/` is shown in the file tree, dimmed and tagged `installed`, and
