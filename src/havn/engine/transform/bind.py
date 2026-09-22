@@ -763,6 +763,31 @@ def as_validation_message(error: BindError) -> str:
 # ---------------------------------------------------------------------------
 
 
+def read_only_rejection(content: str) -> str | None:
+    """Why ``content`` is not a safe read-only buffer, or None when it is.
+
+    Every surface that binds SQL supplied by a *caller* rather than read from
+    the project's own files runs this first: the ``/api/bind`` endpoint (read
+    permission) and the MCP ``bind_model`` tool when it is handed ``sql``.
+    Directive lines are blanked in place first, so ``@config`` and friends do
+    not read as SQL, and the check itself is the one ``/api/query`` uses, so
+    there is a single list of forbidden verbs and file-access functions.
+
+    A rejected buffer is never bound. ``havn validate --bind`` and
+    ``bind_model`` on a saved model name skip this: that is a local, trusted
+    user binding their own files, which may legitimately read a parquet file.
+    The bind pass itself is isolated and locked down either way.
+    """
+    from havn.engine.sql_analysis import strip_config_comments
+    from havn.engine.sql_safety import ReadOnlyQueryError, validate_read_only_query
+
+    try:
+        validate_read_only_query(strip_config_comments(content))
+    except ReadOnlyQueryError as e:
+        return str(e)
+    return None
+
+
 def model_from_buffer(
     content: str,
     *,

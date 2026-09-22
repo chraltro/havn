@@ -635,6 +635,7 @@ class MCPServer:
             as_validation_message,
             bind_models,
             model_from_buffer,
+            read_only_rejection,
         )
 
         name = str(args.get("name") or "").strip()
@@ -644,6 +645,24 @@ class MCPServer:
 
         models = list(self._models())
         if sql:
+            # Agent-supplied SQL, not a file the user wrote: validate it
+            # before any binder sees it, and never bind a buffer that fails.
+            rejection = read_only_rejection(str(sql))
+            if rejection is not None:
+                return {
+                    "model": name or None,
+                    "ok": False,
+                    "available": True,
+                    "errors": [
+                        {
+                            "message": rejection,
+                            "line": None,
+                            "col": None,
+                            "kind": "bind",
+                        }
+                    ],
+                    "columns": [],
+                }
             path = None
             if name:
                 existing = self._find_model(name)
@@ -658,16 +677,22 @@ class MCPServer:
 
         chain = ancestor_closure(models, [target.full_name])
 
-        # The bind pass attaches a throwaway in-memory catalog, which DuckDB
-        # only allows on a writable handle. It writes nothing to the warehouse.
+        # The bind pass builds its shadow in its own in-memory database and
+        # uses this connection only to read base table column types, so a
+        # read-only handle is enough. A project whose warehouse does not exist
+        # yet cannot be opened read-only at all; fall back so binding still
+        # works before the first build.
         config = self._config()
         try:
-            conn = open_warehouse(config, self.project_dir)
-        except Exception as e:
-            raise ToolError(
-                "Could not open the warehouse for binding "
-                f"(a running `havn serve` holds the lock): {e}"
-            )
+            conn = open_warehouse(config, self.project_dir, read_only=True)
+        except Exception:
+            try:
+                conn = open_warehouse(config, self.project_dir)
+            except Exception as e:
+                raise ToolError(
+                    "Could not open the warehouse for binding "
+                    f"(a running `havn serve` holds the lock): {e}"
+                )
         try:
             result = bind_models(conn, chain, project_dir=self.project_dir)
         except Exception as e:
