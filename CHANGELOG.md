@@ -193,6 +193,46 @@ in `docs/internal/dbt-v2-gap-plan.md`.
   environment's defer target with a green or amber dot for whether it can be
   attached right now.
 
+### Security
+
+The four items below were found by a review of this branch before release;
+none of them shipped in a released version.
+
+- `POST /api/bind` no longer executes caller-supplied SQL against the
+  warehouse. The bind pass builds its shadow catalog in a private in-memory
+  DuckDB database with no attachment to the warehouse, seeded with empty
+  typed tables from `information_schema`, so a buffer cannot write to, read
+  from or escape into the real catalog. The shadow turns off
+  `enable_external_access` and locks its configuration before any model SQL
+  runs, so `read_csv`, `read_text`, `glob`, `COPY ... TO`, `ATTACH`,
+  `INSTALL` and `LOAD` all fail inside it. Buffers sent to `/api/bind` and
+  to the MCP `bind_model` tool go through the shared read-only validator
+  first and are never bound if they fail. The route takes a read-pool
+  connection, not a writable handle.
+- Package `git:` sources are restricted to `https://`, `ssh://` and
+  `git@host:path`. `ext::`, `file://`, bare local paths, `git://` and
+  `http://` are refused; a package on this machine belongs under `path:`.
+  Installing a package imports and registers its Python macros, and the docs
+  now say so.
+- The in-memory connection `havn test` runs model SQL on has external access
+  disabled and its configuration locked.
+
+### Fixed before release
+
+- F2 column rename corrupted the open file when it had unsaved changes. The
+  rename is refused until the file is saved, and afterwards the buffer is
+  reloaded from disk instead of being patched with disk offsets.
+- F2 on a CTE's own alias could silently rename a same-named column of an
+  upstream model. A rename whose target is not the model on screen now asks
+  first, naming the model, the column and the number of files.
+- Hover types and F2 did not resolve upstream columns when the model spelt
+  a table in mixed case or quoted it.
+- A bind result could overwrite a fresher column lookup with a narrower list
+  from the last build, hiding a real column from completion.
+- The editor kept one Monaco model per file ever opened, kept the previous
+  file's error count after a switch, and claimed Monaco's own `inmemory:`
+  buffers in its file opener.
+
 ### First impression
 
 - README leads with `pip install havn`; the clone-and-npm chain moved to the
