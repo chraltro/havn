@@ -35,8 +35,9 @@ havn validate [--project PATH] [--bind | --no-bind]
 Checks `project.yml` parsing, directory structure, stream actions, model dependencies, circular dependencies, and environment variable references.
 
 With the bind pass on, each model is also created as a view inside a throwaway
-shadow catalog and described, which resolves output types and reports **bind
-errors** with a line number:
+shadow catalog -- a private in-memory database with no attachment to the
+warehouse and no file access -- and described, which resolves output types and
+reports **bind errors** with a line number:
 
 ```
   error gold.summary:4: bind error: Referenced column "no_such_column" not found in FROM clause!
