@@ -6,11 +6,11 @@ not built itself from another environment's warehouse file, while every
 write still lands in dev.
 
 The mechanics are DuckDB's, not havn's: the other environment's file is
-attached read-only under a fixed alias, and at execution time a model's
-query has its unbuilt references rewritten from ``bronze.orders`` to
-``havn_defer.bronze.orders``. Nothing is rewritten on disk and nothing
-reaches ``content_hash``: the same model text builds the same hash whether
-or not the run deferred.
+attached read-only under an alias derived from its path, and at execution
+time a model's query has its unbuilt references rewritten from
+``bronze.orders`` to ``havn_defer_<hash>.bronze.orders``. Nothing is
+rewritten on disk and nothing reaches ``content_hash``: the same model text
+builds the same hash whether or not the run deferred.
 
 What decides a rewrite is the local DuckDB catalog, not the model list. An
 object that exists in this warehouse is read from this warehouse; anything
@@ -28,18 +28,30 @@ a scheduled run against it is going. :func:`attach_defer_target` turns that
 into :class:`DeferLockedError`, naming the holder DuckDB reported, and
 ``--defer-snapshot`` defers to a consistent copy instead.
 
-Scope is the process, like the ATTACH itself. Parallel transform workers
-open their own connections to the same warehouse file, which DuckDB serves
-from one shared instance, so the attach one worker sees is the attach every
-worker sees and ``ATTACH IF NOT EXISTS`` makes the siblings a no-op. The
-rewriter is likewise built once per run and installed process-wide for
-:func:`havn.engine.transform.execution.resolve_query` to pick up. Two
-unrelated transform runs in one process would share it; that is the same
-single-process constraint ``engine/pr.py`` documents for its own ATTACH.
+**Concurrency.** Two transform runs can be in flight in one process at the
+same time: ``POST /api/transform`` and the scheduler both run outside the
+pipeline lock. So nothing about defer is process-global.
+
+The rewriter is built once per run and handed down the call stack --
+``run_transform`` passes it to ``_run_transform_sequential`` /
+``_run_transform_parallel``, which pass it to ``execute_model`` and on to
+:func:`havn.engine.transform.execution.resolve_query`. Parallel workers are
+threads inside one run and get it as an argument, so a run that did not ask
+to defer has no rewriter to find, whatever another run is doing.
+
+The ATTACH is shared, because DuckDB shares it: workers open their own
+connections to the same warehouse file and DuckDB serves them from one
+instance, so one worker's attach is every worker's attach. That makes it
+concurrent state, and :func:`defer_attachment` refcounts it per
+``(warehouse, target)`` pair so that the first run to finish does not detach
+the target out from under a longer one. The alias is derived from the target
+path, so two runs deferring to two different environments coexist instead of
+silently sharing one alias.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import shutil
@@ -82,7 +94,10 @@ class DeferSpec:
     target: str
     path: Path
     snapshot: bool = False
-    alias: str = DEFAULT_ALIAS
+    # None means "derive the alias from the target path", which is what every
+    # caller wants: two runs deferring to two different environments must not
+    # collide on one alias. An explicit alias is honoured as written.
+    alias: str | None = None
     verbose: bool = False
     project_dir: Path | None = None
     # Models this run will build itself. They are never redirected even when
@@ -186,6 +201,18 @@ def defer_target_path(config: Any, target: str) -> Path | None:
 # ---------------------------------------------------------------------------
 
 
+def alias_for_path(path: Path | str) -> str:
+    """The attach alias for one defer target.
+
+    Derived from the resolved path, so two runs deferring to two different
+    environments get two aliases and can be attached at the same time. Two
+    runs deferring to the *same* environment get the same alias on purpose:
+    that is one attach, refcounted by :func:`defer_attachment`.
+    """
+    digest = hashlib.sha256(str(Path(path).resolve()).encode()).hexdigest()[:12]
+    return f"{DEFAULT_ALIAS}_{digest}"
+
+
 def attach_defer_target(
     conn: duckdb.DuckDBPyConnection,
     path: Path | str,
@@ -226,12 +253,76 @@ def attached_defer_target(
     *,
     alias: str = DEFAULT_ALIAS,
 ) -> Iterator[str]:
-    """Attach for the duration of the block, detach on the way out."""
+    """Attach for the duration of the block, detach on the way out.
+
+    The unconditional form, for a single caller that knows it is alone. A
+    transform run uses :func:`defer_attachment` instead, which refcounts.
+    """
     attach_defer_target(conn, path, alias=alias)
     try:
         yield alias
     finally:
         detach_defer_target(conn, alias=alias)
+
+
+# How many live defer sessions share one attach, keyed by (warehouse, target).
+# The ATTACH is visible to every connection DuckDB serves from the same
+# instance, which is what makes it shared state between concurrent runs, and
+# what makes a plain DETACH in one run's `finally` a bug in another's.
+_attach_lock = threading.Lock()
+_attach_counts: dict[tuple[str, str], int] = {}
+
+
+def _warehouse_key(conn: duckdb.DuckDBPyConnection) -> str:
+    """Identify the warehouse instance ``conn`` belongs to.
+
+    Two connections to the same file share one DuckDB instance, and therefore
+    one set of attachments. In-memory connections have no file to name, so
+    they fall back to the connection's identity, which is the right answer for
+    them: nothing else shares their catalog.
+    """
+    try:
+        row = conn.execute(
+            "SELECT path FROM duckdb_databases() "
+            "WHERE database_name = current_database()"
+        ).fetchone()
+        if row and row[0]:
+            return str(Path(str(row[0])).resolve())
+    except Exception as e:
+        logger.debug("Could not read the warehouse path: %s", e)
+    return f"conn:{id(conn)}"
+
+
+@contextmanager
+def defer_attachment(
+    conn: duckdb.DuckDBPyConnection,
+    path: Path | str,
+    *,
+    alias: str,
+) -> Iterator[str]:
+    """Attach ``path`` for one run, sharing the attach with concurrent runs.
+
+    The first run to enter attaches; the last to leave detaches. Without the
+    refcount, a short deferred run's ``finally`` detached the target while a
+    longer one was still building, and the long run's remaining models failed
+    with "Table with name bronze.orders does not exist".
+    """
+    key = (_warehouse_key(conn), str(Path(path).resolve()))
+    with _attach_lock:
+        # The attach happens under the lock so two runs starting at once
+        # cannot both read a count of zero and race on the ATTACH.
+        attach_defer_target(conn, path, alias=alias)
+        _attach_counts[key] = _attach_counts.get(key, 0) + 1
+    try:
+        yield alias
+    finally:
+        with _attach_lock:
+            remaining = _attach_counts.get(key, 1) - 1
+            if remaining > 0:
+                _attach_counts[key] = remaining
+            else:
+                _attach_counts.pop(key, None)
+                detach_defer_target(conn, alias=alias)
 
 
 def _classify_attach_failure(error: Exception, path: Path) -> DeferError:
@@ -510,27 +601,8 @@ def make_defer_rewriter(
 
 
 # ---------------------------------------------------------------------------
-# Run-scoped installation
+# Run-scoped session
 # ---------------------------------------------------------------------------
-
-_rewriter_lock = threading.Lock()
-_active_rewriter: Callable[[str], str] | None = None
-
-
-def active_query_rewriter() -> Callable[[str], str] | None:
-    """The rewriter the current run installed, if any.
-
-    ``resolve_query`` asks for this once per model. It is process-wide
-    because the ATTACH it goes with is process-wide, and because transform
-    workers are threads that must all see the same answer.
-    """
-    return _active_rewriter
-
-
-def _install_rewriter(rewriter: Callable[[str], str] | None) -> None:
-    global _active_rewriter
-    with _rewriter_lock:
-        _active_rewriter = rewriter
 
 
 @contextmanager
@@ -540,7 +612,11 @@ def defer_session(
     *,
     on_message: Callable[[str], None] | None = None,
 ) -> Iterator[Callable[[str], str]]:
-    """Attach, install the rewriter, and undo both on the way out.
+    """Attach, build the run's rewriter, and undo both on the way out.
+
+    The rewriter is *yielded*, not installed anywhere. Its only reader is the
+    run that entered this block, which threads it down to ``resolve_query``;
+    a concurrent run that did not ask to defer must never pick it up.
 
     One message is emitted at the start naming the target and the file the
     run will actually read, which is the snapshot's path in snapshot mode.
@@ -553,6 +629,8 @@ def defer_session(
         path = snapshot.path
         origin = snapshot.description
 
+    alias = spec.alias or alias_for_path(path)
+
     def say(message: str) -> None:
         logger.info("%s", message)
         if on_message is not None:
@@ -564,26 +642,21 @@ def defer_session(
     # before the manager ever yields, and a cleanup that lived only in the
     # inner finally would never run for it.
     try:
-        attach_defer_target(conn, path, alias=spec.alias)
-        say(f"defer: reading unbuilt models from '{spec.target}' ({origin})")
+        with defer_attachment(conn, path, alias=alias):
+            say(f"defer: reading unbuilt models from '{spec.target}' ({origin})")
 
-        local = catalog_objects(conn) | {m.lower() for m in spec.local_models}
+            local = catalog_objects(conn) | {m.lower() for m in spec.local_models}
 
-        def report_redirects(redirected: list[str]) -> None:
-            say("defer: " + ", ".join(f"{r} -> {spec.alias}.{r}" for r in redirected))
+            def report_redirects(redirected: list[str]) -> None:
+                say("defer: " + ", ".join(f"{r} -> {alias}.{r}" for r in redirected))
 
-        rewriter = make_defer_rewriter(
-            conn,
-            spec.alias,
-            local,
-            report=report_redirects if spec.verbose else None,
-        )
-        _install_rewriter(rewriter)
-        try:
+            rewriter = make_defer_rewriter(
+                conn,
+                alias,
+                local,
+                report=report_redirects if spec.verbose else None,
+            )
             yield rewriter
-        finally:
-            _install_rewriter(None)
-            detach_defer_target(conn, alias=spec.alias)
     finally:
         if snapshot is not None and snapshot.cleanup_dir is not None:
             shutil.rmtree(snapshot.cleanup_dir, ignore_errors=True)

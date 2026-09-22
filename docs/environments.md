@@ -225,6 +225,24 @@ Masking policies are unaffected: they resolve on `schema.table` and ignore
 which database the table came from, so a policy on `bronze.customers` still
 masks a deferred read of it.
 
+### Two runs at once
+
+`havn serve` can have two transform runs in flight in one process: a
+`POST /api/transform` and a scheduled run both execute outside the pipeline
+lock. Defer is scoped to the run, not the process, so they do not interfere:
+
+- the set of redirects belongs to the run that asked for it and is passed
+  down to each model, including to parallel workers, which are threads inside
+  that run. A run started with `--no-defer`, or against an environment with no
+  defer target, builds exactly what it would have built alone, whatever
+  another run is doing at the same time;
+- the read-only attach is shared, because DuckDB shares it between every
+  connection to the same warehouse file. havn counts the runs using it, so the
+  target stays attached until the last deferred run finishes rather than being
+  detached by the first one to end;
+- two runs deferring to two *different* environments each get their own
+  attach alias, so both targets are readable at once.
+
 ### Not supported yet
 
 - The DuckLake backend. DuckLake already uses the attach slot defer needs, so
