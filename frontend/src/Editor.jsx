@@ -167,6 +167,47 @@ export function pathFromUri(uri) {
   return p.startsWith("/") ? p.slice(1) : p;
 }
 
+/**
+ * How many file models stay alive at once.
+ *
+ * @monaco-editor/react creates a model per `path` and only disposes it when
+ * the component unmounts, so a session that opens fifty files keeps fifty
+ * buffers in memory. Keeping the recent ones means switching back and forth
+ * between a handful of files never pays for a reload.
+ */
+export const MAX_OPEN_MODELS = 8;
+
+/**
+ * Dispose the models of files that fell out of the recent list.
+ *
+ * `recent` is most-recently-opened first; everything past `keep` goes. The
+ * file on screen is the head of the list, so it is never a candidate, and
+ * each model's markers are cleared before it goes to keep the marker owners
+ * from outliving it.
+ */
+export function pruneOpenModels(monaco, recent, keep = MAX_OPEN_MODELS) {
+  if (!monaco) return [];
+  const disposed = [];
+  for (const path of (recent || []).slice(keep)) {
+    let model = null;
+    try {
+      model = monaco.editor.getModel(monaco.Uri.parse(modelUriFor(path)));
+    } catch {
+      model = null;
+    }
+    if (!model || (model.isDisposed && model.isDisposed())) continue;
+    try {
+      monaco.editor.setModelMarkers(model, BIND_MARKER_OWNER, []);
+      monaco.editor.setModelMarkers(model, LINT_MARKER_OWNER, []);
+      model.dispose();
+      disposed.push(path);
+    } catch {
+      // A model Monaco already let go of is nothing to worry about.
+    }
+  }
+  return disposed;
+}
+
 /** True for files the SQL model features (bind, lint, definition) apply to. */
 export function isTransformSql(path) {
   return !!path && path.endsWith(".sql") && path.replace(/\\/g, "/").startsWith("transform/");
@@ -1218,6 +1259,18 @@ export default function Editor({ content, language, onChange, activeFile, dirty,
   useEffect(() => {
     if (isTransformSql(activeFile)) getModelsCache();
   }, [activeFile]);
+
+  // --- Keep the number of live text models bounded ---
+  // Every file opened gets its own model and @monaco-editor/react keeps it
+  // until unmount. The recent ones stay, so switching back is instant; the
+  // rest are disposed.
+  const recentPathsRef = useRef([]);
+  useEffect(() => {
+    if (!activeFile) return;
+    const recent = [activeFile, ...recentPathsRef.current.filter((p) => p !== activeFile)];
+    pruneOpenModels(monacoRef.current, recent);
+    recentPathsRef.current = recent.slice(0, MAX_OPEN_MODELS);
+  }, [activeFile, monacoReady]);
 
   function reportStatus(state) {
     if (onStatusRef.current) onStatusRef.current(state);
