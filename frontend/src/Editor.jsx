@@ -210,16 +210,33 @@ function writeColumns(key, info) {
   schemaCache.set(key, { info, time: Date.now() });
 }
 
+/** Split "schema.name" -- or "db.schema.name" -- at the last dot. */
+export function splitRelationKey(key) {
+  const text = String(key || "");
+  const dot = text.lastIndexOf(".");
+  if (dot < 0) return { schema: "", name: text };
+  return { schema: text.slice(0, dot), name: text.slice(dot + 1) };
+}
+
 /**
- * Seed the column cache from a bind result. The binder saw the upstream
- * relations moments ago, so its schemas are fresher than anything
- * `describeTable` cached earlier.
+ * Seed the column cache from a bind result, without overwriting a better one.
+ *
+ * The binder usually saw the upstream relations moments ago, but it can also
+ * fall back to `_havn.model_columns`, which is only as new as the last build.
+ * A live DESCRIBE that knows at least as many columns is therefore kept: it
+ * is the one that has the column somebody just added, and replacing it would
+ * stop completions offering a column that really exists. Entries that stay
+ * keep their original TTL.
  */
 export function seedColumnsFromBind(bind) {
   if (!bind || !bind.upstream) return;
   for (const [key, columns] of Object.entries(bind.upstream)) {
     if (!Array.isArray(columns)) continue;
-    const [schema, name] = key.split(".");
+    const cached = readColumns(key);
+    // undefined is a miss or an expired entry; null is a known miss, which
+    // the binder's answer beats.
+    if (cached && Array.isArray(cached.columns) && cached.columns.length >= columns.length) continue;
+    const { schema, name } = splitRelationKey(key);
     writeColumns(key, { schema, name, columns });
   }
 }
