@@ -143,6 +143,12 @@ export const editorContext = {
    * the index could not see the whole picture.
    */
   confirmBlockers: null,
+  /**
+   * Ask the user to confirm a rename that reaches outside the model on
+   * screen: ({ model, column, files }) => Promise<bool>. Left null the rename
+   * refuses, for the same reason as `confirmBlockers`.
+   */
+  confirmTarget: null,
   /** Show a list of column reference sites: (result) => void. */
   showReferences: null,
 };
@@ -451,6 +457,36 @@ export function qualifiedRefAt(line, word) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Every name a `WITH` block defines: the CTEs themselves and the columns
+ * aliased inside them.
+ *
+ * A CTE's `price * qty AS amount` is local to the query. It is not a column
+ * of any model, so a rename must not follow it out to an upstream that
+ * happens to have a column of the same name.
+ */
+export function cteLocalNames(sql) {
+  const text = String(sql || "");
+  const names = new Set();
+  const header = /(?:\bWITH\b|,)\s*(?:RECURSIVE\s+)?"?(\w+)"?\s+AS\s*(?:NOT\s+MATERIALIZED\s+|MATERIALIZED\s+)?\(/gi;
+  let m;
+  while ((m = header.exec(text)) !== null) {
+    names.add(m[1].toLowerCase());
+    // Walk the CTE body, so only aliases inside it count.
+    let depth = 1;
+    let i = header.lastIndex;
+    for (; i < text.length && depth > 0; i++) {
+      if (text[i] === "(") depth++;
+      else if (text[i] === ")") depth--;
+    }
+    const body = text.slice(header.lastIndex, Math.max(header.lastIndex, i - 1));
+    const alias = /\bAS\s+"?(\w+)"?/gi;
+    let a;
+    while ((a = alias.exec(body)) !== null) names.add(a[1].toLowerCase());
+  }
+  return names;
+}
+
+/**
  * Which model's column the cursor is on, if any.
  *
  * Two things are renameable: the current model's own output column, and
@@ -458,8 +494,11 @@ export function qualifiedRefAt(line, word) {
  * schema for. Anything else (a function name, a table name, a column of a
  * relation nobody bound) returns null, and the editor says so rather than
  * renaming something it cannot see the extent of.
+ *
+ * `cteLocal` are the names the buffer's own `WITH` blocks define; a token
+ * that is one of those is nobody's column and never resolves to an upstream.
  */
-export function renameTargetAt({ word, qualifier, bind, tableRefs = [] }) {
+export function renameTargetAt({ word, qualifier, bind, tableRefs = [], cteLocal = null }) {
   if (!word || !bind) return null;
   const lower = word.toLowerCase();
   if (qualifier) {
@@ -475,6 +514,10 @@ export function renameTargetAt({ word, qualifier, bind, tableRefs = [] }) {
   }
   const own = (bind.columns || []).find((c) => c.name.toLowerCase() === lower);
   if (own && bind.model) return { model: bind.model, column: own.name };
+  // A name the query itself invents lives and dies in this buffer. Following
+  // it to an upstream column of the same name would rename a model the
+  // cursor was never on.
+  if (cteLocal && (cteLocal.has ? cteLocal.has(lower) : [...cteLocal].includes(lower))) return null;
   // Unqualified, and not an output column: it may still be an upstream
   // column, but only when exactly one upstream has it. Two would be a guess.
   const matches = [];
@@ -941,6 +984,7 @@ loader.init().then((monaco) => {
         qualifier: qualifierBefore(model.getLineContent(position.lineNumber), word),
         bind: editorContext.bindResults.get(path),
         tableRefs: extractTableRefs(model.getValue()),
+        cteLocal: cteLocalNames(model.getValue()),
       });
       if (!target) {
         return { rejectReason: `${word.word} is not a column this editor can resolve` };
@@ -961,6 +1005,7 @@ loader.init().then((monaco) => {
         qualifier: qualifierBefore(model.getLineContent(position.lineNumber), word),
         bind: editorContext.bindResults.get(path),
         tableRefs: extractTableRefs(model.getValue()),
+        cteLocal: cteLocalNames(model.getValue()),
       });
       if (!target) {
         return { edits: [], rejectReason: `${word.word} is not a column this editor can resolve` };
@@ -993,6 +1038,19 @@ loader.init().then((monaco) => {
       if (plan.error) return { edits: [], rejectReason: plan.error };
       if (!(plan.edits || []).length) {
         return { edits: [], rejectReason: `Nothing references ${target.model}.${target.column}` };
+      }
+
+      // Renaming the model on screen is what F2 looks like it does. Anything
+      // else -- an upstream model's column, reached through an alias -- edits
+      // files the cursor was never in, so it is said out loud first.
+      const bind = editorContext.bindResults.get(path);
+      if (!bind || !bind.model || target.model !== bind.model) {
+        const confirmTarget = editorContext.confirmTarget;
+        const files = (plan.files || []).length;
+        const ok = confirmTarget ? await confirmTarget({ ...target, files }) : false;
+        if (!ok) {
+          return { edits: [], rejectReason: `Renaming ${target.model}.${target.column} was not confirmed` };
+        }
       }
 
       const hashes = {};
@@ -1105,11 +1163,20 @@ export default function Editor({ content, language, onChange, activeFile, dirty,
   const [columnRefs, setColumnRefs] = useState(null);
   const [blockers, setBlockers] = useState(null);
   const blockerResolveRef = useRef(null);
+  const [renameTarget, setRenameTarget] = useState(null);
+  const targetResolveRef = useRef(null);
 
   function answerBlockers(proceed) {
     const resolve = blockerResolveRef.current;
     blockerResolveRef.current = null;
     setBlockers(null);
+    if (resolve) resolve(proceed);
+  }
+
+  function answerTarget(proceed) {
+    const resolve = targetResolveRef.current;
+    targetResolveRef.current = null;
+    setRenameTarget(null);
     if (resolve) resolve(proceed);
   }
 
@@ -1124,6 +1191,11 @@ export default function Editor({ content, language, onChange, activeFile, dirty,
     new Promise((resolve) => {
       blockerResolveRef.current = resolve;
       setBlockers(blocked);
+    });
+  editorContext.confirmTarget = (target) =>
+    new Promise((resolve) => {
+      targetResolveRef.current = resolve;
+      setRenameTarget(target);
     });
 
   // Warm the model list so go-to-definition resolves on the first try.
@@ -1312,6 +1384,7 @@ export default function Editor({ content, language, onChange, activeFile, dirty,
       qualifier: qualifierBefore(model.getLineContent(position.lineNumber), word),
       bind: editorContext.bindResults.get(path),
       tableRefs: extractTableRefs(model.getValue()),
+      cteLocal: cteLocalNames(model.getValue()),
     });
     if (!target) {
       setColumnRefs({ model: "", column: word.word, sites: [], blocked: [], error: `${word.word} is not a column this editor can resolve` });
@@ -1437,6 +1510,7 @@ export default function Editor({ content, language, onChange, activeFile, dirty,
         />
       )}
       {blockers && <BlockerDialog blocked={blockers} onAnswer={answerBlockers} />}
+      {renameTarget && <TargetDialog target={renameTarget} onAnswer={answerTarget} />}
     </div>
   );
 }
@@ -1516,6 +1590,36 @@ function BlockerDialog({ blocked, onAnswer }) {
         <div style={styles.dialogButtons}>
           <button style={styles.dialogCancel} onClick={() => onAnswer(false)}>Cancel</button>
           <button style={styles.dialogConfirm} onClick={() => onAnswer(true)}>Rename anyway</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The sentence the target confirmation asks: model, column and file count. */
+export function targetPrompt(target) {
+  const files = (target && target.files) || 0;
+  return `Rename ${target.model}.${target.column} in ${files} file${files === 1 ? "" : "s"}?`;
+}
+
+/**
+ * Confirm a rename that leaves the model on screen.
+ *
+ * `alias.column` and an unqualified column of a single upstream both resolve
+ * to another model's column, and renaming it edits files the cursor was never
+ * in. The rename still happens, but never without being named first.
+ */
+function TargetDialog({ target, onAnswer }) {
+  return (
+    <div style={styles.dialogBackdrop} role="dialog" aria-label="Confirm rename target">
+      <div style={styles.dialog}>
+        <div style={styles.dialogTitle}>{targetPrompt(target)}</div>
+        <div style={styles.dialogHint}>
+          This column belongs to another model. Every model that reads it is rewritten too.
+        </div>
+        <div style={styles.dialogButtons}>
+          <button style={styles.dialogCancel} onClick={() => onAnswer(false)}>Cancel</button>
+          <button style={styles.dialogConfirm} onClick={() => onAnswer(true)}>Rename</button>
         </div>
       </div>
     </div>
