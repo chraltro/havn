@@ -1633,6 +1633,41 @@ def _record_ephemeral(
     return ModelResult(status="inlined")
 
 
+def _log_build(
+    conn: duckdb.DuckDBPyConnection,
+    model: SQLModel,
+    duration_ms: int,
+    row_count: int,
+    schema_changes: list[str],
+    assertion_results: list[AssertionResult],
+    pipeline_run_id: str | None = None,
+) -> None:
+    """Record a finished build in the run log, after its assertions ran.
+
+    A failed severity=error assertion logs the build as "error" (the model's
+    descendants are blocked, so calling it a success would contradict the rest
+    of the run). Warnings leave it a success. The build's duration and row
+    count are kept either way.
+    """
+    failed = [
+        ar for ar in assertion_results
+        if not ar.passed and (ar.severity or "error") == "error"
+    ]
+    error = None
+    if failed:
+        error = "assertion failed: " + "; ".join(
+            f"{ar.expression} ({ar.detail})" if ar.detail else ar.expression
+            for ar in failed
+        )
+    log_run(
+        conn, "transform", model.full_name, "error" if failed else "success",
+        duration_ms, row_count,
+        error=error,
+        log_output="; ".join(schema_changes) or None,
+        pipeline_run_id=pipeline_run_id,
+    )
+
+
 def _execute_single_model(
     db_path: str,
     model: SQLModel,
@@ -1694,11 +1729,6 @@ def _execute_single_model(
             query_rewriter=query_rewriter,
         )
         _update_state(conn, model, duration_ms, row_count)
-        log_run(
-            conn, "transform", model.full_name, "success", duration_ms, row_count,
-            log_output="; ".join(schema_changes) or None,
-            pipeline_run_id=pipeline_run_id,
-        )
 
         # Run assertions (and the synthesised @grain check, if any). A
         # severity=error failure must surface as "assertion_failed" so the
@@ -1707,6 +1737,11 @@ def _execute_single_model(
         if model.assertions or model.grain:
             assertion_results = run_assertions(conn, model)
             _save_assertions(conn, model, assertion_results)
+        _log_build(
+            conn, model, duration_ms, row_count, schema_changes,
+            assertion_results, pipeline_run_id,
+        )
+        if assertion_results:
             failed_error = [
                 ar for ar in assertion_results
                 if not ar.passed and (ar.severity or "error") == "error"

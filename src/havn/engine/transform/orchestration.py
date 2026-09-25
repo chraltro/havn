@@ -25,6 +25,7 @@ from .discovery import (
 from .execution import (
     BatchRange,
     _execute_single_model,
+    _log_build,
     _record_ephemeral,
     execute_model,
     snapshot_settings_for,
@@ -413,11 +414,6 @@ def _run_transform_sequential(
                 query_rewriter=query_rewriter,
             )
             _update_state(conn, model, duration_ms, row_count)
-            log_run(
-                conn, "transform", model.full_name, "success", duration_ms, row_count,
-                log_output="; ".join(schema_changes) or None,
-                pipeline_run_id=pipeline_run_id,
-            )
 
             suffix = f" ({row_count:,} rows, {duration_ms}ms)" if row_count else f" ({duration_ms}ms)"
             console.print(f"  [green]done[/green]  {label}{suffix}")
@@ -443,9 +439,15 @@ def _run_transform_sequential(
 
             # Run data quality assertions (and the synthesised @grain check
             # if model.grain is set — both are evaluated by run_assertions).
+            assertion_results = []
             if model.assertions or model.grain:
                 assertion_results = run_assertions(conn, model)
                 _save_assertions(conn, model, assertion_results)
+            _log_build(
+                conn, model, duration_ms, row_count, schema_changes,
+                assertion_results, pipeline_run_id,
+            )
+            if assertion_results:
                 for ar in assertion_results:
                     if ar.passed:
                         console.print(f"         [green]pass[/green]  assert: {ar.expression}")
@@ -707,18 +709,19 @@ def _run_transform_parallel(
                     query_rewriter=query_rewriter,
                 )
                 _update_state(conn, model, duration_ms, row_count)
-                log_run(
-                    conn, "transform", model.full_name, "success", duration_ms, row_count,
-                    log_output="; ".join(schema_changes) or None,
-                    pipeline_run_id=pipeline_run_id,
-                )
                 for change in schema_changes:
                     console.print(f"         [cyan]schema[/cyan]  {change}")
 
                 # Assertions (and synthesised @grain check, if any)
+                ar_results = []
                 if model.assertions or model.grain:
                     ar_results = run_assertions(conn, model)
                     _save_assertions(conn, model, ar_results)
+                _log_build(
+                    conn, model, duration_ms, row_count, schema_changes,
+                    ar_results, pipeline_run_id,
+                )
+                if ar_results:
                     failed_asserts = [
                         ar for ar in ar_results
                         if not ar.passed and (ar.severity or "error") == "error"

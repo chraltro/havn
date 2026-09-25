@@ -86,7 +86,9 @@ def test_workbench_after_build(client):
     assert cols["order_id"]["type"]
     assert cols["customer_id"]["description"] == ""
 
-    assert data["runs"] and data["runs"][0]["status"] in ("success", "warn", "failed")
+    # A failed severity=error check makes the build an error in the run log.
+    assert data["runs"][0]["status"] == "error"
+    assert data["runs"][0]["error"].startswith("assertion failed: no_nulls(customer_id)")
 
     # The failing-rows SQL runs through the normal query endpoint and returns
     # exactly the violating rows.
