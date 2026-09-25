@@ -364,11 +364,88 @@ def test_review_ready_after_approval_and_blocked_by_change_request(client, proje
     assert review["ready"] is False
 
 
-def test_review_flags_self_approval(client, project):
+def test_author_cannot_approve_own_change(client, project):
     pr = _create_pr(client)  # author defaults to "local"
-    client.post(f"/api/prs/{pr['id']}/approve", json={"reviewer": "local"})
+    resp = client.post(f"/api/prs/{pr['id']}/approve", json={"reviewer": "local"})
+    assert resp.status_code == 400
+    assert "someone else has to approve" in resp.json()["detail"]
     review = client.get(f"/api/prs/{pr['id']}/review").json()
-    assert _gate(review)["approval"]["detail"] == "Approved by local (by its author)."
+    assert _gate(review)["approval"]["state"] == "pending"
+    assert _gate(review)["approval"]["detail"] == "Needs an approval from someone other than local."
+
+
+def test_waiving_approval_lets_a_solo_author_ship(client, project):
+    _ignore_warehouse(project)
+    pr = _create_pr(client)
+    client.patch(f"/api/prs/{pr['id']}", json={"require_approval": False})
+    review = client.get(f"/api/prs/{pr['id']}/review").json()
+    assert _gate(review)["approval"]["state"] == "pass"
+    assert review["ready"] is True
+
+
+def test_legacy_self_approval_does_not_count(client, project):
+    """A PR file written before the rule may list its author as an approver."""
+    import json as _json
+
+    _ignore_warehouse(project)
+    pr = _create_pr(client)
+    path = project / ".havn" / "prs" / f"{pr['id']}.json"
+    data = _json.loads(path.read_text())
+    data["approvers"] = ["local"]
+    path.write_text(_json.dumps(data))
+    review = client.get(f"/api/prs/{pr['id']}/review").json()
+    assert _gate(review)["approval"]["state"] == "pending"
+    resp = client.post(f"/api/prs/{pr['id']}/merge", json={"user": "local"})
+    assert resp.status_code == 400
+    assert "other than its author" in resp.json()["detail"]
+
+
+@pytest.fixture
+def auth_client(project):
+    """Auth on, with an admin (ada) and an editor (ed)."""
+    import havn.server.app as server_app
+    from havn.server.deps import reset_shared_conn
+
+    reset_shared_conn()
+    server_app.PROJECT_DIR = project
+    server_app.AUTH_ENABLED = True
+    tc = TestClient(server_app.app)
+    admin = tc.post("/api/auth/setup", json={"username": "ada", "password": "adapass", "role": "admin"}).json()["token"]
+    tc.post("/api/users", json={"username": "ed", "password": "edpass", "role": "editor"},
+            headers={"Authorization": f"Bearer {admin}"})
+    ed = tc.post("/api/auth/login", json={"username": "ed", "password": "edpass"}).json()["token"]
+    tc.tokens = {"ada": {"Authorization": f"Bearer {admin}"}, "ed": {"Authorization": f"Bearer {ed}"}}
+    yield tc
+    server_app.AUTH_ENABLED = False
+    reset_shared_conn()
+
+
+def test_auth_uses_the_signed_in_user_not_the_claimed_one(auth_client):
+    tc = auth_client
+    pr = tc.post("/api/prs", json={"title": "T", "base_ref": "main", "head_ref": "feature/x", "author": "ada"},
+                 headers=tc.tokens["ed"]).json()
+    assert pr["author"] == "ed"  # the claim is ignored
+
+    # ed claims to be ada to approve their own change: refused as ed.
+    resp = tc.post(f"/api/prs/{pr['id']}/approve", json={"reviewer": "ada"}, headers=tc.tokens["ed"])
+    assert resp.status_code == 400
+
+    resp = tc.post(f"/api/prs/{pr['id']}/approve", json={"reviewer": "someone"}, headers=tc.tokens["ada"])
+    assert resp.status_code == 200
+    assert resp.json()["approvers"] == ["ada"]
+
+
+def test_auth_only_admins_waive_approval(auth_client):
+    tc = auth_client
+    pr = tc.post("/api/prs", json={"title": "T", "base_ref": "main", "head_ref": "feature/x"},
+                 headers=tc.tokens["ed"]).json()
+    resp = tc.patch(f"/api/prs/{pr['id']}", json={"require_approval": False}, headers=tc.tokens["ed"])
+    assert resp.status_code == 403
+    resp = tc.patch(f"/api/prs/{pr['id']}", json={"require_approval": False}, headers=tc.tokens["ada"])
+    assert resp.status_code == 200 and resp.json()["require_approval"] is False
+    # Turning it back on needs no special role.
+    resp = tc.patch(f"/api/prs/{pr['id']}", json={"require_approval": True}, headers=tc.tokens["ed"])
+    assert resp.status_code == 200
 
 
 def test_review_dirty_tree_blocks(client, project):

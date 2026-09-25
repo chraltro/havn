@@ -67,6 +67,19 @@ def _pr_to_dict(pr) -> dict:
     return pr.to_dict()
 
 
+def _actor(user: dict, claimed: str | None) -> str:
+    """Who is acting: the signed-in user when auth is on, never a client claim.
+
+    With auth off everyone is "local" and there is no identity to check, so
+    the name the client sends is kept (it is only a label then).
+    """
+    from havn.server.deps import _get_auth_enabled
+
+    if _get_auth_enabled():
+        return user["username"]
+    return (claimed or "local").strip() or "local"
+
+
 # --- PR lifecycle ---
 
 
@@ -97,7 +110,7 @@ def list_prs_endpoint(
 
 @router.post("/api/prs")
 def create_pr_endpoint(req: CreatePrRequest, request: Request):
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
     from havn.engine.pr import create_pr
 
     project_dir = _get_project_dir()
@@ -108,7 +121,7 @@ def create_pr_endpoint(req: CreatePrRequest, request: Request):
             description=req.description,
             base_ref=req.base_ref,
             head_ref=req.head_ref,
-            author=req.author,
+            author=_actor(user, req.author),
             require_approval=req.require_approval,
         )
     except ValueError as e:
@@ -133,6 +146,11 @@ def update_pr_endpoint(pr_id: str, req: UpdatePrRequest, request: Request):
     _require_permission(request, "write")
     from havn.engine.pr import update_pr
 
+    # Turning approval off lets a change merge unreviewed, so with auth on only
+    # an admin may do it (an author could otherwise waive their own review).
+    if req.require_approval is False:
+        _require_permission(request, "manage_users")
+
     project_dir = _get_project_dir()
     try:
         pr = update_pr(
@@ -149,12 +167,12 @@ def update_pr_endpoint(pr_id: str, req: UpdatePrRequest, request: Request):
 
 @router.post("/api/prs/{pr_id}/close")
 def close_pr_endpoint(pr_id: str, req: CloseRequest, request: Request):
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
     from havn.engine.pr import close_pr
 
     project_dir = _get_project_dir()
     try:
-        pr = close_pr(project_dir, pr_id, req.user)
+        pr = close_pr(project_dir, pr_id, _actor(user, req.user))
     except ValueError as e:
         raise HTTPException(400, str(e))
     return _pr_to_dict(pr)
@@ -177,7 +195,7 @@ def list_comments_endpoint(pr_id: str, request: Request):
 
 @router.post("/api/prs/{pr_id}/comments")
 def add_comment_endpoint(pr_id: str, req: CommentRequest, request: Request):
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
     from havn.engine.pr import add_comment
 
     project_dir = _get_project_dir()
@@ -185,7 +203,8 @@ def add_comment_endpoint(pr_id: str, req: CommentRequest, request: Request):
         comment = add_comment(
             project_dir,
             pr_id,
-            author=req.author,
+            # An AI review keeps its own label; a human comment is by whoever is signed in.
+            author=req.author if req.comment_type == "ai_review" else _actor(user, req.author),
             body=req.body,
             comment_type=req.comment_type,
             file=req.file,
@@ -198,12 +217,12 @@ def add_comment_endpoint(pr_id: str, req: CommentRequest, request: Request):
 
 @router.post("/api/prs/{pr_id}/approve")
 def approve_pr_endpoint(pr_id: str, req: ReviewerActionRequest, request: Request):
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
     from havn.engine.pr import approve_pr
 
     project_dir = _get_project_dir()
     try:
-        pr = approve_pr(project_dir, pr_id, req.reviewer)
+        pr = approve_pr(project_dir, pr_id, _actor(user, req.reviewer))
     except ValueError as e:
         raise HTTPException(400, str(e))
     return _pr_to_dict(pr)
@@ -211,12 +230,12 @@ def approve_pr_endpoint(pr_id: str, req: ReviewerActionRequest, request: Request
 
 @router.post("/api/prs/{pr_id}/request-changes")
 def request_changes_endpoint(pr_id: str, req: ReviewerActionRequest, request: Request):
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
     from havn.engine.pr import request_changes
 
     project_dir = _get_project_dir()
     try:
-        pr = request_changes(project_dir, pr_id, req.reviewer, reason=req.reason)
+        pr = request_changes(project_dir, pr_id, _actor(user, req.reviewer), reason=req.reason)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return _pr_to_dict(pr)
@@ -274,11 +293,11 @@ def get_latest_build_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly
 
 @router.post("/api/prs/{pr_id}/merge")
 def merge_pr_endpoint(pr_id: str, req: MergeRequest, request: Request, conn: DbConn):
-    _require_permission(request, "execute")
+    user = _require_permission(request, "execute")
     from havn.engine.pr import merge_pr
 
     project_dir = _get_project_dir()
-    result = merge_pr(project_dir, pr_id, req.user, conn)
+    result = merge_pr(project_dir, pr_id, _actor(user, req.user), conn)
     if not result.get("success"):
         raise HTTPException(400, result.get("error", "merge failed"))
     return result
@@ -365,6 +384,7 @@ def pr_review_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
         ensure_pr_builds_table,
         get_latest_build,
         get_pr,
+        independent_approvers,
         is_dirty,
         MERGE_IGNORED_PATHS,
     )
@@ -455,14 +475,14 @@ def pr_review_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
     else:
         check("changes", "No changes requested", "pass", "No reviewer has requested changes.", True)
 
+    approvals = independent_approvers(pr)
     if not pr.require_approval:
         check("approval", "Approved", "pass", "This change does not require approval.", True)
-    elif pr.approvers:
-        others = [a for a in pr.approvers if a != pr.author]
-        note = "" if others else " (by its author)"
-        check("approval", "Approved", "pass", f"Approved by {', '.join(pr.approvers)}{note}.", True)
+    elif approvals:
+        check("approval", "Approved", "pass", f"Approved by {', '.join(approvals)}.", True)
     else:
-        check("approval", "Approved", "pending", "Needs at least one approval.", True)
+        check("approval", "Approved", "pending",
+              f"Needs an approval from someone other than {pr.author}.", True)
 
     mc = can_merge(project_dir, pr) if pr.status == "open" else {"can_merge": False, "reason": None}
     if pr.status == "open":

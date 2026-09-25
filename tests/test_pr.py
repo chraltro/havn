@@ -436,3 +436,10 @@ def test_is_dirty_ignores_pr_state(git_project):
     assert is_dirty(git_project, ignore=MERGE_IGNORED_PATHS) is False
     (git_project / "transform" / "bronze" / "customers.sql").write_text("SELECT 2\n")
     assert is_dirty(git_project, ignore=MERGE_IGNORED_PATHS) is True
+
+
+def test_author_cannot_approve_own_pr(git_project):
+    pr = create_pr(git_project, "T", "", "main", "feature/enrich", "alice")
+    with pytest.raises(ValueError, match="someone else has to approve"):
+        approve_pr(git_project, pr.id, "Alice")  # case-insensitive
+    assert get_pr(git_project, pr.id).approvers == []

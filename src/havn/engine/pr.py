@@ -401,6 +401,20 @@ def add_comment(
     return comment
 
 
+def _same_person(a: str | None, b: str | None) -> bool:
+    return bool(a) and bool(b) and a.strip().lower() == b.strip().lower()
+
+
+def independent_approvers(pr: PullRequest) -> list[str]:
+    """Approvals that count: everyone who approved except the change's author.
+
+    ``approve_pr`` refuses self-approval, but PR files written before that
+    rule (or edited by hand) can still list the author, so merge and the
+    review gate filter here too.
+    """
+    return [a for a in pr.approvers if not _same_person(a, pr.author)]
+
+
 def approve_pr(project_dir: Path, pr_id: str, reviewer: str) -> PullRequest:
     pr = _load_pr(project_dir, pr_id)
     if pr is None:
@@ -408,6 +422,11 @@ def approve_pr(project_dir: Path, pr_id: str, reviewer: str) -> PullRequest:
     if pr.status != "open":
         raise ValueError(f"Cannot approve {pr.status} PR")
     reviewer = reviewer or "unknown"
+    if _same_person(reviewer, pr.author):
+        raise ValueError(
+            "You opened this change, so someone else has to approve it. "
+            "To merge without review, turn off 'requires approval' for this change."
+        )
     if reviewer not in pr.approvers:
         pr.approvers.append(reviewer)
     # Remove from change_requesters if they previously requested changes
@@ -1075,8 +1094,11 @@ def merge_pr(
         return {"success": False, "error": f"PR '{pr_id}' not found"}
     if pr.status != "open":
         return {"success": False, "error": f"Cannot merge {pr.status} PR"}
-    if pr.require_approval and not pr.approvers:
-        return {"success": False, "error": "PR requires at least one approval"}
+    if pr.require_approval and not independent_approvers(pr):
+        return {
+            "success": False,
+            "error": "PR requires at least one approval from someone other than its author",
+        }
     if pr.change_requesters:
         return {
             "success": False,

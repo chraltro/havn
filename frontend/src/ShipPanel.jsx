@@ -108,6 +108,17 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
     if (kind !== "build") setBusy(null);
   }
 
+  async function waiveApproval() {
+    const ok = await showConfirm(
+      "Merge without review",
+      "Turn off the approval requirement for this change? It can then merge without anyone else reviewing it. With sign-in on, only an admin can do this.",
+      "Turn off approval",
+      true,
+    );
+    if (!ok) return;
+    await act("approve", () => api.updatePr(review.pr.id, { require_approval: false }));
+  }
+
   async function merge() {
     if (!review) return;
     const title = "Merge change";
@@ -130,6 +141,7 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
     }
   }
 
+  const isAuthor = !!review && user.toLowerCase() === (review.pr.author || "").toLowerCase();
   const open = (prs || []).filter((p) => p.status === "open");
   const done = (prs || []).filter((p) => p.status !== "open").slice(0, 8);
 
@@ -179,9 +191,18 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
             <div style={s.dim}>Closed{review.pr.closed_by ? ` by ${review.pr.closed_by}` : ""}{review.pr.closed_at ? ` ${timeAgo(review.pr.closed_at)}` : ""} without merging.</div>
           )}
 
+          {review.pr.status === "open" && isAuthor && review.pr.require_approval && (
+            <div style={s.authorNote}>
+              You opened this change, so someone else has to approve it.
+              {" "}
+              <button style={s.link} disabled={!!busy} onClick={waiveApproval}>Merge without review</button>
+            </div>
+          )}
           {review.pr.status === "open" && (
             <div style={s.reviewActs}>
-              <button style={s.btn} disabled={!!busy} onClick={() => act("approve", () => api.approvePr(review.pr.id, user))}>
+              <button style={s.btn} disabled={!!busy || isAuthor}
+                      title={isAuthor ? "You can't approve your own change" : undefined}
+                      onClick={() => act("approve", () => api.approvePr(review.pr.id, user))}>
                 Approve
               </button>
               <button style={s.btn} disabled={!!busy} onClick={() => setReasonOpen((v) => !v)} aria-expanded={reasonOpen}>
@@ -478,6 +499,7 @@ const s = {
   gateRow: { display: "grid", gridTemplateColumns: "18px minmax(0, 1fr)", gap: 8, padding: "10px 0", borderBottom: "1px solid var(--havn-border)", fontSize: 13 },
   gateDetail: { fontSize: 12, color: "var(--havn-text-secondary)", marginTop: 1, overflowWrap: "anywhere" },
   optional: { marginLeft: 6, fontSize: 10.5, color: "var(--havn-text-dim)", border: "1px solid var(--havn-border-light)", borderRadius: 4, padding: "0 5px" },
+  authorNote: { fontSize: 12.5, color: "var(--havn-text-secondary)", marginTop: 14, lineHeight: 1.5 },
   reviewActs: { display: "flex", gap: 8, marginTop: 14 },
   textarea: {
     width: "100%", boxSizing: "border-box", minHeight: 64, padding: 8, fontSize: 13, fontFamily: "inherit",

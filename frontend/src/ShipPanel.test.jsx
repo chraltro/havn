@@ -8,6 +8,7 @@ const approvePr = vi.fn();
 const mergePr = vi.fn();
 const buildPr = vi.fn();
 const requestPrChanges = vi.fn();
+const updatePr = vi.fn();
 
 vi.mock("./api", () => ({
   api: {
@@ -17,6 +18,7 @@ vi.mock("./api", () => ({
     mergePr: (...a) => mergePr(...a),
     buildPr: (...a) => buildPr(...a),
     requestPrChanges: (...a) => requestPrChanges(...a),
+    updatePr: (...a) => updatePr(...a),
   },
 }));
 vi.mock("./AuthContext", () => ({ useAuth: () => ({ currentUser: { username: "ingrid" } }) }));
@@ -84,7 +86,7 @@ describe("layoutColumns", () => {
 
 describe("ShipPanel", () => {
   beforeEach(() => {
-    for (const f of [listPrs, getPrReview, approvePr, mergePr, buildPr, requestPrChanges]) f.mockReset();
+    for (const f of [listPrs, getPrReview, approvePr, mergePr, buildPr, requestPrChanges, updatePr]) f.mockReset();
     listPrs.mockResolvedValue([PR]);
     getPrReview.mockResolvedValue(review());
   });
@@ -142,5 +144,16 @@ describe("ShipPanel", () => {
     const h = renderShip();
     fireEvent.click(await screen.findByRole("button", { name: "Create a change" }));
     expect(h.onNavigate).toHaveBeenCalledWith("Git:Reviews");
+  });
+
+  it("stops an author approving their own change and offers the waiver", async () => {
+    getPrReview.mockResolvedValue(review({ pr: { ...PR, author: "Ingrid", require_approval: true } }));
+    updatePr.mockResolvedValue({});
+    const h = renderShip();
+    const approve = await screen.findByRole("button", { name: "Approve" });
+    expect(approve.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Merge without review" }));
+    await waitFor(() => expect(updatePr).toHaveBeenCalledWith("pr-1", { require_approval: false }));
+    expect(h.showConfirm.mock.calls[0][0]).toBe("Merge without review");
   });
 });
