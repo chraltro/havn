@@ -284,3 +284,134 @@ def test_api_merge_refuses_without_approval(client):
     # 400 with approval error message
     assert resp.status_code == 400
     assert "approval" in resp.text.lower()
+
+
+# --- Ship review (GET /api/prs/{id}/review) ---
+
+
+def _add_downstream_on_main(project: Path) -> None:
+    """Commit a silver model reading bronze.customers, so the change has impact."""
+    (project / "transform" / "silver").mkdir(parents=True, exist_ok=True)
+    (project / "transform" / "silver" / "names.sql").write_text(
+        "@config materialized=view, schema=silver\n\nSELECT name FROM bronze.customers\n"
+    )
+    _git(project, "add", "-A")
+    _git(project, "commit", "-m", "add silver")
+
+
+def _ignore_warehouse(project: Path) -> None:
+    """Commit the .gitignore a real `havn init` project has."""
+    (project / ".gitignore").write_text("warehouse.duckdb\nwarehouse.duckdb.wal\n.havn/pr-build/\n")
+    _git(project, "add", ".gitignore")
+    _git(project, "commit", "-m", "ignore warehouse")
+
+
+def _create_pr(client) -> dict:
+    resp = client.post(
+        "/api/prs",
+        json={"title": "Trim customers", "base_ref": "main", "head_ref": "feature/x"},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _gate(review: dict) -> dict:
+    return {g["key"]: g for g in review["gate"]}
+
+
+def test_review_before_build_and_approval(client, project):
+    _ignore_warehouse(project)
+    _add_downstream_on_main(project)
+    pr = _create_pr(client)
+    review = client.get(f"/api/prs/{pr['id']}/review").json()
+
+    assert review["pr"]["title"] == "Trim customers"
+    assert "transform/bronze/customers.sql" in review["files"]
+    roles = {n["name"]: n["role"] for n in review["impact"]["nodes"]}
+    # The changed model's direct upstream is drawn too, for context.
+    assert roles == {
+        "landing.customers": "upstream",
+        "bronze.customers": "changed",
+        "silver.names": "impacted",
+    }
+    assert review["impact"]["edges"] == [
+        ["bronze.customers", "silver.names"],
+        ["landing.customers", "bronze.customers"],
+    ]
+
+    gate = _gate(review)
+    assert gate["build"]["state"] == "pending" and gate["build"]["required"] is False
+    assert gate["approval"]["state"] == "pending"
+    assert gate["changes"]["state"] == "pass"
+    assert gate["conflicts"]["state"] == "pass"
+    assert gate["clean"]["state"] == "pass"
+    assert review["ready"] is False
+    assert review["plan"][1] == "Check out main and merge feature/x with --no-ff"
+
+
+def test_review_ready_after_approval_and_blocked_by_change_request(client, project):
+    _ignore_warehouse(project)
+    pr = _create_pr(client)
+    client.post(f"/api/prs/{pr['id']}/approve", json={"reviewer": "ingrid"})
+    review = client.get(f"/api/prs/{pr['id']}/review").json()
+    assert _gate(review)["approval"]["detail"] == "Approved by ingrid."
+    # The build is advisory: merge does not require it, so neither does ready.
+    assert review["ready"] is True, review["gate"]
+
+    client.post(f"/api/prs/{pr['id']}/request-changes", json={"reviewer": "mats", "reason": "no"})
+    review = client.get(f"/api/prs/{pr['id']}/review").json()
+    assert _gate(review)["changes"]["state"] == "fail"
+    assert review["ready"] is False
+
+
+def test_review_flags_self_approval(client, project):
+    pr = _create_pr(client)  # author defaults to "local"
+    client.post(f"/api/prs/{pr['id']}/approve", json={"reviewer": "local"})
+    review = client.get(f"/api/prs/{pr['id']}/review").json()
+    assert _gate(review)["approval"]["detail"] == "Approved by local (by its author)."
+
+
+def test_review_dirty_tree_blocks(client, project):
+    _ignore_warehouse(project)
+    pr = _create_pr(client)
+    client.post(f"/api/prs/{pr['id']}/approve", json={"reviewer": "ingrid"})
+    (project / "scratch.txt").write_text("wip")
+    review = client.get(f"/api/prs/{pr['id']}/review").json()
+    assert _gate(review)["clean"]["state"] == "fail"
+    assert review["ready"] is False
+
+
+def test_review_build_current_then_stale(client, project):
+    from havn.engine.pr import build_pr
+    from havn.server.deps import reset_shared_conn
+
+    pr = _create_pr(client)
+    reset_shared_conn()
+    conn = duckdb.connect(str(project / "warehouse.duckdb"))
+    try:
+        record = build_pr(project, pr["id"], conn)
+    finally:
+        conn.close()
+    assert record["status"] == "success", record.get("error")
+
+    review = client.get(f"/api/prs/{pr['id']}/review").json()
+    assert _gate(review)["build"]["state"] == "pass"
+    assert review["build_current"] is True
+    assert review["build"]["data_diff"]
+
+    # A new commit on the branch makes that build stale.
+    _git(project, "checkout", "feature/x")
+    (project / "transform" / "bronze" / "customers.sql").write_text(
+        "-- config: materialized=table, schema=bronze\n"
+        "-- depends_on: landing.customers\n\n"
+        "SELECT id FROM landing.customers\n"
+    )
+    _git(project, "commit", "-am", "more")
+    _git(project, "checkout", "main")
+    review = client.get(f"/api/prs/{pr['id']}/review").json()
+    assert _gate(review)["build"]["state"] == "warn"
+    assert review["build_current"] is False
+
+
+def test_review_unknown_pr_is_404(client):
+    assert client.get("/api/prs/pr-nope/review").status_code == 404

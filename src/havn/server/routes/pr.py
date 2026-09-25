@@ -342,3 +342,157 @@ def pr_lineage_impact_endpoint(pr_id: str, request: Request):
     # project model is part of the impact.
     dag = build_dag(discover_all_models(project_dir))
     return _compute_lineage_impact(files, dag, project_dir)
+
+
+# --- Ship: one review of a change, with its merge gate ---
+
+
+@router.get("/api/prs/{pr_id}/review")
+def pr_review_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
+    """Everything the Ship page shows for one change, in one call.
+
+    Combines the PR, its changed files, the lineage impact (with the edges
+    between the affected models so the page can draw them), the latest build
+    and its data diff, and a gate: the checks ``merge_pr`` enforces, marked
+    ``required``, plus whether a build of the branch's current head passed.
+    """
+    _require_permission(request, "read")
+    from havn.engine.git import diff_files_between
+    from havn.engine.pr import (
+        _compute_lineage_impact,
+        _run_git,
+        can_merge,
+        ensure_pr_builds_table,
+        get_latest_build,
+        get_pr,
+        is_dirty,
+        PR_STATE_PREFIXES,
+    )
+    from havn.engine.transform.discovery import discover_all_models
+
+    project_dir = _get_project_dir()
+    pr = get_pr(project_dir, pr_id)
+    if pr is None:
+        raise HTTPException(404, f"PR '{pr_id}' not found")
+
+    files = diff_files_between(project_dir, pr.base_ref, pr.head_ref)
+    models = discover_all_models(project_dir)
+    by_name = {m.full_name: m for m in models}
+
+    ensure_pr_builds_table(conn)
+    build = get_latest_build(conn, pr_id)
+
+    # A finished build knows the PR branch's own DAG (new models included);
+    # without one, compute the impact from the base checkout.
+    impact = (build or {}).get("lineage_impact") or _compute_lineage_impact(
+        files, models, project_dir
+    )
+    changed = list(impact.get("changed") or [])
+    impacted = list(impact.get("impacted") or [])
+    upstream = sorted({
+        dep
+        for name in changed
+        for dep in (by_name[name].depends_on if name in by_name else [])
+        if dep not in changed and dep not in impacted
+    })
+    in_graph = set(changed) | set(impacted) | set(upstream)
+    edges = sorted({
+        (dep, m.full_name)
+        for m in models
+        if m.full_name in in_graph
+        for dep in m.depends_on
+        if dep in in_graph and m.full_name not in upstream
+    })
+
+    def rel(name: str) -> str | None:
+        m = by_name.get(name)
+        if m is None:
+            return None
+        try:
+            return str(m.path.relative_to(project_dir))
+        except ValueError:
+            return None
+
+    nodes = (
+        [{"name": n, "role": "upstream", "path": rel(n)} for n in upstream]
+        + [{"name": n, "role": "changed", "path": rel(n)} for n in changed]
+        + [{"name": n, "role": "impacted", "path": rel(n)} for n in impacted]
+    )
+
+    head_sha = None
+    res = _run_git(project_dir, "rev-parse", pr.head_ref)
+    if res.returncode == 0:
+        head_sha = res.stdout.strip() or None
+
+    gate: list[dict] = []
+
+    def check(key: str, label: str, state: str, detail: str, required: bool) -> None:
+        gate.append({"key": key, "label": label, "state": state, "detail": detail, "required": required})
+
+    # Build: advisory (merge does not require it) but shown first.
+    if build is None:
+        check("build", "Built and checked", "pending",
+              "Not built yet. A build runs every model on the branch and its checks.", False)
+    elif build.get("status") == "running":
+        check("build", "Built and checked", "pending", "Build running…", False)
+    elif build.get("status") == "error":
+        check("build", "Built and checked", "fail", build.get("error") or "Build failed", False)
+    elif head_sha and build.get("branch_head") and build["branch_head"] != head_sha:
+        check("build", "Built and checked", "warn",
+              f"Built {build['branch_head'][:7]}; the branch is now at {head_sha[:7]}. Rebuild to check the latest commit.",
+              False)
+    else:
+        check("build", "Built and checked", "pass",
+              f"Every model built and every error-level check passed ({build.get('duration_ms') or 0} ms).",
+              False)
+
+    if pr.status != "open":
+        check("open", "Open", "fail", f"This change is {pr.status}.", True)
+
+    if pr.change_requesters:
+        check("changes", "No changes requested", "fail",
+              f"Changes requested by {', '.join(pr.change_requesters)}.", True)
+    else:
+        check("changes", "No changes requested", "pass", "No reviewer has requested changes.", True)
+
+    if not pr.require_approval:
+        check("approval", "Approved", "pass", "This change does not require approval.", True)
+    elif pr.approvers:
+        others = [a for a in pr.approvers if a != pr.author]
+        note = "" if others else " (by its author)"
+        check("approval", "Approved", "pass", f"Approved by {', '.join(pr.approvers)}{note}.", True)
+    else:
+        check("approval", "Approved", "pending", "Needs at least one approval.", True)
+
+    mc = can_merge(project_dir, pr) if pr.status == "open" else {"can_merge": False, "reason": None}
+    if pr.status == "open":
+        if mc.get("can_merge"):
+            check("conflicts", "Merges cleanly", "pass", f"No conflicts with {pr.base_ref}.", True)
+        else:
+            check("conflicts", "Merges cleanly", "fail", mc.get("reason") or "Cannot merge.", True)
+
+    dirty = is_dirty(project_dir, ignore=PR_STATE_PREFIXES)
+    check("clean", "Working tree clean", "fail" if dirty else "pass",
+          "Commit or stash local changes first; merging checks out the base branch."
+          if dirty else "No uncommitted changes.", True)
+
+    ready = all(g["state"] == "pass" for g in gate if g["required"])
+
+    return {
+        "pr": pr.to_dict(),
+        "files": files,
+        "head_sha": head_sha,
+        "impact": {"nodes": nodes, "edges": [list(e) for e in edges]},
+        "build": build,
+        "gate": gate,
+        "ready": ready,
+        "build_current": gate[0]["state"] == "pass",
+        # What POST /api/prs/{id}/merge does, in order, and what it leaves to you.
+        "plan": [
+            "Snapshot the warehouse (undo with `havn version restore`)",
+            f"Check out {pr.base_ref} and merge {pr.head_ref} with --no-ff",
+            "Mark the change merged and switch back to your branch",
+        ],
+        "after_merge": "Merging changes the code, not the data: run the pipeline "
+                       f"on {pr.base_ref} to rebuild the changed models.",
+    }
