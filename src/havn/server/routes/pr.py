@@ -366,7 +366,7 @@ def pr_review_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
         get_latest_build,
         get_pr,
         is_dirty,
-        PR_STATE_PREFIXES,
+        MERGE_IGNORED_PATHS,
     )
     from havn.engine.transform.discovery import discover_all_models
 
@@ -471,7 +471,7 @@ def pr_review_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
         else:
             check("conflicts", "Merges cleanly", "fail", mc.get("reason") or "Cannot merge.", True)
 
-    dirty = is_dirty(project_dir, ignore=PR_STATE_PREFIXES)
+    dirty = is_dirty(project_dir, ignore=MERGE_IGNORED_PATHS)
     check("clean", "Working tree clean", "fail" if dirty else "pass",
           "Commit or stash local changes first; merging checks out the base branch."
           if dirty else "No uncommitted changes.", True)

@@ -992,8 +992,10 @@ def get_latest_build(conn: duckdb.DuckDBPyConnection, pr_id: str) -> dict | None
 
 
 # Paths whose uncommitted changes do not block a merge: the PR records
-# themselves, which the review flow writes as it goes.
-PR_STATE_PREFIXES = (".havn/prs/",)
+# themselves, which the review flow writes as it goes, and havn's own runtime
+# files (the `havn serve` lockfile, PR build worktrees), which exist whenever
+# the web UI is running and are never committed.
+MERGE_IGNORED_PATHS = (".havn/prs/", ".havn/serve.json", ".havn/pr-build/")
 
 
 def can_merge(project_dir: Path, pr: PullRequest) -> dict:
@@ -1081,8 +1083,9 @@ def merge_pr(
             "error": f"Reviewers have requested changes: {', '.join(pr.change_requesters)}",
         }
     # PR metadata under .havn/prs/ is rewritten by every create, approve and
-    # comment, so counting it would refuse every merge made from the UI.
-    if is_dirty(project_dir, ignore=PR_STATE_PREFIXES):
+    # comment, and `havn serve` holds .havn/serve.json, so counting either
+    # would refuse every merge made from the UI.
+    if is_dirty(project_dir, ignore=MERGE_IGNORED_PATHS):
         return {
             "success": False,
             "error": "Working tree has uncommitted changes — commit or stash before merging",

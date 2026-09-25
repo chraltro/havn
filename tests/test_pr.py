@@ -426,10 +426,13 @@ def test_pr_state_status(git_project):
 
 def test_is_dirty_ignores_pr_state(git_project):
     from havn.engine.git import is_dirty
-    from havn.engine.pr import PR_STATE_PREFIXES
+    from havn.engine.pr import MERGE_IGNORED_PATHS
 
     (git_project / ".havn" / "prs" / "pr-123.json").write_text("{}")
     assert is_dirty(git_project) is True
-    assert is_dirty(git_project, ignore=PR_STATE_PREFIXES) is False
+    assert is_dirty(git_project, ignore=MERGE_IGNORED_PATHS) is False
+    # The `havn serve` lockfile is runtime state, not a change.
+    (git_project / ".havn" / "serve.json").write_text("{}")
+    assert is_dirty(git_project, ignore=MERGE_IGNORED_PATHS) is False
     (git_project / "transform" / "bronze" / "customers.sql").write_text("SELECT 2\n")
-    assert is_dirty(git_project, ignore=PR_STATE_PREFIXES) is True
+    assert is_dirty(git_project, ignore=MERGE_IGNORED_PATHS) is True

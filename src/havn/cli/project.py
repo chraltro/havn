@@ -232,6 +232,8 @@ def init(
         ".havn/catalog.ducklake\n.havn/catalog.ducklake.wal\n.havn/data/\n"
         "__pycache__/\n*.pyc\n.venv/\n.env\noutput/\n_snapshots/\n"
         ".havn/pr-build/\n"
+        # The `havn serve` lockfile: runtime state, never shared.
+        ".havn/serve.json\n"
         # Installed package sources are reproducible from havn_packages.lock,
         # which IS committed. Only the checkout is ignored.
         "havn_packages/\n"
