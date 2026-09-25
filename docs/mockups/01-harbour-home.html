@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>havn Harbour Home</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Tokens mirror frontend/src/themes.js (havn-dark / havn-light) */
+:root {
+  --bg: #0C1014; --bg2: #111A1E; --bg3: #090D10;
+  --border: #1A2B2E; --border-l: #243B3E;
+  --text: #D2DCD8; --text2: #6A8580; --dim: #4A625D;
+  --accent: #3ECFB4; --accent-soft: rgba(62,207,180,.12);
+  --green: #34D399; --red: #F87171; --red-soft: rgba(248,113,113,.12);
+  --yellow: #FBBF24; --yellow-soft: rgba(251,191,36,.12); --purple: #7C8CF5;
+  --r: 6px; --r-lg: 10px;
+  --font: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #F4F6F8; --bg2: #E8ECF0; --bg3: #FFFFFF;
+    --border: #D0D7DF; --border-l: #BCC5D0;
+    --text: #0B0E14; --text2: #5A6878; --dim: #8592A2;
+    --accent: #2BA88E; --accent-soft: rgba(43,168,142,.12);
+    --green: #22A06B; --red: #DC2626; --red-soft: rgba(220,38,38,.08);
+    --yellow: #B45309; --yellow-soft: rgba(180,83,9,.1); --purple: #5B6AD0;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #F4F6F8; --bg2: #E8ECF0; --bg3: #FFFFFF;
+  --border: #D0D7DF; --border-l: #BCC5D0;
+  --text: #0B0E14; --text2: #5A6878; --dim: #8592A2;
+  --accent: #2BA88E; --accent-soft: rgba(43,168,142,.12);
+  --green: #22A06B; --red: #DC2626; --red-soft: rgba(220,38,38,.08);
+  --yellow: #B45309; --yellow-soft: rgba(180,83,9,.1); --purple: #5B6AD0;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 14px/1.45 var(--font); }
+.mono { font-family: var(--mono); }
+button { font: inherit; color: inherit; cursor: pointer; }
+
+/* ---------- Shell ---------- */
+.app { display: grid; grid-template-columns: 64px 1fr; grid-template-rows: 48px 1fr; height: 100vh; }
+.rail { grid-row: 1 / 3; background: var(--bg3); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 4px; }
+.rail .logo { width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: var(--bg3); display: grid; place-items: center; font-weight: 600; margin-bottom: 12px; }
+.rail a { width: 52px; padding: 7px 0 5px; border-radius: var(--r); display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--text2); text-decoration: none; font-size: 10.5px; position: relative; }
+.rail a svg { width: 18px; height: 18px; }
+.rail a:hover { background: var(--bg2); color: var(--text); }
+.rail a.on { color: var(--accent); background: var(--accent-soft); }
+.rail a .badge { position: absolute; top: 3px; right: 9px; min-width: 15px; height: 15px; border-radius: 8px; background: var(--red); color: #fff; font-size: 9.5px; display: grid; place-items: center; padding: 0 3px; }
+.rail .spacer { flex: 1; }
+.avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--purple); color: #fff; display: grid; place-items: center; font-size: 11px; font-weight: 600; margin-top: 6px; }
+
+.top { display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--border); background: var(--bg); min-width: 0; }
+.crumb { color: var(--text2); font-size: 13px; white-space: nowrap; }
+.crumb b { color: var(--text); font-weight: 500; }
+.omni { flex: 1; max-width: 520px; margin: 0 auto; display: flex; align-items: center; gap: 8px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 6px 10px; color: var(--dim); font-size: 13px; min-width: 0; }
+.omni span:first-of-type { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--border-l); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--text2); background: var(--bg3); }
+.env { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-l); border-radius: 20px; padding: 3px 10px 3px 8px; font-size: 12px; white-space: nowrap; background: none; }
+.env i { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+.btn { border: 1px solid var(--border-l); background: var(--bg2); border-radius: var(--r); padding: 5px 12px; font-size: 13px; white-space: nowrap; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #062019; font-weight: 500; }
+.split { display: inline-flex; }
+.split .btn:first-child { border-radius: var(--r) 0 0 var(--r); }
+.split .btn:last-child { border-radius: 0 var(--r) var(--r) 0; border-left: 1px solid rgba(0,0,0,.2); padding: 5px 8px; }
+
+main { overflow: auto; padding: 24px 28px 48px; }
+h1 { font-size: 20px; font-weight: 500; margin: 0; }
+h2 { font-size: 13px; font-weight: 500; color: var(--text2); text-transform: uppercase; letter-spacing: .06em; margin: 0 0 10px; }
+.sub { color: var(--text2); font-size: 13px; margin-top: 2px; }
+.card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r-lg); }
+
+/* ---------- Home ---------- */
+.head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+.tile { padding: 14px 16px; }
+.tile .k { font-size: 12px; color: var(--text2); }
+.tile .v { font-size: 24px; font-weight: 500; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.tile .v small { font-size: 13px; color: var(--text2); font-weight: 400; }
+.tile .d { font-size: 12px; margin-top: 4px; color: var(--text2); }
+.ok { color: var(--green); } .warn { color: var(--yellow); } .bad { color: var(--red); }
+
+.grid2 { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; margin-bottom: 24px; }
+.attn { list-style: none; margin: 0; padding: 0; }
+.attn li { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); align-items: start; }
+.attn li:last-child { border-bottom: 0; }
+.sev { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 12px; font-weight: 600; }
+.sev.bad { background: var(--red-soft); } .sev.warn { background: var(--yellow-soft); }
+.attn .t { font-weight: 500; }
+.attn .m { font-size: 12.5px; color: var(--text2); margin-top: 2px; }
+.attn .acts { display: flex; gap: 6px; }
+.attn .acts .btn { padding: 3px 9px; font-size: 12px; }
+.obj { font-family: var(--mono); font-size: 12.5px; color: var(--accent); }
+
+.timeline { padding: 16px; }
+.bars { display: flex; align-items: flex-end; gap: 5px; height: 90px; border-bottom: 1px solid var(--border); }
+.bars div { flex: 1; border-radius: 3px 3px 0 0; background: var(--accent); opacity: .75; min-height: 4px; }
+.bars div.f { background: var(--red); opacity: .9; }
+.bars div:hover { opacity: 1; }
+.axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); margin-top: 6px; font-family: var(--mono); }
+.runrow { display: flex; justify-content: space-between; font-size: 12.5px; padding: 8px 0; border-top: 1px solid var(--border); margin-top: 12px; color: var(--text2); }
+.runrow b { color: var(--text); font-weight: 500; }
+
+.flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; padding: 0; overflow: hidden; }
+.lane { padding: 14px; border-right: 1px solid var(--border); position: relative; }
+.lane:last-child { border-right: 0; }
+.lane h3 { margin: 0 0 10px; font-size: 13px; font-weight: 500; display: flex; justify-content: space-between; }
+.lane h3 span { color: var(--dim); font-weight: 400; font-family: var(--mono); font-size: 12px; }
+.lane:not(:last-child)::after { content: "›"; position: absolute; right: -8px; top: 12px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg); border: 1px solid var(--border); color: var(--text2); font-size: 12px; display: grid; place-items: center; line-height: 1; z-index: 1; }
+.chip { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: var(--r); font-family: var(--mono); font-size: 12px; color: var(--text); margin-bottom: 4px; background: var(--bg); border: 1px solid transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip:hover { border-color: var(--border-l); }
+.chip i { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--green); }
+.chip.f i { background: var(--red); } .chip.s i { background: var(--yellow); }
+.chip.f { border-color: var(--red-soft); background: var(--red-soft); }
+.chip em { margin-left: auto; font-style: normal; color: var(--dim); font-size: 11px; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--text2); }
+.legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
+
+/* ---------- Design notes ---------- */
+.pin { display: none; position: absolute; width: 20px; height: 20px; border-radius: 50%; background: var(--purple); color: #fff; font: 600 11px/20px var(--font); text-align: center; box-shadow: 0 0 0 3px var(--bg); z-index: 5; }
+body.notes .pin { display: block; }
+.rel { position: relative; }
+.notes-toggle { position: fixed; right: 16px; bottom: 16px; z-index: 20; border-radius: 20px; background: var(--purple); color: #fff; border: 0; padding: 8px 14px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+.notes-panel { display: none; position: fixed; right: 16px; bottom: 60px; width: min(360px, calc(100vw - 32px)); max-height: 70vh; overflow: auto; z-index: 20; background: var(--bg3); border: 1px solid var(--border-l); border-radius: var(--r-lg); padding: 16px 18px; box-shadow: 0 12px 40px rgba(0,0,0,.35); font-size: 13px; }
+body.notes .notes-panel { display: block; }
+.notes-panel h4 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+.notes-panel ol { padding-left: 18px; margin: 10px 0 0; }
+.notes-panel li { margin-bottom: 8px; color: var(--text2); }
+.notes-panel li b { color: var(--text); font-weight: 500; }
+
+@media (max-width: 1100px) { .grid2 { grid-template-columns: 1fr; } .tiles { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: 48px 1fr 58px; }
+  .rail { grid-row: 3; flex-direction: row; justify-content: space-around; border-right: 0; border-top: 1px solid var(--border); padding: 0 4px; }
+  .rail .logo, .rail .spacer, .rail .avatar, .rail a.secondary { display: none; }
+  .crumb, .split, .top .btn { display: none; }
+  main { padding: 16px 16px 40px; }
+  .flow { grid-template-columns: 1fr 1fr; }
+  .lane:nth-child(2) { border-right: 0; } .lane:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+  .lane:nth-child(2)::after { display: none; }
+  .attn li { grid-template-columns: 26px 1fr; } .attn .acts { grid-column: 2; }
+  .notes-toggle { bottom: 72px; } .notes-panel { bottom: 116px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Rail: 5 destinations instead of 5 sections x 17 sub-tabs -->
+  <nav class="rail rel" aria-label="Main">
+    <span class="pin" style="left:44px;top:60px">1</span>
+    <div class="logo">h</div>
+    <a class="on" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</a>
+    <a href="02-model-workbench.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 6l-6 6 6 6M16 6l6 6-6 6"/></svg>Build</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>Data</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Observe<span class="badge">3</span></a>
+    <a href="03-change-review.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7M8.3 6.8c5 .5 7.4 2.3 7.7 3.4"/></svg>Ship</a>
+    <div class="spacer"></div>
+    <a class="secondary" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l2.2 4.8L19 9l-3.5 3.6.9 5.4-4.4-2.5-4.4 2.5.9-5.4L5 9l4.8-1.2z"/></svg>Agent</a>
+    <a class="secondary" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.8 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 14H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10 3V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.8 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 21 10h.1a2 2 0 1 1 0 4z"/></svg>Settings</a>
+    <div class="avatar" title="Christian · admin">CD</div>
+  </nav>
+
+  <!-- Top bar: omnibox is the primary navigation -->
+  <header class="top rel">
+    <span class="crumb">havn / <b>earthquake-demo</b></span>
+    <div class="omni rel">
+      <span class="pin" style="left:-10px;top:-8px">2</span>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="5"/><path d="M10.5 10.5l4 4"/></svg>
+      <span>Jump to model, table, run or command…</span>
+      <kbd>⌘K</kbd>
+    </div>
+    <button class="env rel" title="Switch environment"><span class="pin" style="left:-12px;top:-10px">3</span><i></i>dev<span style="color:var(--dim)">▾</span></button>
+    <div class="split"><button class="btn primary">▶ Run pipeline</button><button class="btn primary" aria-label="More run options">▾</button></div>
+  </header>
+
+  <main>
+    <div class="head">
+      <div>
+        <h1>Pipeline health</h1>
+        <div class="sub">Last full run 12 min ago · next scheduled 18:00 (full-refresh)</div>
+      </div>
+      <div class="legend"><span><i style="background:var(--green)"></i>fresh</span><span><i style="background:var(--yellow)"></i>stale</span><span><i style="background:var(--red)"></i>failing</span></div>
+    </div>
+
+    <section class="tiles rel">
+      <span class="pin" style="left:-8px;top:-8px">4</span>
+      <div class="card tile"><div class="k">Models</div><div class="v">42</div><div class="d"><span class="warn">3 stale</span> · 39 up to date</div></div>
+      <div class="card tile"><div class="k">Checks passing</div><div class="v">118<small> / 121</small></div><div class="d"><span class="bad">2 assertions</span> · 1 contract</div></div>
+      <div class="card tile"><div class="k">Last run</div><div class="v">1m 48s</div><div class="d"><span class="ok">✓ success</span> · 2.1M rows written</div></div>
+      <div class="card tile"><div class="k">Warehouse</div><div class="v">1.8<small> GB</small></div><div class="d">last backup 6h ago · <span class="ok">verified</span></div></div>
+    </section>
+
+    <div class="grid2">
+      <section class="rel">
+        <span class="pin" style="left:-8px;top:-8px">5</span>
+        <h2>Needs attention</h2>
+        <ul class="card attn">
+          <li>
+            <span class="sev bad">!</span>
+            <div><div class="t">Assertion failed in <span class="obj">silver.orders_enriched</span></div><div class="m"><span class="mono">customer_id IS NOT NULL</span> · 14 rows violate · since run #418</div></div>
+            <div class="acts"><button class="btn">See rows</button><button class="btn primary">Open model</button></div>
+          </li>
+          <li>
+            <span class="sev warn">~</span>
+            <div><div class="t">Row count dropped 38% in <span class="obj">gold.daily_revenue</span></div><div class="m">Sentinel · 4,120 rows vs 6,650 7-day average</div></div>
+            <div class="acts"><button class="btn">Compare</button><button class="btn">Mute 24h</button></div>
+          </li>
+          <li>
+            <span class="sev warn">⏱</span>
+            <div><div class="t">Source late: <span class="obj">landing.earthquakes</span></div><div class="m">Last load 26h ago, expected every 6h · ingest/earthquakes.py</div></div>
+            <div class="acts"><button class="btn">Run ingest</button></div>
+          </li>
+          <li>
+            <span class="sev bad">!</span>
+            <div><div class="t">Contract broken: <span class="obj">gold.customer_360</span></div><div class="m">Column <span class="mono">segment</span> expected VARCHAR, got INTEGER</div></div>
+            <div class="acts"><button class="btn primary">Open model</button></div>
+          </li>
+        </ul>
+      </section>
+
+      <section class="rel">
+        <span class="pin" style="left:-8px;top:-8px">6</span>
+        <h2>Runs · last 24h</h2>
+        <div class="card timeline">
+          <div class="bars" aria-label="Run durations">
+            <div style="height:40%"></div><div style="height:42%"></div><div style="height:38%"></div><div style="height:44%"></div><div style="height:41%"></div><div class="f" style="height:22%"></div><div style="height:55%"></div><div style="height:43%"></div><div style="height:40%"></div><div style="height:46%"></div><div style="height:39%"></div><div style="height:88%"></div><div style="height:42%"></div><div style="height:44%"></div><div class="f" style="height:18%"></div><div style="height:47%"></div><div style="height:45%"></div><div style="height:43%"></div>
+          </div>
+          <div class="axis"><span>18:00 yesterday</span><span>06:00</span><span>now</span></div>
+          <div class="runrow"><span><b>#421</b> full-refresh · scheduled</span><span class="ok">✓ 1m 48s</span></div>
+          <div class="runrow" style="margin-top:0"><span><b>#420</b> gold.* · Christian</span><span class="bad">✗ gold.customer_360</span></div>
+        </div>
+      </section>
+    </div>
+
+    <section class="rel">
+      <span class="pin" style="left:-8px;top:-8px">7</span>
+      <h2>Layers</h2>
+      <div class="card flow">
+        <div class="lane"><h3>landing <span>6</span></h3>
+          <div class="chip s"><i></i>earthquakes<em>26h</em></div>
+          <div class="chip"><i></i>customers<em>2h</em></div>
+          <div class="chip"><i></i>orders<em>2h</em></div>
+          <div class="chip"><i></i>products<em>2h</em></div>
+        </div>
+        <div class="lane"><h3>bronze <span>11</span></h3>
+          <div class="chip s"><i></i>earthquakes<em>view</em></div>
+          <div class="chip"><i></i>customers<em>table</em></div>
+          <div class="chip"><i></i>orders<em>incr</em></div>
+          <div class="chip"><i></i>+ 8 more</div>
+        </div>
+        <div class="lane"><h3>silver <span>14</span></h3>
+          <div class="chip f"><i></i>orders_enriched<em>✗ 14</em></div>
+          <div class="chip"><i></i>dim_customer<em>table</em></div>
+          <div class="chip s"><i></i>quake_regions<em>table</em></div>
+          <div class="chip"><i></i>+ 11 more</div>
+        </div>
+        <div class="lane"><h3>gold <span>11</span></h3>
+          <div class="chip f"><i></i>customer_360<em>✗</em></div>
+          <div class="chip"><i></i>daily_revenue<em>~38%</em></div>
+          <div class="chip"><i></i>quake_report<em>table</em></div>
+          <div class="chip"><i></i>+ 8 more</div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<button class="notes-toggle" onclick="document.body.classList.toggle('notes')">Design notes</button>
+<aside class="notes-panel">
+  <h4>Mockup 1 · Harbour Home</h4>
+  <div style="color:var(--text2)">Answer "is my data OK, and if not, what do I click?" in one screen.</div>
+  <ol>
+    <li><b>Five destinations, not 17 tabs.</b> Home, Build, Data, Observe, Ship in an icon rail. Sub-tabs like Sentinel, Quality, Diff become filters inside Observe instead of siblings you have to remember. The rail becomes a bottom bar on phones.</li>
+    <li><b>Omnibox is the nav.</b> The existing ⌘K palette gets promoted to the top bar and searches objects (models, tables, runs), not just commands.</li>
+    <li><b>Environment is a loud pill.</b> Green for dev, red outline for prod, so you always know where Run lands.</li>
+    <li><b>Four numbers that matter</b>, each with its own "why" line underneath.</li>
+    <li><b>Needs attention is a work queue.</b> Failed assertions, Sentinel anomalies, late sources and broken contracts merged into one ranked list, each with the next action inline.</li>
+    <li><b>Run history at a glance.</b> Height = duration, red = failed. Spikes and failures jump out without opening Runs.</li>
+    <li><b>Layers as a flow.</b> landing → bronze → silver → gold with freshness on every model. Failing chips link straight to the Build workbench.</li>
+  </ol>
+</aside>
+</body>
+</html>
