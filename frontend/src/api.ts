@@ -1481,6 +1481,16 @@ export const api = {
   getPrReview: (id: string) => request<any>(`/prs/${encodeURIComponent(id)}/review`),
   getPrStateStatus: () => request<PrStateStatus>("/prs/state-status"),
 
+  // Deploy a git ref to an environment (with rollback on failure)
+  getDeployTargets: () => request<any>("/deploy/targets"),
+  getDeployPlan: (env: string, ref: string) =>
+    request<any>(`/deploy/plan?env=${encodeURIComponent(env)}&ref=${encodeURIComponent(ref)}`),
+  startDeploy: (data: { env: string; ref: string; pr_id?: string }) =>
+    request<any>("/deploys", { method: "POST", body: JSON.stringify(data) }),
+  getDeploy: (id: string) => request<any>(`/deploys/${encodeURIComponent(id)}`),
+  listDeploys: (prId?: string) =>
+    request<any[]>(`/deploys${prId ? `?pr_id=${encodeURIComponent(prId)}` : ""}`),
+
   // Resources
   getResources: () => request<ResourceSnapshot>("/resources"),
   updateResourceAllocation: (body: ResourceAllocationUpdate) =>

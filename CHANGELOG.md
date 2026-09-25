@@ -74,6 +74,22 @@ in `docs/internal/dbt-v2-gap-plan.md`.
     latest commit. Merging without a current build asks for confirmation.
 
   Backed by `GET /api/prs/{id}/review`.
+- **Metric delta.** A PR build evaluates every semantic-layer metric whose
+  model the change affects, on the base warehouse and on the build. Ship shows
+  the base value, the branch value, the change, and a 12-month sparkline of
+  both.
+- **Deploy.** `havn deploy <env>`, `POST /api/deploys`, and Ship after a merge
+  all build a git ref in an environment's warehouse. The code comes from a
+  worktree of that commit, and only models that differ there are rebuilt
+  (`state:modified+`). Those models are snapshotted first: data, views,
+  missing objects and build state. If any fails, every one of them is
+  restored, so a failed deploy leaves the environment exactly as it was.
+  Every deploy is recorded in `_havn.deploys`.
+- **Independent approval.** The author of a PR can't approve it, and merge
+  counts only other people's approvals. With auth on, the PR routes take the
+  author, reviewer and merging user from the session instead of the request
+  body, which previously let anyone approve as anyone. Only admins can turn off
+  a PR's approval requirement.
 - `Ctrl/Cmd+S` saves the open file.
 
 ### Editor
@@ -273,6 +289,11 @@ none of them shipped in a released version.
   `.havn/serve.json`, so the merge's dirty-tree check always refused. It now
   ignores havn's own PR records and runtime files. New projects also gitignore
   `.havn/serve.json`.
+- Polling a PR build or a deploy could briefly see no record, because each
+  save deleted the row and then re-inserted it. Saves now update in place.
+- Merge also ignores every environment's warehouse file, and new projects
+  gitignore `*.duckdb` rather than only `warehouse.duckdb`. Adding a `prod`
+  environment used to leave an untracked `prod.duckdb` that blocked every merge.
 - The offline starter data had 3 earthquakes, not the 25 its notebook
   promises, so `gold.region_risk` built empty and failed its own check on every
   offline first run.

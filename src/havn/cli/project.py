@@ -228,10 +228,12 @@ def init(
     # Config files (both empty and sample projects)
     (target / ".env").write_text(ENV_TEMPLATE)
     (target / ".gitignore").write_text(
-        "warehouse.duckdb\nwarehouse.duckdb.wal\n"
+        # Every environment's warehouse (warehouse.duckdb, prod.duckdb, ...).
+        "*.duckdb\n*.duckdb.wal\n"
         ".havn/catalog.ducklake\n.havn/catalog.ducklake.wal\n.havn/data/\n"
         "__pycache__/\n*.pyc\n.venv/\n.env\noutput/\n_snapshots/\n"
         ".havn/pr-build/\n"
+        ".havn/deploy/\n"
         # The `havn serve` lockfile: runtime state, never shared.
         ".havn/serve.json\n"
         # Installed package sources are reproducible from havn_packages.lock,

@@ -386,7 +386,7 @@ def pr_review_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
         get_pr,
         independent_approvers,
         is_dirty,
-        MERGE_IGNORED_PATHS,
+        merge_ignored_paths,
     )
     from havn.engine.transform.discovery import discover_all_models
 
@@ -491,7 +491,7 @@ def pr_review_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
         else:
             check("conflicts", "Merges cleanly", "fail", mc.get("reason") or "Cannot merge.", True)
 
-    dirty = is_dirty(project_dir, ignore=MERGE_IGNORED_PATHS)
+    dirty = is_dirty(project_dir, ignore=merge_ignored_paths(project_dir))
     check("clean", "Working tree clean", "fail" if dirty else "pass",
           "Commit or stash local changes first; merging checks out the base branch."
           if dirty else "No uncommitted changes.", True)
@@ -513,6 +513,6 @@ def pr_review_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
             f"Check out {pr.base_ref} and merge {pr.head_ref} with --no-ff",
             "Mark the change merged and switch back to your branch",
         ],
-        "after_merge": "Merging changes the code, not the data: run the pipeline "
-                       f"on {pr.base_ref} to rebuild the changed models.",
+        "after_merge": "Merging changes the code, not the data: deploy "
+                       f"{pr.base_ref} to an environment to rebuild the changed models there.",
     }

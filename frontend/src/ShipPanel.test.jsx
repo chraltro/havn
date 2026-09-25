@@ -19,6 +19,9 @@ vi.mock("./api", () => ({
     buildPr: (...a) => buildPr(...a),
     requestPrChanges: (...a) => requestPrChanges(...a),
     updatePr: (...a) => updatePr(...a),
+    getDeployTargets: () => Promise.resolve({ environments: [{ name: "prod", production: true, active: false, exists: true }], default_ref: "main" }),
+    getDeployPlan: () => Promise.resolve({ models: [], commit: "abc" }),
+    listDeploys: () => Promise.resolve([]),
   },
 }));
 vi.mock("./AuthContext", () => ({ useAuth: () => ({ currentUser: { username: "ingrid" } }) }));
@@ -73,7 +76,7 @@ function review(overrides = {}) {
 function renderShip(props = {}) {
   const handlers = {
     showConfirm: vi.fn().mockResolvedValue(true), addOutput: vi.fn(), onOpenFile: vi.fn(),
-    onNavigate: vi.fn(), onRunPipeline: vi.fn(), onMerged: vi.fn(),
+    onNavigate: vi.fn(), onMerged: vi.fn(),
   };
   Object.assign(handlers, props);
   render(<ShipPanel running={false} {...handlers} />);

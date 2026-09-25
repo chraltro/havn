@@ -1336,7 +1336,6 @@ function AppContent() {
                   addOutput={addOutput}
                   onOpenFile={openFile}
                   onNavigate={navigateToTab}
-                  onRunPipeline={() => runPipeline()}
                   onMerged={refreshAll}
                 />
               </ErrorBoundary>

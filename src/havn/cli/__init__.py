@@ -82,6 +82,7 @@ from havn.cli import connectors  # noqa: E402, F401
 from havn.cli import diff  # noqa: E402, F401
 from havn.cli import env  # noqa: E402, F401
 from havn.cli.flight import app as flight_app  # noqa: E402
+from havn.cli import deploy  # noqa: E402, F401
 from havn.cli import jobs  # noqa: E402, F401
 from havn.cli import macros  # noqa: E402, F401
 from havn.cli import mcp  # noqa: E402, F401

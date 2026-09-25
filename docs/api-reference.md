@@ -264,6 +264,30 @@ The Home page in one call:
   `status` is `failing`, `blocked`, `changed`, `never_built`, `fresh` or
   `source`.
 
+## Deploy
+
+### GET /api/deploy/targets
+
+`{environments: [{name, active, production, database, exists}], default_ref}`.
+With no `environments:` in project.yml, the one warehouse is `default`.
+
+### GET /api/deploy/plan?env=prod&ref=main
+
+The models deploying `ref` to `env` would rebuild, in build order: `{env, ref,
+commit, models}`. Changes nothing.
+
+### POST /api/deploys
+
+Body `{env, ref, pr_id?}`, execute permission. Starts the deploy in the
+background and returns its record with `status: "running"`.
+
+### GET /api/deploys?pr_id=&limit= and GET /api/deploys/{id}
+
+Deploy records: `{id, env, ref, commit, pr_id, deployed_by, status, started_at,
+finished_at, duration_ms, models, results, failed, version_id, restored,
+error}`. `status` is `running`, `success`, `up_to_date`, `rolled_back` or
+`error`. `failed` maps each model that did not build to `{status, error}`.
+
 ## DAG
 
 ### GET /api/dag

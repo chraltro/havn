@@ -47,6 +47,8 @@ havn jobs run full-refresh      # run full pipeline
 havn history                    # show run log
 havn env use prod               # switch environment
 havn env list                   # show all environments
+havn deploy prod --plan         # what deploying main to prod would rebuild
+havn deploy prod                # deploy main to prod (rolls back on failure)
 havn env show                   # active environment, defer target and whether it is readable
 havn diff gold.orders           # diff a single model
 havn diff                       # diff changed models + downstream

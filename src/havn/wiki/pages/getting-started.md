@@ -160,7 +160,9 @@ The Observe item in the rail carries a badge with the number of errors in the li
 
 ### Ship
 
-Review a change before it merges. A change is a branch opened from Git → Reviews. Ship shows the models it changes and everything downstream of them, **Build** runs the branch in an isolated copy of the warehouse and shows which tables' data differ, and the gate on the right lists what merging needs: approval, no requested changes, no conflicts, a clean working tree, plus (recommended) a passing build of the latest commit. Merging snapshots the warehouse first; it changes code, not data, so run the pipeline afterwards.
+Review a change before it merges. A change is a branch opened from Git → Reviews. Ship shows the models it changes and everything downstream of them, **Build** runs the branch in an isolated copy of the warehouse and shows which tables' data differ, and the gate on the right lists what merging needs: approval, no requested changes, no conflicts, a clean working tree, plus (recommended) a passing build of the latest commit. The author of a change can't approve it; someone else has to (or, for a solo project, turn off "requires approval" for that change, which needs an admin once sign-in is on). If the project defines semantic-layer metrics, the build also shows how each affected metric moves between the base branch and the change.
+
+Merging changes code, not data. After a merge, **Deploy** builds the base branch in an environment: it shows which models will rebuild there, snapshots them, and if any fails puts all of them back exactly as they were. The same is `havn deploy <env>` on the command line.
 
 ## Explore Your Data (CLI)
 

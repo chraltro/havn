@@ -223,7 +223,28 @@ def ensure_pr_builds_table(conn: duckdb.DuckDBPyConnection) -> None:
 
 def _save_build_record(conn: duckdb.DuckDBPyConnection, record: dict) -> None:
     ensure_pr_builds_table(conn)
-    conn.execute("DELETE FROM _havn.pr_builds WHERE id = ?", [record["id"]])
+    # Update in place when the record exists: Ship polls the latest build
+    # while it runs, and a delete-then-insert let a poll land in between and
+    # see no build at all.
+    if conn.execute("SELECT 1 FROM _havn.pr_builds WHERE id = ?", [record["id"]]).fetchone():
+        conn.execute(
+            "UPDATE _havn.pr_builds SET branch_head = ?, status = ?, finished_at = ?, "
+            "duration_ms = ?, data_diff = ?, lineage_impact = ?, contract_results = ?, "
+            "error = ?, metric_diff = ? WHERE id = ?",
+            [
+                record.get("branch_head"),
+                record.get("status", "running"),
+                record.get("finished_at"),
+                record.get("duration_ms"),
+                json.dumps(record["data_diff"]) if record.get("data_diff") is not None else None,
+                json.dumps(record["lineage_impact"]) if record.get("lineage_impact") is not None else None,
+                json.dumps(record["contract_results"]) if record.get("contract_results") is not None else None,
+                record.get("error"),
+                json.dumps(record["metric_diff"]) if record.get("metric_diff") is not None else None,
+                record["id"],
+            ],
+        )
+        return
     conn.execute(
         "INSERT INTO _havn.pr_builds "
         "(id, pr_id, branch_head, status, started_at, finished_at, duration_ms, "
@@ -1116,9 +1137,34 @@ def get_latest_build(conn: duckdb.DuckDBPyConnection, pr_id: str) -> dict | None
 
 # Paths whose uncommitted changes do not block a merge: the PR records
 # themselves, which the review flow writes as it goes, and havn's own runtime
-# files (the `havn serve` lockfile, PR build worktrees), which exist whenever
+# files (the `havn serve` lockfile, PR build and deploy worktrees), which exist whenever
 # the web UI is running and are never committed.
-MERGE_IGNORED_PATHS = (".havn/prs/", ".havn/serve.json", ".havn/pr-build/")
+MERGE_IGNORED_PATHS = (".havn/prs/", ".havn/serve.json", ".havn/pr-build/", ".havn/deploy/")
+
+
+def merge_ignored_paths(project_dir: Path) -> tuple[str, ...]:
+    """MERGE_IGNORED_PATHS plus every environment's warehouse file.
+
+    Warehouses are data, not code, and a project that adds a `prod`
+    environment gets a `prod.duckdb` its .gitignore may not cover yet.
+    """
+    extra: list[str] = []
+    try:
+        from havn.config import load_project
+
+        cfg = load_project(project_dir)
+        paths = [cfg.database.path] + [
+            (env.database or {}).get("path") for env in cfg.environments.values()
+        ]
+        root = project_dir.resolve()
+        for p in filter(None, paths):
+            full = (project_dir / p).resolve()
+            if full.is_relative_to(root):
+                rel = full.relative_to(root).as_posix()
+                extra += [rel, f"{rel}.wal"]
+    except Exception as e:
+        logger.debug("merge ignore: could not read environments: %s", e)
+    return MERGE_IGNORED_PATHS + tuple(extra)
 
 
 def can_merge(project_dir: Path, pr: PullRequest) -> dict:
@@ -1211,7 +1257,7 @@ def merge_pr(
     # PR metadata under .havn/prs/ is rewritten by every create, approve and
     # comment, and `havn serve` holds .havn/serve.json, so counting either
     # would refuse every merge made from the UI.
-    if is_dirty(project_dir, ignore=MERGE_IGNORED_PATHS):
+    if is_dirty(project_dir, ignore=merge_ignored_paths(project_dir)):
         return {
             "success": False,
             "error": "Working tree has uncommitted changes — commit or stash before merging",

@@ -152,6 +152,7 @@ from havn.server.routes.pipeline import router as pipeline_router  # noqa: E402
 from havn.server.routes.quality import router as quality_router  # noqa: E402
 from havn.server.routes.catalog import router as catalog_router  # noqa: E402
 from havn.server.routes.home import router as home_router  # noqa: E402
+from havn.server.routes.deploy import router as deploy_router  # noqa: E402
 from havn.server.routes.collaboration import (  # noqa: E402
     register_websocket,
     router as collaboration_router,
@@ -198,6 +199,7 @@ app.include_router(pipeline_router)
 app.include_router(quality_router)
 app.include_router(catalog_router)
 app.include_router(home_router)
+app.include_router(deploy_router)
 app.include_router(collaboration_router)
 app.include_router(lint_router)
 app.include_router(masking_router)

@@ -684,6 +684,27 @@ Actions:
   that target's file can be opened right now
 - `reset` — Clear active environment
 
+### havn deploy
+
+Build a git ref in an environment's warehouse, rolling back on failure.
+
+```bash
+havn deploy prod --plan              # what would rebuild; changes nothing
+havn deploy prod                     # deploy main to prod
+havn deploy staging --ref release-3  # any branch, tag or commit
+```
+
+The ref is checked out into a temporary worktree, so the code that runs is that
+commit's, not whatever is checked out. It rebuilds every model whose SQL or
+upstream differs from what that environment last built (`state:modified+`).
+Those models are snapshotted first: table data, view definitions, which ones did
+not exist yet, and their build state. If any of them fails to build (an error,
+a failed error-level check, a blocked upstream), all of them are put back
+exactly as they were, and the command exits 1 naming the models that failed.
+Ingest does not run; deploy the models, not the data feeding them.
+
+Also available from the web UI (Ship) and `POST /api/deploys`.
+
 ### havn macros
 
 List registered Python SQL macros.

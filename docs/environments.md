@@ -117,6 +117,25 @@ Returns:
 }
 ```
 
+## Deploying to an environment
+
+`havn deploy <env>` builds a git ref (default `main`) in that environment's
+warehouse and rebuilds only what differs there (`state:modified+`, compared
+against that environment's own build state), using the ref's code and macros.
+The models it will touch are snapshotted first. If any of them fails, every
+one of them is restored exactly (data, views, build state), so a failed deploy
+leaves the environment as it was and the next deploy plans the same models
+again. Use `--plan` to see the models first.
+
+In the web UI, Ship offers the same after a change merges, defaulting to the
+production-looking environment (`prod`, `production`, `prd`, `live`), which the
+environment pill in the top bar also shows in red. Every deploy is recorded in
+`_havn.deploys` and listed in Ship.
+
+A deploy is a code change applied to data that already exists. Ingest does not
+run, so a model that reads a landing table the environment lacks fails and
+rolls back, and the failure names the missing table.
+
 ## Defer
 
 Defer lets a run build in one environment while reading everything it has not

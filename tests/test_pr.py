@@ -443,3 +443,20 @@ def test_author_cannot_approve_own_pr(git_project):
     with pytest.raises(ValueError, match="someone else has to approve"):
         approve_pr(git_project, pr.id, "Alice")  # case-insensitive
     assert get_pr(git_project, pr.id).approvers == []
+
+
+def test_merge_ignores_environment_warehouses(git_project):
+    from havn.engine.git import is_dirty
+    from havn.engine.pr import merge_ignored_paths
+
+    (git_project / "project.yml").write_text(
+        "name: test\ndatabase:\n  path: warehouse.duckdb\n"
+        "environments:\n  prod:\n    database:\n      path: data/prod.duckdb\n"
+    )
+    _git(git_project, "commit", "-qam", "envs")
+    (git_project / "data").mkdir()
+    (git_project / "data" / "prod.duckdb").write_bytes(b"x")
+    (git_project / "data" / "prod.duckdb.wal").write_bytes(b"x")
+    ignored = merge_ignored_paths(git_project)
+    assert "data/prod.duckdb" in ignored
+    assert is_dirty(git_project, ignore=ignored) is False

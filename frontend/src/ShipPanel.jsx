@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "./api";
 import { useAuth } from "./AuthContext";
 import { timeAgo } from "./HomePanel";
+import DeployCard from "./DeployCard";
 
 /*
  * Ship: should this change go in? A change is a havn PR (a git branch with a
@@ -29,7 +30,7 @@ export function layoutColumns(nodes, edges) {
   return cols.filter(Boolean);
 }
 
-export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile, onNavigate, onRunPipeline, onMerged }) {
+export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile, onNavigate, onMerged }) {
   const auth = useAuth();
   const user = auth?.currentUser?.username || "local";
   const [prs, setPrs] = useState(null);
@@ -170,6 +171,8 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
               data moves, and checks it can merge cleanly before anything reaches {`main`}.
             </p>
             <button style={s.btnPrimary} onClick={() => onNavigate("Git:Reviews")}>Create a change</button>
+            <p style={{ ...s.dim, marginTop: 28 }}>Or deploy what is already on the base branch:</p>
+            <DeployCard showConfirm={showConfirm} onDeployed={onMerged} />
           </div>
         )}
         {reviewError && <div style={{ ...s.err, marginBottom: 12 }}>{reviewError}</div>}
@@ -254,10 +257,10 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
             <div style={{ ...s.mergedBox, marginTop: 0 }} role="status">
               <div><span style={s.ok}>{"✓"}</span> Merged{review.pr.merged_by ? ` by ${review.pr.merged_by}` : ""}{review.pr.merged_at ? ` ${timeAgo(review.pr.merged_at)}` : ""}.</div>
               <div style={{ marginTop: 4 }}>{review.after_merge}</div>
-              <button style={{ ...s.btnPrimary, marginTop: 8 }} onClick={onRunPipeline} disabled={running}>
-                {running ? "Running…" : "▶ Run pipeline"}
-              </button>
             </div>
+          )}
+          {(merged || review.pr.status === "merged") && (
+            <DeployCard refName={review.pr.base_ref} prId={review.pr.id} showConfirm={showConfirm} onDeployed={onMerged} />
           )}
         </aside>
       )}
