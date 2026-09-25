@@ -72,6 +72,17 @@ in `docs/internal/dbt-v2-gap-plan.md`.
   a modern `@config` header; a directive below the SQL also produced a
   spurious "unparsable section".
 - `POST /api/lint/file` needs only `read` when `fix` is false.
+- **Model workbench.** Opening a `transform/*.sql` file wraps the editor in a
+  workbench: a lineage strip (upstream and downstream models, one click to
+  open), an inspector beside the code with Preview, Checks, Columns and Runs,
+  and an action bar that says whether the model is unsaved, changed since its
+  last build or failing checks, and how many downstream models depend on it.
+  **Build + downstream** runs the `model+` selector after saving. Failed
+  `@assert` lines are highlighted in the editor with the failure inline;
+  **Show rows** previews exactly the rows a failed check counted, and
+  **+ add @col** starts a doc line for an undocumented column. Backed by the new
+  `GET /api/models/workbench?path=`. The toolbar's Save / Run Model / Run
+  buttons moved into the action bar for model files.
 
 ### Testing
 

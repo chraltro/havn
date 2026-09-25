@@ -231,6 +231,18 @@ Compare SQL output against materialized tables.
 
 Get a notebook-style view combining SQL source, sample data, lineage, and dependencies.
 
+### GET /api/models/workbench?path=transform/silver/orders.sql
+
+Everything the editor workbench shows for the model defined in `path` (a
+project-relative file path; 404 if no model is defined there): `model`,
+`materialized`, `description`, `upstream` / `downstream` (direct, each with
+its file `path`), `downstream_all` (transitive, nearest first), `columns`
+(name, type from the last build, `@col` description), `checks` (every
+`@assert` and `@grain` with its latest `passed` / `detail` / `checked_at`, plus
+`failing_sql`, a query returning the violating rows, or `null` for
+`row_count` checks), the last 10 transform `runs`, and `state` (`built`,
+`last_run_at`, `row_count`, `changed_since_build`).
+
 ## DAG
 
 ### GET /api/dag

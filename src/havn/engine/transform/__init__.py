@@ -37,6 +37,7 @@ from .quality import (
     _evaluate_assertion,
     _save_assertions,
     _save_profile,
+    failing_rows_sql,
     profile_model,
     run_assertions,
 )
@@ -111,6 +112,7 @@ __all__ = [
     "discover_models",
     "discover_package_models",
     # Quality
+    "failing_rows_sql",
     "profile_model",
     "run_assertions",
     # Execution

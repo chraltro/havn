@@ -31,6 +31,7 @@ import Hint from "./Hint";
 import { useHintTriggerFn } from "./HintSystem";
 import EnvironmentSwitcher from "./EnvironmentSwitcher";
 import ModelNotebookView from "./ModelNotebookView";
+import ModelWorkbench from "./ModelWorkbench";
 import NewModelDialog from "./NewModelDialog";
 import GitReviewsPanel from "./GitReviewsPanel";
 import OrchestrationPanel from "./OrchestrationPanel";
@@ -469,7 +470,7 @@ function DashboardsSection({ showConfirm, embedMode }) {
 function AppContent() {
   const { currentUser, handleLogout } = useAuth();
   const { tables, files, streams, loadFiles, refreshAll } = useWarehouse();
-  const { running, output, runSummary, progress, addOutput, clearOutput, setRunSummary, runTransformAll, runStream, cancelPipeline, runLint, runCurrentScript, runSingleModel, runContracts, runPipeline } = usePipeline();
+  const { running, output, runSummary, progress, addOutput, clearOutput, setRunSummary, runTransformAll, runStream, cancelPipeline, runLint, runCurrentScript, runSingleModel, runSelection, runContracts, runPipeline } = usePipeline();
 
   // Editor state
   const [activeFile, setActiveFile] = useState(null);
@@ -484,6 +485,9 @@ function AppContent() {
   const [preview, setPreview] = useState(null);
   const [previewError, setPreviewError] = useState(null);
   const [previewRunning, setPreviewRunning] = useState(false);
+  const [previewLabel, setPreviewLabel] = useState(null);
+  // Monaco instance as state (editorRef alone does not re-render the workbench).
+  const [editorInstance, setEditorInstance] = useState(null);
   // Bind diagnostics summary for the editor toolbar ("binding...", "2 errors", "ok")
   const [bindStatus, setBindStatus] = useState(null);
   // "Run on save" toggle, persisted in localStorage so it survives reloads.
@@ -1020,6 +1024,7 @@ function AppContent() {
     if (!sql || !sql.trim()) return;
     setPreviewRunning(true);
     setPreviewError(null);
+    setPreviewLabel(label || "Editor SQL");
     if (label) addOutput("info", `Previewing ${label}...`);
     try {
       const data = await api.runQuery(sql, undefined, { limit: PREVIEW_LIMIT });
@@ -1030,6 +1035,11 @@ function AppContent() {
     } finally {
       setPreviewRunning(false);
     }
+  }
+
+  async function handleBuildSelection(selector) {
+    if (dirty) await saveFile();
+    await runSelection(selector);
   }
 
   async function previewCurrentFile() {
@@ -1057,6 +1067,35 @@ function AppContent() {
 
   const isTransformFile = activeFile && activeFile.includes("transform/") && activeFile.endsWith(".sql");
   const bindStatusText = bindStatusLabel(bindStatus);
+
+  const editorElement = (
+    <Editor
+      content={fileContent}
+      language={fileLang}
+      onChange={(val) => {
+        setFileContent(val);
+        setDirty(true);
+      }}
+      activeFile={activeFile}
+      dirty={dirty}
+      onReloadFile={(path, text) => {
+        // A column rename wrote this file. The buffer is
+        // replaced with what the server wrote, so there is
+        // nothing left to save.
+        if (path !== activeFileRef.current) return;
+        setFileContent(text);
+        setDirty(false);
+      }}
+      onMount={(editor) => { editorRef.current = editor; setEditorInstance(editor); }}
+      goToLine={goToLine}
+      onFormat={activeFile?.endsWith(".sql") ? formatCurrentFile : undefined}
+      onPreview={activeFile?.endsWith(".sql") ? previewCurrentFile : undefined}
+      onStatus={setBindStatus}
+      onOpenModel={(path, line, col) => openFileAtLine(path, line || 1, col || 1)}
+      onPreviewCte={(sql, name) => previewSql(sql, name ? `CTE ${name}` : "CTE")}
+    />
+  );
+
 
   return (
     <div style={styles.container}>
@@ -1233,9 +1272,11 @@ function AppContent() {
                       {bindStatusText}
                     </span>
                   )}
-                  <button onClick={saveFile} disabled={!dirty} style={styles.btn}>
-                    Save
-                  </button>
+                  {!isTransformFile && (
+                    <button onClick={saveFile} disabled={!dirty} style={styles.btn}>
+                      Save
+                    </button>
+                  )}
                   <label style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, opacity: 0.8, cursor: "pointer" }} title="Re-run this model/script automatically after save">
                     <input
                       type="checkbox"
@@ -1244,14 +1285,11 @@ function AppContent() {
                     />
                     Run on save
                   </label>
-                  {isTransformFile && (
-                    <button onClick={handleRunSingleModel} disabled={running} style={styles.btn} title={running ? "A run is already in progress" : "Run just this model"}>
-                      Run Model
+                  {!isTransformFile && (
+                    <button onClick={runCurrentFile} disabled={running} style={styles.btnPrimary} title={running ? "A run is already in progress" : "Run this file"}>
+                      Run
                     </button>
                   )}
-                  <button onClick={runCurrentFile} disabled={running} style={styles.btnPrimary} title={running ? "A run is already in progress" : "Run this file"}>
-                    Run
-                  </button>
                 </div>
               )}
             </div>
@@ -1294,33 +1332,39 @@ function AppContent() {
                 </ErrorBoundary>
               ) : (
               <ErrorBoundary name="Editor">
+                {isTransformFile ? (
+                <ModelWorkbench
+                  activeFile={activeFile}
+                  content={fileContent}
+                  dirty={dirty}
+                  running={running}
+                  editor={editorInstance}
+                  preview={preview}
+                  previewError={previewError}
+                  previewRunning={previewRunning}
+                  previewLabel={previewLabel}
+                  onPreview={previewCurrentFile}
+                  onPreviewSql={previewSql}
+                  onClearPreview={() => { setPreview(null); setPreviewError(null); }}
+                  onSave={saveFile}
+                  onBuild={async (modelName) => {
+                    // The workbench knows the model's real name, which a nested
+                    // folder or @config schema= makes different from the path.
+                    if (!modelName) return handleRunSingleModel();
+                    if (dirty) await saveFile();
+                    await runSingleModel(modelName);
+                  }}
+                  onBuildDownstream={handleBuildSelection}
+                  onOpenFile={openFile}
+                  onOpenDag={() => navigateToTab("DAG")}
+                  onEditContent={(text) => { setFileContent(text); setDirty(true); }}
+                >
+                  {editorElement}
+                </ModelWorkbench>
+                ) : (
                 <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
                   <div style={{ flex: 1, overflow: "hidden", minHeight: 0 }}>
-                    <Editor
-                      content={fileContent}
-                      language={fileLang}
-                      onChange={(val) => {
-                        setFileContent(val);
-                        setDirty(true);
-                      }}
-                      activeFile={activeFile}
-                      dirty={dirty}
-                      onReloadFile={(path, text) => {
-                        // A column rename wrote this file. The buffer is
-                        // replaced with what the server wrote, so there is
-                        // nothing left to save.
-                        if (path !== activeFileRef.current) return;
-                        setFileContent(text);
-                        setDirty(false);
-                      }}
-                      onMount={(editor) => { editorRef.current = editor; }}
-                      goToLine={goToLine}
-                      onFormat={activeFile?.endsWith(".sql") ? formatCurrentFile : undefined}
-                      onPreview={activeFile?.endsWith(".sql") ? previewCurrentFile : undefined}
-                      onStatus={setBindStatus}
-                      onOpenModel={(path, line, col) => openFileAtLine(path, line || 1, col || 1)}
-                      onPreviewCte={(sql, name) => previewSql(sql, name ? `CTE ${name}` : "CTE")}
-                    />
+                    {editorElement}
                   </div>
                   {(preview || previewError || previewRunning) && (
                     <>
@@ -1342,6 +1386,7 @@ function AppContent() {
                     </>
                   )}
                 </div>
+                )}
               </ErrorBoundary>
               )
             )}

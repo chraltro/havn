@@ -1188,6 +1188,8 @@ export const api = {
 
   // Model notebook view
   getModelNotebookView: (modelName: string) => request(`/models/${modelName}/notebook-view`),
+  // Everything the editor workbench shows for the model defined in `path`.
+  getModelWorkbench: (path: string) => request(`/models/workbench?path=${encodeURIComponent(path)}`),
 
   // Create model
   createModel: (name: string, schema_name: string = "bronze", materialized: string = "table", sql: string = "") =>

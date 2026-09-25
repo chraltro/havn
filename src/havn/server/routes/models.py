@@ -502,6 +502,194 @@ def get_model_notebook_view(
     }
 
 
+# --- Model workbench ---
+
+
+@router.get("/api/models/workbench")
+def get_model_workbench(
+    request: Request,
+    path: str = Query(..., min_length=1, max_length=1000),
+    conn: DbConnReadOnlyOptional = None,
+) -> dict:
+    """Everything the editor's workbench shows for one SQL model, in one call.
+
+    ``path`` is the project-relative file path the editor has open. It is only
+    compared against discovered models, never read from disk directly.
+    """
+    _require_permission(request, "read")
+    from havn.engine.transform import failing_rows_sql
+    from havn.engine.transform.columns import load_model_columns
+
+    project_dir = _get_project_dir()
+    models = _discover_models_cached(project_dir / "transform")
+
+    def rel(m) -> str | None:
+        try:
+            return str(m.path.relative_to(project_dir))
+        except ValueError:
+            return None
+
+    wanted = path.replace("\\", "/").lstrip("./")
+    target = next((m for m in models if rel(m) == wanted), None)
+    if target is None:
+        raise HTTPException(404, f"No model is defined in '{path}'")
+
+    by_name = {m.full_name: m for m in models}
+    children: dict[str, list[str]] = {}
+    for m in models:
+        for dep in m.depends_on:
+            children.setdefault(dep, []).append(m.full_name)
+
+    # Transitive downstream, breadth-first so nearer models come first.
+    downstream_all: list[str] = []
+    seen = {target.full_name}
+    queue = list(children.get(target.full_name, []))
+    while queue:
+        name = queue.pop(0)
+        if name in seen:
+            continue
+        seen.add(name)
+        downstream_all.append(name)
+        queue.extend(children.get(name, []))
+
+    upstream = [
+        {"name": d, "path": rel(by_name[d]) if d in by_name else None}
+        for d in target.depends_on
+    ]
+    downstream = [
+        {"name": d, "path": rel(by_name[d])}
+        for d in sorted(set(children.get(target.full_name, [])))
+    ]
+
+    specs = list(target.assertion_specs) or [(e, "error") for e in target.assertions]
+    if target.grain:
+        specs.append((f"grain({', '.join(target.grain)})", "error"))
+
+    columns: list[dict] = []
+    state = {
+        "built": False,
+        "last_run_at": None,
+        "row_count": None,
+        "run_duration_ms": None,
+        "changed_since_build": None,
+    }
+    latest: dict[str, dict] = {}
+    runs: list[dict] = []
+
+    if conn is not None:
+        ensure_meta_table(conn)
+        row = conn.execute(
+            "SELECT content_hash, last_run_at, row_count, run_duration_ms "
+            "FROM _havn.model_state WHERE model_path = ?",
+            [target.full_name],
+        ).fetchone()
+        if row:
+            state = {
+                "built": True,
+                "last_run_at": str(row[1]) if row[1] else None,
+                "row_count": row[2],
+                "run_duration_ms": row[3],
+                "changed_since_build": row[0] != target.content_hash,
+            }
+
+        for r in conn.execute(
+            """
+            SELECT expression, passed, detail, checked_at
+            FROM _havn.assertion_results
+            WHERE model_path = ?
+            QUALIFY row_number() OVER (PARTITION BY expression ORDER BY checked_at DESC) = 1
+            """,
+            [target.full_name],
+        ).fetchall():
+            latest[r[0]] = {
+                "passed": r[1],
+                "detail": r[2],
+                "checked_at": str(r[3]) if r[3] else None,
+            }
+
+        runs = [
+            {
+                "status": r[0],
+                "started_at": str(r[1]) if r[1] else None,
+                "duration_ms": r[2],
+                "rows_affected": r[3],
+                "error": r[4],
+            }
+            for r in conn.execute(
+                """
+                SELECT status, started_at, duration_ms, rows_affected, error
+                FROM _havn.run_log
+                WHERE target = ? AND run_type = 'transform'
+                ORDER BY started_at DESC
+                LIMIT 10
+                """,
+                [target.full_name],
+            ).fetchall()
+        ]
+
+        columns = load_model_columns(conn, target.full_name)
+        if not columns:
+            try:
+                columns = [
+                    {"name": r[0], "type": r[1]}
+                    for r in conn.execute(
+                        "SELECT column_name, data_type FROM information_schema.columns "
+                        "WHERE table_catalog = current_database() "
+                        "AND table_schema = ? AND table_name = ? "
+                        "ORDER BY ordinal_position",
+                        [target.schema, target.name],
+                    ).fetchall()
+                ]
+            except Exception:
+                columns = []
+
+    # Documented columns the warehouse has not seen yet still get a row, so
+    # the Columns tab reflects the file and not only the last build.
+    known = {c["name"].lower() for c in columns}
+    docs = {k.lower(): v for k, v in target.column_docs.items()}
+    col_rows = [
+        {"name": c["name"], "type": c["type"], "description": docs.get(c["name"].lower(), "")}
+        for c in columns
+    ]
+    col_rows += [
+        {"name": name, "type": None, "description": text}
+        for name, text in target.column_docs.items()
+        if name.lower() not in known
+    ]
+
+    checks = []
+    for expr, severity in specs:
+        result = latest.get(expr, {})
+        checks.append(
+            {
+                "expression": expr,
+                "severity": severity,
+                "passed": result.get("passed"),
+                "detail": result.get("detail"),
+                "checked_at": result.get("checked_at"),
+                "failing_sql": failing_rows_sql(target, expr),
+            }
+        )
+
+    return {
+        "model": target.full_name,
+        "path": rel(target),
+        "schema": target.schema,
+        "name": target.name,
+        "materialized": target.materialized,
+        "description": target.description,
+        "owner": target.owner,
+        "tags": list(target.tags),
+        "upstream": upstream,
+        "downstream": downstream,
+        "downstream_all": downstream_all,
+        "columns": col_rows,
+        "checks": checks,
+        "runs": runs,
+        "state": state,
+    }
+
+
 # --- Create new model ---
 
 

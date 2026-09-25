@@ -292,6 +292,56 @@ def _evaluate_assertion(
         return AssertionResult(expression=expr, passed=passed, detail=detail)
 
 
+def failing_rows_sql(model: SQLModel, expr: str) -> str | None:
+    """SQL that returns the rows of ``model`` violating assertion ``expr``.
+
+    Mirrors the branches of ``_evaluate_assertion`` so "show failing rows" in
+    the UI lists exactly the rows the assertion counted. Returns None for
+    table-level checks (``row_count``) that have no offending rows to show.
+    A generic expression that turns out to be an aggregate is still returned;
+    it fails when run, the same way the evaluator's counting form does.
+    """
+    table = model.full_name
+    expr = expr.strip()
+
+    if re.search(r"\brow_count\b", expr):
+        return None
+
+    m = re.match(r"no_nulls\((\w+)\)\s*$", expr)
+    if m:
+        return f'SELECT * FROM {table} WHERE "{m.group(1)}" IS NULL'
+
+    m = re.match(r"unique\((\w+)\)\s*$", expr)
+    if m:
+        col = m.group(1)
+        return (
+            f'SELECT * FROM {table} WHERE "{col}" IN ('
+            f'SELECT "{col}" FROM {table} GROUP BY "{col}" HAVING COUNT(*) > 1'
+            f') ORDER BY "{col}"'
+        )
+
+    m = re.match(r"accepted_values\((\w+),\s*\[(.+)\]\)\s*$", expr)
+    if m:
+        col = m.group(1)
+        values = [v.strip().strip("'\"") for v in m.group(2).split(",")]
+        placeholders = ", ".join("'" + v.replace("'", "''") + "'" for v in values)
+        return (
+            f'SELECT * FROM {table} WHERE "{col}" IS NOT NULL '
+            f'AND "{col}"::VARCHAR NOT IN ({placeholders})'
+        )
+
+    m = re.match(r"grain\((.+)\)\s*$", expr)
+    if m:
+        cols = ", ".join(f'"{c.strip()}"' for c in m.group(1).split(","))
+        return (
+            f"SELECT * FROM {table} WHERE ({cols}) IN ("
+            f"SELECT ({cols}) FROM {table} GROUP BY {cols} HAVING COUNT(*) > 1"
+            f") ORDER BY {cols}"
+        )
+
+    return f"SELECT * FROM {table} WHERE NOT ({expr})"
+
+
 def profile_model(
     conn: duckdb.DuckDBPyConnection,
     model: SQLModel,

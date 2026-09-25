@@ -22,7 +22,7 @@ export const HINTS = [
   },
   {
     id: "first-editor-save",
-    text: "Nice. You can run just this model with the Run Model button instead of running the full pipeline.",
+    text: "Nice. For a SQL model, Build model under the editor rebuilds just that model, and Build + downstream also rebuilds everything that reads from it.",
     action: null,
     target: "[data-havn-hint='editor-toolbar']",
     priority: 8,
