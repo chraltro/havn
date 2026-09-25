@@ -243,6 +243,27 @@ its file `path`), `downstream_all` (transitive, nearest first), `columns`
 `row_count` checks), the last 10 transform `runs`, and `state` (`built`,
 `last_run_at`, `row_count`, `changed_since_build`).
 
+## Home
+
+### GET /api/home
+
+The Home page in one call:
+
+- `project_name`, `is_sample`, `has_data`.
+- `tiles.models`: `total`, `changed`, `never_built`, `up_to_date`.
+- `tiles.checks`: `passed`, `failed`, `warned`, `contracts_failed`, from the
+  latest result of each check still declared in its model.
+- `tiles.last_run`: the latest pipeline run.
+- `tiles.warehouse`: `size_bytes` and `last_backup`.
+- `attention`: up to 25 items `{kind, severity, title, subject, detail, at,
+  path, sql}`, errors first. `kind` is `build`, `assertion`, `contract`,
+  `freshness` or `anomaly`. `sql` returns a failed check's violating rows.
+- `attention_total`: the count before the 25-item cap.
+- `runs`: pipeline runs from the last 24 hours, oldest first.
+- `layers`: `[{schema, models: [{name, full_name, path, status, ...}]}]`.
+  `status` is `failing`, `blocked`, `changed`, `never_built`, `fresh` or
+  `source`.
+
 ## DAG
 
 ### GET /api/dag

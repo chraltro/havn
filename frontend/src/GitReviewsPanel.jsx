@@ -1,9 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import GitPanel from "./GitPanel";
 import ReviewsPanel from "./ReviewsPanel";
 
 /**
- * Develop -> Git tab wrapper that exposes two sub-tabs:
+ * Build -> Git tab wrapper that exposes two sub-tabs:
  *   - Status: the existing GitPanel (branch, changes, commits, branches, stash)
  *   - Reviews: the pull request system (ReviewsPanel)
  *
@@ -12,6 +12,16 @@ import ReviewsPanel from "./ReviewsPanel";
  */
 export default function GitReviewsPanel({ showConfirm }) {
   const [sub, setSub] = useState("status");
+  // navigateToTab("Git:Reviews") (e.g. Ship's "New change") opens a sub-tab.
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.detail?.tab !== "Git") return;
+      const want = (e.detail.subTab || "").toLowerCase();
+      if (want === "reviews" || want === "status") setSub(want);
+    };
+    window.addEventListener("havn-subtab", handler);
+    return () => window.removeEventListener("havn-subtab", handler);
+  }, []);
   return (
     <div style={styles.container}>
       <div style={styles.tabBar}>

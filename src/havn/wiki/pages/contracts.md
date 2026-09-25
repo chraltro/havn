@@ -18,7 +18,7 @@ Data contracts are standalone YAML files that define data quality rules. They co
 
 ### Running Contracts from the UI
 
-Use the **Run menu** dropdown in the Develop tab:
+Use the **Run menu** dropdown in the top bar:
 - **Check** -- Runs model validation, inline assertions, AND YAML contracts all at once
 - Results appear in the Output Panel with pass/fail indicators
 

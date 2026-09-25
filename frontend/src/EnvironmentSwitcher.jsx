@@ -45,12 +45,19 @@ export default function EnvironmentSwitcher({ showConfirm }) {
     }
   };
 
+  const prod = isProductionEnv(env.active);
+  const pill = prod ? st.prodPill : null;
+  const dot = { ...st.dot, background: prod ? "var(--havn-red)" : "var(--havn-green)" };
+  const envTitle = prod
+    ? `Environment: ${env.active}. Runs and builds write to production.`
+    : `Environment: ${env.active}`;
+
   // Single environment — just show a label, no dropdown
   if (env.available.length === 1) {
     return (
       <div style={st.row}>
-        <div style={st.badge}>
-          <span style={st.dot} />
+        <div style={{ ...st.badge, ...pill }} title={envTitle} data-env-kind={prod ? "prod" : "other"}>
+          <span style={dot} />
           {env.active}
         </div>
         <DeferBadge defer={env.defer} />
@@ -64,11 +71,13 @@ export default function EnvironmentSwitcher({ showConfirm }) {
         <button
           onClick={() => setOpen(!open)}
           disabled={switching}
-          style={st.trigger}
-          aria-label="Switch environment"
+          style={{ ...st.trigger, ...pill }}
+          aria-label={`Environment: ${env.active}. Switch environment`}
           aria-expanded={open}
+          title={envTitle}
+          data-env-kind={prod ? "prod" : "other"}
         >
-          <span style={st.dot} />
+          <span style={dot} />
           <span>{env.active}</span>
           <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginLeft: 2 }}>
             <path d="M1.5 3L4 5.5L6.5 3" />
@@ -92,6 +101,11 @@ export default function EnvironmentSwitcher({ showConfirm }) {
       <DeferBadge defer={env.defer} />
     </div>
   );
+}
+
+/** Whether an environment name reads as production (prod, production, prd, live). */
+export function isProductionEnv(name) {
+  return /^(prod|production|prd|live)([-_].*)?$/i.test(name || "");
 }
 
 /**
@@ -134,7 +148,13 @@ const st = {
     color: "var(--havn-text-secondary)",
     background: "var(--havn-bg-tertiary)",
     border: "1px solid var(--havn-border)",
-    borderRadius: "var(--havn-radius-lg)",
+    borderRadius: 20,
+  },
+  // Production is loud: red text and border, so a run there is never a surprise.
+  prodPill: {
+    color: "var(--havn-red)",
+    borderColor: "var(--havn-red)",
+    fontWeight: 600,
   },
   dot: {
     width: 6, height: 6, borderRadius: "50%",
@@ -148,7 +168,7 @@ const st = {
     color: "var(--havn-text-secondary)",
     background: "var(--havn-btn-bg)",
     border: "1px solid var(--havn-btn-border)",
-    borderRadius: "var(--havn-radius-lg)",
+    borderRadius: 20,
     cursor: "pointer",
   },
   dropdown: {

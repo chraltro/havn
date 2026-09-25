@@ -998,6 +998,8 @@ export const api = {
 
   // Overview
   getOverview: () => request("/overview"),
+  // Home page: health tiles, attention queue, last-24h runs, layers.
+  getHome: () => request<any>("/home"),
   clearSampleProject: () => request("/project/clear-sample", { method: "POST" }),
 
   // Connector health
@@ -1475,6 +1477,8 @@ export const api = {
     request<{ changed: string[]; impacted: string[] }>(
       `/prs/${encodeURIComponent(id)}/lineage-impact`,
     ),
+  // Ship page: the change, its impact graph, build, and merge gate in one call.
+  getPrReview: (id: string) => request<any>(`/prs/${encodeURIComponent(id)}/review`),
   getPrStateStatus: () => request<PrStateStatus>("/prs/state-status"),
 
   // Resources

@@ -129,54 +129,38 @@ On first launch with `--auth`, you will be prompted to create an admin user thro
 
 ## Using the Web UI
 
-The web UI is organized into four main sections, accessible from the top navigation tabs:
+Five destinations sit in the rail down the left edge (a bottom bar on a phone), with Agent and Settings pinned below them. `Alt+1` to `Alt+6` jump between them. The search box in the top bar (`Ctrl+K` / `Cmd+K`) finds any model, table, file or command. The pill beside it shows the active environment and turns red for production.
 
-### Overview Tab
+### Home
 
-When you first open localhost:3000, you'll see the Overview tab. It displays:
+What you see at localhost:3000. It answers "is my data OK, and if not, what do I click?":
 
-- **Stats Row** -- Key metrics including total tables, rows, connectors, and recent pipeline health (success/failure ratio)
-- **Pipeline Health** -- Recent pipeline runs with their status, affected table/file, row counts, and duration
-- **Warehouse Summary** -- Schemas in your warehouse grouped by name, with table/view counts and total rows per schema
-- **Quick Actions** -- Fast navigation buttons to common tasks: add data sources, run queries, edit transforms, and view the DAG
-- **Failed Runs Detail** -- If any recent runs failed, click the "Runs OK" stat card to expand a list of failures with error messages
+- **Health tiles** -- models up to date / changed / not built, checks passing, the last pipeline run, and warehouse size with the last backup. Each tile opens the matching page.
+- **Needs attention** -- failed builds, failed checks, broken contracts, late sources and recent anomalies in one list, errors first. Each row has its next step: **See rows** runs the query for a failed check's violating rows, **Open** opens the model.
+- **Runs · last 24h** -- one bar per pipeline run, height is duration, failed runs in red with a ✗.
+- **Layers** -- every model under landing, bronze, silver and gold with its status: fresh, changed, not built, failing, or blocked by a failing upstream. Click one to open it.
 
-The Overview is your control center for monitoring warehouse health at a glance.
+The Observe item in the rail carries a badge with the number of errors in the list.
 
-### Develop Tab
+### Build
 
-The Develop tab contains the code editor and DAG viewer for building your data warehouse.
+**Editor** -- open any file from the tree. A SQL model opens in the model workbench: lineage above the code, an inspector beside it (Preview, Checks, Columns, Runs), failed `@assert` lines marked in the editor, and **Build model** / **Build + downstream** below. Save with `Ctrl+S`; preview unsaved SQL with `Ctrl+Enter`.
 
-**Editor** -- The file tree on the left shows your project structure. Click any `.sql` or `.py` file to open it in the Monaco editor with syntax highlighting and autocomplete. Changes are automatically saved. Use this to write and edit SQL transforms and Python scripts.
+**Orchestration** -- pipeline jobs and schedules. **Git** -- status, commits and branches, plus **Reviews** for creating a change from a branch.
 
-**DAG** -- Click the DAG section to see an interactive dependency graph of all your SQL models. Hover over nodes to see upstream and downstream dependencies. This helps you understand data lineage and debug circular dependencies.
+### Data
 
-### Explore Tab
+**Query** -- ad-hoc SQL. Select part of the SQL to run only the selection. Named parameters like `$region` get a Parameters row and are bound server-side, so they cannot inject SQL. Results export as CSV.
 
-The Explore tab has two sub-sections for querying and browsing your data.
+**Tables** -- browse every table and view by schema, with column types and a preview. **DAG** -- the model dependency graph. **Dashboards** -- saved charts. **Data Sources** -- connect databases, APIs and files.
 
-**Query** -- Run ad-hoc SQL queries against any table in your warehouse. Write SQL in the editor, press Ctrl+Enter (or Cmd+Enter on Mac), and see results in the table below. Select part of your SQL to run only the selection. Use named parameters like `$region` in the SQL and fill in their values in the Parameters row that appears above the toolbar; values are bound server-side as prepared-statement parameters, so they cannot inject SQL. Results can be exported as CSV. Autocomplete suggests table names and columns as you type, and your draft, history, and parameter values survive tab switches and reloads.
+### Observe
 
-**Tables** -- Browse all tables and views in your warehouse organized by schema. Click on any table to see column details, data types, and a preview of the first rows. This is useful for exploring data without writing SQL, and for understanding the structure of bronze/silver/gold models.
+**Quality** (checks, contracts, profiles, anomalies), **Unit Tests**, **Sentinel** (source schema drift), **Diff** (what a rebuild would change) and **Runs** (full run history with errors).
 
-### Observe Tab
+### Ship
 
-The Observe tab shows pipeline execution history and logs.
-
-**History** -- View all recent pipeline runs sorted by timestamp. Each run shows:
-- Run type (ingest, seed, transform, export)
-- Affected target (table name or file)
-- Status (success or failure with error message)
-- Duration and rows affected
-- Timestamp
-
-Click on a failed run to see the error details. This is your main tool for debugging pipeline issues.
-
-### Configure Tab
-
-The Configure tab is for data source management and project settings.
-
-**Data Sources** -- Connect external data sources (databases, APIs, file uploads) to ingest data into your warehouse. This wizard guides you through importing CSVs, connecting to Postgres, setting up recurring API connectors, or loading Parquet files.
+Review a change before it merges. A change is a branch opened from Git → Reviews. Ship shows the models it changes and everything downstream of them, **Build** runs the branch in an isolated copy of the warehouse and shows which tables' data differ, and the gate on the right lists what merging needs: approval, no requested changes, no conflicts, a clean working tree, plus (recommended) a passing build of the latest commit. Merging snapshots the warehouse first; it changes code, not data, so run the pipeline afterwards.
 
 ## Explore Your Data (CLI)
 

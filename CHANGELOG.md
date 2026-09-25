@@ -41,6 +41,41 @@ in `docs/internal/dbt-v2-gap-plan.md`.
 - New `_havn.model_columns` table records each model's columns at build time;
   `GET /api/models/{name}/columns` reads it.
 
+### Web UI
+
+- **New navigation.** A rail down the left edge with five destinations: Home,
+  Build, Data, Observe and Ship, plus Agent and Settings at the bottom. It
+  becomes a bottom bar on a phone. The 17 tabs are grouped under them.
+  `Alt+1`–`Alt+6` still jump between sections. Old URLs (`/develop`, `/explore`,
+  `/configure`, `/develop/data-sources`) still work and are rewritten to the new
+  ones.
+- **Omnibox.** The top bar's search box opens the command palette
+  (`Ctrl/Cmd+K`), which finds models, tables, files and commands.
+- **Environment pill.** Shows the active environment and turns red for
+  `prod`, `production`, `prd` or `live`.
+- **Home** replaces Overview once the warehouse has data:
+  - health tiles for models, checks, the last run and the warehouse with its
+    last backup;
+  - a ranked **Needs attention** list covering failed builds, failed checks
+    (with **See rows**), broken contracts, late sources and anomalies from the
+    last 7 days;
+  - the last 24 hours of runs;
+  - every model per layer marked fresh, changed, not built, failing or blocked.
+
+  The Observe item in the rail shows a badge with the number of errors. Backed
+  by `GET /api/home`.
+- **Ship** reviews a change (a havn PR) before it merges:
+  - the models it changes plus their upstream and downstream, as a graph;
+  - **Build**, which runs the branch in an isolated copy of the warehouse and
+    shows which tables' data and schemas differ;
+  - approve and request changes;
+  - a merge gate matching exactly what merge enforces (approval, no requested
+    changes, no conflicts, clean tree), plus a recommended passing build of the
+    latest commit. Merging without a current build asks for confirmation.
+
+  Backed by `GET /api/prs/{id}/review`.
+- `Ctrl/Cmd+S` saves the open file.
+
 ### Editor
 
 - **Live error markers** in `transform/*.sql`: bind diagnostics 400 ms after a
@@ -229,6 +264,18 @@ none of them shipped in a released version.
   disabled and its configuration locked.
 
 ### Fixed before release
+
+- A build whose severity=error assertion failed was logged as `success` in the
+  run log. It is now `error`, with the failing checks in the message, on every
+  build path.
+- A PR created, approved or commented on in the web UI could never merge. Those
+  actions write `.havn/prs/<id>.json`, and `havn serve` holds
+  `.havn/serve.json`, so the merge's dirty-tree check always refused. It now
+  ignores havn's own PR records and runtime files. New projects also gitignore
+  `.havn/serve.json`.
+- The offline starter data had 3 earthquakes, not the 25 its notebook
+  promises, so `gold.region_risk` built empty and failed its own check on every
+  offline first run.
 
 - F2 column rename corrupted the open file when it had unsaved changes. The
   rename is refused until the file is saved, and afterwards the buffer is

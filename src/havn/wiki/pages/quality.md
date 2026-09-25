@@ -30,7 +30,7 @@ havn provides a comprehensive data quality framework with four complementary sys
 
 ### Running Quality Checks from the UI
 
-Use the **Run menu** dropdown in the Develop tab:
+Use the **Run menu** dropdown in the top bar:
 - **Check** -- Runs model validation, inline assertions, and YAML contracts
 - Results appear in the Output Panel with pass/fail indicators
 

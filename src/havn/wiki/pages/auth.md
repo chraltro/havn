@@ -14,7 +14,7 @@ On first launch with `--auth` and no users configured, the web UI shows a setup 
 
 1. Enter a username, password, and display name for the first admin user
 2. Click **Create Admin Account**
-3. You are automatically logged in and redirected to the Overview tab
+3. You are automatically logged in and redirected to Home
 
 ### User Management in Settings
 

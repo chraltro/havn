@@ -14,6 +14,10 @@ import DocsPanel from "./DocsPanel";
 import NotebookPanel from "./NotebookPanel";
 import DataSourcesPanel from "./DataSourcesPanel";
 import OverviewPanel from "./OverviewPanel";
+import HomePanel from "./HomePanel";
+import ShipPanel from "./ShipPanel";
+import NavRail from "./NavRail";
+import { SECTIONS, TAB_TO_SECTION, SECTION_DEFAULT, tabToPath, pathToTab } from "./navigation";
 import RunSummary from "./RunSummary";
 import SettingsPanel from "./SettingsPanel";
 import MaskingPanel from "./MaskingPanel";
@@ -52,56 +56,6 @@ import { PipelineProvider, usePipeline } from "./PipelineContext";
 
 /** Row cap for the editor preview pane (whole model and single CTE alike). */
 const PREVIEW_LIMIT = 100;
-
-/* ------------------------------------------------------------------ */
-/* Section-based navigation                                            */
-/* ------------------------------------------------------------------ */
-
-const SECTIONS = [
-  { id: "Overview", label: "Overview", tabs: [] },
-  { id: "Develop", label: "Develop", tabs: ["Editor", "Data Sources", "Orchestration", "Git"] },
-  { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "DAG", "Dashboards"] },
-  { id: "Observe", label: "Observe", tabs: ["Quality", "Unit Tests", "Sentinel", "Diff", "Runs"] },
-  { id: "Configure", label: "Configure", tabs: ["Masking", "Wiki", "Docs", "Settings"] },
-];
-
-// Quick lookup: tab name -> section id
-const TAB_TO_SECTION = {};
-for (const s of SECTIONS) {
-  if (s.tabs.length === 0) TAB_TO_SECTION[s.id] = s.id;
-  for (const t of s.tabs) TAB_TO_SECTION[t] = s.id;
-}
-
-// Default tab for each section (first sub-tab or the section itself)
-const SECTION_DEFAULT = {};
-for (const s of SECTIONS) {
-  SECTION_DEFAULT[s.id] = s.tabs.length > 0 ? s.tabs[0] : s.id;
-}
-
-// URL routing helpers
-function tabToPath(tab) {
-  const section = TAB_TO_SECTION[tab];
-  if (!section) return "/";
-  const sSlug = section.toLowerCase();
-  // Overview has no sub-tabs
-  if (section === "Overview") return "/";
-  const tSlug = tab.toLowerCase().replace(/\s+/g, "-");
-  // If it's the default tab for the section, just use section path
-  if (SECTION_DEFAULT[section] === tab) return `/${sSlug}`;
-  return `/${sSlug}/${tSlug}`;
-}
-
-function pathToTab(pathname) {
-  const parts = pathname.replace(/^\/+|\/+$/g, "").toLowerCase().split("/").filter(Boolean);
-  if (parts.length === 0) return "Overview";
-  const sectionSlug = parts[0];
-  const section = SECTIONS.find(s => s.id.toLowerCase() === sectionSlug);
-  if (!section) return "Overview";
-  if (parts.length === 1) return SECTION_DEFAULT[section.id];
-  const tabSlug = parts[1];
-  const tab = section.tabs.find(t => t.toLowerCase().replace(/\s+/g, "-") === tabSlug);
-  return tab || SECTION_DEFAULT[section.id];
-}
 
 /* ------------------------------------------------------------------ */
 /* Pipeline Run Menu (replaces 5 separate action buttons)              */
@@ -512,6 +466,16 @@ function AppContent() {
       history.pushState({ tab }, "", path);
     }
   }, []);
+  // An old or partial URL (/develop, /explore/dag) is rewritten in place to
+  // its canonical path, so bookmarks and shared links converge.
+  useEffect(() => {
+    const canonical = tabToPath(activeTab);
+    if (window.location.pathname !== canonical) {
+      history.replaceState({ tab: activeTab }, "", canonical + window.location.search + window.location.hash);
+    }
+    // Only on first load; navigation after that goes through setActiveTab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [selectedTable, setSelectedTable] = useState(null);
 
   // Derive active section from active tab
@@ -584,6 +548,8 @@ function AppContent() {
 
   // Run status indicator (header)
   const [recentStatus, setRecentStatus] = useState(null); // "success" | "failed" | null
+  // Error-level items in Home's attention queue, shown as the Observe badge.
+  const [attentionCount, setAttentionCount] = useState(0);
   const prevRunningRef = useRef(false);
   useEffect(() => {
     if (prevRunningRef.current && !running) {
@@ -599,6 +565,19 @@ function AppContent() {
     }
     prevRunningRef.current = running;
   }, [running, runSummary]);
+
+  // Keep the Observe badge current off the Home page too: on load and after
+  // every run. HomePanel reports the same count whenever it loads.
+  useEffect(() => {
+    if (running) return;
+    let cancelled = false;
+    api.getHome()
+      .then((d) => {
+        if (!cancelled) setAttentionCount((d.attention || []).filter((a) => a.severity === "error").length);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [running]);
 
   // Command palette state
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -680,13 +659,24 @@ function AppContent() {
     setHintTrigger("tabSwitchCount", tabSwitchCountRef.current);
   }
 
-  // Keyboard shortcuts: Alt+1..5 for sections, Ctrl/Cmd+K for command palette
+  // Keyboard shortcuts: Alt+1..6 for sections, Ctrl/Cmd+K for the command
+  // palette, Ctrl/Cmd+S to save the open file. The handler is registered once,
+  // so it reads the current save function through a ref.
+  const saveShortcutRef = useRef(null);
   useEffect(() => {
     function handleKeyDown(e) {
       // Ctrl+K / Cmd+K — command palette
       if ((e.ctrlKey || e.metaKey) && e.key === "k") {
         e.preventDefault();
         setPaletteOpen((v) => !v);
+        return;
+      }
+      // Ctrl+S / Cmd+S — save the file in the editor instead of the page
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
+        if (saveShortcutRef.current) {
+          e.preventDefault();
+          saveShortcutRef.current();
+        }
         return;
       }
       if (!e.altKey) return;
@@ -1066,6 +1056,10 @@ function AppContent() {
   }
 
   const isTransformFile = activeFile && activeFile.includes("transform/") && activeFile.endsWith(".sql");
+  // Ctrl/Cmd+S saves only while a dirty file is open in the editor (notebooks
+  // have their own save).
+  saveShortcutRef.current = activeTab === "Editor" && activeFile && dirty && !activeFile.endsWith(".dpnb")
+    ? saveFile : null;
   const bindStatusText = bindStatusLabel(bindStatus);
 
   const editorElement = (
@@ -1097,43 +1091,47 @@ function AppContent() {
   );
 
 
-  return (
-    <div style={styles.container}>
-      {/* Header: logo + section nav + actions + user */}
-      <header style={styles.header} role="banner">
-        <button
-          onClick={() => navigateToTab("Overview")}
-          style={styles.logo}
-          title="Home"
-          aria-label="havn home"
-        >
-          <img src="/logo.svg" alt="havn" width="22" height="22" style={{ marginRight: "6px", verticalAlign: "middle" }} />
-          havn
-        </button>
+  const fullWidthPage = activeSection === "Overview" || activeSection === "Ship";
 
-        {/* Section navigation */}
-        <nav style={styles.sectionNav} data-havn-guide="tabs" aria-label="Main navigation">
-          {SECTIONS.map((section, i) => {
-            const isActive = activeSection === section.id;
-            return (
-              <button
-                key={section.id}
-                data-havn-tab=""
-                data-havn-active={isActive ? "true" : "false"}
-                onClick={() => navigateToTab(SECTION_DEFAULT[section.id])}
-                style={isActive ? styles.sectionActive : styles.section}
-                title={`${section.label} (Alt+${i + 1})`}
-                aria-current={isActive ? "true" : undefined}
-              >
-                {section.label}
-              </button>
-            );
-          })}
-        </nav>
+  return (
+    <div style={styles.frame}>
+    <NavRail
+      sections={SECTIONS}
+      activeSection={activeSection}
+      onNavigate={(id) => navigateToTab(SECTION_DEFAULT[id])}
+      agentOpen={agentSidebarOpen}
+      onToggleAgent={() => setAgentSidebarOpen((v) => !v)}
+      badges={{ Observe: attentionCount }}
+    />
+    <div style={styles.container} className="havn-shell">
+      {/* Top bar: where you are, the omnibox, run status, actions, env, user */}
+      <header style={styles.header} role="banner">
+        <span className="havn-crumb" style={styles.crumb}>
+          {currentSectionDef?.label || "Home"}
+          {subTabs.length > 0 && <span style={{ color: "var(--havn-text-dim)" }}> / </span>}
+          {subTabs.length > 0 && <b style={styles.crumbTab}>{activeTab}</b>}
+        </span>
+
+        {/* Omnibox: opens the command palette, which searches models, tables,
+            files and commands. */}
+        <button
+          type="button"
+          onClick={() => setPaletteOpen(true)}
+          style={styles.omnibox}
+          aria-label="Search models, tables, files and commands"
+          aria-keyshortcuts="Control+K Meta+K"
+          data-havn-guide="omnibox"
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <circle cx="6.5" cy="6.5" r="5"/><path d="M10.5 10.5L14.5 14.5"/>
+          </svg>
+          <span style={styles.omniboxText}>Jump to a model, table, file or command…</span>
+          <kbd className="havn-omnibox-kbd" style={styles.omniboxKbd}>{/Mac|iPhone|iPad/.test(navigator.platform || "") ? "\u2318K" : "Ctrl K"}</kbd>
+        </button>
 
         {/* Run status indicator */}
         {running && (
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginLeft: "auto", marginRight: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
             <div style={{
               width: 8, height: 8, borderRadius: "50%",
               background: "var(--havn-accent)",
@@ -1145,7 +1143,7 @@ function AppContent() {
           </div>
         )}
         {!running && recentStatus && (
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginLeft: "auto", marginRight: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
             <span style={{ fontSize: "12px" }}>{recentStatus === "success" ? "\u2713" : "\u2717"}</span>
             <span style={{
               fontSize: "11px",
@@ -1166,18 +1164,9 @@ function AppContent() {
             onContracts={runContracts}
             onCancel={cancelPipeline}
           />
-          <button
-            onClick={() => setAgentSidebarOpen((v) => !v)}
-            style={agentSidebarOpen ? styles.btnPrimary : styles.btn}
-            title="Toggle agent sidebar"
-            aria-label="Toggle agent sidebar"
-            aria-expanded={agentSidebarOpen}
-          >
-            Agent
-          </button>
           <EnvironmentSwitcher showConfirm={showConfirm} />
           {currentUser && (
-            <div style={styles.userInfo}>
+            <div className="havn-userinfo" style={styles.userInfo}>
               <span style={styles.userName}>{currentUser.display_name || currentUser.username}</span>
               <span style={styles.userRole}>{currentUser.role}</span>
               {currentUser.username !== "local" && (
@@ -1190,7 +1179,8 @@ function AppContent() {
 
       <div style={styles.main}>
         {/* Sidebar */}
-        <aside style={{ ...styles.sidebar, width: sidebarWidth }} data-havn-guide="sidebar" role="navigation" aria-label="File browser">
+        {!fullWidthPage && (
+        <aside className="havn-sidebar" style={{ ...styles.sidebar, width: sidebarWidth }} data-havn-guide="sidebar" role="navigation" aria-label="File browser">
           <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--havn-border)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--havn-text-dim)" strokeWidth="1.5" style={{ flexShrink: 0 }}>
@@ -1231,12 +1221,17 @@ function AppContent() {
             </div>
           </div>
         </aside>
+        )}
 
-        <ResizeHandle
-          direction="horizontal"
-          onResize={onSidebarResize}
-          onResizeStart={onSidebarResizeStart}
-        />
+        {!fullWidthPage && (
+          <div className="havn-sidebar" style={{ display: "flex" }}>
+            <ResizeHandle
+              direction="horizontal"
+              onResize={onSidebarResize}
+              onResizeStart={onSidebarResizeStart}
+            />
+          </div>
+        )}
 
         {/* Content */}
         <div style={styles.content} role="main">
@@ -1299,6 +1294,19 @@ function AppContent() {
           <div style={styles.panel} data-havn-guide="main-panel">
             {activeTab === "Overview" && (
               <ErrorBoundary name="Overview">
+                <HomePanel
+                  running={running}
+                  refreshKey={tables}
+                  onNavigate={navigateToTab}
+                  onOpenFile={openFile}
+                  onRunPipeline={() => runPipeline()}
+                  onQuery={(sql) => {
+                    navigateToTab("Query");
+                    window.__havn_prefill_query = { sql, run: true };
+                  }}
+                  onClearSample={handleClearSample}
+                  onAttentionCount={setAttentionCount}
+                  firstRun={
                 <OverviewPanel
                   onNavigate={navigateToTab}
                   onSelectTable={handleSelectTable}
@@ -1315,6 +1323,21 @@ function AppContent() {
                   showConfirm={showConfirm}
                   onClearSample={handleClearSample}
                   refreshKey={tables}
+                />
+                  }
+                />
+              </ErrorBoundary>
+            )}
+            {activeTab === "Ship" && (
+              <ErrorBoundary name="Ship">
+                <ShipPanel
+                  running={running}
+                  showConfirm={showConfirm}
+                  addOutput={addOutput}
+                  onOpenFile={openFile}
+                  onNavigate={navigateToTab}
+                  onRunPipeline={() => runPipeline()}
+                  onMerged={refreshAll}
                 />
               </ErrorBoundary>
             )}
@@ -1554,6 +1577,7 @@ function AppContent() {
         onRunStream={(name) => { runStream(name); }}
       />
     </div>
+    </div>
   );
 }
 
@@ -1624,26 +1648,26 @@ export default function App() {
 /* ------------------------------------------------------------------ */
 
 const styles = {
-  container: { display: "flex", flexDirection: "column", height: "100vh", background: "var(--havn-bg)", color: "var(--havn-text)", fontFamily: "var(--havn-font)" },
+  frame: { display: "flex", height: "100vh", background: "var(--havn-bg)", color: "var(--havn-text)", fontFamily: "var(--havn-font)" },
+  container: { display: "flex", flexDirection: "column", flex: 1, minWidth: 0, height: "100vh", background: "var(--havn-bg)", color: "var(--havn-text)", fontFamily: "var(--havn-font)" },
   loading: { display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "var(--havn-bg)", color: "var(--havn-text-secondary)", fontFamily: "var(--havn-font)", fontSize: "14px" },
 
   // Header
-  header: { display: "flex", alignItems: "center", padding: "0 16px", borderBottom: "1px solid var(--havn-border)", background: "var(--havn-bg-secondary)", minHeight: "46px", gap: "12px" },
-  logo: { display: "inline-flex", alignItems: "center", fontSize: "17px", fontWeight: 700, fontFamily: "var(--havn-font)", color: "var(--havn-accent)", letterSpacing: "-0.5px", background: "none", border: "none", cursor: "pointer", padding: "8px 0", marginRight: "4px", flexShrink: 0 },
-
-  // Section navigation (in header)
-  sectionNav: { display: "flex", alignItems: "center", gap: "1px", flex: 1 },
-  section: {
-    padding: "12px 14px", background: "none", border: "none", borderBottom: "2px solid transparent",
-    color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "13px", whiteSpace: "nowrap",
-    fontWeight: 500, transition: "color 0.15s", letterSpacing: "0.01em",
+  header: { display: "flex", alignItems: "center", padding: "0 16px", borderBottom: "1px solid var(--havn-border)", background: "var(--havn-bg-secondary)", minHeight: "48px", gap: "12px", minWidth: 0 },
+  crumb: { fontSize: "13px", color: "var(--havn-text-secondary)", whiteSpace: "nowrap", flexShrink: 0 },
+  crumbTab: { color: "var(--havn-text)", fontWeight: 500 },
+  omnibox: {
+    flex: "1 1 auto", maxWidth: 520, minWidth: 0, margin: "0 auto", display: "flex", alignItems: "center", gap: 8,
+    padding: "6px 10px", background: "var(--havn-bg)", border: "1px solid var(--havn-border)",
+    borderRadius: "var(--havn-radius)", color: "var(--havn-text-dim)", fontSize: "13px", fontFamily: "var(--havn-font)",
+    cursor: "text", textAlign: "left",
   },
-  sectionActive: {
-    padding: "12px 14px", background: "none", border: "none", borderBottom: "2px solid var(--havn-accent)",
-    color: "var(--havn-text)", cursor: "pointer", fontSize: "13px", whiteSpace: "nowrap",
-    fontWeight: 600, transition: "color 0.15s", letterSpacing: "0.01em",
+  omniboxText: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  omniboxKbd: {
+    fontFamily: "var(--havn-font-mono)", fontSize: "10.5px", color: "var(--havn-text-secondary)",
+    border: "1px solid var(--havn-border-light)", borderBottomWidth: 2, borderRadius: 4, padding: "0 5px",
+    background: "var(--havn-bg-tertiary)", flexShrink: 0,
   },
-
   // Header right side
   headerRight: { display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 },
   userInfo: { display: "flex", alignItems: "center", gap: "6px", marginLeft: "4px" },

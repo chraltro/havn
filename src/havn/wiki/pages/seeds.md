@@ -26,7 +26,7 @@ Seeds are CSV files that are loaded into DuckDB as reference tables. They provid
 
 ### Loading Seeds from the UI
 
-Use the **Run menu** dropdown in the Develop tab:
+Use the **Run menu** dropdown in the top bar:
 - Seeds are loaded as part of the pipeline when you run a stream that includes a `seed: [all]` step
 
 ## Directory Structure
