@@ -23,7 +23,7 @@ vi.mock("./api", () => ({
 }));
 vi.mock("./AuthContext", () => ({ useAuth: () => ({ currentUser: { username: "ingrid" } }) }));
 
-const { default: ShipPanel, layoutColumns } = await import("./ShipPanel");
+const { default: ShipPanel, layoutColumns, fmtMetric } = await import("./ShipPanel");
 
 const PR = {
   id: "pr-1", title: "Net revenue", description: "", base_ref: "main", head_ref: "feature/net",
@@ -45,6 +45,10 @@ function review(overrides = {}) {
     },
     build: {
       status: "success", branch_head: "abc1234", started_at: "t0", finished_at: null, duration_ms: 900,
+      metric_diff: [
+        { metric: "revenue", model: "gold.revenue", description: "", base: 41200000, pr: 40211200, delta: -988800, delta_pct: -2.4,
+          series: [{ bucket: "2026-08-01", base: 100, pr: 90 }, { bucket: "2026-09-01", base: 110, pr: 105 }], error: null },
+      ],
       data_diff: {
         "gold.revenue": { status: "modified", main_rows: 10, pr_rows: 10, added_rows: 3, removed_rows: 3,
                           schema_changes: [{ type: "added", column: "net_revenue", data_type: "DECIMAL" }] },
@@ -155,5 +159,21 @@ describe("ShipPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Merge without review" }));
     await waitFor(() => expect(updatePr).toHaveBeenCalledWith("pr-1", { require_approval: false }));
     expect(h.showConfirm.mock.calls[0][0]).toBe("Merge without review");
+  });
+
+  it("shows how affected metrics move", async () => {
+    renderShip();
+    expect(await screen.findByText("revenue")).toBeTruthy();
+    expect(screen.getByText("41.2M")).toBeTruthy();
+    expect(screen.getByText("40.2M")).toBeTruthy();
+    expect(screen.getByText("\u25BC -2.4%")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "revenue by month, base and branch" })).toBeTruthy();
+  });
+
+  it("formats metric values compactly", () => {
+    expect(fmtMetric(41200000)).toBe("41.2M");
+    expect(fmtMetric(12345)).toBe("12.3k");
+    expect(fmtMetric(0.5)).toBe("0.5");
+    expect(fmtMetric(null)).toBe("–");
   });
 });

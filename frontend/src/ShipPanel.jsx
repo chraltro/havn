@@ -303,6 +303,15 @@ function ChangeDetail({ review, busy, buildRunning, onOpenFile, onBuild }) {
 
       {impact.nodes.length > 0 && <ImpactGraph impact={impact} onOpenFile={onOpenFile} />}
 
+      {build?.status === "success" && build.metric_diff?.length > 0 && (
+        <>
+          <h2 style={s.h2}>Metrics</h2>
+          <div style={{ ...s.card, marginBottom: 20 }}>
+            {build.metric_diff.map((m) => <MetricRow key={m.metric} m={m} />)}
+          </div>
+        </>
+      )}
+
       <h2 style={s.h2}>Data changes</h2>
       <DataDiff build={build} buildRunning={buildRunning} onBuild={pr.status === "open" ? onBuild : null} />
 
@@ -376,6 +385,70 @@ function ImpactGraph({ impact, onOpenFile }) {
         <span><i style={{ ...s.key, borderColor: "var(--havn-accent)", borderStyle: "dashed" }} />rebuilt downstream</span>
         <span><i style={s.key} />upstream</span>
       </div>
+    </div>
+  );
+}
+
+export function fmtMetric(v) {
+  if (v == null) return "–";
+  const a = Math.abs(v);
+  if (a >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
+  if (a >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+  if (a >= 1e4) return `${(v / 1e3).toFixed(1)}k`;
+  return Number.isInteger(v) ? v.toLocaleString() : v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function MetricRow({ m }) {
+  const moved = m.delta != null && m.delta !== 0;
+  const arrow = !moved ? "" : m.delta > 0 ? "\u25B2 " : "\u25BC ";
+  const change = m.base == null
+    ? "new on this branch"
+    : m.delta_pct != null ? `${arrow}${m.delta_pct > 0 ? "+" : ""}${m.delta_pct}%` : moved ? `${arrow}${fmtMetric(m.delta)}` : "unchanged";
+  return (
+    <div style={s.metricRow}>
+      <div style={{ minWidth: 0 }}>
+        <div style={s.metricName}><span style={s.mono}>{m.metric}</span> <span style={s.dimInline}>· {m.model}</span></div>
+        <div style={s.metricVals}>
+          <span>{fmtMetric(m.base)}</span>
+          <span aria-hidden="true" style={s.dimInline}> → </span>
+          <b style={{ fontWeight: 500, color: "var(--havn-text)" }}>{fmtMetric(m.pr)}</b>
+          <span style={{ marginLeft: 8, color: moved ? "var(--havn-text)" : "var(--havn-text-dim)" }}>{change}</span>
+        </div>
+        {m.error && <div style={{ ...s.bad, fontSize: 12 }}>{m.error}</div>}
+      </div>
+      {m.series?.length > 1 && <Sparkline series={m.series} name={m.metric} />}
+    </div>
+  );
+}
+
+function Sparkline({ series, name }) {
+  const [hover, setHover] = useState(null);
+  const W = 180, H = 40, P = 3;
+  const vals = series.flatMap((b) => [b.base, b.pr]).filter((v) => v != null);
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const x = (i) => P + (i / (series.length - 1)) * (W - 2 * P);
+  const y = (v) => (hi === lo ? H / 2 : H - P - ((v - lo) / (hi - lo)) * (H - 2 * P));
+  const line = (key) => series.map((b, i) => (b[key] == null ? null : `${x(i)},${y(b[key])}`)).filter(Boolean).join(" ");
+  const cur = hover != null ? series[hover] : null;
+  return (
+    <div style={{ position: "relative", flexShrink: 0 }}>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img"
+           aria-label={`${name} by month, base and branch`} onMouseLeave={() => setHover(null)}>
+        <polyline points={line("base")} fill="none" stroke="var(--havn-text-secondary)" strokeWidth="1.5" strokeDasharray="3 3" />
+        <polyline points={line("pr")} fill="none" stroke="var(--havn-accent)" strokeWidth="2" />
+        {hover != null && <line x1={x(hover)} x2={x(hover)} y1={0} y2={H} stroke="var(--havn-border-light)" />}
+        {series.map((_, i) => (
+          <rect key={i} x={x(i) - (W / series.length) / 2} y={0} width={W / series.length} height={H}
+                fill="transparent" onMouseEnter={() => setHover(i)} />
+        ))}
+      </svg>
+      <div style={s.sparkLegend}><span>- - base</span><span style={{ color: "var(--havn-accent)" }}>— branch</span></div>
+      {cur && (
+        <div style={s.sparkTip} role="status">
+          <div style={{ color: "var(--havn-text-dim)" }}>{String(cur.bucket).slice(0, 7)}</div>
+          <div>base {fmtMetric(cur.base)} · branch {fmtMetric(cur.pr)}</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -485,6 +558,14 @@ const s = {
   desc: { fontSize: 13, color: "var(--havn-text-secondary)", margin: "10px 0 0", whiteSpace: "pre-wrap" },
   legend: { display: "flex", gap: 16, fontSize: 11.5, color: "var(--havn-text-secondary)", marginTop: 8 },
   key: { display: "inline-block", width: 14, height: 10, borderRadius: 3, border: "1.5px solid var(--havn-border-light)", marginRight: 6, verticalAlign: "-1px" },
+  metricRow: { display: "flex", alignItems: "center", gap: 16, padding: "12px 16px", borderBottom: "1px solid var(--havn-border)" },
+  metricName: { fontSize: 13 },
+  metricVals: { fontSize: 18, marginTop: 2, fontVariantNumeric: "tabular-nums", color: "var(--havn-text-secondary)" },
+  sparkLegend: { display: "flex", justifyContent: "flex-end", gap: 10, fontSize: 10.5, color: "var(--havn-text-secondary)" },
+  sparkTip: {
+    position: "absolute", bottom: "100%", right: 0, marginBottom: 4, whiteSpace: "nowrap", fontSize: 11.5, padding: "4px 8px",
+    background: "var(--havn-bg-tertiary)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", zIndex: 5,
+  },
   diffMeta: { fontSize: 12, color: "var(--havn-text-secondary)", padding: "10px 16px", borderBottom: "1px solid var(--havn-border)" },
   diffRow: { padding: "10px 16px", borderBottom: "1px solid var(--havn-border)" },
   diffTop: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },

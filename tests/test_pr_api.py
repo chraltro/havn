@@ -492,3 +492,63 @@ def test_review_build_current_then_stale(client, project):
 
 def test_review_unknown_pr_is_404(client):
     assert client.get("/api/prs/pr-nope/review").status_code == 404
+
+
+def test_build_records_metric_delta(tmp_path):
+    """A PR build compares each affected metric on main and on the branch."""
+    from havn.engine.pr import build_pr, create_pr, get_latest_build
+
+    p = tmp_path
+    _git(p, "init", "-b", "main")
+    _git(p, "config", "user.email", "t@havn.dev")
+    _git(p, "config", "user.name", "T")
+    _git(p, "config", "commit.gpgsign", "false")
+    (p / "project.yml").write_text("name: m\ndatabase:\n  path: warehouse.duckdb\n")
+    (p / ".gitignore").write_text("warehouse.duckdb\n.havn/pr-build/\n")
+    (p / "transform" / "gold").mkdir(parents=True)
+    model = p / "transform" / "gold" / "orders.sql"
+    model.write_text(
+        "@config materialized=table, schema=gold\n\n"
+        "SELECT * FROM landing.orders\n"
+    )
+    (p / "metrics").mkdir()
+    (p / "metrics" / "revenue.yml").write_text(
+        "metrics:\n"
+        "  - name: revenue\n    model: gold.orders\n    measure: SUM(amount)\n"
+        "    time_dimension: order_date\n"
+        "  - name: unrelated\n    model: gold.other\n    measure: COUNT(*)\n"
+    )
+    _git(p, "add", "-A")
+    _git(p, "commit", "-m", "init")
+    _git(p, "checkout", "-b", "feature/refunds")
+    model.write_text(
+        "@config materialized=table, schema=gold\n\n"
+        "SELECT order_id, order_date, amount - refund AS amount FROM landing.orders\n"
+    )
+    _git(p, "commit", "-am", "net of refunds")
+    _git(p, "checkout", "main")
+
+    conn = duckdb.connect(str(p / "warehouse.duckdb"))
+    conn.execute("CREATE SCHEMA landing")
+    conn.execute(
+        "CREATE TABLE landing.orders AS SELECT * FROM (VALUES "
+        "(1, DATE '2026-08-03', 100.0, 10.0), (2, DATE '2026-09-01', 50.0, 0.0), "
+        "(3, DATE '2026-09-20', 50.0, 15.0)) t(order_id, order_date, amount, refund)"
+    )
+    from havn.engine.database import ensure_meta_table
+    from havn.engine.transform import run_transform
+
+    ensure_meta_table(conn)
+    run_transform(conn, p / "transform", project_dir=p)
+    pr = create_pr(p, "Refunds", "", "main", "feature/refunds", "alice")
+    record = build_pr(p, pr.id, conn)
+    assert record["status"] == "success", record.get("error")
+
+    stored = get_latest_build(conn, pr.id)
+    conn.close()
+    diff = stored["metric_diff"]
+    assert [m["metric"] for m in diff] == ["revenue"]  # gold.other is not affected
+    rev = diff[0]
+    assert rev["base"] == 200.0 and rev["pr"] == 175.0
+    assert rev["delta"] == -25.0 and rev["delta_pct"] == -12.5
+    assert [(b["base"], b["pr"]) for b in rev["series"]] == [(100.0, 90.0), (100.0, 85.0)]

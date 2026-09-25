@@ -213,6 +213,12 @@ def ensure_pr_builds_table(conn: duckdb.DuckDBPyConnection) -> None:
             error           VARCHAR
         )
     """, is_lake))
+    # Added after the table shipped. A read-only connection can't migrate;
+    # _fetch_build_record then reads without the column.
+    try:
+        conn.execute("ALTER TABLE _havn.pr_builds ADD COLUMN IF NOT EXISTS metric_diff JSON")
+    except Exception:
+        pass
 
 
 def _save_build_record(conn: duckdb.DuckDBPyConnection, record: dict) -> None:
@@ -221,8 +227,8 @@ def _save_build_record(conn: duckdb.DuckDBPyConnection, record: dict) -> None:
     conn.execute(
         "INSERT INTO _havn.pr_builds "
         "(id, pr_id, branch_head, status, started_at, finished_at, duration_ms, "
-        " data_diff, lineage_impact, contract_results, error) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " data_diff, lineage_impact, contract_results, error, metric_diff) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             record["id"],
             record["pr_id"],
@@ -235,6 +241,7 @@ def _save_build_record(conn: duckdb.DuckDBPyConnection, record: dict) -> None:
             json.dumps(record["lineage_impact"]) if record.get("lineage_impact") is not None else None,
             json.dumps(record["contract_results"]) if record.get("contract_results") is not None else None,
             record.get("error"),
+            json.dumps(record["metric_diff"]) if record.get("metric_diff") is not None else None,
         ],
     )
 
@@ -243,12 +250,16 @@ def _fetch_build_record(
     conn: duckdb.DuckDBPyConnection, pr_id: str
 ) -> dict | None:
     ensure_pr_builds_table(conn)
-    row = conn.execute(
-        "SELECT id, pr_id, branch_head, status, started_at, finished_at, "
-        "duration_ms, data_diff, lineage_impact, contract_results, error "
-        "FROM _havn.pr_builds WHERE pr_id = ? ORDER BY started_at DESC LIMIT 1",
-        [pr_id],
-    ).fetchone()
+    cols = (
+        "id, pr_id, branch_head, status, started_at, finished_at, "
+        "duration_ms, data_diff, lineage_impact, contract_results, error"
+    )
+    query = "FROM _havn.pr_builds WHERE pr_id = ? ORDER BY started_at DESC LIMIT 1"
+    try:
+        row = conn.execute(f"SELECT {cols}, metric_diff {query}", [pr_id]).fetchone()
+    except duckdb.Error:
+        # A warehouse from before metric_diff, opened read-only.
+        row = conn.execute(f"SELECT {cols}, NULL {query}", [pr_id]).fetchone()
     if row is None:
         return None
     return {
@@ -263,6 +274,7 @@ def _fetch_build_record(
         "lineage_impact": json.loads(row[8]) if isinstance(row[8], str) else row[8],
         "contract_results": json.loads(row[9]) if isinstance(row[9], str) else row[9],
         "error": row[10],
+        "metric_diff": json.loads(row[11]) if isinstance(row[11], str) else row[11],
     }
 
 
@@ -976,6 +988,9 @@ def _build_pr_locked(
         record["lineage_impact"] = _compute_lineage_impact(
             changed_files, union_dag, project_dir
         )
+        # Semantic-layer metrics that read an affected model, on both sides.
+        touched = set(record["lineage_impact"]["changed"]) | set(record["lineage_impact"]["impacted"])
+        record["metric_diff"] = _metric_diff(conn, worktree_path, "pr_db", touched)
 
         record["status"] = "success"
     except Exception as e:
@@ -999,6 +1014,95 @@ def _build_pr_locked(
     record["finished_at"] = _now_iso()
     _save_build_record(conn, record)
     return record
+
+
+def _number(v: Any) -> float | None:
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+METRIC_SERIES_BUCKETS = 12
+
+
+def _metric_diff(
+    conn: duckdb.DuckDBPyConnection,
+    branch_root: Path,
+    attached_alias: str,
+    models: set[str],
+) -> list[dict]:
+    """Each metric over an affected model, on the base warehouse and the PR's.
+
+    Metric definitions come from the PR branch (``branch_root/metrics``), and
+    the same definition is compiled against both sides: as written for the
+    base warehouse, and with its model qualified by ``attached_alias`` for the
+    PR build. Returns ``[{metric, model, description, base, pr, delta,
+    delta_pct, series, error}]``; ``series`` is the last 12 months of both
+    sides when the metric has a time dimension.
+    """
+    from dataclasses import replace
+
+    from havn.engine.semantic import compile_metric, load_metrics
+
+    try:
+        metrics, _errors = load_metrics(branch_root)
+    except Exception as e:
+        logger.debug("metric diff skipped: %s", e)
+        return []
+
+    def run(sql: str) -> list[tuple]:
+        return conn.execute(sql).fetchall()
+
+    out: list[dict] = []
+    for metric in sorted(metrics.values(), key=lambda m: m.name):
+        if metric.model not in models:
+            continue
+        pr_metric = replace(metric, model=f"{attached_alias}.{metric.model}")
+        entry: dict[str, Any] = {
+            "metric": metric.name,
+            "model": metric.model,
+            "description": metric.description,
+            "base": None,
+            "pr": None,
+            "delta": None,
+            "delta_pct": None,
+            "series": None,
+            "error": None,
+        }
+        errors = []
+        try:
+            entry["base"] = _number(run(compile_metric(metric))[0][0])
+        except Exception as e:
+            # A model new in this PR has no base table: not an error worth showing.
+            errors.append(f"base: {e}")
+        try:
+            entry["pr"] = _number(run(compile_metric(pr_metric))[0][0])
+        except Exception as e:
+            errors.append(f"branch: {e}")
+            entry["error"] = str(e)
+        if entry["base"] is not None and entry["pr"] is not None:
+            entry["delta"] = entry["pr"] - entry["base"]
+            if entry["base"] != 0:
+                entry["delta_pct"] = round(entry["delta"] / abs(entry["base"]) * 100, 2)
+        if metric.time_dimension:
+            try:
+                base_rows = {} if entry["base"] is None else {
+                    str(r[0]): _number(r[1]) for r in run(compile_metric(metric, grain="month"))
+                }
+                pr_rows = {str(r[0]): _number(r[1]) for r in run(compile_metric(pr_metric, grain="month"))}
+                buckets = sorted(set(base_rows) | set(pr_rows))[-METRIC_SERIES_BUCKETS:]
+                entry["series"] = [
+                    {"bucket": b, "base": base_rows.get(b), "pr": pr_rows.get(b)} for b in buckets
+                ]
+            except Exception as e:
+                logger.debug("metric series for %s skipped: %s", metric.name, e)
+        if errors:
+            logger.debug("metric diff %s: %s", metric.name, "; ".join(errors))
+        out.append(entry)
+    return out
 
 
 def get_latest_build(conn: duckdb.DuckDBPyConnection, pr_id: str) -> dict | None:
