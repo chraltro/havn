@@ -64,6 +64,8 @@ def git_project(tmp_path):
     )
     (tmp_path / ".havn" / "prs").mkdir(parents=True)
     (tmp_path / ".havn" / "prs" / ".gitkeep").write_text("")
+    # What `havn init` writes: the warehouse is never committed.
+    (tmp_path / ".gitignore").write_text("warehouse.duckdb\nwarehouse.duckdb.wal\n.havn/pr-build/\n")
 
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-m", "initial")
@@ -304,11 +306,12 @@ def test_merge_refuses_closed_pr(git_project, conn):
 def test_merge_happy_path(git_project, conn):
     pr = create_pr(git_project, "T", "", "main", "feature/enrich", "alice")
     approve_pr(git_project, pr.id, "bob")
+    # Creating and approving the PR wrote .havn/prs/<id>.json; that must not
+    # count as a dirty tree, or no PR made in the UI could ever merge.
     result = merge_pr(git_project, pr.id, "alice", conn)
-    if not result["success"]:
-        pytest.skip(
-            f"git merge-tree unsupported on this git version: {result.get('error')}"
-        )
+    if not result["success"] and "merge-tree" in (result.get("error") or ""):
+        pytest.skip(f"git merge-tree unsupported on this git version: {result['error']}")
+    assert result["success"], result.get("error")
     assert result["merge_commit"]
     # Current branch should be main
     head = _git(git_project, "rev-parse", "--abbrev-ref", "HEAD")
@@ -419,3 +422,14 @@ def test_pr_state_status(git_project):
     create_pr(git_project, "T", "", "main", "feature/enrich", "a")
     status_after = pr_state_status(git_project)
     assert status_after["dirty"] is True
+
+
+def test_is_dirty_ignores_pr_state(git_project):
+    from havn.engine.git import is_dirty
+    from havn.engine.pr import PR_STATE_PREFIXES
+
+    (git_project / ".havn" / "prs" / "pr-123.json").write_text("{}")
+    assert is_dirty(git_project) is True
+    assert is_dirty(git_project, ignore=PR_STATE_PREFIXES) is False
+    (git_project / "transform" / "bronze" / "customers.sql").write_text("SELECT 2\n")
+    assert is_dirty(git_project, ignore=PR_STATE_PREFIXES) is True

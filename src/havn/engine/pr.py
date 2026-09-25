@@ -991,6 +991,11 @@ def get_latest_build(conn: duckdb.DuckDBPyConnection, pr_id: str) -> dict | None
 # ---------------------------------------------------------------------------
 
 
+# Paths whose uncommitted changes do not block a merge: the PR records
+# themselves, which the review flow writes as it goes.
+PR_STATE_PREFIXES = (".havn/prs/",)
+
+
 def can_merge(project_dir: Path, pr: PullRequest) -> dict:
     """Non-destructive virtual merge check via ``git merge-tree``.
 
@@ -1075,7 +1080,9 @@ def merge_pr(
             "success": False,
             "error": f"Reviewers have requested changes: {', '.join(pr.change_requesters)}",
         }
-    if is_dirty(project_dir):
+    # PR metadata under .havn/prs/ is rewritten by every create, approve and
+    # comment, so counting it would refuse every merge made from the UI.
+    if is_dirty(project_dir, ignore=PR_STATE_PREFIXES):
         return {
             "success": False,
             "error": "Working tree has uncommitted changes — commit or stash before merging",
