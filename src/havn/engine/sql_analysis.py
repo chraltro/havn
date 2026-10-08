@@ -8,6 +8,7 @@ complex expressions.
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from dataclasses import dataclass
@@ -683,6 +684,27 @@ def extract_column_lineage(
     return lineage
 
 
+@functools.lru_cache(maxsize=1)
+def _to_node_memo_kwargs() -> frozenset[str]:
+    """Which of ``to_node``'s memo parameters this sqlglot actually accepts.
+
+    ``_cache`` and ``_scope_meta`` are private, optional memoization hooks:
+    sqlglot carried them for a few releases and dropped them again in 29.
+    They only make a repeated walk cheaper -- lineage is identical without
+    them -- so they are passed when present and skipped when not, instead of
+    pinning the dependency to the window where they happened to exist.
+    """
+    import inspect
+
+    from sqlglot.lineage import to_node
+
+    try:
+        accepted = set(inspect.signature(to_node).parameters)
+    except (TypeError, ValueError):  # pragma: no cover - builtins only
+        return frozenset()
+    return frozenset({"_cache", "_scope_meta"} & accepted)
+
+
 def _trace_selects(scope: Any, selects: list[exp.Expression], qualified: exp.Expression):
     """Run sqlglot's lineage walk over every projection of the outer scope."""
     from sqlglot.lineage import to_node
@@ -690,8 +712,15 @@ def _trace_selects(scope: Any, selects: list[exp.Expression], qualified: exp.Exp
     alias_map = _table_alias_map(qualified)
     cache: dict[tuple, Any] = {}
     scope_meta: dict[int, Any] = {}
+    supported = _to_node_memo_kwargs()
+    memo_kwargs: dict[str, Any] = {}
+    if "_cache" in supported:
+        memo_kwargs["_cache"] = cache
+    if "_scope_meta" in supported:
+        memo_kwargs["_scope_meta"] = scope_meta
 
     lineage: dict[str, list[dict[str, str]]] = {}
+    failures: list[Exception] = []
     for index, select in enumerate(selects):
         name = (select.alias_or_name or "").lower() or f"_col_{index}"
         try:
@@ -706,15 +735,24 @@ def _trace_selects(scope: Any, selects: list[exp.Expression], qualified: exp.Exp
                 # deep-copies the enclosing SELECT per column to build one.
                 # Nothing here reads labels.
                 trim_selects=False,
-                _cache=cache,
-                _scope_meta=scope_meta,
+                **memo_kwargs,
             )
         except Exception as e:
             logger.debug("Lineage failed for column %s: %s", name, e)
+            failures.append(e)
             sources: list[dict[str, str]] = []
         else:
             sources = _leaf_sources(node, alias_map)
         lineage[_disambiguate(name, lineage)] = sources
+    # One column failing is usually an expression sqlglot cannot trace.
+    # Every column failing is the tracer itself being broken -- a sqlglot
+    # release changing an API this relies on did exactly that, and at debug
+    # level it showed only as empty lineage everywhere. Say so once.
+    if failures and len(failures) == len(selects):
+        logger.warning(
+            "Column lineage failed for all %d columns (sqlglot %s): %s",
+            len(selects), sqlglot.__version__, failures[0],
+        )
     return lineage
 
 

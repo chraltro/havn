@@ -212,6 +212,24 @@ def _evaluate_assertion(
             detail = f"{dup_count:,} duplicate(s) — {distinct:,} distinct out of {total:,} rows"
         return AssertionResult(expression=expr, passed=passed, detail=detail)
 
+    # unique(a, b) / no_nulls(a, b) -- a composite uniqueness check is spelled
+    # `@grain a, b`, which has its own evaluator. Without this branch the
+    # expression falls through to the generic-SQL path and surfaces as a
+    # DuckDB parser error, which says nothing about what to write instead.
+    m = re.match(r"(unique|no_nulls)\(\s*(\w+(?:\s*,\s*\w+)+)\s*\)\s*$", expr)
+    if m:
+        helper, cols = m.group(1), ", ".join(c.strip() for c in m.group(2).split(","))
+        if helper == "unique":
+            hint = f"declare the grain instead: `@grain {cols}`"
+        else:
+            singles = " / ".join(f"no_nulls({c.strip()})" for c in cols.split(","))
+            hint = f"write one assertion per column: {singles}"
+        return AssertionResult(
+            expression=expr,
+            passed=False,
+            detail=f"{helper}() takes a single column; {hint}",
+        )
+
     # accepted_values(column, ['val1', 'val2'])
     m = re.match(r"accepted_values\((\w+),\s*\[(.+)\]\)\s*$", expr)
     if m:
@@ -329,6 +347,11 @@ def failing_rows_sql(model: SQLModel, expr: str) -> str | None:
             f'SELECT * FROM {table} WHERE "{col}" IS NOT NULL '
             f'AND "{col}"::VARCHAR NOT IN ({placeholders})'
         )
+
+    # Mirrors the evaluator's rejection of the multi-column spelling: the
+    # assertion never ran, so there are no rows to show.
+    if re.match(r"(unique|no_nulls)\(\s*\w+(?:\s*,\s*\w+)+\s*\)\s*$", expr):
+        return None
 
     m = re.match(r"grain\((.+)\)\s*$", expr)
     if m:
@@ -493,3 +516,47 @@ def _save_source_freshness(
             )
         except Exception:
             pass
+
+
+def declared_checks(model: SQLModel) -> set[str]:
+    """The assertion expressions a model declares right now, as they are stored."""
+    declared = {e for e, _ in model.assertion_specs} | set(model.assertions)
+    if model.grain:
+        declared.add(f"grain({', '.join(model.grain)})")
+    return declared
+
+
+def current_assertion_results(
+    conn: duckdb.DuckDBPyConnection,
+    models: list[SQLModel],
+) -> list[tuple]:
+    """Latest result of every check the models still declare.
+
+    _havn.assertion_results is an append-only history: every run adds a row
+    per check, and a check that was edited or deleted keeps its old rows. A
+    pass rate over that history counts the same check many times, and keeps
+    counting failures of checks that no longer exist. This is the one place
+    "the current state of the checks" is defined, so every page that shows
+    it agrees.
+
+    Returns ``(model_path, expression, passed, detail, severity, checked_at)``
+    rows, severity defaulting to ``"error"``.
+    """
+    by_name = {m.full_name: m for m in models}
+    rows = conn.execute(
+        """
+        SELECT model_path, expression, passed, detail, COALESCE(severity, 'error'), checked_at
+        FROM _havn.assertion_results
+        QUALIFY row_number() OVER (
+            PARTITION BY model_path, expression ORDER BY checked_at DESC
+        ) = 1
+        ORDER BY model_path, expression
+        """
+    ).fetchall()
+    current = []
+    for row in rows:
+        model = by_name.get(row[0])
+        if model is None or row[1] not in declared_checks(model):
+            continue  # model, or this check on it, has since been removed or edited
+        current.append(row)
+    return current

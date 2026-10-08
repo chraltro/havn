@@ -653,3 +653,34 @@ class TestExtractColumnReferences:
 
     def test_unparseable_sql_returns_nothing(self):
         assert extract_column_references("SELECT FROM ((( WHERE") == []
+
+
+def test_lineage_warns_once_when_every_column_fails(monkeypatch, caplog):
+    """A broken tracer must not look like a model with no lineage.
+
+    A sqlglot release removed arguments the tracer passed; every column then
+    failed, each failure was logged at debug, and lineage came back empty
+    everywhere with nothing at a visible level.
+    """
+    import logging
+
+    import sqlglot.lineage
+
+    from havn.engine.sql_analysis import clear_lineage_cache, extract_column_lineage
+
+    def broken(*args, **kwargs):
+        raise TypeError("to_node() got an unexpected keyword argument")
+
+    monkeypatch.setattr(sqlglot.lineage, "to_node", broken)
+    clear_lineage_cache()
+    with caplog.at_level(logging.WARNING, logger="havn.sql_analysis"):
+        lineage = extract_column_lineage(
+            "SELECT c.customer_id, c.name FROM bronze.customers c",
+            depends_on=["bronze.customers"],
+        )
+    clear_lineage_cache()
+
+    assert lineage == {"customer_id": [], "name": []}
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "all 2 columns" in warnings[0].getMessage()

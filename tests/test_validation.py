@@ -536,3 +536,62 @@ class TestConfigKeyValidation:
         models = self._discover(tmp_path, "@config materialized=ephemeral, schema=gold")
         errors = validate_models(None, models)
         assert not [e for e in errors if "Unknown materialization" in e.message]
+
+class TestAmbiguousColumnScope:
+    """An unqualified column is ambiguous only where it is actually ambiguous."""
+
+    CATALOG = {
+        "silver.a": {"person_key", "amount"},
+        "silver.b": {"person_key", "note"},
+    }
+
+    def _validate(self, tmp_path, sql):
+        from havn.engine.transform.analysis import validate_models
+        from havn.engine.transform.models import SQLModel
+
+        model = SQLModel(
+            path=tmp_path / "target.sql",
+            name="target",
+            schema="gold",
+            full_name="gold.target",
+            sql=sql,
+            query=sql,
+            materialized="table",
+            depends_on=["silver.a", "silver.b"],
+        )
+        return validate_models(
+            None,
+            [model],
+            known_tables=set(self.CATALOG),
+            source_columns=self.CATALOG,
+        )
+
+    def test_cte_over_one_table_is_not_ambiguous(self, tmp_path):
+        """person_key is in both upstreams but each CTE reads only one.
+
+        The checker used to compare every unqualified column against the
+        model's whole dependency list, so a column that resolves cleanly
+        inside its own CTE was reported ambiguous -- once per mention.
+        """
+        sql = (
+            "WITH left_side AS (SELECT person_key, amount FROM silver.a), "
+            "right_side AS (SELECT person_key, note FROM silver.b) "
+            "SELECT l.person_key, l.amount, r.note "
+            "FROM left_side l JOIN right_side r ON l.person_key = r.person_key"
+        )
+        ambiguous = [e for e in self._validate(tmp_path, sql) if "Ambiguous" in e.message]
+        assert ambiguous == []
+
+    def test_genuinely_ambiguous_column_is_reported_once(self, tmp_path):
+        """A join of two tables sharing the column still warns -- exactly once."""
+        sql = (
+            "SELECT person_key, amount, note "
+            "FROM silver.a JOIN silver.b ON silver.a.amount = silver.b.note "
+            "ORDER BY person_key"
+        )
+        ambiguous = [
+            e for e in self._validate(tmp_path, sql)
+            if "Ambiguous column 'person_key'" in e.message
+        ]
+        assert len(ambiguous) == 1
+        assert "silver.a, silver.b" in ambiguous[0].message

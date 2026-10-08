@@ -355,6 +355,60 @@ def _validate_microbatch_config(models: list[SQLModel]) -> list[ValidationError]
     return errors
 
 
+def _unqualified_candidates(
+    col: exp.Column,
+    col_name: str,
+    parsed: exp.Expression,
+    depends_on: list[str],
+    column_catalog: dict[str, set[str]] | dict[str, list[str]],
+) -> set[str]:
+    """Upstream tables an unqualified ``col`` could have come from.
+
+    Scoped to the SELECT the column is written in: the tables that SELECT
+    reads directly. Only when the scope cannot be determined does this fall
+    back to every dependency of the model, which is the broad check that
+    used to run unconditionally and reported a CTE's own columns as
+    ambiguous with unrelated siblings.
+    """
+    scope_tables = _enclosing_select_tables(col, parsed)
+    candidates = scope_tables if scope_tables is not None else set(depends_on)
+    return {
+        dep for dep in candidates
+        if dep in column_catalog and col_name in column_catalog[dep]
+    }
+
+
+def _enclosing_select_tables(
+    col: exp.Column, parsed: exp.Expression
+) -> set[str] | None:
+    """Real tables read directly by the SELECT that ``col`` sits in.
+
+    Returns None when the column has no enclosing SELECT, or when that
+    SELECT reads something this cannot resolve to a concrete table (a
+    subquery or a CTE), since the columns then depend on that inner
+    projection rather than on a table in the catalog.
+    """
+    from sqlglot import exp
+
+    select = col.find_ancestor(exp.Select)
+    if select is None:
+        return None
+
+    tables: set[str] = set()
+    for source in list(select.find_all(exp.Table)):
+        # Only sources of THIS select; a correlated subquery has its own.
+        if source.find_ancestor(exp.Select) is not select:
+            continue
+        db_name, table_name = source.db or "", source.name or ""
+        # No schema qualifier means a CTE reference or a bare table name.
+        # Neither resolves against the catalog, so the scope is unknown and
+        # the caller falls back to the broad check rather than guessing.
+        if not db_name or not table_name:
+            return None
+        tables.add(f"{db_name}.{table_name}".lower())
+    return tables or None
+
+
 def validate_models(
     conn: duckdb.DuckDBPyConnection | None,
     models: list[SQLModel],
@@ -484,6 +538,8 @@ def validate_models(
                     ))
 
         # 3. Check column references
+        # Column names already reported ambiguous for this model.
+        ambiguous_reported: set[str] = set()
         # Build alias map for this model (excluding CTE references)
         alias_map: dict[str, str] = {}
         # Aliases that point to CTEs: e.g. `FROM flows f` -> {"f": "flows"}.
@@ -538,12 +594,19 @@ def validate_models(
                             message=f"Column '{col_name}' not found in table '{resolved_table}'",
                         ))
             elif col_name and not table_ref:
-                # Unqualified column — check for ambiguity across upstream sources.
-                found_in: list[str] = []
-                for dep in model.depends_on:
-                    if dep in column_catalog and col_name in column_catalog[dep]:
-                        found_in.append(dep)
-                if len(found_in) > 1:
+                # Unqualified column — ambiguous only against the tables
+                # readable where it is written, not against every upstream the
+                # model happens to touch. A CTE that selects from one table
+                # resolves its own columns unambiguously even when a sibling
+                # CTE reads a table sharing the column name.
+                found_in = sorted(_unqualified_candidates(
+                    col, col_name, parsed, model.depends_on, column_catalog
+                ))
+                # One warning per column, not one per mention: the same name is
+                # usually written several times in a model and repeating an
+                # identical message buries the distinct ones.
+                if len(found_in) > 1 and col_name not in ambiguous_reported:
+                    ambiguous_reported.add(col_name)
                     errors.append(ValidationError(
                         model=model.full_name,
                         severity="warning",
