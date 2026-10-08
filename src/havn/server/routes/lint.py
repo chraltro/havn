@@ -143,7 +143,7 @@ def save_lint_config(request: Request, req: LintConfigRequest) -> dict:
     """Save the .sqlfluff config file."""
     _require_permission(request, "write")
     sqlfluff_path = _get_project_dir() / ".sqlfluff"
-    sqlfluff_path.write_text(req.content)
+    sqlfluff_path.write_text(req.content, encoding="utf-8")
     return {"status": "saved"}
 
 

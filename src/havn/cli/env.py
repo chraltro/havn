@@ -25,7 +25,7 @@ def _read_env_file(project_dir: Path) -> str | None:
 def _write_env_file(project_dir: Path, env_name: str) -> None:
     """Write the active environment to .havn-env file."""
     env_path = project_dir / ENV_FILE
-    env_path.write_text(env_name + "\n")
+    env_path.write_text(env_name + "\n", encoding="utf-8")
 
 
 def _delete_env_file(project_dir: Path) -> None:

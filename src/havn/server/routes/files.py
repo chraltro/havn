@@ -132,7 +132,7 @@ def _scan_dir(base: Path, rel: Path | None = None) -> list[FileInfo]:
         # Skip DuckDB temp/WAL dirs and binary artifacts
         if ".duckdb" in entry.name:
             continue
-        rel_path = str(entry.relative_to(base))
+        rel_path = entry.relative_to(base).as_posix()
         package = _package_of(rel_path)
         if entry.is_dir():
             items.append(

@@ -90,7 +90,7 @@ def promote_sql_to_model(
             f"Use overwrite=True to replace it."
         )
 
-    model_path.write_text(content)
+    model_path.write_text(content, encoding="utf-8")
 
     return model_path
 

@@ -421,7 +421,7 @@ def update_job(name: str, req: UpdateJobRequest, request: Request):
         updates.pop("schedules", None)
         updates.pop("cron", None)
     data.update(updates)
-    job.file_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+    job.file_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False), encoding="utf-8")
     return {"status": "updated", "file": job.file_path.name}
 
 

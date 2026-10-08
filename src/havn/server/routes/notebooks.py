@@ -124,7 +124,7 @@ def list_notebooks(request: Request) -> list[dict]:
     project_dir = _get_project_dir()
     notebooks = []
     for f in sorted(project_dir.rglob("*.dpnb")):
-        rel = str(f.relative_to(project_dir)).replace("\\", "/")
+        rel = f.relative_to(project_dir).as_posix()
         try:
             data = json.loads(f.read_text())
             notebooks.append(
@@ -256,7 +256,7 @@ def promote_to_model_endpoint(request: Request, req: PromoteToModelRequest) -> d
             description=req.description,
             overwrite=req.overwrite,
         )
-        rel_path = str(model_path.relative_to(project_dir))
+        rel_path = model_path.relative_to(project_dir).as_posix()
 
         validation_warnings = []
         try:
@@ -301,7 +301,7 @@ def model_to_notebook_endpoint(
         save_notebook(nb_path, nb)
         return {
             "status": "created",
-            "path": str(nb_path.relative_to(project_dir)),
+            "path": nb_path.relative_to(project_dir).as_posix(),
             "notebook": nb,
         }
     except ValueError as e:
@@ -362,7 +362,7 @@ def debug_notebook_endpoint(
         save_notebook(nb_path, nb)
         return {
             "status": "created",
-            "path": str(nb_path.relative_to(project_dir)),
+            "path": nb_path.relative_to(project_dir).as_posix(),
             "notebook": nb,
         }
     except ValueError as e:

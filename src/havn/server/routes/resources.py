@@ -112,4 +112,4 @@ def _persist_allocation(body: BudgetUpdate) -> None:
         "max_concurrent": body.max_concurrent,
     }
     raw["resources"] = resources
-    path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")

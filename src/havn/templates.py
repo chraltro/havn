@@ -45,7 +45,7 @@ extended_capitalisation_policy = lower
 # ---------------------------------------------------------------------------
 
 PROJECT_YML_TEMPLATE = """\
-name: {name}
+name: "{name}"
 description: "Earthquake analytics pipeline — a havn sample project"
 sample: true
 
@@ -81,7 +81,7 @@ lint:
 """
 
 PROJECT_YML_EMPTY_TEMPLATE = """\
-name: {name}
+name: "{name}"
 
 database:
   path: warehouse.duckdb
@@ -106,7 +106,7 @@ lint:
 """
 
 PROJECT_YML_DUCKLAKE_TEMPLATE = """\
-name: {name}
+name: "{name}"
 description: "A havn sample project (DuckLake backend)"
 sample: {sample}
 

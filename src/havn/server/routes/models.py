@@ -102,7 +102,7 @@ def list_models(
             "full_name": m.full_name,
             "materialized": m.materialized,
             "depends_on": m.depends_on,
-            "path": str(m.path.relative_to(project_dir)),
+            "path": m.path.relative_to(project_dir).as_posix(),
             "content_hash": m.content_hash,
             "tags": list(getattr(m, "tags", []) or []),
         }
@@ -462,7 +462,7 @@ def get_model_notebook_view(
             raise HTTPException(404, f"Model '{model_name}' not found")
 
     sql_source = target.path.read_text()
-    rel_path = str(target.path.relative_to(_get_project_dir()))
+    rel_path = target.path.relative_to(_get_project_dir()).as_posix()
 
     sample_data = None
     if conn:
@@ -525,7 +525,9 @@ def get_model_workbench(
 
     def rel(m) -> str | None:
         try:
-            return str(m.path.relative_to(project_dir))
+            # as_posix so this compares against `wanted` on Windows too,
+            # where str() of a relative path uses backslashes.
+            return m.path.relative_to(project_dir).as_posix()
         except ValueError:
             return None
 
@@ -722,11 +724,11 @@ def create_model_endpoint(request: Request, req: CreateModelRequest) -> dict:
     if not has_config:
         sql_content = f"@config materialized={req.materialized}, schema={req.schema_name}\n\n{sql_content}"
 
-    model_path.write_text(sql_content)
+    model_path.write_text(sql_content, encoding="utf-8")
 
     return {
         "status": "created",
-        "path": str(model_path.relative_to(project_dir)),
+        "path": model_path.relative_to(project_dir).as_posix(),
         "full_name": f"{req.schema_name}.{req.name}",
     }
 

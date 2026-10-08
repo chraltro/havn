@@ -566,7 +566,7 @@ class MCPServer:
                     # a model that came from havn_packages/, which an agent
                     # needs before it suggests editing the file.
                     "package": getattr(m, "package", None),
-                    "path": str(m.path.relative_to(self.project_dir)),
+                    "path": m.path.relative_to(self.project_dir).as_posix(),
                 }
                 for m in models
             ]
@@ -584,7 +584,7 @@ class MCPServer:
         m = self._find_model(str(args.get("name") or ""))
         return {
             "name": m.full_name,
-            "path": str(m.path.relative_to(self.project_dir)),
+            "path": m.path.relative_to(self.project_dir).as_posix(),
             "materialized": m.materialized,
             "depends_on": m.depends_on,
             "description": m.description,

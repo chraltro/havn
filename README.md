@@ -76,8 +76,8 @@ havn serve          # http://localhost:3000
 havn serve --auth   # with role-based access control
 ```
 
-### 20+ Data Connectors
-Connect to Postgres, MySQL, SQLite, Stripe, HubSpot, Google Sheets, S3, REST APIs, and more - from the CLI or the web UI.
+### 14 Data Connectors
+Connect to Postgres, MySQL, BigQuery, Snowflake, Redshift, Databricks, Stripe, HubSpot, Shopify, Google Sheets, CSV, S3/GCS, REST APIs, and webhooks - from the CLI or the web UI.
 
 ```bash
 havn connect postgres --host localhost --database mydb --user admin

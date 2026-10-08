@@ -115,7 +115,7 @@ def serve(
         "port": port,
         "pid": _os.getpid(),
         "auth": auth,
-    }))
+    }), encoding="utf-8")
     try:
         uvicorn.run(server_app.app, host=host, port=port)
     finally:

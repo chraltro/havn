@@ -172,7 +172,7 @@ def _rewrite_project_yml(project_dir: Path, dest_config) -> None:
     else:
         raw["database"].pop("path", None)
     tmp = yml_path.with_suffix(".yml.tmp")
-    tmp.write_text(yaml.safe_dump(raw, sort_keys=False))
+    tmp.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     tmp.replace(yml_path)  # atomic on POSIX; os.replace semantics on Windows
 
 

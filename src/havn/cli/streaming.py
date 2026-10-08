@@ -183,7 +183,7 @@ def _start_background(
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
-    pidfile.write_text(str(proc.pid))
+    pidfile.write_text(str(proc.pid), encoding="utf-8")
     console.print(
         f"[green]Poller for '{connector}' started[/green] "
         f"(pid {proc.pid}, pidfile: {pidfile})"

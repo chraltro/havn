@@ -74,7 +74,7 @@ def promote(
             overwrite=overwrite,
         )
 
-        rel_path = model_path.relative_to(project_dir)
+        rel_path = model_path.relative_to(project_dir).as_posix()
         console.print(f"[green]Model created:[/green] {rel_path}")
 
         # Validate the new model fits into the DAG
@@ -167,7 +167,7 @@ def debug(
         nb_path = project_dir / "notebooks" / f"debug_{safe_name}.dpnb"
         save_notebook(nb_path, nb)
 
-        rel_path = nb_path.relative_to(project_dir)
+        rel_path = nb_path.relative_to(project_dir).as_posix()
         console.print(f"[green]Debug notebook created:[/green] {rel_path}")
         if error_message:
             console.print(f"  [dim]Error: {error_message[:120]}{'...' if len(error_message) > 120 else ''}[/dim]")

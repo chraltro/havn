@@ -140,7 +140,7 @@ def create_version(
             tables_info[full_name] = {
                 "row_count": row_count,
                 "columns": [{"name": c[0], "type": c[1]} for c in cols],
-                "parquet_file": str(parquet_path.relative_to(project_dir)),
+                "parquet_file": parquet_path.relative_to(project_dir).as_posix(),
             }
         except Exception as e:
             logger.warning("Failed to snapshot %s: %s", full_name, e)
@@ -154,7 +154,7 @@ def create_version(
         "trigger": trigger,
         "tables": tables_info,
     }
-    (snap_dir / "_manifest.json").write_text(json.dumps(manifest, indent=2))
+    (snap_dir / "_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     # Record in metadata. ``INSERT OR REPLACE`` requires a PK, which DuckLake
     # doesn't support; delete-then-insert works on both backends.

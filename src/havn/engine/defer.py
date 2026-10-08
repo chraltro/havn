@@ -325,10 +325,14 @@ def defer_attachment(
                 detach_defer_target(conn, alias=alias)
 
 
+# Windows words a contended file lock differently from POSIX DuckDB builds.
+_WINDOWS_LOCK_TEXT = "being used by another process"
+
+
 def _classify_attach_failure(error: Exception, path: Path) -> DeferError:
     """Turn DuckDB's ATTACH failure into the defer error that explains it."""
     text = str(error)
-    if "Could not set lock on file" in text:
+    if "Could not set lock on file" in text or _WINDOWS_LOCK_TEXT in text:
         holder = _lock_holder(text)
         who = f" It is held by {holder}." if holder else ""
         return DeferLockedError(
@@ -350,12 +354,18 @@ def _classify_attach_failure(error: Exception, path: Path) -> DeferError:
 def _lock_holder(text: str) -> str | None:
     """Pull the holder DuckDB named out of its lock message.
 
-    The message reads: ``Conflicting lock is held in /usr/bin/python3.11
-    (PID 10344)``.
+    On POSIX the message reads ``Conflicting lock is held in
+    /usr/bin/python3.11 (PID 10344)``. Windows words it differently, as
+    ``File is already open in <exe> (PID 6620)``, and puts a newline before
+    the path -- so both spellings are matched, tolerant of the line break.
     """
-    match = re.search(r"Conflicting lock is held in (.+?\(PID \d+\))", text)
-    if match:
-        return match.group(1).strip()
+    for pattern in (
+        r"Conflicting lock is held in\s+(.+?\(PID \d+\))",
+        r"File is already open in\s+(.+?\(PID \d+\))",
+    ):
+        match = re.search(pattern, text, re.DOTALL)
+        if match:
+            return " ".join(match.group(1).split())
     return None
 
 

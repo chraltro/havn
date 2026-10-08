@@ -130,6 +130,15 @@ def _init_from_remote(name: str, directory: Optional[Path], url: str) -> None:
         console.print(f"[dim]See {readme} for next steps.[/dim]")
 
 
+def _yaml_dq(value: str) -> str:
+    """``value`` escaped for use inside a YAML double-quoted scalar.
+
+    project.yml writes ``name: "{name}"`` so a name like ``yes`` or ``123``
+    stays a string; a quote or backslash in the name must not end it early.
+    """
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 @app.command()
 def init(
     name: Annotated[str, typer.Argument(help="Project name")] = "my-project",
@@ -196,37 +205,38 @@ def init(
     if backend == "ducklake":
         (target / "project.yml").write_text(
             PROJECT_YML_DUCKLAKE_TEMPLATE.format(
-                name=name, sample="false" if empty else "true"
-            )
+                name=_yaml_dq(name), sample="false" if empty else "true"
+            ),
+            encoding="utf-8",
         )
         (target / ".havn").mkdir(exist_ok=True)
         (target / ".havn" / "data").mkdir(exist_ok=True)
     elif empty:
-        (target / "project.yml").write_text(PROJECT_YML_EMPTY_TEMPLATE.format(name=name))
+        (target / "project.yml").write_text(PROJECT_YML_EMPTY_TEMPLATE.format(name=_yaml_dq(name)), encoding="utf-8")
     else:
-        (target / "project.yml").write_text(PROJECT_YML_TEMPLATE.format(name=name))
+        (target / "project.yml").write_text(PROJECT_YML_TEMPLATE.format(name=_yaml_dq(name)), encoding="utf-8")
 
     # Sample data scaffolding (skipped for --empty, regardless of backend)
     if not empty:
-        (target / "ingest" / "earthquakes.dpnb").write_text(SAMPLE_INGEST_NOTEBOOK)
-        (target / "transform" / "bronze" / "earthquakes.sql").write_text(SAMPLE_BRONZE_SQL)
-        (target / "transform" / "silver" / "earthquake_events.sql").write_text(SAMPLE_SILVER_EVENTS_SQL)
-        (target / "transform" / "silver" / "earthquake_daily.sql").write_text(SAMPLE_SILVER_DAILY_SQL)
-        (target / "transform" / "gold" / "earthquake_summary.sql").write_text(SAMPLE_GOLD_SUMMARY_SQL)
-        (target / "transform" / "gold" / "top_earthquakes.sql").write_text(SAMPLE_GOLD_TOP_SQL)
-        (target / "transform" / "gold" / "region_risk.sql").write_text(SAMPLE_GOLD_REGIONS_SQL)
-        (target / "export" / "earthquake_report.py").write_text(SAMPLE_EXPORT_SCRIPT)
+        (target / "ingest" / "earthquakes.dpnb").write_text(SAMPLE_INGEST_NOTEBOOK, encoding="utf-8")
+        (target / "transform" / "bronze" / "earthquakes.sql").write_text(SAMPLE_BRONZE_SQL, encoding="utf-8")
+        (target / "transform" / "silver" / "earthquake_events.sql").write_text(SAMPLE_SILVER_EVENTS_SQL, encoding="utf-8")
+        (target / "transform" / "silver" / "earthquake_daily.sql").write_text(SAMPLE_SILVER_DAILY_SQL, encoding="utf-8")
+        (target / "transform" / "gold" / "earthquake_summary.sql").write_text(SAMPLE_GOLD_SUMMARY_SQL, encoding="utf-8")
+        (target / "transform" / "gold" / "top_earthquakes.sql").write_text(SAMPLE_GOLD_TOP_SQL, encoding="utf-8")
+        (target / "transform" / "gold" / "region_risk.sql").write_text(SAMPLE_GOLD_REGIONS_SQL, encoding="utf-8")
+        (target / "export" / "earthquake_report.py").write_text(SAMPLE_EXPORT_SCRIPT, encoding="utf-8")
         (target / "macros" / "geo.py").write_text(SAMPLE_MACRO_GEO, encoding="utf-8")
-        (target / "seeds" / "magnitude_scale.csv").write_text(SAMPLE_SEED_CSV)
-        (target / "contracts" / "quality.yml").write_text(SAMPLE_CONTRACTS_YML)
-        (target / "tests" / "unit" / "top_earthquakes.yml").write_text(SAMPLE_UNIT_TEST_YML)
-        (target / "notebooks" / "explore.dpnb").write_text(SAMPLE_EXPLORE_NOTEBOOK)
+        (target / "seeds" / "magnitude_scale.csv").write_text(SAMPLE_SEED_CSV, encoding="utf-8")
+        (target / "contracts" / "quality.yml").write_text(SAMPLE_CONTRACTS_YML, encoding="utf-8")
+        (target / "tests" / "unit" / "top_earthquakes.yml").write_text(SAMPLE_UNIT_TEST_YML, encoding="utf-8")
+        (target / "notebooks" / "explore.dpnb").write_text(SAMPLE_EXPLORE_NOTEBOOK, encoding="utf-8")
         # Starter orchestration jobs
-        (target / "orchestration" / "full-refresh.yml").write_text(SAMPLE_FULL_REFRESH_JOB)
-        (target / "orchestration" / "incremental.yml").write_text(SAMPLE_INCREMENTAL_JOB)
+        (target / "orchestration" / "full-refresh.yml").write_text(SAMPLE_FULL_REFRESH_JOB, encoding="utf-8")
+        (target / "orchestration" / "incremental.yml").write_text(SAMPLE_INCREMENTAL_JOB, encoding="utf-8")
 
     # Config files (both empty and sample projects)
-    (target / ".env").write_text(ENV_TEMPLATE)
+    (target / ".env").write_text(ENV_TEMPLATE, encoding="utf-8")
     (target / ".gitignore").write_text(
         # Every environment's warehouse (warehouse.duckdb, prod.duckdb, ...).
         "*.duckdb\n*.duckdb.wal\n"
@@ -238,7 +248,8 @@ def init(
         ".havn/serve.json\n"
         # Installed package sources are reproducible from havn_packages.lock,
         # which IS committed. Only the checkout is ignored.
-        "havn_packages/\n"
+        "havn_packages/\n",
+        encoding="utf-8",
     )
     # .havn/ holds shareable PR state. .havn/prs/ travels with the repo (commit
     # the JSON files there to share PRs with collaborators); .havn/pr-build/ is
@@ -252,18 +263,19 @@ def init(
         "  share PRs with your team. Each developer runs their own havn\n"
         "  locally; PR state travels with the repository.\n"
         "- `pr-build/` — Transient git worktrees used by `havn pr build`.\n"
-        "  Automatically cleaned up after each build. Gitignored.\n"
+        "  Automatically cleaned up after each build. Gitignored.\n",
+        encoding="utf-8",
     )
     (havn_dir / "prs").mkdir(exist_ok=True)
-    (havn_dir / "prs" / ".gitkeep").write_text("")
-    (target / "CLAUDE.md").write_text(CLAUDE_MD_TEMPLATE.format(name=name))
-    (target / ".cursorrules").write_text(CURSORRULES_TEMPLATE)
+    (havn_dir / "prs" / ".gitkeep").write_text("", encoding="utf-8")
+    (target / "CLAUDE.md").write_text(CLAUDE_MD_TEMPLATE.format(name=name), encoding="utf-8")
+    (target / ".cursorrules").write_text(CURSORRULES_TEMPLATE, encoding="utf-8")
     # Seed a relaxed sqlfluff config so `havn lint` doesn't bury new
     # projects under RF03/AM05 violations on idiomatic SQL. The linter
     # auto-detects this file at lint time.
-    (target / ".sqlfluff").write_text(SQLFLUFF_TEMPLATE)
+    (target / ".sqlfluff").write_text(SQLFLUFF_TEMPLATE, encoding="utf-8")
     (target / ".github").mkdir(parents=True, exist_ok=True)
-    (target / ".github" / "copilot-instructions.md").write_text(COPILOT_INSTRUCTIONS_TEMPLATE)
+    (target / ".github" / "copilot-instructions.md").write_text(COPILOT_INSTRUCTIONS_TEMPLATE, encoding="utf-8")
 
     console.print(f"[green]Project '{name}' created at {target}[/green]")
     console.print()
@@ -406,7 +418,7 @@ def validate(
 
     # 6. Check .env variables referenced in config
     import re
-    config_lines = (project_dir / "project.yml").read_text().splitlines() if (project_dir / "project.yml").exists() else []
+    config_lines = (project_dir / "project.yml").read_text(encoding="utf-8").splitlines() if (project_dir / "project.yml").exists() else []
     # Only check non-comment lines for env var references
     active_text = "\n".join(line for line in config_lines if not line.strip().startswith("#"))
     env_refs = set(re.findall(r"\$\{(\w+)\}", active_text))
@@ -1010,5 +1022,5 @@ def _rewrite_project_yml_clean(project_dir: Path, name: str) -> None:
     """Rewrite project.yml without sample flag and sample-specific content."""
     from havn.templates import PROJECT_YML_EMPTY_TEMPLATE
 
-    (project_dir / "project.yml").write_text(PROJECT_YML_EMPTY_TEMPLATE.format(name=name))
+    (project_dir / "project.yml").write_text(PROJECT_YML_EMPTY_TEMPLATE.format(name=_yaml_dq(name)), encoding="utf-8")
     console.print("  Updated project.yml")

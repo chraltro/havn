@@ -52,7 +52,7 @@ def list_seeds_endpoint(request: Request) -> list[dict]:
             "name": s["name"],
             "full_name": s["full_name"],
             "schema": s["schema"],
-            "path": str(s["path"].relative_to(_get_project_dir())),
+            "path": s["path"].relative_to(_get_project_dir()).as_posix(),
         }
         for s in seeds
     ]
@@ -237,7 +237,7 @@ def update_database_config(request: Request, body: DatabaseConfigUpdate) -> dict
         elif "threads" in raw["database"]:
             del raw["database"]["threads"]
 
-    yml_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False))
+    yml_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False), encoding="utf-8")
 
     # Reset shared connection so new settings take effect
     from havn.server.deps import reset_shared_conn, _clear_config_cache
@@ -513,8 +513,7 @@ def clear_sample_project(request: Request) -> dict:
     from havn.templates import PROJECT_YML_EMPTY_TEMPLATE
 
     (project_dir / "project.yml").write_text(
-        PROJECT_YML_EMPTY_TEMPLATE.format(name=config.name)
-    )
+        PROJECT_YML_EMPTY_TEMPLATE.format(name=config.name), encoding="utf-8")
 
     # Invalidate caches
     invalidate_config_cache()

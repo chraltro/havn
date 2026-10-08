@@ -280,5 +280,5 @@ def _toggle_enabled(name: str, enabled: bool, project_dir: Path | None) -> None:
         raise typer.Exit(1)
     data = yaml.safe_load(job.file_path.read_text())
     data["enabled"] = enabled
-    job.file_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+    job.file_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False), encoding="utf-8")
     console.print(f"Job '{name}' {'enabled' if enabled else 'disabled'}")

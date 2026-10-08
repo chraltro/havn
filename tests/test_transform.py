@@ -454,6 +454,11 @@ def test_sql_parsed_once_per_pass(tmp_path, monkeypatch):
         "SELECT id, name FROM landing.src\n"
     )
 
+    # sqlglot imports its duckdb dialect lazily, and that module parses a
+    # dozen helper expressions at import time. Load it before counting, or
+    # those land in `calls` and the count measures sqlglot, not havn.
+    sqlglot.parse_one("SELECT 1", dialect="duckdb")
+
     calls = []
     real_parse_one = sqlglot.parse_one
 
@@ -467,4 +472,9 @@ def test_sql_parsed_once_per_pass(tmp_path, monkeypatch):
     assert len(models) == 1
     validate_models(None, models)
     extract_column_lineage(models[0])
-    assert len(calls) == 1, calls
+
+    # Only parses of the model's own SQL count. sqlglot also parses bare
+    # identifiers out of the schema mapping while qualifying, which is its
+    # business, not a second parse of the model.
+    model_parses = [sql for sql in calls if "landing.src" in str(sql)]
+    assert len(model_parses) == 1, calls

@@ -591,7 +591,7 @@ def execute_job(
     # Insert initial run row
     run_id = conn.execute("SELECT gen_random_uuid()::VARCHAR").fetchone()[0]
     try:
-        rel_path = str(job.file_path.relative_to(project_dir))
+        rel_path = job.file_path.relative_to(project_dir).as_posix()
     except (ValueError, AttributeError):
         rel_path = str(job.file_path)
     conn.execute(
@@ -1147,7 +1147,7 @@ def save_job(project_dir: Path, job_data: dict) -> Path:
         out_data.pop("exclude", None)
 
     path = orch_dir / f"{slug}.yml"
-    path.write_text(yaml.dump(out_data, default_flow_style=False, sort_keys=False))
+    path.write_text(yaml.dump(out_data, default_flow_style=False, sort_keys=False), encoding="utf-8")
     return path
 
 

@@ -392,7 +392,7 @@ def capture_snapshot(
             logger.warning("Snapshot dir would escape project_dir for %s", model_name)
             return False
         snapshot_path = snapshot_dir / f"{run_id}.parquet"
-        rel_path = str(snapshot_path.relative_to(project_dir))
+        rel_path = snapshot_path.relative_to(project_dir).as_posix()
 
         try:
             safe_path = str(snapshot_path).replace("'", "''")

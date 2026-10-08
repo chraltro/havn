@@ -180,7 +180,7 @@ def lint(
     total_fixed = 0
 
     for sql_file in sql_files:
-        sql = sql_file.read_text()
+        sql = sql_file.read_text(encoding="utf-8")
 
         if fix:
             # Fixing rewrites the SQL, so the directive header is set aside
@@ -193,7 +193,7 @@ def lint(
             fixed_sql, changed = fix_result.fix_string()
             if changed:
                 sql = _rejoin_header(lines, header_count, fixed_sql)
-                sql_file.write_text(sql)
+                sql_file.write_text(sql, encoding="utf-8")
                 total_fixed += violations_before - len(
                     linter.lint_string(fixed_sql).get_violations()
                 )
@@ -203,7 +203,7 @@ def lint(
         rel_path = sql_file.relative_to(transform_dir.parent)
         for violation in result.get_violations():
             all_violations.append({
-                "file": str(rel_path),
+                "file": rel_path.as_posix(),
                 "line": violation.line_no,
                 "col": violation.line_pos,
                 "code": violation.rule_code(),
@@ -252,7 +252,7 @@ def lint_file(
         config = FluffConfig.from_kwargs(**config_kwargs)
     linter = Linter(config=config)
 
-    sql = content if content is not None else sql_file.read_text()
+    sql = content if content is not None else sql_file.read_text(encoding="utf-8")
     total_fixed = 0
     final_content = sql
 
@@ -267,7 +267,7 @@ def lint_file(
         fixed_sql, changed = fix_result.fix_string()
         if changed:
             final_content = _rejoin_header(lines, header_count, fixed_sql)
-            sql_file.write_text(final_content)
+            sql_file.write_text(final_content, encoding="utf-8")
             total_fixed = violations_before - len(
                 linter.lint_string(fixed_sql).get_violations()
             )
@@ -283,7 +283,7 @@ def lint_file(
     all_violations: list[dict] = []
     for violation in result.get_violations():
         all_violations.append({
-            "file": str(rel_path),
+            "file": rel_path.as_posix(),
             "line": violation.line_no,
             "col": violation.line_pos,
             "code": violation.rule_code(),

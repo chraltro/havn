@@ -28,6 +28,15 @@ def test_starter_project_builds_offline(tmp_path, monkeypatch):
     monkeypatch.delenv("NO_PROXY", raising=False)
     monkeypatch.delenv("no_proxy", raising=False)
 
+    # urlopen caches a global opener the first time it is called, and that
+    # opener captured the proxy environment as it was then. Any earlier test
+    # in the session that reached the network leaves it cached, so the dead
+    # proxy above would be ignored and the real feed would load. Drop it so
+    # the next urlopen rebuilds against the env set here.
+    import urllib.request
+
+    monkeypatch.setattr(urllib.request, "_opener", None)
+
     result = runner.invoke(app, ["run", "ingest/earthquakes.dpnb"])
     assert result.exit_code == 0, result.output
 

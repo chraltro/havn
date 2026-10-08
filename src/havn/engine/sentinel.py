@@ -960,7 +960,7 @@ def apply_rename_fix(
         return {"status": "error", "message": f"No occurrences of `{old_name}` found in {model_path}"}
 
     count = len(pattern.findall(content))
-    full_path.write_text(new_content)
+    full_path.write_text(new_content, encoding="utf-8")
 
     return {
         "status": "success",
