@@ -12,6 +12,7 @@ from havn.server.deps import (
     DbConnReadOnly,
     DbConnReadOnlyOptional,
     _get_config,
+    _discover_models_cached,
     _get_project_dir,
     _require_permission,
     ensure_meta_table,
@@ -130,27 +131,32 @@ def get_profile(
 def get_assertions(
     request: Request, conn: DbConnReadOnly, limit: int = 100
 ) -> list[dict]:
-    """Get recent data quality assertion results."""
+    """The current result of every check: the latest run of each one the
+    project still declares.
+
+    This used to return the last ``limit`` rows of the raw history, and the
+    page computed its pass rate from them -- so one check counted once per
+    run, failures of checks since edited or deleted kept counting, and once
+    the history passed ``limit`` rows older models dropped out. ``limit``
+    still caps the response size.
+    """
     _require_permission(request, "read")
     ensure_meta_table(conn)
-    rows = conn.execute(
-        """
-        SELECT model_path, expression, passed, detail, checked_at
-        FROM _havn.assertion_results
-        ORDER BY checked_at DESC
-        LIMIT ?
-        """,
-        [limit],
-    ).fetchall()
+    from havn.engine.transform.quality import current_assertion_results
+
+    models = _discover_models_cached(_get_project_dir() / "transform")
+    rows = current_assertion_results(conn, models)
+    rows.sort(key=lambda r: r[5] or "", reverse=True)
     return [
         {
             "model": r[0],
             "expression": r[1],
             "passed": r[2],
             "detail": r[3],
-            "checked_at": str(r[4]) if r[4] else None,
+            "severity": r[4],
+            "checked_at": str(r[5]) if r[5] else None,
         }
-        for r in rows
+        for r in rows[:limit]
     ]
 
 
@@ -431,7 +437,7 @@ def update_anomaly_config(request: Request, req: AnomalyConfigUpdate) -> dict:
     if req.threshold is not None:
         anomaly["threshold"] = req.threshold
 
-    config_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False))
+    config_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False), encoding="utf-8")
 
     return {
         "status": "updated",

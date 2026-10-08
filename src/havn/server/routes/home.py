@@ -8,12 +8,15 @@ with their status. Read-only throughout.
 
 from __future__ import annotations
 
+import duckdb
+
 import logging
 import os
 from typing import Any
 
 from fastapi import APIRouter, Request
 
+from havn.engine.transform.quality import current_assertion_results
 from havn.server.deps import (
     DbConnReadOnlyOptional,
     _discover_models_cached,
@@ -63,7 +66,9 @@ def get_home(request: Request, conn: DbConnReadOnlyOptional = None) -> dict:
 
     def rel(m) -> str | None:
         try:
-            return str(m.path.relative_to(project_dir))
+            # as_posix: the editor addresses files with forward slashes on
+            # every platform, and these paths are matched against those.
+            return m.path.relative_to(project_dir).as_posix()
         except ValueError:
             return None
 
@@ -138,23 +143,11 @@ def get_home(request: Request, conn: DbConnReadOnlyOptional = None) -> dict:
 
     # --- Assertions: latest result per (model, expression) -----------------
     failing_models: set[str] = set()
-    for model_path, expr, passed, detail, severity, checked_at in _rows(
-        conn,
-        """
-        SELECT model_path, expression, passed, detail, COALESCE(severity, 'error'), checked_at
-        FROM _havn.assertion_results
-        QUALIFY row_number() OVER (
-            PARTITION BY model_path, expression ORDER BY checked_at DESC
-        ) = 1
-        """,
-    ):
-        if model_path not in by_name:
-            continue  # model or check since removed
-        declared = {e for e, _ in by_name[model_path].assertion_specs} | set(by_name[model_path].assertions)
-        if by_name[model_path].grain:
-            declared.add(f"grain({', '.join(by_name[model_path].grain)})")
-        if expr not in declared:
-            continue  # the check was edited or deleted since it last ran
+    try:
+        current_checks = current_assertion_results(conn, list(models))
+    except duckdb.Error:
+        current_checks = []  # no metadata yet
+    for model_path, expr, passed, detail, severity, checked_at in current_checks:
         if passed:
             tiles["checks"]["passed"] += 1
             continue
@@ -318,11 +311,11 @@ def get_home(request: Request, conn: DbConnReadOnlyOptional = None) -> dict:
             """
             SELECT
                 pipeline_run_id,
-                MIN(target),
+                arg_min(target, started_at),
                 MIN(started_at) AS started,
                 CASE WHEN SUM(CASE WHEN status IN ('error', 'failed') THEN 1 ELSE 0 END) > 0
                      THEN 'failed' ELSE 'success' END,
-                SUM(duration_ms),
+                (MAX(epoch_ms(started_at) + COALESCE(duration_ms, 0)) - MIN(epoch_ms(started_at))),
                 COUNT(*),
                 SUM(CASE WHEN status IN ('error', 'failed') THEN 1 ELSE 0 END),
                 SUM(rows_affected)
@@ -340,10 +333,10 @@ def get_home(request: Request, conn: DbConnReadOnlyOptional = None) -> dict:
         conn,
         """
         SELECT
-            pipeline_run_id, MIN(target), MIN(started_at) AS started,
+            pipeline_run_id, arg_min(target, started_at), MIN(started_at) AS started,
             CASE WHEN SUM(CASE WHEN status IN ('error', 'failed') THEN 1 ELSE 0 END) > 0
                  THEN 'failed' ELSE 'success' END,
-            SUM(duration_ms), COUNT(*),
+            (MAX(epoch_ms(started_at) + COALESCE(duration_ms, 0)) - MIN(epoch_ms(started_at))), COUNT(*),
             SUM(CASE WHEN status IN ('error', 'failed') THEN 1 ELSE 0 END),
             SUM(rows_affected)
         FROM _havn.run_log
