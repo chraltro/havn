@@ -265,6 +265,18 @@ def list_contracts(request: Request) -> list[dict]:
             "notify": c.notify,
             "escalate_after": c.escalate_after,
             "path": str(c.path) if c.path else None,
+            "columns": [
+                {
+                    "name": col.name,
+                    "type": col.type,
+                    "nullable": col.nullable,
+                    "description": col.description,
+                }
+                for col in c.columns
+            ],
+            "strict": c.strict,
+            "on_widen": c.on_widen,
+            "errors": c.errors,
         }
         for c in contracts
     ]
@@ -292,6 +304,17 @@ def run_contracts_endpoint(request: Request, conn: DbConn) -> dict:
                 "error": r.error,
                 "assertions": r.results,
                 "consecutive_failures": r.consecutive_failures,
+                "schema_findings": [
+                    {
+                        "column": f.column,
+                        "kind": f.kind,
+                        "severity": f.severity,
+                        "message": f.message,
+                        "declared": f.declared,
+                        "actual": f.actual,
+                    }
+                    for f in r.schema_findings
+                ],
             }
             for r in results
         ],

@@ -6,6 +6,7 @@ import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Callable
 
 import duckdb
 from rich.console import Console
@@ -18,9 +19,17 @@ from .discovery import (
     _update_state,
     build_dag,
     build_dag_tiers,
+    discover_all_models,
     discover_models,
 )
-from .execution import _execute_single_model, execute_model
+from .execution import (
+    BatchRange,
+    _execute_single_model,
+    _log_build,
+    _record_ephemeral,
+    execute_model,
+    snapshot_settings_for,
+)
 from .models import SQLModel
 from .quality import (
     _save_assertions,
@@ -46,13 +55,20 @@ def run_transform(
     run_id: str | None = None,
     pipeline_run_id: str | None = None,
     db_config: object | None = None,
+    exclude: list[str] | None = None,
+    batch_range: BatchRange | None = None,
+    defer: object | None = None,
 ) -> dict[str, str]:
     """Run the full transformation pipeline.
 
     Args:
         conn: DuckDB connection
         transform_dir: Path to transform/ directory
-        targets: Specific models to run (None = all)
+        targets: Graph selectors picking what to run (None or ["all"] = every
+            model). See :func:`havn.engine.selectors.select_models` for the
+            grammar: ``+x``, ``x+``, ``@x``, ``gold.fct_*``, ``tag:daily``,
+            ``state:modified`` and so on. Plain ``schema.name`` still means
+            exactly that model.
         force: Force rebuild even if unchanged
         parallel: Enable parallel execution of independent models
         max_workers: Max number of parallel workers
@@ -61,6 +77,18 @@ def run_transform(
         rewind_config: RewindConfig from project settings
         run_id: Pipeline run ID (for snapshot tagging)
         pipeline_run_id: Shared ID grouping all model executions in this pipeline run
+        exclude: Selectors whose matches are subtracted from ``targets``.
+        batch_range: An explicit event-time range for microbatch models, from
+            ``--event-time-start`` / ``--event-time-end``. Microbatch models
+            process exactly these windows instead of resuming from recorded
+            state; every other model ignores it, except that an
+            ``incremental_filter`` may use ``{start}`` and ``{end}``.
+        defer: A ``havn.engine.defer.DeferSpec`` from
+            ``havn.engine.defer.resolve_defer``, or None for an ordinary run.
+            When given, the other environment's warehouse is attached
+            read-only for the length of the run and every model reference
+            this warehouse cannot satisfy is read from there instead. Writes
+            are unaffected: they always land in this warehouse.
 
     Returns:
         Dict of model_name -> status ("built", "skipped", "error")
@@ -70,34 +98,125 @@ def run_transform(
         pipeline_run_id = str(uuid.uuid4())
 
     ensure_meta_table(conn)
-    models = discover_models(transform_dir)
+    # The full project is always needed for change detection: upstream hashes
+    # are computed over the whole DAG, even when only a subset is executed.
+    # "The whole DAG" includes installed packages, so go through the project
+    # root whenever transform_dir is a project's own -- a caller that handed
+    # us some other directory meant that directory and nothing else.
+    _root = Path(project_dir) if project_dir else transform_dir.parent
+    if _root / "transform" == transform_dir:
+        all_models = discover_all_models(_root)
+    else:
+        all_models = discover_models(transform_dir)
 
-    if not models:
+    if not all_models:
         console.print("[yellow]No SQL models found in transform/[/yellow]")
         return {}
 
-    # Filter to targets if specified
-    if targets and targets != ["all"]:
-        target_set = set(targets)
-        models = [m for m in models if m.full_name in target_set or m.name in target_set]
+    # Filter to the selection if one was given. `models` is the execution set;
+    # the entries are the same objects as in `all_models`, so hashes computed
+    # against the full map are visible here too.
+    models = all_models
+    if (targets and targets != ["all"]) or exclude:
+        from havn.engine.selectors import select_models
+
+        selection = select_models(
+            targets,
+            all_models,
+            conn=conn,
+            # ``path:`` selectors are written relative to the project root,
+            # which is transform/'s parent whether or not the caller bothered
+            # to pass project_dir (the API does not).
+            project_dir=project_dir or transform_dir.parent,
+            exclude=exclude,
+        )
+        chosen = set(selection.selected)
+        models = [m for m in all_models if m.full_name in chosen]
         if not models:
-            all_names = [m.full_name for m in discover_models(transform_dir)]
-            console.print(f"[yellow]No models matched targets: {', '.join(targets)}[/yellow]")
+            all_names = [m.full_name for m in all_models]
+            asked = ", ".join(targets or ["all"])
+            console.print(f"[yellow]No models matched targets: {asked}[/yellow]")
+            for warning in selection.warnings:
+                console.print(f"[yellow]{warning}[/yellow]")
             if all_names:
                 console.print(f"[dim]Available models: {', '.join(all_names)}[/dim]")
             return {}
 
-    if parallel:
-        return _run_transform_parallel(
-            conn, models, force, max_workers, db_path=db_path,
+    # Defer: attach the other environment before the first model and detach in
+    # the context manager's finally, so a crash mid-run still releases it.
+    # Parallel workers open their own connections to this same file, which
+    # DuckDB serves from one shared instance, so they inherit the attach.
+    #
+    # The rewriter the session yields belongs to this run alone and is passed
+    # explicitly all the way down to ``resolve_query``. It is never stashed
+    # anywhere another run could read it: two runs can be in flight in one
+    # process (``POST /api/transform`` and the scheduler both run outside the
+    # pipeline lock), and a run with ``defer=None`` must build exactly what it
+    # would have built alone.
+    with _defer_context(conn, defer, models) as query_rewriter:
+        if parallel:
+            return _run_transform_parallel(
+                conn, models, force, max_workers, db_path=db_path,
+                project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
+                pipeline_run_id=pipeline_run_id, db_config=db_config,
+                all_models=all_models, batch_range=batch_range,
+                query_rewriter=query_rewriter,
+            )
+        return _run_transform_sequential(
+            conn, models, force,
             project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
-            pipeline_run_id=pipeline_run_id, db_config=db_config,
+            pipeline_run_id=pipeline_run_id, all_models=all_models,
+            batch_range=batch_range, query_rewriter=query_rewriter,
         )
-    return _run_transform_sequential(
-        conn, models, force,
-        project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
-        pipeline_run_id=pipeline_run_id,
-    )
+
+
+def _defer_context(
+    conn: duckdb.DuckDBPyConnection,
+    defer: object | None,
+    models: list[SQLModel],
+):
+    """The defer session for this run, or a no-op context when not deferring.
+
+    Either way the context yields what the run should use as its query
+    rewriter: the deferred run's redirects, or None.
+    """
+    if defer is None:
+        from contextlib import nullcontext
+
+        return nullcontext(None)
+    from havn.engine.defer import defer_session
+
+    defer.local_models = {m.full_name for m in models}
+    return defer_session(conn, defer, on_message=lambda msg: console.print(f"  [dim]{msg}[/dim]"))
+
+
+def _hash_full_dag(
+    models: list[SQLModel],
+    all_models: list[SQLModel] | None,
+) -> tuple[list[SQLModel], dict[str, SQLModel]]:
+    """Set ``upstream_hash`` across the whole project, return what to execute.
+
+    Change detection has to see the full DAG. Targeted runs used to filter the
+    model list before the DAG was built, so ``_compute_upstream_hash`` found
+    none of a model's upstreams in the map and stored ``sha256("")`` as its
+    upstream hash. A later full run then read a different hash for the same
+    unchanged model and rebuilt it.
+
+    Hashing walks every model in topological order (dependencies must have
+    their own ``upstream_hash`` set before it is read), while the returned
+    list holds only the models that were selected for execution. Both lists
+    reference the same ``SQLModel`` objects, so the hashes are visible to the
+    caller either way.
+    """
+    full = all_models if all_models is not None else models
+    full_ordered = build_dag(full)
+    full_map = {m.full_name: m for m in full_ordered}
+    for model in full_ordered:
+        model.upstream_hash = _compute_upstream_hash(model, full_map)
+
+    selected = {m.full_name for m in models}
+    ordered = [m for m in full_ordered if m.full_name in selected]
+    return ordered, full_map
 
 
 def _evaluate_deny_rules(
@@ -124,14 +243,12 @@ def _evaluate_deny_rules(
     if not deny_rules:
         return {}
 
-    import sqlglot
     from sqlglot import exp as _exp
 
     out: dict[str, str] = {}
     for model in models:
-        try:
-            parsed = sqlglot.parse_one(model.query, read="duckdb")
-        except Exception:
+        parsed = model.ast
+        if parsed is None:
             continue  # parse errors surface elsewhere
         schema_lower = model.schema.lower()
         referenced: set[str] = set()
@@ -161,16 +278,21 @@ def _run_transform_sequential(
     rewind_config: object | None = None,
     run_id: str | None = None,
     pipeline_run_id: str | None = None,
+    all_models: list[SQLModel] | None = None,
+    batch_range: BatchRange | None = None,
+    query_rewriter: Callable[[str], str] | None = None,
 ) -> dict[str, str]:
-    """Run models sequentially (original behavior + assertions + profiling)."""
-    ordered = build_dag(models)
-    model_map = {m.full_name: m for m in ordered}
+    """Run models sequentially (original behavior + assertions + profiling).
+
+    ``all_models`` is the full project; ``models`` is the subset to execute.
+    Upstream hashes are computed over the former so a targeted run does not
+    corrupt change detection.
+
+    ``query_rewriter`` is this run's defer rewriter, or None.
+    """
+    ordered, model_map = _hash_full_dag(models, all_models)
     # Collect profiles for anomaly detection at end of run
     _run_profiles: dict[str, object] = {}
-
-    # Compute upstream hashes
-    for model in ordered:
-        model.upstream_hash = _compute_upstream_hash(model, model_map)
 
     results: dict[str, str] = {}
     # Track models that errored or had a severity=error assertion failure
@@ -223,6 +345,16 @@ def _run_transform_sequential(
                 pass
             continue
 
+        # Ephemeral models are never built: every consumer carries their query
+        # as a CTE instead. Reported as "inlined" rather than "skipped", which
+        # would read as "unchanged, the table on disk is current".
+        if model.materialized == "ephemeral":
+            console.print(f"  [dim]inline[/dim]  {label}")
+            results[model.full_name] = _record_ephemeral(
+                conn, model, pipeline_run_id
+            ).status
+            continue
+
         if not changed:
             console.print(f"  [dim]skip[/dim]  {label}")
             results[model.full_name] = "skipped"
@@ -268,12 +400,25 @@ def _run_transform_sequential(
                 continue
 
         try:
-            duration_ms, row_count = execute_model(conn, model)
+            schema_changes: list[str] = []
+            duration_ms, row_count = execute_model(
+                conn, model, schema_changes, model_map,
+                snapshot_settings=(
+                    snapshot_settings_for(project_dir)
+                    if model.materialized == "snapshot"
+                    else None
+                ),
+                batch_range=batch_range,
+                force=force,
+                run_id=pipeline_run_id,
+                query_rewriter=query_rewriter,
+            )
             _update_state(conn, model, duration_ms, row_count)
-            log_run(conn, "transform", model.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
 
             suffix = f" ({row_count:,} rows, {duration_ms}ms)" if row_count else f" ({duration_ms}ms)"
             console.print(f"  [green]done[/green]  {label}{suffix}")
+            for change in schema_changes:
+                console.print(f"         [cyan]schema[/cyan]  {change}")
 
             # Capture snapshot for Pipeline Rewind
             if project_dir and run_id:
@@ -294,9 +439,15 @@ def _run_transform_sequential(
 
             # Run data quality assertions (and the synthesised @grain check
             # if model.grain is set — both are evaluated by run_assertions).
+            assertion_results = []
             if model.assertions or model.grain:
                 assertion_results = run_assertions(conn, model)
                 _save_assertions(conn, model, assertion_results)
+            _log_build(
+                conn, model, duration_ms, row_count, schema_changes,
+                assertion_results, pipeline_run_id,
+            )
+            if assertion_results:
                 for ar in assertion_results:
                     if ar.passed:
                         console.print(f"         [green]pass[/green]  assert: {ar.expression}")
@@ -318,7 +469,7 @@ def _run_transform_sequential(
                     continue
 
             # Auto-profile for tables
-            if model.materialized in ("table", "incremental"):
+            if model.materialized in ("table", "incremental", "snapshot"):
                 profile = profile_model(conn, model)
                 _save_profile(conn, model, profile)
                 _run_profiles[model.full_name] = profile
@@ -376,20 +527,27 @@ def _run_transform_parallel(
     run_id: str | None = None,
     pipeline_run_id: str | None = None,
     db_config: object | None = None,
+    all_models: list[SQLModel] | None = None,
+    batch_range: BatchRange | None = None,
+    query_rewriter: Callable[[str], str] | None = None,
 ) -> dict[str, str]:
     """Run models in parallel by DAG tiers.
 
     Models within the same tier are independent and can execute concurrently.
     Each tier must complete before the next one starts.
     Assertion failures in a tier block the next tier.
-    """
-    tiers = build_dag_tiers(models)
-    model_map = {m.full_name: m for m in models}
 
-    # Compute upstream hashes
-    ordered = build_dag(models)
-    for model in ordered:
-        model.upstream_hash = _compute_upstream_hash(model, model_map)
+    ``all_models`` is the full project; ``models`` is the subset to execute.
+    Tiers are built from the subset, hashes from the full DAG.
+
+    ``query_rewriter`` is this run's defer rewriter, or None. Workers are
+    threads within this run and receive it as an argument.
+    """
+    # ``model_map`` covers the whole project: workers re-derive each model's
+    # upstream hash from it, so a targeted run must not hand them a map that
+    # is missing the upstreams.
+    _ordered, model_map = _hash_full_dag(models, all_models)
+    tiers = build_dag_tiers(models)
 
     # Pre-create every target schema on the main connection BEFORE any
     # parallel worker starts. Without this, two workers in the same tier
@@ -414,7 +572,8 @@ def _run_transform_parallel(
             return _run_transform_sequential(
                 conn, models, force,
                 project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
-                pipeline_run_id=pipeline_run_id,
+                pipeline_run_id=pipeline_run_id, all_models=all_models,
+                query_rewriter=query_rewriter,
             )
 
     # Resolve database path explicitly (only used when db_config is None).
@@ -431,7 +590,8 @@ def _run_transform_parallel(
         return _run_transform_sequential(
             conn, models, force,
             project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
-            pipeline_run_id=pipeline_run_id,
+            pipeline_run_id=pipeline_run_id, all_models=all_models,
+            query_rewriter=query_rewriter,
         )
 
     results: dict[str, str] = {}
@@ -514,8 +674,16 @@ def _run_transform_parallel(
         if len(tier) == 1:
             # Single model — run in the main connection
             model = tier[0]
-            changed = force or _has_changed(conn, model)
             label = f"[bold]{model.full_name}[/bold] ({model.materialized})"
+
+            if model.materialized == "ephemeral":
+                console.print(f"  [dim]inline[/dim]  {label}")
+                results[model.full_name] = _record_ephemeral(
+                    conn, model, pipeline_run_id
+                ).status
+                continue
+
+            changed = force or _has_changed(conn, model)
 
             if not changed:
                 console.print(f"  [dim]skip[/dim]  {label}")
@@ -527,14 +695,33 @@ def _run_transform_parallel(
                 continue
 
             try:
-                duration_ms, row_count = execute_model(conn, model)
+                schema_changes: list[str] = []
+                duration_ms, row_count = execute_model(
+                    conn, model, schema_changes, model_map,
+                    snapshot_settings=(
+                        snapshot_settings_for(project_dir)
+                        if model.materialized == "snapshot"
+                        else None
+                    ),
+                    batch_range=batch_range,
+                    force=force,
+                    run_id=pipeline_run_id,
+                    query_rewriter=query_rewriter,
+                )
                 _update_state(conn, model, duration_ms, row_count)
-                log_run(conn, "transform", model.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
+                for change in schema_changes:
+                    console.print(f"         [cyan]schema[/cyan]  {change}")
 
                 # Assertions (and synthesised @grain check, if any)
+                ar_results = []
                 if model.assertions or model.grain:
                     ar_results = run_assertions(conn, model)
                     _save_assertions(conn, model, ar_results)
+                _log_build(
+                    conn, model, duration_ms, row_count, schema_changes,
+                    ar_results, pipeline_run_id,
+                )
+                if ar_results:
                     failed_asserts = [
                         ar for ar in ar_results
                         if not ar.passed and (ar.severity or "error") == "error"
@@ -547,7 +734,7 @@ def _run_transform_parallel(
                         continue
 
                 # Profile
-                if model.materialized in ("table", "incremental"):
+                if model.materialized in ("table", "incremental", "snapshot"):
                     profile = profile_model(conn, model)
                     _save_profile(conn, model, profile)
 
@@ -587,6 +774,7 @@ def _run_transform_parallel(
                         _execute_single_model,
                         db_path_str, model, force, model_map,
                         db_config, project_dir, pipeline_run_id,
+                        batch_range, query_rewriter,
                     ): model
                     for model in tier
                 }
@@ -598,6 +786,8 @@ def _run_transform_parallel(
                 label = f"[bold]{model_name}[/bold]"
                 if model_result.status == "skipped":
                     console.print(f"  [dim]skip[/dim]  {label}")
+                elif model_result.status == "inlined":
+                    console.print(f"  [dim]inline[/dim]  {label}")
                 elif model_result.status == "built":
                     suffix = ""
                     if model_result.row_count:
@@ -605,6 +795,8 @@ def _run_transform_parallel(
                     else:
                         suffix = f" ({model_result.duration_ms}ms)"
                     console.print(f"  [green]done[/green]  {label}{suffix}")
+                    for change in model_result.schema_changes:
+                        console.print(f"         [cyan]schema[/cyan]  {change}")
                 elif model_result.status == "assertion_failed":
                     console.print(f"  [red]FAIL[/red]  {label}: assertion(s) failed")
                 else:

@@ -220,11 +220,13 @@ def verify_backup(backup_path: Path) -> dict[str, Any]:
         # Count objects
         schemas = conn.execute(
             "SELECT DISTINCT table_schema FROM information_schema.tables "
-            "WHERE table_schema NOT IN ('information_schema', 'pg_catalog')"
+            "WHERE table_catalog = current_database() "
+            "AND table_schema NOT IN ('information_schema', 'pg_catalog')"
         ).fetchall()
         table_count = conn.execute(
             "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema NOT IN ('information_schema', 'pg_catalog')"
+            "WHERE table_catalog = current_database() "
+            "AND table_schema NOT IN ('information_schema', 'pg_catalog')"
         ).fetchone()[0]
 
         conn.close()

@@ -9,9 +9,15 @@ import duckdb
 import pytest
 
 from havn.engine.database import ensure_meta_table
+from havn.engine.sql_analysis import (
+    clear_lineage_cache,
+    extract_column_lineage as extract_column_lineage_sql,
+    fetch_column_catalog,
+)
 from havn.engine.transform import (
     SQLModel,
     extract_column_lineage,
+    impact_analysis,
 )
 
 
@@ -250,3 +256,184 @@ class TestColumnLineage:
         for col in ("id", "kind", "amount"):
             assert col in lineage, lineage
             assert lineage[col][0]["source_table"] == "silver.fact_transactions"
+
+
+class _CountingConn:
+    """Wraps a real DuckDB connection and counts ``execute`` calls."""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self.executes = 0
+
+    def execute(self, *args, **kwargs):
+        self.executes += 1
+        return self._conn.execute(*args, **kwargs)
+
+
+class TestLineageCatalogFetch:
+    def test_catalog_read_once_per_model(self, db):
+        """Resolution must not scan information_schema once per dependency."""
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        for name in ("a", "b", "c", "d"):
+            db.execute(f"CREATE TABLE bronze.{name} AS SELECT 1 AS id, 2 AS val_{name}")
+        model = SQLModel(
+            path=Path("test.sql"), name="joined", schema="silver",
+            full_name="silver.joined", sql="",
+            query=(
+                "SELECT a.id, a.val_a, b.val_b, c.val_c, d.val_d "
+                "FROM bronze.a a "
+                "JOIN bronze.b b ON a.id = b.id "
+                "JOIN bronze.c c ON a.id = c.id "
+                "JOIN bronze.d d ON a.id = d.id"
+            ),
+            materialized="view",
+            depends_on=["bronze.a", "bronze.b", "bronze.c", "bronze.d"],
+        )
+        counting = _CountingConn(db)
+        lineage = extract_column_lineage(model, conn=counting)
+        assert counting.executes == 1
+        assert lineage["val_c"][0]["source_table"] == "bronze.c"
+
+    def test_shared_catalog_avoids_all_queries(self, db):
+        """A caller-supplied catalog means no catalog query at all."""
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        db.execute("CREATE TABLE bronze.src AS SELECT 1 AS id, 'x' AS name")
+        catalog = fetch_column_catalog(db)
+
+        models = [
+            SQLModel(
+                path=Path(f"m{i}.sql"), name=f"m{i}", schema="silver",
+                full_name=f"silver.m{i}", sql="",
+                query="SELECT * FROM bronze.src",
+                materialized="view",
+                depends_on=["bronze.src"],
+            )
+            for i in range(5)
+        ]
+        counting = _CountingConn(db)
+        for model in models:
+            lineage = extract_column_lineage(model, conn=counting, column_catalog=catalog)
+            assert set(lineage) == {"id", "name"}
+        assert counting.executes == 0
+
+    def test_fetch_column_catalog_preserves_ordinal_position(self, db):
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        db.execute("CREATE TABLE bronze.ordered AS SELECT 1 AS zeta, 2 AS alpha, 3 AS mid")
+        catalog = fetch_column_catalog(db)
+        assert catalog["bronze.ordered"] == ["zeta", "alpha", "mid"]
+
+    def test_impact_analysis_reads_catalog_once(self, db):
+        """Column-level impact walks many downstream models on one catalog."""
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        db.execute("CREATE TABLE bronze.src AS SELECT 1 AS id, 'x' AS name")
+        models = [
+            SQLModel(
+                path=Path("src.sql"), name="src", schema="bronze",
+                full_name="bronze.src", sql="",
+                query="SELECT id, name FROM landing.src",
+                materialized="table", depends_on=["landing.src"],
+            )
+        ]
+        models += [
+            SQLModel(
+                path=Path(f"d{i}.sql"), name=f"d{i}", schema="silver",
+                full_name=f"silver.d{i}", sql="",
+                query="SELECT id, name FROM bronze.src",
+                materialized="view", depends_on=["bronze.src"],
+            )
+            for i in range(6)
+        ]
+        counting = _CountingConn(db)
+        result = impact_analysis(models, "bronze.src", column="name", conn=counting)
+        assert len(result["affected_columns"]) == 6
+        assert counting.executes == 1
+
+
+class TestInferredSchema:
+    """The `schema=` argument: columns a bind pass knows, the catalog does not."""
+
+    def test_star_expands_from_an_inferred_schema(self):
+        lineage = extract_column_lineage_sql(
+            "SELECT * FROM silver.unbuilt",
+            ["silver.unbuilt"],
+            schema={"silver.unbuilt": [("id", "INTEGER"), ("label", "VARCHAR")]},
+        )
+        assert set(lineage) == {"id", "label"}
+        assert lineage["label"] == [
+            {"source_table": "silver.unbuilt", "source_column": "label"}
+        ]
+
+    def test_inferred_schema_wins_over_the_catalog(self, db):
+        """The catalog describes the last build; the inferred schema, the next one."""
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        db.execute("CREATE TABLE bronze.src AS SELECT 1 AS id, 'x' AS name")
+        lineage = extract_column_lineage_sql(
+            "SELECT * FROM bronze.src",
+            ["bronze.src"],
+            db,
+            schema={"bronze.src": [("id", "INTEGER"), ("name", "VARCHAR"), ("added", "DOUBLE")]},
+        )
+        assert set(lineage) == {"id", "name", "added"}
+
+    def test_unparseable_inferred_type_does_not_break_the_trace(self):
+        lineage = extract_column_lineage_sql(
+            "SELECT id FROM silver.unbuilt",
+            ["silver.unbuilt"],
+            schema={"silver.unbuilt": [("id", "NOT A REAL TYPE")]},
+        )
+        assert lineage["id"] == [
+            {"source_table": "silver.unbuilt", "source_column": "id"}
+        ]
+
+    def test_star_without_any_schema_is_marked_unresolved(self):
+        """No catalog, no inferred schema: the upstream is known, the columns are not."""
+        lineage = extract_column_lineage_sql(
+            "SELECT * FROM bronze.mystery", ["bronze.mystery"]
+        )
+        assert lineage == {
+            "*": [
+                {
+                    "source_table": "bronze.mystery",
+                    "source_column": "*",
+                    "resolved": False,
+                }
+            ]
+        }
+
+
+class TestLineageMemo:
+    """Tracing is memoized on the SQL plus the upstream column lists."""
+
+    def test_repeat_call_returns_an_independent_copy(self):
+        clear_lineage_cache()
+        sql = "SELECT c.customer_id, c.name FROM bronze.customers c"
+        first = extract_column_lineage_sql(sql, ["bronze.customers"])
+        first["customer_id"].append({"source_table": "junk", "source_column": "junk"})
+        first["injected"] = []
+
+        second = extract_column_lineage_sql(sql, ["bronze.customers"])
+        assert "injected" not in second
+        assert second["customer_id"] == [
+            {"source_table": "bronze.customers", "source_column": "customer_id"}
+        ]
+
+    def test_new_upstream_column_is_not_served_from_the_memo(self, db):
+        """A rebuilt upstream changes the key, so `SELECT *` re-expands."""
+        clear_lineage_cache()
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        db.execute("CREATE TABLE bronze.src AS SELECT 1 AS id, 'x' AS name")
+        sql = "SELECT * FROM bronze.src"
+        assert set(extract_column_lineage_sql(sql, ["bronze.src"], db)) == {"id", "name"}
+
+        db.execute("ALTER TABLE bronze.src ADD COLUMN extra INTEGER")
+        assert set(extract_column_lineage_sql(sql, ["bronze.src"], db)) == {
+            "id",
+            "name",
+            "extra",
+        }
+
+    def test_clear_lineage_cache_does_not_change_results(self):
+        sql = "SELECT o.order_id, o.amount FROM bronze.orders o"
+        before = extract_column_lineage_sql(sql, ["bronze.orders"])
+        clear_lineage_cache()
+        assert extract_column_lineage_sql(sql, ["bronze.orders"]) == before

@@ -213,16 +213,43 @@ def ensure_pr_builds_table(conn: duckdb.DuckDBPyConnection) -> None:
             error           VARCHAR
         )
     """, is_lake))
+    # Added after the table shipped. A read-only connection can't migrate;
+    # _fetch_build_record then reads without the column.
+    try:
+        conn.execute("ALTER TABLE _havn.pr_builds ADD COLUMN IF NOT EXISTS metric_diff JSON")
+    except Exception:
+        pass
 
 
 def _save_build_record(conn: duckdb.DuckDBPyConnection, record: dict) -> None:
     ensure_pr_builds_table(conn)
-    conn.execute("DELETE FROM _havn.pr_builds WHERE id = ?", [record["id"]])
+    # Update in place when the record exists: Ship polls the latest build
+    # while it runs, and a delete-then-insert let a poll land in between and
+    # see no build at all.
+    if conn.execute("SELECT 1 FROM _havn.pr_builds WHERE id = ?", [record["id"]]).fetchone():
+        conn.execute(
+            "UPDATE _havn.pr_builds SET branch_head = ?, status = ?, finished_at = ?, "
+            "duration_ms = ?, data_diff = ?, lineage_impact = ?, contract_results = ?, "
+            "error = ?, metric_diff = ? WHERE id = ?",
+            [
+                record.get("branch_head"),
+                record.get("status", "running"),
+                record.get("finished_at"),
+                record.get("duration_ms"),
+                json.dumps(record["data_diff"]) if record.get("data_diff") is not None else None,
+                json.dumps(record["lineage_impact"]) if record.get("lineage_impact") is not None else None,
+                json.dumps(record["contract_results"]) if record.get("contract_results") is not None else None,
+                record.get("error"),
+                json.dumps(record["metric_diff"]) if record.get("metric_diff") is not None else None,
+                record["id"],
+            ],
+        )
+        return
     conn.execute(
         "INSERT INTO _havn.pr_builds "
         "(id, pr_id, branch_head, status, started_at, finished_at, duration_ms, "
-        " data_diff, lineage_impact, contract_results, error) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " data_diff, lineage_impact, contract_results, error, metric_diff) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             record["id"],
             record["pr_id"],
@@ -235,6 +262,7 @@ def _save_build_record(conn: duckdb.DuckDBPyConnection, record: dict) -> None:
             json.dumps(record["lineage_impact"]) if record.get("lineage_impact") is not None else None,
             json.dumps(record["contract_results"]) if record.get("contract_results") is not None else None,
             record.get("error"),
+            json.dumps(record["metric_diff"]) if record.get("metric_diff") is not None else None,
         ],
     )
 
@@ -243,12 +271,16 @@ def _fetch_build_record(
     conn: duckdb.DuckDBPyConnection, pr_id: str
 ) -> dict | None:
     ensure_pr_builds_table(conn)
-    row = conn.execute(
-        "SELECT id, pr_id, branch_head, status, started_at, finished_at, "
-        "duration_ms, data_diff, lineage_impact, contract_results, error "
-        "FROM _havn.pr_builds WHERE pr_id = ? ORDER BY started_at DESC LIMIT 1",
-        [pr_id],
-    ).fetchone()
+    cols = (
+        "id, pr_id, branch_head, status, started_at, finished_at, "
+        "duration_ms, data_diff, lineage_impact, contract_results, error"
+    )
+    query = "FROM _havn.pr_builds WHERE pr_id = ? ORDER BY started_at DESC LIMIT 1"
+    try:
+        row = conn.execute(f"SELECT {cols}, metric_diff {query}", [pr_id]).fetchone()
+    except duckdb.Error:
+        # A warehouse from before metric_diff, opened read-only.
+        row = conn.execute(f"SELECT {cols}, NULL {query}", [pr_id]).fetchone()
     if row is None:
         return None
     return {
@@ -263,6 +295,7 @@ def _fetch_build_record(
         "lineage_impact": json.loads(row[8]) if isinstance(row[8], str) else row[8],
         "contract_results": json.loads(row[9]) if isinstance(row[9], str) else row[9],
         "error": row[10],
+        "metric_diff": json.loads(row[11]) if isinstance(row[11], str) else row[11],
     }
 
 
@@ -401,6 +434,20 @@ def add_comment(
     return comment
 
 
+def _same_person(a: str | None, b: str | None) -> bool:
+    return bool(a) and bool(b) and a.strip().lower() == b.strip().lower()
+
+
+def independent_approvers(pr: PullRequest) -> list[str]:
+    """Approvals that count: everyone who approved except the change's author.
+
+    ``approve_pr`` refuses self-approval, but PR files written before that
+    rule (or edited by hand) can still list the author, so merge and the
+    review gate filter here too.
+    """
+    return [a for a in pr.approvers if not _same_person(a, pr.author)]
+
+
 def approve_pr(project_dir: Path, pr_id: str, reviewer: str) -> PullRequest:
     pr = _load_pr(project_dir, pr_id)
     if pr is None:
@@ -408,6 +455,11 @@ def approve_pr(project_dir: Path, pr_id: str, reviewer: str) -> PullRequest:
     if pr.status != "open":
         raise ValueError(f"Cannot approve {pr.status} PR")
     reviewer = reviewer or "unknown"
+    if _same_person(reviewer, pr.author):
+        raise ValueError(
+            "You opened this change, so someone else has to approve it. "
+            "To merge without review, turn off 'requires approval' for this change."
+        )
     if reviewer not in pr.approvers:
         pr.approvers.append(reviewer)
     # Remove from change_requesters if they previously requested changes
@@ -957,6 +1009,9 @@ def _build_pr_locked(
         record["lineage_impact"] = _compute_lineage_impact(
             changed_files, union_dag, project_dir
         )
+        # Semantic-layer metrics that read an affected model, on both sides.
+        touched = set(record["lineage_impact"]["changed"]) | set(record["lineage_impact"]["impacted"])
+        record["metric_diff"] = _metric_diff(conn, worktree_path, "pr_db", touched)
 
         record["status"] = "success"
     except Exception as e:
@@ -982,6 +1037,95 @@ def _build_pr_locked(
     return record
 
 
+def _number(v: Any) -> float | None:
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+METRIC_SERIES_BUCKETS = 12
+
+
+def _metric_diff(
+    conn: duckdb.DuckDBPyConnection,
+    branch_root: Path,
+    attached_alias: str,
+    models: set[str],
+) -> list[dict]:
+    """Each metric over an affected model, on the base warehouse and the PR's.
+
+    Metric definitions come from the PR branch (``branch_root/metrics``), and
+    the same definition is compiled against both sides: as written for the
+    base warehouse, and with its model qualified by ``attached_alias`` for the
+    PR build. Returns ``[{metric, model, description, base, pr, delta,
+    delta_pct, series, error}]``; ``series`` is the last 12 months of both
+    sides when the metric has a time dimension.
+    """
+    from dataclasses import replace
+
+    from havn.engine.semantic import compile_metric, load_metrics
+
+    try:
+        metrics, _errors = load_metrics(branch_root)
+    except Exception as e:
+        logger.debug("metric diff skipped: %s", e)
+        return []
+
+    def run(sql: str) -> list[tuple]:
+        return conn.execute(sql).fetchall()
+
+    out: list[dict] = []
+    for metric in sorted(metrics.values(), key=lambda m: m.name):
+        if metric.model not in models:
+            continue
+        pr_metric = replace(metric, model=f"{attached_alias}.{metric.model}")
+        entry: dict[str, Any] = {
+            "metric": metric.name,
+            "model": metric.model,
+            "description": metric.description,
+            "base": None,
+            "pr": None,
+            "delta": None,
+            "delta_pct": None,
+            "series": None,
+            "error": None,
+        }
+        errors = []
+        try:
+            entry["base"] = _number(run(compile_metric(metric))[0][0])
+        except Exception as e:
+            # A model new in this PR has no base table: not an error worth showing.
+            errors.append(f"base: {e}")
+        try:
+            entry["pr"] = _number(run(compile_metric(pr_metric))[0][0])
+        except Exception as e:
+            errors.append(f"branch: {e}")
+            entry["error"] = str(e)
+        if entry["base"] is not None and entry["pr"] is not None:
+            entry["delta"] = entry["pr"] - entry["base"]
+            if entry["base"] != 0:
+                entry["delta_pct"] = round(entry["delta"] / abs(entry["base"]) * 100, 2)
+        if metric.time_dimension:
+            try:
+                base_rows = {} if entry["base"] is None else {
+                    str(r[0]): _number(r[1]) for r in run(compile_metric(metric, grain="month"))
+                }
+                pr_rows = {str(r[0]): _number(r[1]) for r in run(compile_metric(pr_metric, grain="month"))}
+                buckets = sorted(set(base_rows) | set(pr_rows))[-METRIC_SERIES_BUCKETS:]
+                entry["series"] = [
+                    {"bucket": b, "base": base_rows.get(b), "pr": pr_rows.get(b)} for b in buckets
+                ]
+            except Exception as e:
+                logger.debug("metric series for %s skipped: %s", metric.name, e)
+        if errors:
+            logger.debug("metric diff %s: %s", metric.name, "; ".join(errors))
+        out.append(entry)
+    return out
+
+
 def get_latest_build(conn: duckdb.DuckDBPyConnection, pr_id: str) -> dict | None:
     return _fetch_build_record(conn, pr_id)
 
@@ -989,6 +1133,38 @@ def get_latest_build(conn: duckdb.DuckDBPyConnection, pr_id: str) -> dict | None
 # ---------------------------------------------------------------------------
 # Merge
 # ---------------------------------------------------------------------------
+
+
+# Paths whose uncommitted changes do not block a merge: the PR records
+# themselves, which the review flow writes as it goes, and havn's own runtime
+# files (the `havn serve` lockfile, PR build and deploy worktrees), which exist whenever
+# the web UI is running and are never committed.
+MERGE_IGNORED_PATHS = (".havn/prs/", ".havn/serve.json", ".havn/pr-build/", ".havn/deploy/")
+
+
+def merge_ignored_paths(project_dir: Path) -> tuple[str, ...]:
+    """MERGE_IGNORED_PATHS plus every environment's warehouse file.
+
+    Warehouses are data, not code, and a project that adds a `prod`
+    environment gets a `prod.duckdb` its .gitignore may not cover yet.
+    """
+    extra: list[str] = []
+    try:
+        from havn.config import load_project
+
+        cfg = load_project(project_dir)
+        paths = [cfg.database.path] + [
+            (env.database or {}).get("path") for env in cfg.environments.values()
+        ]
+        root = project_dir.resolve()
+        for p in filter(None, paths):
+            full = (project_dir / p).resolve()
+            if full.is_relative_to(root):
+                rel = full.relative_to(root).as_posix()
+                extra += [rel, f"{rel}.wal"]
+    except Exception as e:
+        logger.debug("merge ignore: could not read environments: %s", e)
+    return MERGE_IGNORED_PATHS + tuple(extra)
 
 
 def can_merge(project_dir: Path, pr: PullRequest) -> dict:
@@ -1068,14 +1244,20 @@ def merge_pr(
         return {"success": False, "error": f"PR '{pr_id}' not found"}
     if pr.status != "open":
         return {"success": False, "error": f"Cannot merge {pr.status} PR"}
-    if pr.require_approval and not pr.approvers:
-        return {"success": False, "error": "PR requires at least one approval"}
+    if pr.require_approval and not independent_approvers(pr):
+        return {
+            "success": False,
+            "error": "PR requires at least one approval from someone other than its author",
+        }
     if pr.change_requesters:
         return {
             "success": False,
             "error": f"Reviewers have requested changes: {', '.join(pr.change_requesters)}",
         }
-    if is_dirty(project_dir):
+    # PR metadata under .havn/prs/ is rewritten by every create, approve and
+    # comment, and `havn serve` holds .havn/serve.json, so counting either
+    # would refuse every merge made from the UI.
+    if is_dirty(project_dir, ignore=merge_ignored_paths(project_dir)):
         return {
             "success": False,
             "error": "Working tree has uncommitted changes — commit or stash before merging",

@@ -46,6 +46,31 @@ def test_strip_config_comments():
     assert query.strip() == "SELECT 1"
 
 
+def test_content_hash_ignores_blanked_directive_lines():
+    """Blanking directives in place must not change any model's hash.
+
+    Otherwise every already-built model in every project would rebuild once
+    on upgrade: the queries are the same SQL, only the header's worth of
+    leading blank lines differs.
+    """
+    # What discovery produced before directives were blanked in place...
+    before = _make_model(query="SELECT id\nFROM bronze.src\n")
+    # ...and what it produces now, for the same file.
+    after = _make_model(query="\n\nSELECT id\nFROM bronze.src\n")
+    assert before.content_hash == after.content_hash
+
+    # A directive between the SQL lines blanks to an empty line, which the
+    # whitespace normalization already absorbs.
+    mid_file = _make_model(query="SELECT id\n\nFROM bronze.src\n")
+    assert mid_file.content_hash == before.content_hash
+
+
+def test_content_hash_still_tracks_real_query_changes():
+    a = _make_model(query="SELECT id FROM bronze.src")
+    b = _make_model(query="SELECT id, name FROM bronze.src")
+    assert a.content_hash != b.content_hash
+
+
 def test_discover_models(tmp_path):
     bronze = tmp_path / "transform" / "bronze"
     bronze.mkdir(parents=True)
@@ -237,3 +262,209 @@ def test_transform_nonexistent_target(tmp_path):
     conn.close()
 
     conn.close()
+
+
+def _chain_project(tmp_path):
+    """A landing -> bronze -> silver chain, plus a connection to build it in."""
+    db_path = tmp_path / "test.duckdb"
+    conn = duckdb.connect(str(db_path))
+    ensure_meta_table(conn)
+    conn.execute("CREATE SCHEMA IF NOT EXISTS landing")
+    conn.execute("CREATE TABLE landing.src AS SELECT 1 AS id, 'a' AS name")
+
+    transform_dir = tmp_path / "transform"
+    (transform_dir / "bronze").mkdir(parents=True)
+    (transform_dir / "silver").mkdir(parents=True)
+    (transform_dir / "bronze" / "src.sql").write_text(textwrap.dedent("""\
+        @config materialized=table, schema=bronze
+
+        SELECT id, name FROM landing.src
+    """))
+    (transform_dir / "silver" / "enriched.sql").write_text(textwrap.dedent("""\
+        @config materialized=table, schema=silver
+
+        SELECT id, upper(name) AS name FROM bronze.src
+    """))
+    return conn, transform_dir, str(db_path)
+
+
+def _upstream_hash(conn, model_path):
+    row = conn.execute(
+        "SELECT upstream_hash FROM _havn.model_state WHERE model_path = ?",
+        [model_path],
+    ).fetchone()
+    return row[0] if row else None
+
+
+def test_targeted_run_preserves_upstream_hash(tmp_path):
+    """A targeted run must hash against the whole DAG, not the selection.
+
+    Filtering the model list before building the DAG left
+    ``_compute_upstream_hash`` with no upstreams to hash, so it stored
+    sha256("") and the next full run rebuilt an unchanged model.
+    """
+    conn, transform_dir, _ = _chain_project(tmp_path)
+    try:
+        results = run_transform(conn, transform_dir)
+        assert results["silver.enriched"] == "built"
+        before = _upstream_hash(conn, "silver.enriched")
+        assert before
+
+        # Nothing changed, so the targeted run should skip -- and must not
+        # rewrite the stored upstream hash either way.
+        results = run_transform(conn, transform_dir, targets=["silver.enriched"])
+        assert results == {"silver.enriched": "skipped"}
+        assert _upstream_hash(conn, "silver.enriched") == before
+
+        # Forcing the targeted rebuild rewrites state; the hash must survive.
+        run_transform(conn, transform_dir, targets=["silver.enriched"], force=True)
+        assert _upstream_hash(conn, "silver.enriched") == before
+
+        # The next full run has nothing to do.
+        results = run_transform(conn, transform_dir)
+        assert results == {"bronze.src": "skipped", "silver.enriched": "skipped"}
+    finally:
+        conn.close()
+
+
+def test_targeted_run_preserves_upstream_hash_parallel(tmp_path):
+    """Same contract on the parallel path, which hands workers the model map."""
+    conn, transform_dir, db_path = _chain_project(tmp_path)
+    try:
+        run_transform(conn, transform_dir, parallel=True, db_path=db_path)
+        before = _upstream_hash(conn, "silver.enriched")
+        assert before
+
+        run_transform(
+            conn, transform_dir, targets=["silver.enriched"],
+            force=True, parallel=True, db_path=db_path,
+        )
+        assert _upstream_hash(conn, "silver.enriched") == before
+
+        results = run_transform(conn, transform_dir, parallel=True, db_path=db_path)
+        assert results == {"bronze.src": "skipped", "silver.enriched": "skipped"}
+    finally:
+        conn.close()
+
+
+def test_upstream_change_still_rebuilds_downstream(tmp_path):
+    """Hashing the full DAG must not blunt real change propagation."""
+    conn, transform_dir, _ = _chain_project(tmp_path)
+    try:
+        run_transform(conn, transform_dir)
+        (transform_dir / "bronze" / "src.sql").write_text(textwrap.dedent("""\
+            @config materialized=table, schema=bronze
+
+            SELECT id, name, 1 AS version FROM landing.src
+        """))
+        results = run_transform(conn, transform_dir)
+        assert results["bronze.src"] == "built"
+        assert results["silver.enriched"] == "built"
+    finally:
+        conn.close()
+
+
+# --- Cached AST ---------------------------------------------------------
+
+
+def _make_model(query="SELECT id FROM bronze.src", **kwargs):
+    defaults = dict(
+        path=Path("m.sql"), name="m", schema="silver", full_name="silver.m",
+        sql="", query=query, materialized="view", depends_on=["bronze.src"],
+    )
+    defaults.update(kwargs)
+    return SQLModel(**defaults)
+
+
+def test_model_ast_is_cached():
+    model = _make_model()
+    assert model.ast is not None
+    assert model.ast is model.ast
+
+
+def test_model_ast_stays_out_of_equality_and_hash():
+    """The AST must not leak into dataclass equality or the content hash."""
+    a = _make_model()
+    b = _make_model()
+    _ = a.ast  # populate one side's cache only
+    assert a == b
+    assert a.content_hash == b.content_hash
+
+
+def test_model_ast_none_for_unparseable_sql():
+    model = _make_model(query="THIS IS NOT VALID SQL AT ALL")
+    assert model.ast is None
+    assert model.parse_error
+
+
+def test_duplicate_model_names_are_rejected(tmp_path):
+    """Two files producing one name used to make build_dag drop one silently."""
+    from havn.engine.transform.discovery import DuplicateModelError
+
+    transform_dir = tmp_path / "transform"
+    (transform_dir / "bronze").mkdir(parents=True)
+    (transform_dir / "silver").mkdir(parents=True)
+    (transform_dir / "bronze" / "orders.sql").write_text(
+        "@config materialized=table, schema=gold\n\nSELECT 1 AS id\n"
+    )
+    (transform_dir / "silver" / "orders.sql").write_text(
+        "@config materialized=table, schema=gold\n\nSELECT 2 AS id\n"
+    )
+
+    with pytest.raises(DuplicateModelError) as exc:
+        discover_models(transform_dir)
+
+    message = str(exc.value)
+    assert "gold.orders" in message
+    assert str(transform_dir / "bronze" / "orders.sql") in message
+    assert str(transform_dir / "silver" / "orders.sql") in message
+
+
+def test_same_name_in_different_schemas_is_fine(tmp_path):
+    transform_dir = tmp_path / "transform"
+    (transform_dir / "bronze").mkdir(parents=True)
+    (transform_dir / "silver").mkdir(parents=True)
+    (transform_dir / "bronze" / "orders.sql").write_text("SELECT 1 AS id\n")
+    (transform_dir / "silver" / "orders.sql").write_text("SELECT 2 AS id\n")
+
+    names = {m.full_name for m in discover_models(transform_dir)}
+    assert names == {"bronze.orders", "silver.orders"}
+
+
+def test_duplicate_model_error_is_a_value_error(tmp_path):
+    """Callers already catching ValueError from discovery keep working."""
+    from havn.engine.transform.discovery import DuplicateModelError
+
+    assert issubclass(DuplicateModelError, ValueError)
+
+
+def test_sql_parsed_once_per_pass(tmp_path, monkeypatch):
+    """Discovery, validation and lineage share one parse per model.
+
+    Each of them used to call ``sqlglot.parse_one`` on the same SQL.
+    """
+    import sqlglot
+
+    from havn.engine.transform import extract_column_lineage, validate_models
+
+    bronze = tmp_path / "transform" / "bronze"
+    bronze.mkdir(parents=True)
+    (bronze / "src.sql").write_text(
+        "@config materialized=view, schema=bronze\n\n"
+        "SELECT id, name FROM landing.src\n"
+    )
+
+    calls = []
+    real_parse_one = sqlglot.parse_one
+
+    def counting_parse_one(sql, *args, **kwargs):
+        calls.append(sql)
+        return real_parse_one(sql, *args, **kwargs)
+
+    monkeypatch.setattr(sqlglot, "parse_one", counting_parse_one)
+
+    models = discover_models(tmp_path / "transform")
+    assert len(models) == 1
+    validate_models(None, models)
+    extract_column_lineage(models[0])
+    assert len(calls) == 1, calls

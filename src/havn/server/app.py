@@ -151,6 +151,8 @@ from havn.server.routes.connectors import router as connectors_router  # noqa: E
 from havn.server.routes.pipeline import router as pipeline_router  # noqa: E402
 from havn.server.routes.quality import router as quality_router  # noqa: E402
 from havn.server.routes.catalog import router as catalog_router  # noqa: E402
+from havn.server.routes.home import router as home_router  # noqa: E402
+from havn.server.routes.deploy import router as deploy_router  # noqa: E402
 from havn.server.routes.collaboration import (  # noqa: E402
     register_websocket,
     router as collaboration_router,
@@ -169,6 +171,7 @@ from havn.server.routes.agent import (  # noqa: E402
 from havn.server.routes.circuits import router as circuits_router  # noqa: E402
 from havn.server.routes.git import router as git_router  # noqa: E402
 from havn.server.routes.macros import router as macros_router  # noqa: E402
+from havn.server.routes.packages import router as packages_router  # noqa: E402
 from havn.server.routes.dashboards import router as dashboards_router  # noqa: E402
 from havn.server.routes.jobs import router as jobs_router  # noqa: E402
 from havn.server.routes.pr import router as pr_router  # noqa: E402
@@ -179,10 +182,15 @@ from havn.server.routes.semantic import router as semantic_router  # noqa: E402
 from havn.server.routes.sql_api import router as sql_api_router  # noqa: E402
 from havn.server.routes.export import router as export_router  # noqa: E402
 from havn.server.routes.streaming import router as streaming_router  # noqa: E402
+from havn.server.routes.unit_tests import router as unit_tests_router  # noqa: E402
+from havn.server.routes.bind import router as bind_router  # noqa: E402
+from havn.server.routes.rename import router as rename_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(files_router)
 app.include_router(models_router)
+app.include_router(bind_router)
+app.include_router(rename_router)
 app.include_router(dag_router)
 app.include_router(query_router)
 app.include_router(notebooks_router)
@@ -190,6 +198,8 @@ app.include_router(connectors_router)
 app.include_router(pipeline_router)
 app.include_router(quality_router)
 app.include_router(catalog_router)
+app.include_router(home_router)
+app.include_router(deploy_router)
 app.include_router(collaboration_router)
 app.include_router(lint_router)
 app.include_router(masking_router)
@@ -202,6 +212,7 @@ app.include_router(audit_router)
 app.include_router(circuits_router)
 app.include_router(git_router)
 app.include_router(macros_router)
+app.include_router(packages_router)
 app.include_router(dashboards_router)
 app.include_router(jobs_router)
 app.include_router(pr_router)
@@ -212,6 +223,7 @@ app.include_router(semantic_router)
 app.include_router(sql_api_router)
 app.include_router(export_router)
 app.include_router(streaming_router)
+app.include_router(unit_tests_router)
 
 # Register WebSocket endpoints (can't use APIRouter for WebSocket)
 register_websocket(app)

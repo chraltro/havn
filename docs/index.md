@@ -78,6 +78,7 @@ Ingest Scripts (.py / .dpnb)
 | Core Concepts | [Transforms](transforms.md), [Pipelines](pipelines.md), [Seeds](seeds.md), [Sources](sources.md) |
 | Data Integration | [Connectors](connectors.md), [CDC](cdc.md) |
 | Data Quality | [Quality](quality.md), [Contracts](contracts.md), [Lineage](lineage.md) |
+| Refactoring | [Refactoring](refactoring.md) -- rename a column, find column references |
 | Security | [Auth](auth.md), [Masking](masking.md) |
 | Advanced | [Scheduler](scheduler.md), [Notebooks](notebooks.md), [Versioning](versioning.md) |
 | Reference | [CLI Reference](cli-reference.md), [API Reference](api-reference.md) |

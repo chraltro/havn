@@ -112,6 +112,8 @@ export default function CommandPalette({ isOpen, onClose, files, tables, streams
 
     // Commands
     const commands = [
+      { name: "Home", secondary: "Pipeline health and what needs attention", icon: "\u2302", action: () => { onNavigate("Overview"); onClose(); } },
+      { name: "Ship", secondary: "Review and merge changes", icon: "\u21E1", action: () => { onNavigate("Ship"); onClose(); } },
       { name: "Run Transform", secondary: "Build all SQL models", icon: "\u25B6", action: () => { onNavigate("Editor"); onClose(); } },
       { name: "Run Diff", secondary: "Preview transform changes", icon: "\u0394", action: () => { onNavigate("Diff"); onClose(); } },
       { name: "Query Table", secondary: "Open SQL query runner", icon: "Q", action: () => { onNavigate("Query"); onClose(); } },

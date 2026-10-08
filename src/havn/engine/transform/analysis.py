@@ -2,12 +2,27 @@
 
 from __future__ import annotations
 
+import difflib
 import logging
+import re
+from pathlib import Path
 
 import duckdb
 
-from havn.engine.sql_analysis import extract_column_lineage as _extract_column_lineage_impl
+from havn.engine.sql_analysis import (
+    BATCH_SIZES,
+    CONFIG_KEYS,
+    HARD_DELETE_POLICIES,
+    MATERIALIZATIONS,
+    ON_SCHEMA_CHANGE_POLICIES,
+    SNAPSHOT_STRATEGIES,
+    extract_column_lineage as _extract_column_lineage_impl,
+    extract_column_references,
+    fetch_column_catalog,
+    parse_config,
+)
 
+from .execution import parse_event_time
 from .models import SQLModel, ValidationError
 
 logger = logging.getLogger("havn.transform")
@@ -16,17 +31,328 @@ logger = logging.getLogger("havn.transform")
 def extract_column_lineage(
     model: SQLModel,
     conn: duckdb.DuckDBPyConnection | None = None,
+    column_catalog: dict[str, list[str]] | None = None,
 ) -> dict[str, list[dict[str, str]]]:
     """Extract column-level lineage from a SQL model using sqlglot AST parsing.
 
     Returns a mapping of output_column -> list of {source_table, source_column}.
     Delegates to the shared sql_analysis module for AST-based lineage tracing.
+
+    Tracing several models in one pass? Call
+    :func:`havn.engine.sql_analysis.fetch_column_catalog` once and pass the
+    result as ``column_catalog`` so the catalog is not re-read per model.
     """
     return _extract_column_lineage_impl(
         query=model.query,
         depends_on=model.depends_on,
         conn=conn,
+        column_catalog=column_catalog,
+        ast=model.ast,
     )
+
+
+def _did_you_mean(value: str, options: set[str] | frozenset[str]) -> str:
+    """A ``Did you mean 'x'?`` clause for a near miss, or "" when there is none."""
+    close = difflib.get_close_matches(value.lower(), sorted(options), n=1, cutoff=0.6)
+    return f" Did you mean '{close[0]}'?" if close else ""
+
+
+def _validate_config_keys(models: list[SQLModel]) -> list[ValidationError]:
+    """Report `@config` keys and materializations that mean nothing.
+
+    Discovery reads a fixed set of keys off the config dict and ignores the
+    rest, so `materialised=table` used to build a view without a word of
+    complaint, and any key from a newer version of havn (or a plain typo)
+    did the same.
+    """
+    errors: list[ValidationError] = []
+    for model in models:
+        config = parse_config(model.sql)
+        for key in config:
+            if key in CONFIG_KEYS:
+                continue
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown @config key '{key}'."
+                    f"{_did_you_mean(key, CONFIG_KEYS)}"
+                    f" Known keys: {', '.join(sorted(CONFIG_KEYS))}."
+                ),
+            ))
+
+        materialized = config.get("materialized")
+        if materialized and materialized not in MATERIALIZATIONS:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown materialization '{materialized}'."
+                    f"{_did_you_mean(materialized, MATERIALIZATIONS)}"
+                    f" Supported: {', '.join(sorted(MATERIALIZATIONS))}."
+                ),
+            ))
+
+        policy = config.get("on_schema_change")
+        if policy and policy not in ON_SCHEMA_CHANGE_POLICIES:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown on_schema_change policy '{policy}'."
+                    f"{_did_you_mean(policy, ON_SCHEMA_CHANGE_POLICIES)}"
+                    f" Supported: {', '.join(sorted(ON_SCHEMA_CHANGE_POLICIES))}."
+                ),
+            ))
+        elif policy and config.get("materialized") != "incremental":
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="warning",
+                message=(
+                    "on_schema_change only applies to incremental models; "
+                    f"this model is materialized as "
+                    f"'{config.get('materialized', 'view')}' and the policy is ignored"
+                ),
+            ))
+    return errors
+
+
+_TAG_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
+
+
+def _validate_tags(models: list[SQLModel]) -> list[ValidationError]:
+    """Report `@config tags=` entries that no `tag:` selector could match.
+
+    Tags are free text on the way in, so `tags = daily finance` (a space
+    instead of a comma) used to produce a single tag nobody would ever type
+    at the command line. Identifier-shaped tags keep `tag:` selectors
+    predictable, and a hyphen is allowed because job names use them.
+    """
+    errors: list[ValidationError] = []
+    for model in models:
+        for tag in getattr(model, "tags", []) or []:
+            if not _TAG_RE.match(tag):
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=(
+                        f"Invalid tag '{tag}' in @config tags=. Tags must be "
+                        "identifiers (letters, digits, underscore, hyphen; "
+                        "not starting with a digit) and separated by commas."
+                    ),
+                ))
+    return errors
+
+
+_SNAPSHOT_ONLY_KEYS = ("strategy", "updated_at", "check_cols", "hard_deletes")
+
+
+def _validate_snapshot_config(models: list[SQLModel]) -> list[ValidationError]:
+    """Check that a `materialized=snapshot` model can actually be merged.
+
+    Every one of these is caught at execution time too, because the engine
+    refuses to write history it cannot reason about. Catching them here means
+    `havn check` says so before a run, rather than after the first table has
+    already been built.
+    """
+    errors: list[ValidationError] = []
+    for model in models:
+        config = parse_config(model.sql)
+        is_snapshot = model.materialized == "snapshot"
+
+        if not is_snapshot:
+            for key in _SNAPSHOT_ONLY_KEYS:
+                if key in config:
+                    errors.append(ValidationError(
+                        model=model.full_name,
+                        severity="warning",
+                        message=(
+                            f"@config {key}= only applies to a snapshot model; "
+                            f"this model is materialized as '{model.materialized}' "
+                            "and the setting is ignored"
+                        ),
+                    ))
+            continue
+
+        if not model.unique_key:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    "Snapshot models need @config unique_key=<column> so a "
+                    "source row can be matched against its own history."
+                ),
+            ))
+        if model.strategy not in SNAPSHOT_STRATEGIES:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown snapshot strategy '{model.strategy}'."
+                    f"{_did_you_mean(model.strategy, SNAPSHOT_STRATEGIES)}"
+                    f" Supported: {', '.join(sorted(SNAPSHOT_STRATEGIES))}."
+                ),
+            ))
+        elif model.strategy == "timestamp" and not model.updated_at:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    "strategy=timestamp needs @config updated_at=<column>: the "
+                    "engine compares that column against the stored valid_from "
+                    "to decide whether a row changed."
+                ),
+            ))
+        if model.updated_at and model.strategy != "timestamp":
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="warning",
+                message=(
+                    "updated_at only applies to strategy=timestamp; this "
+                    f"snapshot uses strategy={model.strategy} and the column "
+                    "is ignored"
+                ),
+            ))
+        if model.check_cols and model.strategy != "check":
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    "check_cols only applies to strategy=check. Drop "
+                    "check_cols, or switch the snapshot to strategy=check."
+                ),
+            ))
+        if model.hard_deletes not in HARD_DELETE_POLICIES:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown hard_deletes policy '{model.hard_deletes}'."
+                    f"{_did_you_mean(model.hard_deletes, HARD_DELETE_POLICIES)}"
+                    f" Supported: {', '.join(sorted(HARD_DELETE_POLICIES))}."
+                ),
+            ))
+        for key in ("incremental_filter", "watermark"):
+            if key in config:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=(
+                        f"@config {key}= is not supported on a snapshot model. "
+                        "A snapshot always reads the source's current state in "
+                        "full and compares it against the history it already "
+                        "holds; filtering the read would silently look like a "
+                        "hard delete of every row that got filtered out."
+                    ),
+                ))
+    return errors
+
+
+_MICROBATCH_ONLY_KEYS = ("event_time", "batch_size", "begin", "lookback")
+
+
+def _validate_microbatch_config(models: list[SQLModel]) -> list[ValidationError]:
+    """Check that a microbatch model can be cut into windows.
+
+    The engine refuses to run one it cannot window, so everything here is a
+    pre-flight of the same rules. The point is that `havn check` answers
+    before a backfill starts rather than after the first window.
+    """
+    errors: list[ValidationError] = []
+    for model in models:
+        config = parse_config(model.sql)
+        is_microbatch = (
+            model.materialized == "incremental"
+            and model.incremental_strategy == "microbatch"
+        )
+
+        if not is_microbatch:
+            for key in _MICROBATCH_ONLY_KEYS:
+                if key in config:
+                    errors.append(ValidationError(
+                        model=model.full_name,
+                        severity="warning",
+                        message=(
+                            f"@config {key}= only applies to "
+                            "incremental_strategy=microbatch; this model uses "
+                            f"'{model.incremental_strategy}' and the setting "
+                            "is ignored"
+                        ),
+                    ))
+            continue
+
+        for key, what in (
+            ("event_time", "the column each window is cut on"),
+            ("batch_size", "one of hour, day, month, year"),
+            ("begin", "the first window to process, as a date"),
+        ):
+            if not getattr(model, key):
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=(
+                        f"incremental_strategy=microbatch needs @config "
+                        f"{key}=: {what}."
+                    ),
+                ))
+        if model.batch_size and model.batch_size not in BATCH_SIZES:
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    f"Unknown batch_size '{model.batch_size}'."
+                    f"{_did_you_mean(model.batch_size, BATCH_SIZES)}"
+                    f" Supported: {', '.join(sorted(BATCH_SIZES))}."
+                ),
+            ))
+        if model.begin:
+            try:
+                parse_event_time(model.begin, "begin=")
+            except Exception as e:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=str(e),
+                ))
+        raw_lookback = config.get("lookback")
+        if raw_lookback is not None:
+            try:
+                if int(raw_lookback) < 0:
+                    raise ValueError
+            except ValueError:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=(
+                        f"lookback must be a whole number of windows, not "
+                        f"'{raw_lookback}'."
+                    ),
+                ))
+        for key in ("incremental_filter", "watermark"):
+            if key in config:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="error",
+                    message=(
+                        f"@config {key}= cannot be combined with "
+                        "incremental_strategy=microbatch. The batch window is "
+                        "already the filter; a second one would silently "
+                        "narrow every window and leave gaps nothing refills."
+                    ),
+                ))
+        for placeholder in ("{start}", "{end}"):
+            if placeholder not in model.query:
+                errors.append(ValidationError(
+                    model=model.full_name,
+                    severity="warning",
+                    message=(
+                        f"Microbatch model does not use {placeholder}. havn "
+                        "does not add an event-time filter for you, so every "
+                        "window would read the whole source and the last "
+                        "window would win."
+                    ),
+                ))
+    return errors
 
 
 def validate_models(
@@ -36,6 +362,10 @@ def validate_models(
     source_columns: dict[str, set[str]] | None = None,
     landing_schemas: set[str] | None = None,
     deny_rules: list | None = None,
+    *,
+    bind: bool = False,
+    project_dir=None,
+    schema_drift: bool | None = None,
 ) -> list[ValidationError]:
     """Validate all models without executing them.
 
@@ -54,8 +384,14 @@ def validate_models(
         known_tables: Additional known table names (e.g. from seeds, sources).
         source_columns: Column sets declared in sources.yml, keyed by table name.
         landing_schemas: Schema names reserved for raw/landing data.
+        bind: Resolve every model through the DuckDB binder as well, which
+            also enables the contract column check and the schema drift
+            warning, both of which need an inferred schema.
+        project_dir: Project root, used to find contracts and settings.
+        schema_drift: Report a model whose output shape has moved since its
+            last build. ``None`` reads ``validation.schema_drift`` from
+            project.yml, where it is off by default.
     """
-    import sqlglot
     from sqlglot import exp
 
     model_names = {m.full_name for m in models}
@@ -82,26 +418,19 @@ def validate_models(
                 c.lower() for c in cols
             )
     if conn:
-        try:
-            rows = conn.execute(
-                "SELECT table_schema || '.' || table_name, column_name "
-                "FROM information_schema.columns"
-            ).fetchall()
-            for table_fqn, col_name in rows:
-                table_fqn = table_fqn.lower()
-                column_catalog.setdefault(table_fqn, set()).add(col_name.lower())
-        except Exception as e:
-            logger.debug("Could not describe table columns: %s", e)
+        for table_fqn, cols in fetch_column_catalog(conn).items():
+            column_catalog.setdefault(table_fqn, set()).update(
+                c.lower() for c in cols
+            )
 
     for model in models:
-        # 1. Parse check
-        try:
-            parsed = sqlglot.parse_one(model.query, read="duckdb")
-        except sqlglot.errors.ParseError as e:
+        # 1. Parse check. ``model.ast`` is the tree discovery already parsed.
+        parsed = model.ast
+        if parsed is None:
             errors.append(ValidationError(
                 model=model.full_name,
                 severity="error",
-                message=f"SQL parse error: {e}",
+                message=f"SQL parse error: {model.parse_error}",
             ))
             continue
 
@@ -223,6 +552,11 @@ def validate_models(
 
     # --- Additional pre-build validations ---
 
+    errors.extend(_validate_config_keys(models))
+    errors.extend(_validate_tags(models))
+    errors.extend(_validate_snapshot_config(models))
+    errors.extend(_validate_microbatch_config(models))
+
     # Default landing schemas if not provided
     _landing = {s.lower() for s in landing_schemas} if landing_schemas else {"landing"}
 
@@ -249,7 +583,21 @@ def validate_models(
                     ),
                 ))
 
-        # 6. Model must not write to a landing schema
+        # 6. Assertions need a table to query, and an ephemeral model never
+        #    becomes one.
+        if model.materialized == "ephemeral" and (model.assertions or model.grain):
+            errors.append(ValidationError(
+                model=model.full_name,
+                severity="error",
+                message=(
+                    "assertions cannot run on ephemeral models; move them to a "
+                    "consumer. An ephemeral model is inlined into its consumers "
+                    "as a CTE and never materialized, so there is nothing to "
+                    "query after the build."
+                ),
+            ))
+
+        # 7. Model must not write to a landing schema
         if model.schema.lower() in _landing:
             errors.append(ValidationError(
                 model=model.full_name,
@@ -260,13 +608,12 @@ def validate_models(
                 ),
             ))
 
-    # 7. Deny-list policies: refuse models in forbidden schemas that
+    # 8. Deny-list policies: refuse models in forbidden schemas that
     #    reference forbidden columns. Catches PII leaks at compile time.
     if deny_rules:
         for model in models:
-            try:
-                parsed = sqlglot.parse_one(model.query, read="duckdb")
-            except sqlglot.errors.ParseError:
+            parsed = model.ast
+            if parsed is None:
                 continue  # Already reported above
             schema_lower = model.schema.lower()
             referenced_columns: set[str] = set()
@@ -291,6 +638,220 @@ def validate_models(
                         ),
                     ))
 
+    # 8. Shadow bind pass: hand the SQL to the DuckDB binder.
+    #
+    # Everything above is name-level. The binder is what resolves types,
+    # function signatures and columns on upstreams that were never built. It
+    # needs a writable connection to attach its throwaway catalog, so it is
+    # opt-in rather than on by default.
+    if bind and conn is not None:
+        errors.extend(
+            _bind_errors(conn, models, project_dir, schema_drift=schema_drift)
+        )
+
+    return errors
+
+
+def _bind_errors(
+    conn: duckdb.DuckDBPyConnection,
+    models: list[SQLModel],
+    project_dir=None,
+    *,
+    schema_drift: bool | None = None,
+) -> list[ValidationError]:
+    """Run the shadow bind pass and render it as ``ValidationError`` rows.
+
+    The bind pass produces an inferred schema per model as a side result, so
+    two checks that need one ride along here: contract column declarations,
+    and (when ``schema_drift`` is on) a model whose output shape has moved
+    since its last build. ``schema_drift`` defaults to whatever
+    ``validation.schema_drift`` says in project.yml.
+    """
+    from .bind import as_validation_message, bind_models
+
+    errors: list[ValidationError] = []
+    try:
+        result = bind_models(conn, models, project_dir=project_dir)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug("Bind pass failed: %s", e)
+        return errors
+
+    for warning in result.warnings:
+        errors.append(ValidationError(
+            model="",
+            severity="warning",
+            message=warning.message,
+        ))
+    for model_name, bind_errors in result.errors.items():
+        for err in bind_errors:
+            errors.append(ValidationError(
+                model=model_name,
+                severity="error",
+                message=as_validation_message(err),
+                line=err.line,
+            ))
+
+    errors.extend(_contract_schema_errors(conn, project_dir, result.schemas))
+
+    if schema_drift is None:
+        schema_drift = _schema_drift_enabled(project_dir)
+    if schema_drift:
+        errors.extend(_schema_drift_warnings(conn, models, result.schemas))
+    return errors
+
+
+def _schema_drift_enabled(project_dir) -> bool:
+    """Whether ``validation.schema_drift: warn`` is set in project.yml."""
+    if project_dir is None:
+        return False
+    try:
+        from pathlib import Path
+
+        from havn.config import load_project
+
+        config = load_project(Path(project_dir))
+    except Exception as e:  # pragma: no cover - a bad project.yml is reported elsewhere
+        logger.debug("Could not read validation settings: %s", e)
+        return False
+    validation = getattr(config, "validation", None)
+    return str(getattr(validation, "schema_drift", "off") or "off").lower() == "warn"
+
+
+def _schema_drift_warnings(
+    conn: duckdb.DuckDBPyConnection,
+    models: list[SQLModel],
+    schemas: dict[str, list[tuple[str, str]]],
+) -> list[ValidationError]:
+    """Report models whose output shape has moved since their last build.
+
+    This is the contract check without a contract: the schema recorded at the
+    last successful build is the baseline, and the bind pass says what the
+    file would produce now. A column that vanished is a downstream break
+    whether or not anybody wrote it down.
+
+    Off by default. The equivalence rules have not been tuned on a real
+    project yet, and a warning that fires on every model is a warning nobody
+    reads.
+    """
+    from havn.engine.contracts import classify_type_change
+
+    from .columns import load_model_columns
+
+    warnings: list[ValidationError] = []
+    for model in models:
+        bound = schemas.get(model.full_name)
+        if not bound:
+            continue
+        baseline = load_model_columns(conn, model.full_name)
+        if not baseline:
+            # Never built: there is nothing it could have drifted from.
+            continue
+
+        before = {c["name"].lower(): (c["name"], c["type"]) for c in baseline}
+        after = {name.lower(): (name, ctype) for name, ctype in bound}
+
+        added = [after[k][0] for k in after if k not in before]
+        removed = [before[k][0] for k in before if k not in after]
+        retyped = [
+            f"{after[k][0]} {before[k][1]} -> {after[k][1]}"
+            for k in after
+            if k in before
+            and classify_type_change(before[k][1], after[k][1]) != "match"
+        ]
+        if not (added or removed or retyped):
+            continue
+
+        parts: list[str] = []
+        if added:
+            parts.append(f"added {', '.join(added)}")
+        if removed:
+            parts.append(f"removed {', '.join(removed)}")
+        if retyped:
+            parts.append(f"retyped {', '.join(retyped)}")
+        warnings.append(ValidationError(
+            model=model.full_name,
+            severity="warning",
+            message=(
+                f"output schema of {model.full_name} changes: {'; '.join(parts)}"
+            ),
+        ))
+    return warnings
+
+
+def _inferred_schema(
+    conn: duckdb.DuckDBPyConnection,
+    model: str,
+    schemas: dict[str, list[tuple[str, str]]],
+) -> list[tuple[str, str]]:
+    """The best (column, type) list available for ``model`` before the build.
+
+    The bind pass is the first choice: it reflects the file as it is written
+    now, not the last build. A model outside the chain that was bound falls
+    back to the schema recorded at its last build, which is at least real.
+    Neither available means the shape is unknown and the caller must not
+    invent a finding from it.
+    """
+    bound = schemas.get(model)
+    if bound:
+        return bound
+    from .columns import load_model_columns
+
+    return [(c["name"], c["type"]) for c in load_model_columns(conn, model)]
+
+
+def _contract_schema_errors(
+    conn: duckdb.DuckDBPyConnection,
+    project_dir,
+    schemas: dict[str, list[tuple[str, str]]],
+) -> list[ValidationError]:
+    """Check every contract's declared columns against the inferred schema.
+
+    This is the whole point of putting columns in a contract: a break is
+    reported before the build, on a warehouse where the table may not exist
+    at all, rather than after a model has already replaced good data with
+    the wrong shape.
+    """
+    if project_dir is None:
+        return []
+    from pathlib import Path
+
+    from havn.engine.contracts import check_contract_schema, discover_contracts
+
+    contracts_dir = Path(project_dir) / "contracts"
+    if not contracts_dir.exists():
+        return []
+    try:
+        contracts = discover_contracts(contracts_dir)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug("Could not read contracts for validation: %s", e)
+        return []
+
+    errors: list[ValidationError] = []
+    for contract in contracts:
+        for message in contract.errors:
+            errors.append(ValidationError(
+                model=contract.model,
+                severity="error",
+                message=message,
+            ))
+        if not contract.columns:
+            continue
+        inferred = _inferred_schema(conn, contract.model, schemas)
+        if not inferred:
+            # Never bound, never built: the shape is unknown, and a guess
+            # here would be a false break on a fresh checkout.
+            continue
+        for finding in check_contract_schema(contract, inferred):
+            if finding.severity == "info":
+                # An undeclared column on a non-strict contract is the normal
+                # way to cover three columns of twenty. It belongs in the
+                # contract report, not in every validate run.
+                continue
+            errors.append(ValidationError(
+                model=contract.model,
+                severity=finding.severity,
+                message=f"contract '{contract.name}': {finding.message}",
+            ))
     return errors
 
 
@@ -309,7 +870,16 @@ def impact_analysis(
         conn: Optional connection for column-level lineage resolution
 
     Returns:
-        Dict with downstream_models, affected_columns, impact_chain
+        Dict with downstream_models, affected_columns, impact_chain.
+
+    Each entry in ``affected_columns`` carries ``model``, ``column`` and
+    ``clause``. A projection hit comes from column lineage and names the
+    downstream *output* column, with ``clause`` set to ``select``. A hit in
+    any other clause comes from the reference index and names the upstream
+    column as it is written, because a filter, a join predicate, a GROUP BY
+    or an ORDER BY produces no output column of its own. Without the second
+    kind, a downstream model that only filters on the column looked
+    unaffected.
     """
     model_map = {m.full_name: m for m in models}
 
@@ -355,22 +925,78 @@ def impact_analysis(
     # Column-level impact if a column is specified
     if column and conn:
         affected_columns: list[dict[str, str]] = []
+        # One catalog read for the whole downstream set, not one per model.
+        catalog = fetch_column_catalog(conn)
+        # The reference index attributes an unqualified column by name, so it
+        # wants the column sets the catalog already gave us. Types play no
+        # part in that decision, hence the empty type strings.
+        reference_schema = {
+            table: [(col, "") for col in cols] for table, cols in catalog.items()
+        }
+        target_key = target.lower()
+        column_key = column.lower()
         for ds_name in downstream:
             ds_model = model_map.get(ds_name)
             if not ds_model:
                 continue
-            lineage = extract_column_lineage(ds_model, conn)
+            lineage = extract_column_lineage(ds_model, conn, column_catalog=catalog)
             for out_col, sources in lineage.items():
                 for src in sources:
                     if src["source_table"] == target and src["source_column"] == column:
                         affected_columns.append({
                             "model": ds_name,
                             "column": out_col,
+                            "clause": "select",
                         })
+            affected_columns.extend(
+                _non_projection_hits(ds_model, ds_name, target_key, column_key, reference_schema)
+            )
         result["column"] = column
         result["affected_columns"] = affected_columns
 
     return result
+
+
+def _non_projection_hits(
+    model: SQLModel,
+    model_name: str,
+    target: str,
+    column: str,
+    reference_schema: dict[str, list[tuple[str, str]]],
+) -> list[dict[str, str]]:
+    """Mentions of ``target.column`` in ``model`` outside the SELECT list.
+
+    The SELECT list is left to column lineage, which knows the output column
+    name a projection lands in; repeating it here would report the same hit
+    twice under two names. Everything else -- WHERE, JOIN ... ON, GROUP BY,
+    HAVING, QUALIFY, ORDER BY, a window's own PARTITION BY -- has no output
+    column, so the upstream column name is what the hit carries. One hit per
+    clause per model: a predicate that names the column three times is still
+    one reason the model is affected.
+    """
+    try:
+        references = extract_column_references(
+            model.query,
+            model.depends_on,
+            reference_schema,
+            ast=getattr(model, "ast", None),
+        )
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug("Could not index column references for %s: %s", model_name, e)
+        return []
+
+    hits: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for ref in references:
+        if ref.clause == "select":
+            continue
+        if ref.table != target or ref.column != column:
+            continue
+        if ref.clause in seen:
+            continue
+        seen.add(ref.clause)
+        hits.append({"model": model_name, "column": column, "clause": ref.clause})
+    return hits
 
 
 def check_freshness(
@@ -379,7 +1005,7 @@ def check_freshness(
     *,
     include_sources: bool = False,
     source_min_rows: int = 0,
-    transform_dir = None,
+    transform_dir: Path | None = None,
 ) -> list[dict]:
     """Check freshness of all models. Returns stale models.
 
@@ -407,9 +1033,9 @@ def check_freshness(
     source_specs_by_model: dict[str, list[dict]] = {}
     if include_sources and transform_dir is not None:
         try:
-            from .discovery import discover_models
+            from .discovery import discover_all_models
 
-            for m in discover_models(transform_dir):
+            for m in discover_all_models(Path(transform_dir).parent):
                 if m.source_freshness:
                     source_specs_by_model[m.full_name] = m.source_freshness
         except Exception as e:

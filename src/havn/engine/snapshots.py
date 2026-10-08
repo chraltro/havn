@@ -282,7 +282,8 @@ def _compute_checksum(
             schema, name = "main", model_name
         cols = warehouse_conn.execute(
             "SELECT column_name, data_type FROM information_schema.columns "
-            "WHERE table_schema = ? AND table_name = ? "
+            "WHERE table_catalog = current_database() "
+            "AND table_schema = ? AND table_name = ? "
             "ORDER BY ordinal_position",
             [schema, name],
         ).fetchall()
@@ -315,7 +316,8 @@ def _compute_schema_hash(
 
     cols = warehouse_conn.execute(
         "SELECT column_name, data_type FROM information_schema.columns "
-        "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+        "WHERE table_catalog = current_database() "
+        "AND table_schema = ? AND table_name = ? ORDER BY ordinal_position",
         [schema, name],
     ).fetchall()
 
@@ -723,9 +725,9 @@ def get_downstream_models(
     transform_dir: Path,
 ) -> list[str]:
     """Find all downstream models that depend on the given model."""
-    from havn.engine.transform import build_dag, discover_models
+    from havn.engine.transform import build_dag, discover_all_models
 
-    models = discover_models(transform_dir)
+    models = discover_all_models(transform_dir.parent)
     if not models:
         return []
 

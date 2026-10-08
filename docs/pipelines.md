@@ -171,6 +171,73 @@ havn schedule
 
 See [Scheduler](scheduler) for the full cron reference.
 
+## Orchestration Jobs
+
+A job is a YAML file in `orchestration/` that names what to run and, optionally,
+when. Unlike a stream, which is an explicit list of steps, a job names *targets*
+and lets havn work out the order and the upstream it needs:
+
+```yaml
+# orchestration/full-refresh.yml
+name: full-refresh
+targets:
+  - gold.*
+  - export/earthquake_report.py
+resolve: upstream
+retry: 1
+schedules:
+  - "0 6 * * *"
+```
+
+```bash
+havn jobs                    # list jobs with last and next run
+havn jobs preview full-refresh   # show the resolved plan, without running it
+havn jobs run full-refresh
+```
+
+### Targets
+
+`targets:` takes the full selector grammar documented under
+[Selecting models](transforms#selecting-models) -- wildcards, `+x` / `x+` /
+`@x`, `n+` depth bounds, and the `tag:`, `path:`, `config.<key>:` and
+`state:modified` methods -- plus two things only jobs have:
+
+| Target | Runs |
+|---|---|
+| `ingest/orders.py` | that ingest script |
+| `ingest/orders.py+` | that script, then every model downstream of the tables it creates |
+| `export/report.py` | that export script |
+| `+export/report.py` | the models the script references, their upstream, then the script |
+
+Script targets are scheduled around the model selection: ingest first, then
+models in dependency order, then exports.
+
+### Exclude
+
+`exclude:` takes the same grammar and is subtracted from the selection:
+
+```yaml
+name: nightly
+targets:
+  - tag:daily
+exclude:
+  - tag:expensive
+  - gold.experimental_*
+```
+
+### resolve
+
+`resolve:` is a compatibility knob for jobs written before selectors existed.
+
+| Value | Meaning |
+|---|---|
+| `upstream` (default) | A target with no `+` markers means `+target`: its upstream is pulled in. A downstream expansion also pulls in the upstream of everything it reached, so the plan is always buildable from scratch. |
+| `none` | Targets run literally. `gold.orders` is `gold.orders` and nothing else. |
+
+New jobs should set `resolve: none` and say what they mean with the selector
+syntax instead. `havn jobs preview <name>` prints the resolved plan, which is
+the quickest way to see which mode a job is in.
+
 ## Python Ingest Scripts
 
 Ingest scripts are plain Python files. A DuckDB connection is pre-injected as `db`:

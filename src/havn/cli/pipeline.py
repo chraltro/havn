@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import TYPE_CHECKING, Annotated, Optional
 
 import typer
 from rich.table import Table
 
 from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, console
+
+if TYPE_CHECKING:
+    from havn.engine.selectors import SelectionResult
 
 logger = logging.getLogger("havn.cli")
 
@@ -162,33 +165,230 @@ def seed(
         conn.close()
 
 
+def _report_selection(selection: SelectionResult, *, verbose: bool) -> None:
+    """Print what a set of selectors resolved to.
+
+    Always loud about a selector that matched nothing, since a typo in a
+    selector otherwise looks exactly like a project where everything is
+    already up to date. Quiet about the rest unless ``-v`` asked.
+    """
+    for warning in selection.warnings:
+        console.print(f"[yellow]warning: {warning}[/yellow]")
+
+    if not verbose:
+        return
+    for selector, names in selection.matched.items():
+        rendered = ", ".join(names) if names else "(nothing)"
+        console.print(f"  [dim]{selector} -> {rendered}[/dim]")
+    console.print(f"  [dim]{len(selection.selected)} model(s) selected[/dim]")
+
+
+@app.command(name="ls")
+def ls(
+    targets: Annotated[Optional[list[str]], typer.Argument(help="Graph selectors (default: every model)")] = None,
+    select: Annotated[Optional[list[str]], typer.Option("--select", "-s", help="Graph selector, repeatable")] = None,
+    exclude: Annotated[Optional[list[str]], typer.Option("--exclude", "-x", help="Graph selector whose matches are removed")] = None,
+    names_only: Annotated[bool, typer.Option("--names", "-n", help="Print bare model names, one per line, for piping")] = False,
+    env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use (e.g. dev, prod)")] = None,
+    project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
+) -> None:
+    """List the models a selector resolves to, without building anything.
+
+    A dry run for the selector grammar that `havn transform` takes, so an
+    `@`, a `state:modified+` or a wildcard can be checked before it drives a
+    build. Prints schema, materialization and tags for each match.
+    """
+    from havn.engine.database import open_warehouse
+    from havn.engine.selectors import select_models
+    from havn.engine.transform import discover_all_models
+
+    project_dir = _resolve_project(project_dir)
+    config = _load_config(project_dir, env)
+
+    selectors = list(targets or []) + list(select or [])
+    exclusions = list(exclude or [])
+
+    models = discover_all_models(project_dir, config)
+    by_name = {m.full_name: m for m in models}
+
+    # Only `state:` selectors need the warehouse; opening it otherwise would
+    # make `havn ls` fail in a project that has never been built.
+    conn = None
+    if any("state:" in s for s in selectors + exclusions):
+        if _warehouse_exists(config, project_dir):
+            conn = open_warehouse(config, project_dir)
+        else:
+            # Nothing has ever been built, so every model is modified. That is
+            # what `havn transform state:modified` answers on the same project,
+            # because it opens (and thereby creates) the warehouse and finds no
+            # model_state. `ls` must not create a file as a side effect of
+            # listing, so it reads an empty in-memory database instead, which
+            # gives the same answer. Passing conn=None would select nothing and
+            # exit 1, contradicting the line printed right here.
+            import duckdb
+
+            conn = duckdb.connect()
+            console.print(
+                "[yellow]No warehouse yet; state: selectors match every model.[/yellow]"
+            )
+
+    try:
+        selection = select_models(
+            selectors or ["all"],
+            models,
+            conn=conn,
+            project_dir=project_dir,
+            exclude=exclusions or None,
+        )
+    finally:
+        if conn is not None:
+            conn.close()
+
+    for warning in selection.warnings:
+        console.print(f"[yellow]warning: {warning}[/yellow]")
+
+    if not selection.selected:
+        console.print("[dim]No models selected.[/dim]")
+        raise typer.Exit(1)
+
+    if names_only:
+        for name in selection.selected:
+            print(name)
+        return
+
+    # The package column only earns its width when a package is installed.
+    has_packages = any(getattr(by_name[n], "package", None) for n in selection.selected)
+    table = Table(title=f"{len(selection.selected)} model(s)")
+    table.add_column("model", style="bold")
+    table.add_column("schema")
+    table.add_column("materialized")
+    if has_packages:
+        table.add_column("package")
+    table.add_column("tags")
+    for name in selection.selected:
+        model = by_name[name]
+        row = [name, model.schema, model.materialized]
+        if has_packages:
+            row.append(getattr(model, "package", None) or "[dim]-[/dim]")
+        row.append(", ".join(getattr(model, "tags", []) or []) or "[dim]-[/dim]")
+        table.add_row(*row)
+    console.print(table)
+
+
 @app.command()
 def transform(
-    targets: Annotated[Optional[list[str]], typer.Argument(help="Specific models to run")] = None,
+    targets: Annotated[Optional[list[str]], typer.Argument(help="Graph selectors picking what to build (default: everything)")] = None,
+    select: Annotated[Optional[list[str]], typer.Option("--select", "-s", help="Graph selector, repeatable; same grammar as the positional argument")] = None,
+    exclude: Annotated[Optional[list[str]], typer.Option("--exclude", "-x", help="Graph selector whose matches are removed from the selection")] = None,
     force: Annotated[bool, typer.Option("--force", "-f", help="Force rebuild all models")] = False,
     sequential: Annotated[bool, typer.Option("--sequential", help="Disable parallel execution; run models one at a time")] = False,
     workers: Annotated[int, typer.Option("--workers", "-w", help="Max parallel workers")] = 4,
     env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use (e.g. dev, prod)")] = None,
     skip_check: Annotated[bool, typer.Option("--skip-check", help="Skip pre-transform validation")] = False,
+    event_time_start: Annotated[Optional[str], typer.Option("--event-time-start", help="Backfill microbatch models from this event time (UTC), e.g. 2024-01-01")] = None,
+    event_time_end: Annotated[Optional[str], typer.Option("--event-time-end", help="Backfill microbatch models up to this event time (UTC), exclusive")] = None,
+    defer: Annotated[Optional[bool], typer.Option("--defer/--no-defer", help="Read models this warehouse has not built from the environment's defer target (default: on when one is configured)")] = None,
+    defer_snapshot: Annotated[bool, typer.Option("--defer-snapshot", help="Defer to a consistent copy of the target, for when it is locked by a running job")] = False,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Print the resolved selection and which selector matched what")] = False,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
     """Parse SQL models, resolve DAG, execute in dependency order.
+
+    Targets are dbt-style graph selectors:
+
+      havn transform                        every model
+      havn transform gold.orders            exactly that model
+      havn transform +gold.orders           it and everything it depends on
+      havn transform gold.orders+           it and everything downstream
+      havn transform 1+gold.orders          one hop of upstream only
+      havn transform @silver.customers      it, its downstream, and their upstream
+      havn transform 'gold.fct_*'           fnmatch wildcards
+      havn transform tag:daily              models tagged daily
+      havn transform path:transform/gold/   models under a path
+      havn transform config.materialized:incremental
+      havn transform state:modified+        what changed, plus downstream
+      havn transform 'tag:daily,gold.*'     comma intersects
+      havn transform -s tag:daily -x gold.experimental
+
+    Microbatch models normally resume from their own recorded window state.
+    To backfill an explicit range instead:
+
+      havn transform gold.events --event-time-start 2024-01-01 --event-time-end 2024-03-01
+
+    When the active environment declares `defer: <other env>`, models this
+    warehouse has not built are read from that environment's warehouse and
+    everything still writes here. Its file must not be open for writing
+    anywhere else; if it is, --defer-snapshot reads a consistent copy instead.
 
     Supports incremental models, data quality assertions, auto-profiling,
     and parallel execution of independent models.
     """
     from havn.engine.database import open_warehouse
-    from havn.engine.transform import run_transform
+    from havn.engine.transform import BatchRange, parse_event_time, run_transform
+
+    batch_range = None
+    if event_time_start or event_time_end:
+        try:
+            batch_range = BatchRange(
+                start=parse_event_time(event_time_start, "--event-time-start")
+                if event_time_start else None,
+                end=parse_event_time(event_time_end, "--event-time-end")
+                if event_time_end else None,
+            )
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1) from e
+        if batch_range.start and batch_range.end and batch_range.start >= batch_range.end:
+            console.print(
+                "[red]--event-time-start must be before --event-time-end.[/red]"
+            )
+            raise typer.Exit(1)
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir, env)
     transform_dir = project_dir / "transform"
+
+    from havn.engine.defer import DeferError, resolve_defer
+
+    try:
+        defer_spec = resolve_defer(
+            config, project_dir,
+            enabled=defer, snapshot=defer_snapshot, verbose=verbose,
+        )
+    except DeferError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from e
+
+    selectors = list(targets or []) + list(select or [])
+    exclusions = list(exclude or [])
 
     parallel = not sequential
     mode = "parallel" if parallel else "sequential"
     console.print(f"[bold]Transform[/bold] [dim]({mode})[/dim]:")
 
     conn = open_warehouse(config, project_dir)
+
+    # Resolve the selection up front so the user is told what will run (and
+    # which selector matched nothing) before any of the work starts.
+    resolved: Optional[list[str]] = None
+    if selectors or exclusions:
+        from havn.engine.selectors import select_models
+        from havn.engine.transform import discover_all_models
+
+        all_models = discover_all_models(project_dir, config)
+        selection = select_models(
+            selectors or ["all"],
+            all_models,
+            conn=conn,
+            project_dir=project_dir,
+            exclude=exclusions or None,
+        )
+        _report_selection(selection, verbose=verbose)
+        if not selection.selected:
+            console.print("[red]Nothing selected; nothing to build.[/red]")
+            conn.close()
+            raise typer.Exit(1)
+        resolved = selection.selected
 
     # Register Python SQL macros (macros/ directory) so they're available in transforms
     macros_dir = project_dir / "macros"
@@ -215,7 +415,8 @@ def transform(
                     try:
                         exists = conn.execute(
                             "SELECT COUNT(*) FROM information_schema.tables "
-                            "WHERE table_schema = ? AND table_name = ?",
+                            "WHERE table_catalog = current_database() "
+                            "AND table_schema = ? AND table_name = ?",
                             [parts[0], parts[1]],
                         ).fetchone()[0]
                         if exists:
@@ -279,10 +480,12 @@ def transform(
 
     try:
         results = run_transform(
-            conn, transform_dir, targets=targets, force=force,
+            conn, transform_dir, targets=resolved, force=force,
             parallel=parallel, max_workers=workers,
             db_config=config.database,
             project_dir=project_dir, rewind_config=config.rewind, run_id=run_id,
+            batch_range=batch_range,
+            defer=defer_spec,
         )
         if not results:
             return
@@ -292,8 +495,11 @@ def transform(
         assertions_failed = sum(1 for s in results.values() if s == "assertion_failed")
         policy_denied = sum(1 for s in results.values() if s == "policy_denied")
         source_stale = sum(1 for s in results.values() if s == "source_stale")
+        inlined = sum(1 for s in results.values() if s == "inlined")
         console.print()
         parts = [f"{built} built", f"{skipped} skipped", f"{errors} errors"]
+        if inlined:
+            parts.append(f"{inlined} inlined")
         if assertions_failed:
             parts.append(f"{assertions_failed} assertion failures")
         if policy_denied:
@@ -515,6 +721,7 @@ def lint(
     ``.sqlfluff`` file overrides both.
     """
     from havn.config import load_project
+    from havn.lint.linter import LintRefused
     from havn.lint.linter import lint as run_lint
     from havn.lint.linter import print_violations
 
@@ -526,13 +733,17 @@ def lint(
     mode = "style+correctness" if style else "correctness-only"
     console.print(f"[bold]{action} SQL files ({mode})...[/bold]")
 
-    count, violations, fixed = run_lint(
-        transform_dir,
-        fix=fix,
-        dialect=config.lint.dialect,
-        rules=config.lint.rules or None,
-        style=style,
-    )
+    try:
+        count, violations, fixed = run_lint(
+            transform_dir,
+            fix=fix,
+            dialect=config.lint.dialect,
+            rules=config.lint.rules or None,
+            style=style,
+        )
+    except LintRefused as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
 
     print_violations(violations)
 

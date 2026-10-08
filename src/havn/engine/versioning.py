@@ -132,7 +132,8 @@ def create_version(
             # Get schema info
             cols = conn.execute(
                 "SELECT column_name, data_type FROM information_schema.columns "
-                "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+                "WHERE table_catalog = current_database() "
+                "AND table_schema = ? AND table_name = ? ORDER BY ordinal_position",
                 [schema, table],
             ).fetchall()
 
@@ -274,7 +275,8 @@ def diff_versions(
             ).fetchone()[0]
             cols = conn.execute(
                 "SELECT column_name, data_type FROM information_schema.columns "
-                "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+                "WHERE table_catalog = current_database() "
+                "AND table_schema = ? AND table_name = ? ORDER BY ordinal_position",
                 [schema, table],
             ).fetchall()
             to_tables[full_name] = {

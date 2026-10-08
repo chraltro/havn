@@ -361,6 +361,92 @@ class TestImpactAnalysis:
         affected = result["affected_columns"]
         assert any(a["model"] == "silver.users" and a["column"] == "name" for a in affected)
 
+    def test_projection_hits_are_labelled_select(self, db):
+        """Every hit carries the clause it was found in."""
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        db.execute("CREATE TABLE bronze.src AS SELECT 1 AS id, 'x' AS name")
+
+        models = [
+            SQLModel(path=Path("a.sql"), name="src", schema="bronze", full_name="bronze.src",
+                     sql="", query="SELECT 1 AS id, 'x' AS name", materialized="table", depends_on=[]),
+            SQLModel(path=Path("b.sql"), name="users", schema="silver", full_name="silver.users",
+                     sql="", query="SELECT s.name AS label FROM bronze.src s",
+                     materialized="table", depends_on=["bronze.src"]),
+        ]
+        result = impact_analysis(models, "bronze.src", column="name", conn=db)
+        assert result["affected_columns"] == [
+            {"model": "silver.users", "column": "label", "clause": "select"}
+        ]
+
+    def _filter_models(self, db, downstream_query: str):
+        db.execute("CREATE SCHEMA IF NOT EXISTS bronze")
+        db.execute(
+            "CREATE TABLE bronze.src AS SELECT 1 AS id, 'x' AS name, 'eu' AS region"
+        )
+        db.execute("CREATE TABLE bronze.other AS SELECT 1 AS id, 'x' AS name")
+        return [
+            SQLModel(path=Path("a.sql"), name="src", schema="bronze", full_name="bronze.src",
+                     sql="", query="SELECT 1 AS id, 'x' AS name, 'eu' AS region",
+                     materialized="table", depends_on=[]),
+            SQLModel(path=Path("o.sql"), name="other", schema="bronze", full_name="bronze.other",
+                     sql="", query="SELECT 1 AS id, 'x' AS name",
+                     materialized="table", depends_on=[]),
+            SQLModel(path=Path("b.sql"), name="users", schema="silver", full_name="silver.users",
+                     sql="", query=downstream_query, materialized="table",
+                     depends_on=["bronze.src", "bronze.other"]),
+        ]
+
+    def test_where_only_column_is_affected(self, db):
+        """A column that only ever appears in a WHERE still shows up."""
+        models = self._filter_models(
+            db, "SELECT s.id FROM bronze.src s WHERE s.name = 'x'"
+        )
+        result = impact_analysis(models, "bronze.src", column="name", conn=db)
+        assert result["affected_columns"] == [
+            {"model": "silver.users", "column": "name", "clause": "where"}
+        ]
+
+    def test_join_only_column_is_affected(self, db):
+        """A join key that feeds no output column is still an impact."""
+        models = self._filter_models(
+            db,
+            "SELECT s.id FROM bronze.src s "
+            "JOIN bronze.other o ON s.name = o.name",
+        )
+        result = impact_analysis(models, "bronze.src", column="name", conn=db)
+        assert result["affected_columns"] == [
+            {"model": "silver.users", "column": "name", "clause": "join"}
+        ]
+
+    def test_group_by_only_column_is_affected(self, db):
+        """Grouping on a column counts, even when it is not projected."""
+        models = self._filter_models(
+            db,
+            "SELECT COUNT(*) AS n FROM bronze.src s GROUP BY s.region",
+        )
+        result = impact_analysis(models, "bronze.src", column="region", conn=db)
+        assert result["affected_columns"] == [
+            {"model": "silver.users", "column": "region", "clause": "group"}
+        ]
+
+    def test_repeated_mentions_in_one_clause_report_once(self, db):
+        """Three mentions in the same WHERE are one reason, not three."""
+        models = self._filter_models(
+            db,
+            "SELECT s.id FROM bronze.src s "
+            "WHERE s.name = 'x' OR s.name = 'y' OR s.name = 'z'",
+        )
+        result = impact_analysis(models, "bronze.src", column="name", conn=db)
+        assert len(result["affected_columns"]) == 1
+
+    def test_unrelated_column_is_not_affected(self, db):
+        """A filter on another table's column of the same name is not a hit."""
+        models = self._filter_models(
+            db, "SELECT s.id FROM bronze.src s, bronze.other o WHERE o.name = 'x'"
+        )
+        result = impact_analysis(models, "bronze.src", column="name", conn=db)
+        assert result["affected_columns"] == []
+
     def test_impact_diamond_dependency(self):
         """Diamond dependency: A -> B, A -> C, B -> D, C -> D."""
         models = [
@@ -376,3 +462,77 @@ class TestImpactAnalysis:
         ]
         result = impact_analysis(models, "bronze.a")
         assert set(result["downstream_models"]) == {"silver.b", "silver.c", "gold.d"}
+
+
+class TestConfigKeyValidation:
+    """Unknown `@config` keys used to be dropped without a word."""
+
+    def _discover(self, tmp_path, header):
+        gold = tmp_path / "transform" / "gold"
+        gold.mkdir(parents=True)
+        (gold / "m.sql").write_text(f"{header}\n\nSELECT 1 AS id\n")
+        return discover_models(tmp_path / "transform")
+
+    def test_unknown_key_is_an_error_with_a_suggestion(self, tmp_path):
+        models = self._discover(tmp_path, "@config materialised=table, schema=gold")
+        errors = validate_models(None, models)
+        unknown = [e for e in errors if "Unknown @config key" in e.message]
+        assert len(unknown) == 1
+        assert unknown[0].severity == "error"
+        assert "'materialised'" in unknown[0].message
+        assert "Did you mean 'materialized'?" in unknown[0].message
+
+    def test_unknown_key_without_a_near_match(self, tmp_path):
+        models = self._discover(tmp_path, "@config schema=gold, cluster_by=region")
+        errors = validate_models(None, models)
+        unknown = [e for e in errors if "Unknown @config key" in e.message]
+        assert len(unknown) == 1
+        assert "'cluster_by'" in unknown[0].message
+        assert "Did you mean" not in unknown[0].message
+        assert "Known keys:" in unknown[0].message
+
+    def test_known_keys_pass(self, tmp_path):
+        models = self._discover(
+            tmp_path,
+            "@config materialized=incremental, schema=gold, unique_key=id, "
+            "incremental_strategy=merge, partition_by=id, watermark=id, "
+            "on_schema_change=sync_all_columns",
+        )
+        errors = validate_models(None, models)
+        assert not [e for e in errors if "@config" in e.message]
+        assert not [e for e in errors if "materialization" in e.message]
+
+    def test_legacy_header_is_validated_too(self, tmp_path):
+        models = self._discover(tmp_path, "-- config: materialised=table, schema=gold")
+        errors = validate_models(None, models)
+        assert [e for e in errors if "Unknown @config key" in e.message]
+
+    def test_unknown_materialization_is_an_error(self, tmp_path):
+        models = self._discover(tmp_path, "@config materialized=tabel, schema=gold")
+        errors = validate_models(None, models)
+        bad = [e for e in errors if "Unknown materialization" in e.message]
+        assert len(bad) == 1
+        assert bad[0].severity == "error"
+        assert "Did you mean 'table'?" in bad[0].message
+
+    def test_unsupported_materialization_without_a_near_match(self, tmp_path):
+        models = self._discover(tmp_path, "@config materialized=parquet, schema=gold")
+        errors = validate_models(None, models)
+        bad = [e for e in errors if "Unknown materialization" in e.message]
+        assert len(bad) == 1
+        assert (
+            "Supported: ephemeral, incremental, snapshot, table, view."
+            in bad[0].message
+        )
+
+    def test_snapshot_is_a_supported_materialization(self, tmp_path):
+        models = self._discover(
+            tmp_path, "@config materialized=snapshot, unique_key=id, schema=gold"
+        )
+        errors = validate_models(None, models)
+        assert not [e for e in errors if "Unknown materialization" in e.message]
+
+    def test_ephemeral_is_a_supported_materialization(self, tmp_path):
+        models = self._discover(tmp_path, "@config materialized=ephemeral, schema=gold")
+        errors = validate_models(None, models)
+        assert not [e for e in errors if "Unknown materialization" in e.message]

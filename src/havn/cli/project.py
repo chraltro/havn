@@ -173,6 +173,7 @@ def init(
         SAMPLE_SEED_CSV,
         SAMPLE_SILVER_DAILY_SQL,
         SAMPLE_SILVER_EVENTS_SQL,
+        SAMPLE_UNIT_TEST_YML,
     )
 
     if backend not in ("duckdb", "ducklake"):
@@ -186,6 +187,7 @@ def init(
     dirs = [
         "ingest", "transform/bronze", "transform/silver", "transform/gold",
         "export", "seeds", "contracts", "notebooks", "macros", "orchestration",
+        "tests/unit",
     ]
     for d in dirs:
         (target / d).mkdir(parents=True, exist_ok=True)
@@ -217,6 +219,7 @@ def init(
         (target / "macros" / "geo.py").write_text(SAMPLE_MACRO_GEO, encoding="utf-8")
         (target / "seeds" / "magnitude_scale.csv").write_text(SAMPLE_SEED_CSV)
         (target / "contracts" / "quality.yml").write_text(SAMPLE_CONTRACTS_YML)
+        (target / "tests" / "unit" / "top_earthquakes.yml").write_text(SAMPLE_UNIT_TEST_YML)
         (target / "notebooks" / "explore.dpnb").write_text(SAMPLE_EXPLORE_NOTEBOOK)
         # Starter orchestration jobs
         (target / "orchestration" / "full-refresh.yml").write_text(SAMPLE_FULL_REFRESH_JOB)
@@ -225,10 +228,17 @@ def init(
     # Config files (both empty and sample projects)
     (target / ".env").write_text(ENV_TEMPLATE)
     (target / ".gitignore").write_text(
-        "warehouse.duckdb\nwarehouse.duckdb.wal\n"
+        # Every environment's warehouse (warehouse.duckdb, prod.duckdb, ...).
+        "*.duckdb\n*.duckdb.wal\n"
         ".havn/catalog.ducklake\n.havn/catalog.ducklake.wal\n.havn/data/\n"
         "__pycache__/\n*.pyc\n.venv/\n.env\noutput/\n_snapshots/\n"
         ".havn/pr-build/\n"
+        ".havn/deploy/\n"
+        # The `havn serve` lockfile: runtime state, never shared.
+        ".havn/serve.json\n"
+        # Installed package sources are reproducible from havn_packages.lock,
+        # which IS committed. Only the checkout is ignored.
+        "havn_packages/\n"
     )
     # .havn/ holds shareable PR state. .havn/prs/ travels with the repo (commit
     # the JSON files there to share PRs with collaborators); .havn/pr-build/ is
@@ -278,6 +288,7 @@ def init(
         console.print("  havn macros                 # see Python functions usable in SQL")
         console.print("  havn serve                  # open web UI")
         console.print("  havn contracts              # check data quality")
+        console.print("  havn test                   # run model unit tests")
         console.print()
         console.print(
             "[dim]Need a Python library (e.g. pandas) in your scripts? "
@@ -288,10 +299,25 @@ def init(
 @app.command()
 def validate(
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
+    bind: Annotated[Optional[bool], typer.Option("--bind/--no-bind", help="Resolve model SQL through the DuckDB binder (default: on when a warehouse exists)")] = None,
+    schema_drift: Annotated[Optional[bool], typer.Option("--schema-drift/--no-schema-drift", help="Warn when a model's output shape has moved since its last build (default: validation.schema_drift in project.yml, off)")] = None,
 ) -> None:
-    """Validate project structure, config, and SQL model dependencies."""
+    """Validate project structure, config, and SQL model dependencies.
+
+    With the bind pass on (the default once a warehouse exists), every model's
+    SQL is also resolved through the DuckDB binder against a throwaway shadow
+    catalog. That catches wrong arity, unknown functions, operator overload
+    failures and missing columns -- including columns on upstream models that
+    have never been built -- and reports them with a line number.
+
+    The bind pass also checks any `columns:` block declared in a contract
+    against the schema it infers, so a contract break is reported before the
+    build rather than after it. With --schema-drift, a model whose output
+    shape has moved since its last build is reported too, contract or no
+    contract.
+    """
     from havn.config import load_project
-    from havn.engine.transform import build_dag, discover_models
+    from havn.engine.transform import build_dag, discover_all_models
 
     project_dir = _resolve_project(project_dir)
     errors: list[str] = []
@@ -317,8 +343,7 @@ def validate(
                 errors.append(f"Stream '{name}': unknown action '{step.action}'")
 
     # 4. Discover and validate SQL models
-    transform_dir = project_dir / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir, config)
     model_names = {m.full_name for m in models}
 
     # Check for duplicate model names
@@ -345,6 +370,39 @@ def validate(
         console.print(f"[green]DAG[/green] {len(models)} models, no circular dependencies")
     except Exception as e:
         errors.append(f"Circular dependency detected: {e}")
+
+    # 5b. Bind pass. Needs a writable warehouse to attach its shadow catalog
+    # to, so it defaults on only once one exists and stays quiet otherwise
+    # rather than reporting a failure the user cannot act on.
+    warehouse_ready = _warehouse_exists(config, project_dir)
+    want_bind = warehouse_ready if bind is None else bind
+    if want_bind and not warehouse_ready:
+        warnings.append(
+            "--bind needs a warehouse; run a pipeline first. Skipping the bind pass."
+        )
+    elif want_bind and models:
+        from havn.engine.database import open_warehouse
+        from havn.engine.transform.analysis import _bind_errors
+
+        conn = open_warehouse(config, project_dir)
+        try:
+            bind_errors = _bind_errors(
+                conn, models, project_dir, schema_drift=schema_drift
+            )
+        finally:
+            conn.close()
+        failures = 0
+        for e in bind_errors:
+            where = f"{e.model}:{e.line}" if e.line else (e.model or "project")
+            if e.severity == "error":
+                errors.append(f"{where}: {e.message}")
+                failures += 1
+            else:
+                warnings.append(f"{where}: {e.message}")
+        if not failures:
+            console.print(
+                f"[green]bind[/green] {len(models)} models resolved against the warehouse"
+            )
 
     # 6. Check .env variables referenced in config
     import re
@@ -437,7 +495,8 @@ def status(
         try:
             rows = conn.execute(
                 "SELECT table_schema, table_name FROM information_schema.tables "
-                "WHERE table_schema NOT IN ('information_schema', '_havn') "
+                "WHERE table_catalog = current_database() "
+                "AND table_schema NOT IN ('information_schema', '_havn') "
                 "AND table_schema NOT LIKE 'pg_%' "
                 "AND table_schema NOT LIKE '__ducklake%' "
                 "AND table_name NOT LIKE 'ducklake_%'"
@@ -602,7 +661,7 @@ def context(
     """Generate a project summary to paste into any AI assistant (ChatGPT, Claude, etc.)."""
     from havn.config import load_project
     from havn.engine.database import open_warehouse
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
@@ -627,8 +686,7 @@ def context(
     lines.append("")
 
     # SQL models
-    transform_dir = project_dir / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir, config)
     if models:
         lines.append("## SQL Models")
         for m in models:
@@ -657,7 +715,8 @@ def context(
                 """
                 SELECT table_schema, table_name, table_type
                 FROM information_schema.tables
-                WHERE table_schema NOT IN ('information_schema', '_havn')
+                WHERE table_catalog = current_database()
+                  AND table_schema NOT IN ('information_schema', '_havn')
                 ORDER BY table_schema, table_name
                 """
             ).fetchall()

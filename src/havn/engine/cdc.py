@@ -231,7 +231,9 @@ def sync_table_high_watermark(
             conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{target_schema}"')
 
             exists = conn.execute(
-                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_catalog = current_database() "
+                "AND table_schema = ? AND table_name = ?",
                 [target_schema, table_name],
             ).fetchone()[0] > 0
 

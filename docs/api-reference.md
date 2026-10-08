@@ -98,6 +98,17 @@ Save or create a file. Allowed extensions: `.sql`, `.py`, `.yml`, `.yaml`, `.dpn
 {"content": "SELECT 1"}
 ```
 
+### PUT /api/files
+
+Save several files as one unit: all of them land, or none do. Every file is
+hash-checked before any is written, and anything already written is restored
+if a later write fails. Returns `409` with `{conflict, stale, current_hashes}`
+when a file no longer matches its `expected_hash`.
+
+```json
+{"files": [{"path": "transform/silver/customers.sql", "content": "SELECT 1", "expected_hash": "a1b2c3"}]}
+```
+
 ### DELETE /api/files/{path}
 
 Delete a file. Optional `?drop_object=true` to also drop the corresponding database object.
@@ -160,16 +171,40 @@ Get table and column names for query editor autocomplete.
 
 ### GET /api/models
 
-List all SQL transform models with metadata.
+List SQL transform models with metadata.
 
-Returns: `[{name, schema, full_name, materialized, depends_on, path, content_hash}]`
+Query parameters:
+
+| Name | Description |
+|---|---|
+| `select` | Graph selector filtering the list, e.g. `tag:daily`, `+gold.orders`, `gold.fct_*`. Omit to list everything. `state:` is not available here: this endpoint is read-only and has no warehouse connection to compare hashes against. |
+
+Returns: `[{name, schema, full_name, materialized, depends_on, path, content_hash, tags}]`
 
 ### POST /api/transform
 
 Run the SQL transformation pipeline.
 
 ```json
-{"targets": null, "force": false}
+{"targets": null, "exclude": null, "force": false}
+```
+
+`targets` and `exclude` are graph selectors, the same grammar as
+`havn transform` (see [Selecting models](transforms#selecting-models)). A plain
+`"gold.orders"` is an exact match, so a caller that sends one model name keeps
+working.
+
+```json
+{"targets": ["state:modified+"], "exclude": ["tag:expensive"]}
+```
+
+A selector that matches nothing is a 400 naming it, not an empty success: a
+typo would otherwise be indistinguishable from "everything was already up to
+date". When some selectors matched and others did not, the run goes ahead and
+the response carries the rest:
+
+```json
+{"results": {"gold.orders": "built"}, "warnings": ["Unknown selector method 'taggg'."]}
 ```
 
 ### POST /api/models/create
@@ -196,6 +231,63 @@ Compare SQL output against materialized tables.
 
 Get a notebook-style view combining SQL source, sample data, lineage, and dependencies.
 
+### GET /api/models/workbench?path=transform/silver/orders.sql
+
+Everything the editor workbench shows for the model defined in `path` (a
+project-relative file path; 404 if no model is defined there): `model`,
+`materialized`, `description`, `upstream` / `downstream` (direct, each with
+its file `path`), `downstream_all` (transitive, nearest first), `columns`
+(name, type from the last build, `@col` description), `checks` (every
+`@assert` and `@grain` with its latest `passed` / `detail` / `checked_at`, plus
+`failing_sql`, a query returning the violating rows, or `null` for
+`row_count` checks), the last 10 transform `runs`, and `state` (`built`,
+`last_run_at`, `row_count`, `changed_since_build`).
+
+## Home
+
+### GET /api/home
+
+The Home page in one call:
+
+- `project_name`, `is_sample`, `has_data`.
+- `tiles.models`: `total`, `changed`, `never_built`, `up_to_date`.
+- `tiles.checks`: `passed`, `failed`, `warned`, `contracts_failed`, from the
+  latest result of each check still declared in its model.
+- `tiles.last_run`: the latest pipeline run.
+- `tiles.warehouse`: `size_bytes` and `last_backup`.
+- `attention`: up to 25 items `{kind, severity, title, subject, detail, at,
+  path, sql}`, errors first. `kind` is `build`, `assertion`, `contract`,
+  `freshness` or `anomaly`. `sql` returns a failed check's violating rows.
+- `attention_total`: the count before the 25-item cap.
+- `runs`: pipeline runs from the last 24 hours, oldest first.
+- `layers`: `[{schema, models: [{name, full_name, path, status, ...}]}]`.
+  `status` is `failing`, `blocked`, `changed`, `never_built`, `fresh` or
+  `source`.
+
+## Deploy
+
+### GET /api/deploy/targets
+
+`{environments: [{name, active, production, database, exists}], default_ref}`.
+With no `environments:` in project.yml, the one warehouse is `default`.
+
+### GET /api/deploy/plan?env=prod&ref=main
+
+The models deploying `ref` to `env` would rebuild, in build order: `{env, ref,
+commit, models}`. Changes nothing.
+
+### POST /api/deploys
+
+Body `{env, ref, pr_id?}`, execute permission. Starts the deploy in the
+background and returns its record with `status: "running"`.
+
+### GET /api/deploys?pr_id=&limit= and GET /api/deploys/{id}
+
+Deploy records: `{id, env, ref, commit, pr_id, deployed_by, status, started_at,
+finished_at, duration_ms, models, results, failed, version_id, restored,
+error}`. `status` is `running`, `success`, `up_to_date`, `rolled_back` or
+`error`. `failed` maps each model that did not build to `{status, error}`.
+
 ## DAG
 
 ### GET /api/dag
@@ -205,6 +297,24 @@ Get the model dependency DAG (nodes and edges).
 ### GET /api/dag/full
 
 Get the full DAG including seeds, sources, ingest scripts, and exposures.
+
+Each model node carries `package`: `null` for the project's own models, the
+package name for models that came from `havn_packages/`.
+
+## Packages
+
+### GET /api/packages
+
+Installed packages with their source, rev, resolved commit, manifest version
+and model/macro counts, plus `declared` (the `packages:` block) and `missing`
+(declared but not installed).
+
+### POST /api/packages/install
+
+Install every declared package and rewrite `havn_packages.lock`. Body:
+`{"upgrade": false}`. Requires execute permission. Returns one result per
+package (`status` is `installed`, `unchanged` or `error`) plus the refreshed
+listing.
 
 ## Lineage
 
@@ -219,6 +329,43 @@ Get column-level lineage for all models.
 ### GET /api/impact/{model_name}
 
 Analyze downstream impact. Optional `?column=name` for column-level analysis.
+
+## Rename
+
+See [Refactoring](refactoring.md) for what the blockers mean.
+
+### GET /api/rename/references
+
+`?model=silver.customers&column=customer_id`. Every place the column is
+written, with a character range per site, plus the places the index could not
+see through. Read permission.
+
+Returns `{model, column, sites, blocked, models}`.
+
+### POST /api/rename/plan
+
+The splices a rename would make and the file contents they produce. Writes
+nothing. Read permission. A refusal comes back as `{error}` with an empty
+`edits`, not as an HTTP error.
+
+```json
+{"model": "silver.customers", "column": "customer_id", "new_name": "cust_id", "force": false}
+```
+
+Returns `{model, column, new_name, sites, blocked, edits, files}`. Each entry
+in `files` carries the new `content` and the `file_hash` of what is on disk
+now, to hand back to `/apply`.
+
+### POST /api/rename/apply
+
+Apply the rename to every file it touches, or to none of them. Write
+permission. `409` when a file changed since the plan was made, `400` when the
+rename is refused.
+
+```json
+{"model": "silver.customers", "column": "customer_id", "new_name": "cust_id",
+ "hashes": {"transform/silver/customers.sql": "a1b2c3"}}
+```
 
 ## Pipeline
 
@@ -394,6 +541,19 @@ Run all data contracts.
 ### GET /api/contracts/history
 
 Get contract evaluation history.
+
+### GET /api/unit-tests
+
+List the model unit tests declared in `tests/unit/*.yml`, plus any load errors.
+
+### POST /api/unit-tests/run
+
+Run the unit tests, optionally filtered to one model. Requires `execute`
+permission; the tests themselves run in memory and never touch the warehouse.
+
+```json
+{"model": "silver.customers"}
+```
 
 ## Masking
 

@@ -239,6 +239,38 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
             row_count    BIGINT DEFAULT 0
         )
     """)
+    # Column names and types of each model as last built. Nothing else in the
+    # warehouse records inferred types: model_profiles has names only, and the
+    # catalog holds the last successful build, which disappears the moment a
+    # model is dropped or renamed. The editor and the bind pass both want a
+    # cheap answer for "what columns does this upstream have", so the
+    # DESCRIBE taken at build time is kept here, keyed by the content hash it
+    # belongs to.
+    _exec("""
+        CREATE TABLE IF NOT EXISTS _havn.model_columns (
+            model_path   VARCHAR PRIMARY KEY,
+            content_hash VARCHAR NOT NULL,
+            columns      JSON NOT NULL,
+            bound_at     TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
+    # One row per microbatch window a model has processed. This is what makes
+    # a backfill resumable: a 30-window run that dies at window 17 leaves
+    # sixteen `done` rows and one `failed` row, and the next run picks up from
+    # the first window that is not `done` rather than starting over. No
+    # primary key: the writer replaces a window's row by deleting it first,
+    # which works the same on DuckDB and on DuckLake.
+    _exec("""
+        CREATE TABLE IF NOT EXISTS _havn.batch_state (
+            model_path   VARCHAR NOT NULL,
+            window_start TIMESTAMP NOT NULL,
+            window_end   TIMESTAMP NOT NULL,
+            status       VARCHAR NOT NULL,
+            "rows"       BIGINT DEFAULT 0,
+            run_id       VARCHAR,
+            finished_at  TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
     _exec("""
         CREATE TABLE IF NOT EXISTS _havn.run_log (
             run_id       VARCHAR DEFAULT gen_random_uuid()::VARCHAR,

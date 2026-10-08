@@ -23,7 +23,7 @@ from havn.server.deps import (
     _require_permission,
     _serialize,
     build_dag,
-    discover_models,
+    discover_all_models,
     ensure_meta_table,
 )
 
@@ -260,7 +260,7 @@ def promote_to_model_endpoint(request: Request, req: PromoteToModelRequest) -> d
 
         validation_warnings = []
         try:
-            models = discover_models(transform_dir)
+            models = discover_all_models(project_dir)
             build_dag(models)
         except Exception as e:
             validation_warnings.append(f"DAG validation warning: {e}")

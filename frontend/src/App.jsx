@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { api } from "./api";
 import FileTree from "./FileTree";
-import Editor from "./Editor";
+import Editor, { bindStatusLabel, stripModelDirectives } from "./Editor";
 import OutputPanel from "./OutputPanel";
 import QueryPanel from "./QueryPanel";
 import TablesPanel from "./TablesPanel";
@@ -14,14 +14,20 @@ import DocsPanel from "./DocsPanel";
 import NotebookPanel from "./NotebookPanel";
 import DataSourcesPanel from "./DataSourcesPanel";
 import OverviewPanel from "./OverviewPanel";
+import HomePanel from "./HomePanel";
+import ShipPanel from "./ShipPanel";
+import NavRail from "./NavRail";
+import { SECTIONS, TAB_TO_SECTION, SECTION_DEFAULT, tabToPath, pathToTab } from "./navigation";
 import RunSummary from "./RunSummary";
 import SettingsPanel from "./SettingsPanel";
 import MaskingPanel from "./MaskingPanel";
 import QualityPanel from "./QualityPanel";
+import UnitTestsPanel from "./UnitTestsPanel";
 import WikiPanel from "./WikiPanel";
 import LoginPage from "./LoginPage";
 import ResizeHandle from "./ResizeHandle";
 import useResizable from "./useResizable";
+import { useFilesChanged } from "./filesChanged";
 import SortableTable from "./SortableTable";
 import Onboarding from "./Onboarding";
 import ErrorBoundary from "./ErrorBoundary";
@@ -29,6 +35,7 @@ import Hint from "./Hint";
 import { useHintTriggerFn } from "./HintSystem";
 import EnvironmentSwitcher from "./EnvironmentSwitcher";
 import ModelNotebookView from "./ModelNotebookView";
+import ModelWorkbench from "./ModelWorkbench";
 import NewModelDialog from "./NewModelDialog";
 import GitReviewsPanel from "./GitReviewsPanel";
 import OrchestrationPanel from "./OrchestrationPanel";
@@ -47,55 +54,8 @@ import { schemaCompare } from "./schemaOrder";
 import { PipelineProvider, usePipeline } from "./PipelineContext";
 
 
-/* ------------------------------------------------------------------ */
-/* Section-based navigation                                            */
-/* ------------------------------------------------------------------ */
-
-const SECTIONS = [
-  { id: "Overview", label: "Overview", tabs: [] },
-  { id: "Develop", label: "Develop", tabs: ["Editor", "Data Sources", "Orchestration", "Git"] },
-  { id: "Explore", label: "Explore", tabs: ["Query", "Tables", "DAG", "Dashboards"] },
-  { id: "Observe", label: "Observe", tabs: ["Quality", "Sentinel", "Diff", "Runs"] },
-  { id: "Configure", label: "Configure", tabs: ["Masking", "Wiki", "Docs", "Settings"] },
-];
-
-// Quick lookup: tab name -> section id
-const TAB_TO_SECTION = {};
-for (const s of SECTIONS) {
-  if (s.tabs.length === 0) TAB_TO_SECTION[s.id] = s.id;
-  for (const t of s.tabs) TAB_TO_SECTION[t] = s.id;
-}
-
-// Default tab for each section (first sub-tab or the section itself)
-const SECTION_DEFAULT = {};
-for (const s of SECTIONS) {
-  SECTION_DEFAULT[s.id] = s.tabs.length > 0 ? s.tabs[0] : s.id;
-}
-
-// URL routing helpers
-function tabToPath(tab) {
-  const section = TAB_TO_SECTION[tab];
-  if (!section) return "/";
-  const sSlug = section.toLowerCase();
-  // Overview has no sub-tabs
-  if (section === "Overview") return "/";
-  const tSlug = tab.toLowerCase().replace(/\s+/g, "-");
-  // If it's the default tab for the section, just use section path
-  if (SECTION_DEFAULT[section] === tab) return `/${sSlug}`;
-  return `/${sSlug}/${tSlug}`;
-}
-
-function pathToTab(pathname) {
-  const parts = pathname.replace(/^\/+|\/+$/g, "").toLowerCase().split("/").filter(Boolean);
-  if (parts.length === 0) return "Overview";
-  const sectionSlug = parts[0];
-  const section = SECTIONS.find(s => s.id.toLowerCase() === sectionSlug);
-  if (!section) return "Overview";
-  if (parts.length === 1) return SECTION_DEFAULT[section.id];
-  const tabSlug = parts[1];
-  const tab = section.tabs.find(t => t.toLowerCase().replace(/\s+/g, "-") === tabSlug);
-  return tab || SECTION_DEFAULT[section.id];
-}
+/** Row cap for the editor preview pane (whole model and single CTE alike). */
+const PREVIEW_LIMIT = 100;
 
 /* ------------------------------------------------------------------ */
 /* Pipeline Run Menu (replaces 5 separate action buttons)              */
@@ -464,12 +424,14 @@ function DashboardsSection({ showConfirm, embedMode }) {
 function AppContent() {
   const { currentUser, handleLogout } = useAuth();
   const { tables, files, streams, loadFiles, refreshAll } = useWarehouse();
-  const { running, output, runSummary, progress, addOutput, clearOutput, setRunSummary, runTransformAll, runStream, cancelPipeline, runLint, runCurrentScript, runSingleModel, runContracts, runPipeline } = usePipeline();
+  const { running, output, runSummary, progress, addOutput, clearOutput, setRunSummary, runTransformAll, runStream, cancelPipeline, runLint, runCurrentScript, runSingleModel, runSelection, runContracts, runPipeline } = usePipeline();
 
   // Editor state
   const [activeFile, setActiveFile] = useState(null);
   const [sidebarFilter, setSidebarFilter] = useState("");
   const activeFileRef = useRef(null);
+  // /api/models result, cached for model-path resolution (see resolveModelPath)
+  const modelsCacheRef = useRef(null);
   const [fileContent, setFileContent] = useState("");
   const [fileLang, setFileLang] = useState("sql");
   const [dirty, setDirty] = useState(false);
@@ -477,6 +439,11 @@ function AppContent() {
   const [preview, setPreview] = useState(null);
   const [previewError, setPreviewError] = useState(null);
   const [previewRunning, setPreviewRunning] = useState(false);
+  const [previewLabel, setPreviewLabel] = useState(null);
+  // Monaco instance as state (editorRef alone does not re-render the workbench).
+  const [editorInstance, setEditorInstance] = useState(null);
+  // Bind diagnostics summary for the editor toolbar ("binding...", "2 errors", "ok")
+  const [bindStatus, setBindStatus] = useState(null);
   // "Run on save" toggle, persisted in localStorage so it survives reloads.
   // When on, saving a transform .sql file triggers `havn transform --target <model>`;
   // saving a script under ingest/ or export/ triggers `havn run <path>`.
@@ -498,6 +465,16 @@ function AppContent() {
     if (window.location.pathname !== path) {
       history.pushState({ tab }, "", path);
     }
+  }, []);
+  // An old or partial URL (/develop, /explore/dag) is rewritten in place to
+  // its canonical path, so bookmarks and shared links converge.
+  useEffect(() => {
+    const canonical = tabToPath(activeTab);
+    if (window.location.pathname !== canonical) {
+      history.replaceState({ tab: activeTab }, "", canonical + window.location.search + window.location.hash);
+    }
+    // Only on first load; navigation after that goes through setActiveTab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [selectedTable, setSelectedTable] = useState(null);
 
@@ -571,6 +548,8 @@ function AppContent() {
 
   // Run status indicator (header)
   const [recentStatus, setRecentStatus] = useState(null); // "success" | "failed" | null
+  // Error-level items in Home's attention queue, shown as the Observe badge.
+  const [attentionCount, setAttentionCount] = useState(0);
   const prevRunningRef = useRef(false);
   useEffect(() => {
     if (prevRunningRef.current && !running) {
@@ -586,6 +565,19 @@ function AppContent() {
     }
     prevRunningRef.current = running;
   }, [running, runSummary]);
+
+  // Keep the Observe badge current off the Home page too: on load and after
+  // every run. HomePanel reports the same count whenever it loads.
+  useEffect(() => {
+    if (running) return;
+    let cancelled = false;
+    api.getHome()
+      .then((d) => {
+        if (!cancelled) setAttentionCount((d.attention || []).filter((a) => a.severity === "error").length);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [running]);
 
   // Command palette state
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -667,13 +659,24 @@ function AppContent() {
     setHintTrigger("tabSwitchCount", tabSwitchCountRef.current);
   }
 
-  // Keyboard shortcuts: Alt+1..5 for sections, Ctrl/Cmd+K for command palette
+  // Keyboard shortcuts: Alt+1..6 for sections, Ctrl/Cmd+K for the command
+  // palette, Ctrl/Cmd+S to save the open file. The handler is registered once,
+  // so it reads the current save function through a ref.
+  const saveShortcutRef = useRef(null);
   useEffect(() => {
     function handleKeyDown(e) {
       // Ctrl+K / Cmd+K — command palette
       if ((e.ctrlKey || e.metaKey) && e.key === "k") {
         e.preventDefault();
         setPaletteOpen((v) => !v);
+        return;
+      }
+      // Ctrl+S / Cmd+S — save the file in the editor instead of the page
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
+        if (saveShortcutRef.current) {
+          e.preventDefault();
+          saveShortcutRef.current();
+        }
         return;
       }
       if (!e.altKey) return;
@@ -758,13 +761,33 @@ function AppContent() {
     }
   }
 
-  function resolveFilePath(ref) {
+  // Resolve "schema.name" to the file that declares the model. The folder is
+  // only the *default* schema: `@config schema=` can point a model at another
+  // one, so transform/{schema}/{name}.sql is a guess. /api/models knows the
+  // real path; the convention stays as the fallback for models it doesn't list
+  // (unsaved file, API error, stale cache).
+  async function resolveModelPath(fullName) {
+    const [schema, name] = fullName.split(".");
+    const byConvention = `transform/${schema}/${name}.sql`;
+    if (!schema || !name) return byConvention;
+    try {
+      let match = (modelsCacheRef.current || []).find((m) => m.full_name === fullName);
+      if (!match) {
+        modelsCacheRef.current = await api.listModels();
+        match = (modelsCacheRef.current || []).find((m) => m.full_name === fullName);
+      }
+      return match && match.path ? match.path : byConvention;
+    } catch {
+      return byConvention;
+    }
+  }
+
+  async function resolveFilePath(ref) {
     const normalized = ref.replace(/\\/g, "/");
     const hasExtension = /\.(sql|py|yml|yaml|json|csv|md|txt|dpnb)$/i.test(normalized);
 
     if (!hasExtension && !normalized.includes("/") && /^\w+\.\w+$/.test(normalized)) {
-      const [schema, model] = normalized.split(".");
-      return `transform/${schema}/${model}.sql`;
+      return resolveModelPath(normalized);
     }
 
     if (!normalized.includes("/")) {
@@ -784,7 +807,7 @@ function AppContent() {
   }
 
   async function openFileAtLine(ref, line, col) {
-    const path = resolveFilePath(ref);
+    const path = await resolveFilePath(ref);
     if (activeFile === path) {
       setGoToLine({ line, col: col || 1 });
       setActiveTab("Editor");
@@ -806,6 +829,13 @@ function AppContent() {
   // Keep refs in sync for use in callbacks with stale closures
   activeFileRef.current = activeFile;
   dirtyRef.current = dirty;
+
+  // A column rename rewrites files the editor never opened, so the tree and
+  // the cached model list both went stale when it returned.
+  useFilesChanged(() => {
+    modelsCacheRef.current = null;
+    loadFiles();
+  });
 
   // Reload the currently open file from disk (used when agent edits it)
   async function reloadActiveFile() {
@@ -842,6 +872,9 @@ function AppContent() {
       await api.saveFile(activeFile, fileContent);
       setDirty(false);
       addOutput("info", `Saved ${activeFile}`);
+      // Saving is the cue for a lint pass: SQLFluff is too slow to run per
+      // keystroke, so the editor listens for this rather than polling.
+      window.dispatchEvent(new CustomEvent("havn-file-saved", { detail: { path: activeFile } }));
       setHintTrigger("firstFileEdited", true);
       // Run on save: rebuild this single model / re-run this single
       // script after a successful save, if the toggle is on.
@@ -976,30 +1009,15 @@ function AppContent() {
     }
   }
 
-  async function previewCurrentFile() {
-    if (!activeFile || !activeFile.endsWith(".sql")) return;
-    const lines = fileContent.split("\n");
-    let start = 0;
-    for (const line of lines) {
-      const s = line.trim();
-      // Strip both the canonical @-prefixed directives and the legacy
-      // SQL-comment form, plus any leading blank lines, so the preview
-      // sends only executable SQL to DuckDB.
-      const isDirective =
-        s.startsWith("@config") || s.startsWith("@depends_on") ||
-        s.startsWith("@description") || s.startsWith("@col") ||
-        s.startsWith("@assert") ||
-        s.startsWith("-- config:") || s.startsWith("-- depends_on:") ||
-        s.startsWith("-- description:") || s.startsWith("-- col:") ||
-        s.startsWith("-- assert:");
-      if (isDirective || s === "") { start++; } else break;
-    }
-    const sql = lines.slice(start).join("\n").trim();
-    if (!sql) return;
+  /** Run SQL and show it in the editor's preview pane. */
+  async function previewSql(sql, label) {
+    if (!sql || !sql.trim()) return;
     setPreviewRunning(true);
     setPreviewError(null);
+    setPreviewLabel(label || "Editor SQL");
+    if (label) addOutput("info", `Previewing ${label}...`);
     try {
-      const data = await api.runQuery(sql);
+      const data = await api.runQuery(sql, undefined, { limit: PREVIEW_LIMIT });
       setPreview(data);
     } catch (e) {
       setPreviewError(e.message);
@@ -1007,6 +1025,16 @@ function AppContent() {
     } finally {
       setPreviewRunning(false);
     }
+  }
+
+  async function handleBuildSelection(selector) {
+    if (dirty) await saveFile();
+    await runSelection(selector);
+  }
+
+  async function previewCurrentFile() {
+    if (!activeFile || !activeFile.endsWith(".sql")) return;
+    await previewSql(stripModelDirectives(fileContent));
   }
 
   function handleSelectTable(schema, name) {
@@ -1028,44 +1056,82 @@ function AppContent() {
   }
 
   const isTransformFile = activeFile && activeFile.includes("transform/") && activeFile.endsWith(".sql");
+  // Ctrl/Cmd+S saves only while a dirty file is open in the editor (notebooks
+  // have their own save).
+  saveShortcutRef.current = activeTab === "Editor" && activeFile && dirty && !activeFile.endsWith(".dpnb")
+    ? saveFile : null;
+  const bindStatusText = bindStatusLabel(bindStatus);
+
+  const editorElement = (
+    <Editor
+      content={fileContent}
+      language={fileLang}
+      onChange={(val) => {
+        setFileContent(val);
+        setDirty(true);
+      }}
+      activeFile={activeFile}
+      dirty={dirty}
+      onReloadFile={(path, text) => {
+        // A column rename wrote this file. The buffer is
+        // replaced with what the server wrote, so there is
+        // nothing left to save.
+        if (path !== activeFileRef.current) return;
+        setFileContent(text);
+        setDirty(false);
+      }}
+      onMount={(editor) => { editorRef.current = editor; setEditorInstance(editor); }}
+      goToLine={goToLine}
+      onFormat={activeFile?.endsWith(".sql") ? formatCurrentFile : undefined}
+      onPreview={activeFile?.endsWith(".sql") ? previewCurrentFile : undefined}
+      onStatus={setBindStatus}
+      onOpenModel={(path, line, col) => openFileAtLine(path, line || 1, col || 1)}
+      onPreviewCte={(sql, name) => previewSql(sql, name ? `CTE ${name}` : "CTE")}
+    />
+  );
+
+
+  const fullWidthPage = activeSection === "Overview" || activeSection === "Ship";
 
   return (
-    <div style={styles.container}>
-      {/* Header: logo + section nav + actions + user */}
+    <div style={styles.frame}>
+    <NavRail
+      sections={SECTIONS}
+      activeSection={activeSection}
+      onNavigate={(id) => navigateToTab(SECTION_DEFAULT[id])}
+      agentOpen={agentSidebarOpen}
+      onToggleAgent={() => setAgentSidebarOpen((v) => !v)}
+      badges={{ Observe: attentionCount }}
+    />
+    <div style={styles.container} className="havn-shell">
+      {/* Top bar: where you are, the omnibox, run status, actions, env, user */}
       <header style={styles.header} role="banner">
-        <button
-          onClick={() => navigateToTab("Overview")}
-          style={styles.logo}
-          title="Home"
-          aria-label="havn home"
-        >
-          <img src="/logo.svg" alt="havn" width="22" height="22" style={{ marginRight: "6px", verticalAlign: "middle" }} />
-          havn
-        </button>
+        <span className="havn-crumb" style={styles.crumb}>
+          {currentSectionDef?.label || "Home"}
+          {subTabs.length > 0 && <span style={{ color: "var(--havn-text-dim)" }}> / </span>}
+          {subTabs.length > 0 && <b style={styles.crumbTab}>{activeTab}</b>}
+        </span>
 
-        {/* Section navigation */}
-        <nav style={styles.sectionNav} data-havn-guide="tabs" aria-label="Main navigation">
-          {SECTIONS.map((section, i) => {
-            const isActive = activeSection === section.id;
-            return (
-              <button
-                key={section.id}
-                data-havn-tab=""
-                data-havn-active={isActive ? "true" : "false"}
-                onClick={() => navigateToTab(SECTION_DEFAULT[section.id])}
-                style={isActive ? styles.sectionActive : styles.section}
-                title={`${section.label} (Alt+${i + 1})`}
-                aria-current={isActive ? "true" : undefined}
-              >
-                {section.label}
-              </button>
-            );
-          })}
-        </nav>
+        {/* Omnibox: opens the command palette, which searches models, tables,
+            files and commands. */}
+        <button
+          type="button"
+          onClick={() => setPaletteOpen(true)}
+          style={styles.omnibox}
+          aria-label="Search models, tables, files and commands"
+          aria-keyshortcuts="Control+K Meta+K"
+          data-havn-guide="omnibox"
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <circle cx="6.5" cy="6.5" r="5"/><path d="M10.5 10.5L14.5 14.5"/>
+          </svg>
+          <span style={styles.omniboxText}>Jump to a model, table, file or command…</span>
+          <kbd className="havn-omnibox-kbd" style={styles.omniboxKbd}>{/Mac|iPhone|iPad/.test(navigator.platform || "") ? "\u2318K" : "Ctrl K"}</kbd>
+        </button>
 
         {/* Run status indicator */}
         {running && (
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginLeft: "auto", marginRight: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
             <div style={{
               width: 8, height: 8, borderRadius: "50%",
               background: "var(--havn-accent)",
@@ -1077,7 +1143,7 @@ function AppContent() {
           </div>
         )}
         {!running && recentStatus && (
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginLeft: "auto", marginRight: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
             <span style={{ fontSize: "12px" }}>{recentStatus === "success" ? "\u2713" : "\u2717"}</span>
             <span style={{
               fontSize: "11px",
@@ -1098,18 +1164,9 @@ function AppContent() {
             onContracts={runContracts}
             onCancel={cancelPipeline}
           />
-          <button
-            onClick={() => setAgentSidebarOpen((v) => !v)}
-            style={agentSidebarOpen ? styles.btnPrimary : styles.btn}
-            title="Toggle agent sidebar"
-            aria-label="Toggle agent sidebar"
-            aria-expanded={agentSidebarOpen}
-          >
-            Agent
-          </button>
           <EnvironmentSwitcher showConfirm={showConfirm} />
           {currentUser && (
-            <div style={styles.userInfo}>
+            <div className="havn-userinfo" style={styles.userInfo}>
               <span style={styles.userName}>{currentUser.display_name || currentUser.username}</span>
               <span style={styles.userRole}>{currentUser.role}</span>
               {currentUser.username !== "local" && (
@@ -1122,7 +1179,8 @@ function AppContent() {
 
       <div style={styles.main}>
         {/* Sidebar */}
-        <aside style={{ ...styles.sidebar, width: sidebarWidth }} data-havn-guide="sidebar" role="navigation" aria-label="File browser">
+        {!fullWidthPage && (
+        <aside className="havn-sidebar" style={{ ...styles.sidebar, width: sidebarWidth }} data-havn-guide="sidebar" role="navigation" aria-label="File browser">
           <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--havn-border)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--havn-text-dim)" strokeWidth="1.5" style={{ flexShrink: 0 }}>
@@ -1163,12 +1221,17 @@ function AppContent() {
             </div>
           </div>
         </aside>
+        )}
 
-        <ResizeHandle
-          direction="horizontal"
-          onResize={onSidebarResize}
-          onResizeStart={onSidebarResizeStart}
-        />
+        {!fullWidthPage && (
+          <div className="havn-sidebar" style={{ display: "flex" }}>
+            <ResizeHandle
+              direction="horizontal"
+              onResize={onSidebarResize}
+              onResizeStart={onSidebarResizeStart}
+            />
+          </div>
+        )}
 
         {/* Content */}
         <div style={styles.content} role="main">
@@ -1193,9 +1256,22 @@ function AppContent() {
                     {activeFile}
                     {dirty && <span style={styles.modifiedDot}> *</span>}
                   </span>
-                  <button onClick={saveFile} disabled={!dirty} style={styles.btn}>
-                    Save
-                  </button>
+                  {bindStatusText && (
+                    <span
+                      style={{
+                        ...styles.bindStatus,
+                        color: bindStatus?.errorCount > 0 ? "var(--havn-red)" : "var(--havn-text-dim)",
+                      }}
+                      title="Live SQL diagnostics for this model"
+                    >
+                      {bindStatusText}
+                    </span>
+                  )}
+                  {!isTransformFile && (
+                    <button onClick={saveFile} disabled={!dirty} style={styles.btn}>
+                      Save
+                    </button>
+                  )}
                   <label style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, opacity: 0.8, cursor: "pointer" }} title="Re-run this model/script automatically after save">
                     <input
                       type="checkbox"
@@ -1204,14 +1280,11 @@ function AppContent() {
                     />
                     Run on save
                   </label>
-                  {isTransformFile && (
-                    <button onClick={handleRunSingleModel} disabled={running} style={styles.btn} title={running ? "A run is already in progress" : "Run just this model"}>
-                      Run Model
+                  {!isTransformFile && (
+                    <button onClick={runCurrentFile} disabled={running} style={styles.btnPrimary} title={running ? "A run is already in progress" : "Run this file"}>
+                      Run
                     </button>
                   )}
-                  <button onClick={runCurrentFile} disabled={running} style={styles.btnPrimary} title={running ? "A run is already in progress" : "Run this file"}>
-                    Run
-                  </button>
                 </div>
               )}
             </div>
@@ -1221,6 +1294,19 @@ function AppContent() {
           <div style={styles.panel} data-havn-guide="main-panel">
             {activeTab === "Overview" && (
               <ErrorBoundary name="Overview">
+                <HomePanel
+                  running={running}
+                  refreshKey={tables}
+                  onNavigate={navigateToTab}
+                  onOpenFile={openFile}
+                  onRunPipeline={() => runPipeline()}
+                  onQuery={(sql) => {
+                    navigateToTab("Query");
+                    window.__havn_prefill_query = { sql, run: true };
+                  }}
+                  onClearSample={handleClearSample}
+                  onAttentionCount={setAttentionCount}
+                  firstRun={
                 <OverviewPanel
                   onNavigate={navigateToTab}
                   onSelectTable={handleSelectTable}
@@ -1238,6 +1324,20 @@ function AppContent() {
                   onClearSample={handleClearSample}
                   refreshKey={tables}
                 />
+                  }
+                />
+              </ErrorBoundary>
+            )}
+            {activeTab === "Ship" && (
+              <ErrorBoundary name="Ship">
+                <ShipPanel
+                  running={running}
+                  showConfirm={showConfirm}
+                  addOutput={addOutput}
+                  onOpenFile={openFile}
+                  onNavigate={navigateToTab}
+                  onMerged={refreshAll}
+                />
               </ErrorBoundary>
             )}
             {activeTab === "Dashboards" && (
@@ -1254,21 +1354,39 @@ function AppContent() {
                 </ErrorBoundary>
               ) : (
               <ErrorBoundary name="Editor">
+                {isTransformFile ? (
+                <ModelWorkbench
+                  activeFile={activeFile}
+                  content={fileContent}
+                  dirty={dirty}
+                  running={running}
+                  editor={editorInstance}
+                  preview={preview}
+                  previewError={previewError}
+                  previewRunning={previewRunning}
+                  previewLabel={previewLabel}
+                  onPreview={previewCurrentFile}
+                  onPreviewSql={previewSql}
+                  onClearPreview={() => { setPreview(null); setPreviewError(null); }}
+                  onSave={saveFile}
+                  onBuild={async (modelName) => {
+                    // The workbench knows the model's real name, which a nested
+                    // folder or @config schema= makes different from the path.
+                    if (!modelName) return handleRunSingleModel();
+                    if (dirty) await saveFile();
+                    await runSingleModel(modelName);
+                  }}
+                  onBuildDownstream={handleBuildSelection}
+                  onOpenFile={openFile}
+                  onOpenDag={() => navigateToTab("DAG")}
+                  onEditContent={(text) => { setFileContent(text); setDirty(true); }}
+                >
+                  {editorElement}
+                </ModelWorkbench>
+                ) : (
                 <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
                   <div style={{ flex: 1, overflow: "hidden", minHeight: 0 }}>
-                    <Editor
-                      content={fileContent}
-                      language={fileLang}
-                      onChange={(val) => {
-                        setFileContent(val);
-                        setDirty(true);
-                      }}
-                      activeFile={activeFile}
-                      onMount={(editor) => { editorRef.current = editor; }}
-                      goToLine={goToLine}
-                      onFormat={activeFile?.endsWith(".sql") ? formatCurrentFile : undefined}
-                      onPreview={activeFile?.endsWith(".sql") ? previewCurrentFile : undefined}
-                    />
+                    {editorElement}
                   </div>
                   {(preview || previewError || previewRunning) && (
                     <>
@@ -1290,10 +1408,11 @@ function AppContent() {
                     </>
                   )}
                 </div>
+                )}
               </ErrorBoundary>
               )
             )}
-            {activeTab === "Query" && <ErrorBoundary name="Query"><QueryPanel addOutput={addOutput} onOpenModel={(key) => { const [s, t] = key.split("."); openFile(`transform/${s}/${t}.sql`); }} /></ErrorBoundary>}
+            {activeTab === "Query" && <ErrorBoundary name="Query"><QueryPanel addOutput={addOutput} onOpenModel={async (key) => { openFile(await resolveModelPath(key)); }} /></ErrorBoundary>}
             {activeTab === "Tables" && <ErrorBoundary name="Tables"><TablesPanel selectedTable={selectedTable} onQueryTable={queryTable} tables={tables} onSelectTable={handleSelectTable} /></ErrorBoundary>}
             {activeTab === "Data Sources" && <ErrorBoundary name="Data Sources"><DataSourcesPanel addOutput={addOutput} showConfirm={showConfirm} onDataChanged={refreshAll} /></ErrorBoundary>}
 
@@ -1304,6 +1423,7 @@ function AppContent() {
             {activeTab === "Diff" && <ErrorBoundary name="Diff"><DiffPanel api={api} addOutput={addOutput} /></ErrorBoundary>}
             {activeTab === "Docs" && <ErrorBoundary name="Docs"><DocsPanel /></ErrorBoundary>}
             {activeTab === "Quality" && <ErrorBoundary name="Quality"><QualityPanel addOutput={addOutput} /></ErrorBoundary>}
+            {activeTab === "Unit Tests" && <ErrorBoundary name="Unit Tests"><UnitTestsPanel /></ErrorBoundary>}
             {activeTab === "Masking" && <ErrorBoundary name="Masking"><MaskingPanel showConfirm={showConfirm} /></ErrorBoundary>}
             {activeTab === "Wiki" && <ErrorBoundary name="Wiki"><WikiPanel /></ErrorBoundary>}
             {activeTab === "Runs" && <ErrorBoundary name="Runs"><HistoryPanel onOpenFile={openFile} /></ErrorBoundary>}
@@ -1456,6 +1576,7 @@ function AppContent() {
         onRunStream={(name) => { runStream(name); }}
       />
     </div>
+    </div>
   );
 }
 
@@ -1526,26 +1647,26 @@ export default function App() {
 /* ------------------------------------------------------------------ */
 
 const styles = {
-  container: { display: "flex", flexDirection: "column", height: "100vh", background: "var(--havn-bg)", color: "var(--havn-text)", fontFamily: "var(--havn-font)" },
+  frame: { display: "flex", height: "100vh", background: "var(--havn-bg)", color: "var(--havn-text)", fontFamily: "var(--havn-font)" },
+  container: { display: "flex", flexDirection: "column", flex: 1, minWidth: 0, height: "100vh", background: "var(--havn-bg)", color: "var(--havn-text)", fontFamily: "var(--havn-font)" },
   loading: { display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "var(--havn-bg)", color: "var(--havn-text-secondary)", fontFamily: "var(--havn-font)", fontSize: "14px" },
 
   // Header
-  header: { display: "flex", alignItems: "center", padding: "0 16px", borderBottom: "1px solid var(--havn-border)", background: "var(--havn-bg-secondary)", minHeight: "46px", gap: "12px" },
-  logo: { display: "inline-flex", alignItems: "center", fontSize: "17px", fontWeight: 700, fontFamily: "var(--havn-font)", color: "var(--havn-accent)", letterSpacing: "-0.5px", background: "none", border: "none", cursor: "pointer", padding: "8px 0", marginRight: "4px", flexShrink: 0 },
-
-  // Section navigation (in header)
-  sectionNav: { display: "flex", alignItems: "center", gap: "1px", flex: 1 },
-  section: {
-    padding: "12px 14px", background: "none", border: "none", borderBottom: "2px solid transparent",
-    color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "13px", whiteSpace: "nowrap",
-    fontWeight: 500, transition: "color 0.15s", letterSpacing: "0.01em",
+  header: { display: "flex", alignItems: "center", padding: "0 16px", borderBottom: "1px solid var(--havn-border)", background: "var(--havn-bg-secondary)", minHeight: "48px", gap: "12px", minWidth: 0 },
+  crumb: { fontSize: "13px", color: "var(--havn-text-secondary)", whiteSpace: "nowrap", flexShrink: 0 },
+  crumbTab: { color: "var(--havn-text)", fontWeight: 500 },
+  omnibox: {
+    flex: "1 1 auto", maxWidth: 520, minWidth: 0, margin: "0 auto", display: "flex", alignItems: "center", gap: 8,
+    padding: "6px 10px", background: "var(--havn-bg)", border: "1px solid var(--havn-border)",
+    borderRadius: "var(--havn-radius)", color: "var(--havn-text-dim)", fontSize: "13px", fontFamily: "var(--havn-font)",
+    cursor: "text", textAlign: "left",
   },
-  sectionActive: {
-    padding: "12px 14px", background: "none", border: "none", borderBottom: "2px solid var(--havn-accent)",
-    color: "var(--havn-text)", cursor: "pointer", fontSize: "13px", whiteSpace: "nowrap",
-    fontWeight: 600, transition: "color 0.15s", letterSpacing: "0.01em",
+  omniboxText: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  omniboxKbd: {
+    fontFamily: "var(--havn-font-mono)", fontSize: "10.5px", color: "var(--havn-text-secondary)",
+    border: "1px solid var(--havn-border-light)", borderBottomWidth: 2, borderRadius: 4, padding: "0 5px",
+    background: "var(--havn-bg-tertiary)", flexShrink: 0,
   },
-
   // Header right side
   headerRight: { display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 },
   userInfo: { display: "flex", alignItems: "center", gap: "6px", marginLeft: "4px" },
@@ -1585,6 +1706,7 @@ const styles = {
   // File actions (inline in sub-tab bar)
   fileActions: { marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px", paddingLeft: "16px" },
   fileName: { fontSize: "11px", color: "var(--havn-text-dim)", fontFamily: "var(--havn-font-mono)", maxWidth: "280px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  bindStatus: { fontSize: "11px", fontFamily: "var(--havn-font-mono)", whiteSpace: "nowrap" },
   modifiedDot: { color: "var(--havn-accent)", fontWeight: 700 },
 
   // Panel

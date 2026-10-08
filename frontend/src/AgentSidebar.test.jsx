@@ -126,7 +126,15 @@ describe("AgentSidebar", () => {
   it("fetches available agents on mount", async () => {
     render(<AgentSidebar isOpen={true} onToggle={() => {}} />);
     await new Promise((r) => setTimeout(r, 10));
-    expect(global.fetch).toHaveBeenCalledWith("/api/agents");
+    // The request goes through the api client (api.listAgents), which attaches
+    // the bearer token and a timeout signal, so fetch gets an options object
+    // alongside the URL.
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/agents",
+      expect.objectContaining({
+        headers: expect.objectContaining({ "Content-Type": "application/json" }),
+      })
+    );
   });
 
   it("uses data-havn attributes for styling hooks", () => {

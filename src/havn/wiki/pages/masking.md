@@ -18,7 +18,7 @@ havn provides column-level data masking to protect sensitive data. Masking is ap
 
 ### SQL Commands in the Query Panel
 
-You can also manage masking policies directly from the **Query** panel in the Explore tab using special SQL commands:
+You can also manage masking policies directly from the **Query** page under Data using special SQL commands:
 
 ```sql
 -- Create a policy

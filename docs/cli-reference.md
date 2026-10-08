@@ -24,10 +24,32 @@ Creates project structure with sample earthquake data pipeline, seeds, contracts
 Validate project structure, config, and SQL model dependencies.
 
 ```bash
-havn validate [--project PATH]
+havn validate [--project PATH] [--bind | --no-bind]
 ```
 
+| Option | Default | Description |
+|---|---|---|
+| `--project, -p` | `.` | Project directory |
+| `--bind / --no-bind` | on when a warehouse exists | Resolve every model's SQL through the DuckDB binder |
+
 Checks `project.yml` parsing, directory structure, stream actions, model dependencies, circular dependencies, and environment variable references.
+
+With the bind pass on, each model is also created as a view inside a throwaway
+shadow catalog -- a private in-memory database with no attachment to the
+warehouse and no file access -- and described, which resolves output types and
+reports **bind errors** with a line number:
+
+```
+  error gold.summary:4: bind error: Referenced column "no_such_column" not found in FROM clause!
+```
+
+The pass reads no rows and writes nothing to the warehouse. It catches wrong
+arity, unknown functions, operator overload failures, missing columns
+(including on upstream models that have never been built), missing struct
+keys, ambiguous references, aggregation without `GROUP BY`, and set-operation
+arity mismatches. It does not catch value conversions such as
+`CAST(some_varchar AS INTEGER)`, which bind clean and fail at run time. See
+[Data Quality](quality.md#validation-and-type-resolution).
 
 ### havn status
 
@@ -134,17 +156,90 @@ havn seed [--force] [--schema NAME] [--env NAME] [--project PATH]
 Build SQL models in dependency order.
 
 ```bash
-havn transform [TARGETS...] [--force] [--sequential] [--workers N] [--env NAME] [--skip-check] [--project PATH]
+havn transform [TARGETS...] [--select SEL] [--exclude SEL] [--force] [--sequential] [--workers N] [--env NAME] [--skip-check] [--event-time-start TS] [--event-time-end TS] [--defer/--no-defer] [--defer-snapshot] [--verbose] [--project PATH]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `TARGETS` | all | Specific models to build |
+| `TARGETS` | all | Graph selectors picking what to build |
+| `--select, -s` | none | Graph selector, repeatable; the same grammar as `TARGETS`, for people coming from dbt |
+| `--exclude, -x` | none | Graph selector whose matches are removed from the selection |
 | `--force, -f` | false | Rebuild all (ignore change detection) |
 | `--sequential` | false | Disable parallel execution; run models one at a time (independent models run concurrently by default) |
 | `--workers, -w` | 4 | Max parallel workers |
 | `--env, -e` | none | Environment override |
 | `--skip-check` | false | Skip pre-transform validation |
+| `--event-time-start` | none | Backfill microbatch models from this event time (UTC), e.g. `2024-01-01` |
+| `--event-time-end` | none | Backfill microbatch models up to this event time (UTC), exclusive |
+| `--defer / --no-defer` | on when the environment declares `defer:` | Read models this warehouse has not built from the environment's defer target |
+| `--defer-snapshot` | false | Defer to a consistent copy of the target, for when it is open for writing elsewhere |
+| `--verbose, -v` | false | Print the resolved selection and which selector matched what |
+
+```bash
+havn transform                          # everything
+havn transform gold.orders              # one model
+havn transform +gold.orders             # and its upstream
+havn transform gold.orders+             # and its downstream
+havn transform 2+gold.orders            # two hops of upstream
+havn transform @silver.customers        # it, its downstream, and their upstream
+havn transform 'gold.fct_*'             # wildcard (quote it)
+havn transform tag:daily                # by tag
+havn transform path:transform/gold/     # by path
+havn transform config.materialized:incremental
+havn transform state:modified+          # what changed, plus downstream
+havn transform 'tag:daily,gold.*'       # comma intersects
+havn transform -s tag:daily -x tag:expensive
+
+# backfill a microbatch model over an explicit event-time range
+havn transform gold.events --event-time-start 2024-01-01 --event-time-end 2024-03-01
+
+# build one model in dev, reading its upstreams from prod
+havn transform gold.orders                     # defers if the environment says to
+havn transform gold.orders --no-defer          # build against dev alone
+havn transform gold.orders --defer-snapshot    # prod is busy; read a copy
+```
+
+`--defer` needs `environments.<name>.defer` in project.yml, and reads the
+other environment's warehouse file directly, so that file must not be open
+for writing anywhere else. When it is, the run stops with the holder's PID
+and `--defer-snapshot` is the way through. See
+[Environments: Defer](environments#defer).
+
+`--event-time-start` / `--event-time-end` process exactly that range of
+windows instead of resuming from recorded state; either may be given alone,
+and the end is exclusive. `--force` on a microbatch model reprocesses every
+window from its `begin`. See
+[Microbatch incremental models](transforms#microbatch-incremental-models).
+
+A selector that matched nothing is a warning; a run that selected nothing at
+all exits non-zero. Full grammar: [Selecting models](transforms#selecting-models).
+
+### havn ls
+
+List the models a selector resolves to, without building anything. A dry run
+for the selector grammar `havn transform` takes.
+
+```bash
+havn ls [TARGETS...] [--select SEL] [--exclude SEL] [--names] [--env NAME] [--project PATH]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `TARGETS` | all | Graph selectors to resolve |
+| `--select, -s` | none | Graph selector, repeatable |
+| `--exclude, -x` | none | Graph selector whose matches are removed |
+| `--names, -n` | false | Print bare model names, one per line, for piping |
+| `--env, -e` | none | Environment override |
+
+```bash
+havn ls                          # every model, with schema, materialization and tags
+havn ls '+gold.orders'           # what a build of gold.orders would touch
+havn ls state:modified+ --names  # what `havn transform` would rebuild
+```
+
+The warehouse is only opened when a `state:` selector needs it, so `havn ls`
+works in a project that has never been built. Exits non-zero when nothing
+matched.
 
 ### havn jobs run
 
@@ -263,19 +358,33 @@ Register it with an MCP client, for example:
 claude mcp add havn -- havn mcp -p /path/to/project
 ```
 
-Tools exposed: `query`, `list_tables`, `describe_table`, `list_models`, `get_model`, `model_lineage`, `run_history`, `list_metrics`, `query_metric`, `run_transform`.
+Tools exposed: `query`, `list_tables`, `describe_table`, `list_models`, `get_model`, `model_lineage`, `run_history`, `list_metrics`, `query_metric`, `run_unit_tests`, `run_transform`.
 
 ## Data Quality
 
 ### havn check
 
-Validate SQL models, run assertions, and run contracts.
+Validate SQL models, run assertions, contracts, and unit tests.
 
 ```bash
-havn check [TARGETS...] [--env NAME] [--project PATH]
+havn check [TARGETS...] [--unit-tests/--no-unit-tests] [--env NAME] [--project PATH]
 ```
 
-Runs model validation, inline assertions, and YAML contracts.
+Runs model validation, inline assertions, YAML contracts, and the unit tests
+in `tests/unit/`. Pass `--no-unit-tests` to skip the last step.
+
+### havn test
+
+Run model unit tests: fixture rows in, expected rows out.
+
+```bash
+havn test [--model NAME] [-v] [--env NAME] [--project PATH]
+```
+
+Each test runs its model against the mock rows declared in `tests/unit/*.yml`
+on a throwaway in-memory DuckDB, so nothing is read from or written to the
+warehouse. `-v` prints the rows that differ. Exits 1 if any test fails.
+See [Unit Tests](unit-tests).
 
 ### havn freshness
 
@@ -339,6 +448,35 @@ Analyze downstream impact of changing a model or column.
 ```bash
 havn impact MODEL [--column NAME] [--json] [--project PATH]
 ```
+
+### havn rename-column
+
+Rename a column in the model that defines it and everywhere it is read.
+
+```bash
+havn rename-column MODEL COLUMN NEW_NAME [--dry-run] [--force] [--yes] [--env NAME] [--project PATH]
+```
+
+Prints every site it found, with the clause each one sits in, and every place
+it cannot see through. Writes nothing until you confirm, and either writes
+every file or none.
+
+```bash
+# Look first: the sites and the blockers, nothing written
+havn rename-column silver.customers customer_id cust_id --dry-run
+
+# Rename, asking before it writes
+havn rename-column silver.customers customer_id cust_id
+
+# Rename the places it can see, leaving the blocked ones alone
+havn rename-column silver.customers customer_id cust_id --force
+```
+
+A rename refuses while anything is blocked. A downstream `SELECT *`,
+`COLUMNS(...)`, `UNION BY NAME`, a relation-position macro call, an
+unqualified reference two relations could own, or a metrics or contracts YAML
+naming the column each block it; `--force` goes ahead with the rest. See
+[Refactoring](refactoring.md).
 
 ### havn promote
 
@@ -542,8 +680,30 @@ havn env ACTION [NAME]
 Actions:
 - `list` — Show all environments, mark active with star
 - `use <name>` — Set active environment (writes `.havn-env`)
-- `show` — Show current active environment
+- `show` — Show current active environment, plus its defer target and whether
+  that target's file can be opened right now
 - `reset` — Clear active environment
+
+### havn deploy
+
+Build a git ref in an environment's warehouse, rolling back on failure.
+
+```bash
+havn deploy prod --plan              # what would rebuild; changes nothing
+havn deploy prod                     # deploy main to prod
+havn deploy staging --ref release-3  # any branch, tag or commit
+```
+
+The ref is checked out into a temporary worktree, so the code that runs is that
+commit's, not whatever is checked out. It rebuilds every model whose SQL or
+upstream differs from what that environment last built (`state:modified+`).
+Those models are snapshotted first: table data, view definitions, which ones did
+not exist yet, and their build state. If any of them fails to build (an error,
+a failed error-level check, a blocked upstream), all of them are put back
+exactly as they were, and the command exits 1 naming the models that failed.
+Ingest does not run; deploy the models, not the data feeding them.
+
+Also available from the web UI (Ship) and `POST /api/deploys`.
 
 ### havn macros
 
@@ -553,7 +713,23 @@ List registered Python SQL macros.
 havn macros [--project PATH]
 ```
 
-Shows all macros discovered from the `macros/` directory: name, parameters, return type, source file, and docstring.
+Shows all macros discovered from the `macros/` directory, from installed packages, and from havn's built-in library: name, parameters, return type, origin, source file, and docstring.
+
+### havn packages
+
+Install and inspect shared model and macro packages. See [Packages](packages.md).
+
+```bash
+havn packages                    # list installed packages (default action)
+havn packages install            # install what project.yml declares
+havn packages install --upgrade  # re-resolve each rev instead of using the lock
+havn packages remove crm         # delete a checkout and its lock entry
+```
+
+Packages are declared under `packages:` in `project.yml` as `{name, git, rev}`
+or `{name, path}`, installed into `havn_packages/`, and pinned by
+`havn_packages.lock`. A package's models are namespaced into `<pkg>_<schema>`
+and selectable with `package:<name>`.
 
 ### havn version
 

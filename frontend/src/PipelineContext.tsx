@@ -15,6 +15,8 @@ interface PipelineState {
   runLint: (fix?: boolean) => Promise<void>;
   runCurrentScript: (scriptPath: string) => Promise<void>;
   runSingleModel: (modelName: string) => Promise<void>;
+  /** Run a graph selector (`+gold.orders`, `tag:daily`, ...) as one target. */
+  runSelection: (selector: string) => Promise<void>;
   runContracts: () => Promise<void>;
   runPipeline: (steps?: string[], force?: boolean) => Promise<void>;
 }
@@ -117,6 +119,9 @@ function createEventProcessor(
 
         if (status === "skipped") {
           msg = `${prefix}Skipped ${displayName} (no changes)`;
+        } else if (status === "inlined") {
+          // Ephemeral: never materialized, carried into consumers as a CTE.
+          msg = `${prefix}Inlined ${displayName} (ephemeral)`;
         } else if (status === "error" || status === "assertion_failed") {
           const cleanErr = err?.replace(/[\x00]/g, ".").replace(/\.+/g, ".") || "";
           msg = `${prefix}Failed ${displayName}${cleanErr ? ` — ${cleanErr}` : ""}`;
@@ -126,7 +131,7 @@ function createEventProcessor(
 
         if (rowCount) totalRows += rowCount;
         const level = status === "error" || status === "assertion_failed" ? "error"
-          : status === "skipped" ? "log"
+          : status === "skipped" || status === "inlined" ? "log"
           : "success";
         addOutput(level as OutputEntry["type"], msg, serverTs);
 
@@ -552,6 +557,16 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
     ),
   [startAndConnect]);
 
+  // A selector goes through as a single target: the server resolves it with
+  // the same code `havn transform <selector>` uses. No --force, because a
+  // selector already says what to rebuild.
+  const runSelection = useCallback((selector: string) =>
+    startAndConnect(
+      () => api.startTransform([selector], false),
+      `Running transform for ${selector}...`,
+    ),
+  [startAndConnect]);
+
   const runContracts = useCallback(() =>
     startAndConnect(
       () => api.startContracts(),
@@ -582,6 +597,7 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
         runLint,
         runCurrentScript,
         runSingleModel,
+        runSelection,
         runContracts,
         runPipeline,
       }}

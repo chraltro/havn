@@ -82,22 +82,26 @@ from havn.cli import connectors  # noqa: E402, F401
 from havn.cli import diff  # noqa: E402, F401
 from havn.cli import env  # noqa: E402, F401
 from havn.cli.flight import app as flight_app  # noqa: E402
+from havn.cli import deploy  # noqa: E402, F401
 from havn.cli import jobs  # noqa: E402, F401
 from havn.cli import macros  # noqa: E402, F401
 from havn.cli import mcp  # noqa: E402, F401
 from havn.cli.metrics import metrics_app  # noqa: E402
 from havn.cli import migrate  # noqa: E402, F401
 from havn.cli import models  # noqa: E402, F401
+from havn.cli import packages  # noqa: E402, F401
 from havn.cli import pipeline  # noqa: E402, F401
 from havn.cli import pr  # noqa: E402, F401
 from havn.cli import project  # noqa: E402, F401
 from havn.cli import quality  # noqa: E402, F401
 from havn.cli import query  # noqa: E402, F401
+from havn.cli import rename  # noqa: E402, F401
 from havn.cli import shell  # noqa: E402, F401
 from havn.cli import masking  # noqa: E402, F401
 from havn.cli import rewind  # noqa: E402, F401
 from havn.cli import sentinel  # noqa: E402, F401
 from havn.cli import streaming  # noqa: E402, F401
+from havn.cli import unit_tests  # noqa: E402, F401
 from havn.cli import version  # noqa: E402, F401
 
 app.add_typer(flight_app, name="flight")
