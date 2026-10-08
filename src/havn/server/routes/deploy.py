@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import duckdb
+
 import logging
 import threading
 from pathlib import Path
@@ -88,7 +90,7 @@ def deploy_targets(request: Request) -> dict:
             "name": name,
             "active": is_active,
             "production": _is_production(name),
-            "database": str(path.relative_to(project_dir)) if path.is_relative_to(project_dir) else str(path),
+            "database": path.relative_to(project_dir).as_posix() if path.is_relative_to(project_dir) else str(path),
             "exists": path.exists(),
         })
     return {"environments": envs, "default_ref": _default_ref(project_dir)}
@@ -121,7 +123,42 @@ def deploy_plan(
                 target.close()
     except DeployError as e:
         raise HTTPException(400, str(e))
+    except duckdb.Error as e:
+        # The target is open elsewhere: a deploy to it is running in this
+        # process, or another process holds it (DuckDB takes an exclusive
+        # lock on Windows). That is a state to retry, not a server error.
+        raise HTTPException(
+            409, f"The {env} warehouse is busy, probably with a deploy in progress. Try again shortly. ({e})"
+        )
     return {"env": env, **plan}
+
+
+def _check_production_ref(project_dir: Path, env: str, ref: str, user: dict) -> None:
+    """Only reviewed code reaches production, unless an admin deploys it.
+
+    Deploy took any ref, so an editor could put an unmerged, unreviewed
+    branch straight into prod and bypass the change-review gate entirely.
+    For a production environment the ref's commit must already be on the
+    base branch -- that is, merged through review. Admins keep the escape
+    hatch (hotfixes, rollbacks to an old tag on main still pass anyway).
+    With sign-in off everyone acts as an admin, so nothing changes there.
+    """
+    from havn.engine.auth import has_permission
+    from havn.engine.git import _run_git
+
+    if not _is_production(env) or has_permission(user.get("role", ""), "manage_users"):
+        return
+    base = _default_ref(project_dir)
+    commit = _run_git(project_dir, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+    if commit.returncode != 0:
+        raise HTTPException(400, f"'{ref}' is not a branch, tag or commit in this repository")
+    reachable = _run_git(project_dir, "merge-base", "--is-ancestor", commit.stdout.strip(), base)
+    if reachable.returncode != 0:
+        raise HTTPException(
+            403,
+            f"Only code merged into {base} can be deployed to {env}. "
+            f"Merge '{ref}' through a reviewed change first, or ask an admin.",
+        )
 
 
 @router.post("/api/deploys")
@@ -133,6 +170,7 @@ def start_deploy(req: DeployRequest, request: Request, conn: DbConn) -> dict:
 
     project_dir = _get_project_dir()
     cfg, path, is_active = _target(req.env)
+    _check_production_ref(project_dir, req.env, req.ref, user)
     record = new_record(req.env, req.ref, pr_id=req.pr_id, deployed_by=_actor(user, None))
     _save(conn, record)
 
@@ -149,7 +187,11 @@ def start_deploy(req: DeployRequest, request: Request, conn: DbConn) -> dict:
                            restore_macros_from=project_dir)
             else:
                 target = open_warehouse(cfg, project_dir)
-                run_deploy(project_dir, record, target, record_conn=record_cur, db_path=str(path))
+                # The deploy closes the target before it saves the final
+                # status (see run_deploy's close_target); the close in the
+                # finally below is then a no-op backstop for early failures.
+                run_deploy(project_dir, record, target, record_conn=record_cur,
+                           db_path=str(path), close_target=True)
         except Exception as e:
             logger.error("deploy %s failed to start: %s", record["id"], e)
             if record_cur is not None:

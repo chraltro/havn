@@ -7,6 +7,8 @@ Shared dependencies (DB injection, auth, caching) live in havn.server.deps.
 
 from __future__ import annotations
 
+import logging
+
 from pathlib import Path
 
 from contextlib import asynccontextmanager
@@ -36,6 +38,31 @@ ACTIVE_ENV: str | None = None  # Set by CLI --env flag
 _maintenance = None
 
 
+logger = logging.getLogger("havn.server")
+
+
+def _close_out_interrupted_work() -> None:
+    """Mark builds and deploys a previous server left "running" as interrupted."""
+    try:
+        from havn.engine.deploy import mark_interrupted_deploys
+        from havn.engine.pr import mark_interrupted_builds
+        from havn.engine.write_queue import cursor_for
+        from havn.server.deps import _get_shared_conn
+
+        cur = cursor_for(_get_shared_conn())
+        try:
+            builds, deploys = mark_interrupted_builds(cur), mark_interrupted_deploys(cur)
+        finally:
+            cur.close()
+        if builds or deploys:
+            logger.warning(
+                "Marked %d build(s) and %d deploy(s) as interrupted by the last shutdown", builds, deploys
+            )
+    except Exception as e:
+        # No warehouse yet, or read-only: nothing to close out.
+        logger.debug("Skipped closing out interrupted work: %s", e)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Server lifecycle hooks.
@@ -46,6 +73,7 @@ async def _lifespan(app: FastAPI):
     On shutdown, stop the streaming flush worker and the maintenance loop.
     """
     global _maintenance
+    _close_out_interrupted_work()
     try:
         from havn.engine.streaming.maintenance import MaintenanceScheduler
         from havn.engine.write_queue import cursor_for

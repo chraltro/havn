@@ -451,7 +451,12 @@ def test_local_path_package_keeps_symlinks_as_symlinks(tmp_path):
         source / "transform" / "silver" / "dim_date.sql",
         "@config materialized=table, schema=silver\n\nSELECT 1 AS day_key\n",
     )
-    (source / "link").symlink_to(outside, target_is_directory=True)
+    try:
+        (source / "link").symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        # Windows only grants SeCreateSymbolicLinkPrivilege to an admin or a
+        # machine in Developer Mode. Without it the case cannot be set up.
+        pytest.skip(f"symlinks not permitted in this environment: {exc}")
     (source / "broken").symlink_to(tmp_path / "does-not-exist")
 
     project = _make_project(tmp_path, f"packages:\n  - name: shared\n    path: {source}\n")
@@ -1051,3 +1056,58 @@ def test_promote_to_model_dag_check_covers_package_models(tmp_path):
     finally:
         reset_shared_conn()
         invalidate_config_cache()
+
+
+def test_a_lock_entry_cannot_point_outside_havn_packages(tmp_path):
+    """The lock is committed, so it is input. A crafted name must not delete anything.
+
+    An entry named ../../victim used to reach the "no longer declared, remove
+    the checkout" cleanup and rmtree a directory outside the project.
+    """
+    victim = tmp_path / "victim"
+    (victim / "keep").mkdir(parents=True)
+    (victim / "keep" / "data.txt").write_text("important")
+    project = _make_project(tmp_path, "packages: []\n")
+    (project / "havn_packages.lock").write_text(
+        "version: 1\npackages:\n  - name: ../../victim\n    source: git\n    git: x\n    rev: v1\n    commit: abc\n"
+    )
+
+    assert read_lock(project) == {}
+    install_packages(project, load_project(project))
+
+    assert (victim / "keep" / "data.txt").read_text() == "important"
+
+
+def test_force_rmtree_refuses_a_path_that_is_not_a_package_checkout(tmp_path):
+    from havn.engine.packages import _force_rmtree
+
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    with pytest.raises(ValueError, match="not a package checkout"):
+        _force_rmtree(outside)
+    assert outside.exists()
+
+
+def test_a_failed_upgrade_keeps_the_working_checkout(tmp_path):
+    """Offline, or the remote moved: the installed package must still be there.
+
+    The clone used to begin by deleting the checkout, so a failed fetch left
+    the project with no package models while the lock still pinned a commit.
+    """
+    bare, _work = _make_package_repo(tmp_path)
+    project = _make_project(
+        tmp_path, f"packages:\n  - name: crm\n    git: {bare}\n    rev: v1.0.0\n"
+    )
+    install_packages(project, load_project(project))
+    checkout = project / "havn_packages" / "crm"
+    assert (checkout / ".git").exists()
+
+    (project / "project.yml").write_text(
+        "name: testproj\ndatabase:\n  path: warehouse.duckdb\n"
+        f"packages:\n  - name: crm\n    git: {tmp_path / 'gone.git'}\n    rev: v2.0.0\n"
+    )
+    results = install_packages(project, load_project(project), upgrade=True)
+
+    assert results[0].status == "error"
+    assert (checkout / ".git").exists()
+    assert not list((project / "havn_packages").glob(".crm.*"))  # no staging left behind

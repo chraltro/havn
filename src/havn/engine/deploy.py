@@ -40,6 +40,19 @@ DEPLOY_ROOT = (".havn", "deploy")
 # Statuses run_transform reports for a model that is in place afterwards.
 _OK_STATUSES = {"built", "skipped", "inlined"}
 
+# Per-model bookkeeping a rollback must put back along with the tables.
+# batch_state matters most: a failed deploy that processed new microbatch
+# windows leaves them marked done, so after the tables are restored the next
+# run would resume after windows whose rows were rolled away -- silent data
+# loss until someone forces a backfill. model_blocked likewise: a deploy that
+# cleared a block and then rolled back must not leave the rejected data
+# looking accepted.
+_ROLLBACK_META_TABLES = ("model_state", "model_columns", "batch_state", "model_blocked")
+
+
+def _quote_ident(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
 _deploy_lock = threading.Lock()
 
 
@@ -74,6 +87,32 @@ def ensure_deploys_table(conn: duckdb.DuckDBPyConnection) -> None:
             error        VARCHAR
         )
     """)
+
+
+def mark_interrupted_deploys(conn: duckdb.DuckDBPyConnection) -> int:
+    """Close out deploys a previous server process left "running".
+
+    A deploy runs on a daemon thread of the server, so a restart or crash
+    kills it mid-way and nothing updates its record: the page would show
+    "Deploying..." forever. Only one server holds a warehouse at a time, so
+    at startup nothing can really still be running. Returns how many.
+    """
+    try:
+        n = conn.execute("SELECT COUNT(*) FROM _havn.deploys WHERE status = 'running'").fetchone()[0]
+        if n:
+            # Same timestamp format as every other record (_now(): ISO 8601 UTC).
+            # The target is left as the interrupted run left it -- there is no
+            # snapshot to roll back to from here -- so the message says so.
+            conn.execute(
+                "UPDATE _havn.deploys SET status = 'error', "
+                "error = 'Interrupted: the server stopped before this deploy finished. "
+                "The target may be partly deployed; deploy again to bring it to a known state.', "
+                "finished_at = ? WHERE status = 'running'",
+                [_now()],
+            )
+        return n
+    except duckdb.CatalogException:
+        return 0  # no deploy has ever run here
 
 
 _RECORD_KEYS = ("models", "results", "failed", "version_id", "restored")
@@ -194,9 +233,16 @@ def _plan(conn: duckdb.DuckDBPyConnection | None, checkout_dir: Path) -> list[st
         ensure_meta_table(conn)
     except duckdb.Error:
         pass  # read-only plan against a warehouse that has never been built
-    chosen = set(
-        select_models(["state:modified+"], models, conn=conn, project_dir=checkout_dir).selected
-    )
+    # A model whose last build an error assertion rejected is not "modified",
+    # but the deploy's transform will rebuild it (see _needs_build), so the
+    # plan has to list it and everything below it too.
+    try:
+        blocked = [r[0] for r in conn.execute("SELECT model_path FROM _havn.model_blocked").fetchall()]
+    except duckdb.Error:
+        blocked = []
+    known = set(ordered)
+    selectors = ["state:modified+", *(f"{name}+" for name in blocked if name in known)]
+    chosen = set(select_models(selectors, models, conn=conn, project_dir=checkout_dir).selected)
     return [name for name in ordered if name in chosen]
 
 
@@ -271,8 +317,7 @@ def _snapshot(conn, project_dir: Path, names: list[str], label: str) -> dict:
         "objects": objects,
         "version_id": version_id,
         "parquet": {t: info.get("parquet_file") for t, info in tables_info.items()},
-        "model_state": _meta_rows(conn, "model_state", names),
-        "model_columns": _meta_rows(conn, "model_columns", names),
+        **{table: _meta_rows(conn, table, names) for table in _ROLLBACK_META_TABLES},
     }
 
 
@@ -296,8 +341,8 @@ def _restore(conn, project_dir: Path, snap: dict) -> list[str]:
         restored.append(full)
 
     names = list(snap["objects"])
-    for table in ("model_state", "model_columns"):
-        cols, rows = snap[table]
+    for table in _ROLLBACK_META_TABLES:
+        cols, rows = snap.get(table) or ([], [])
         try:
             conn.execute(f"DELETE FROM _havn.{table} WHERE model_path IN (SELECT unnest(?))", [names])
         except duckdb.Error:
@@ -305,7 +350,7 @@ def _restore(conn, project_dir: Path, snap: dict) -> list[str]:
         if cols and rows:
             placeholders = ", ".join("?" for _ in cols)
             conn.executemany(
-                f"INSERT INTO _havn.{table} ({', '.join(cols)}) VALUES ({placeholders})",
+                f"INSERT INTO _havn.{table} ({', '.join(_quote_ident(c) for c in cols)}) VALUES ({placeholders})",
                 [list(r) for r in rows],
             )
     return restored
@@ -325,6 +370,13 @@ def new_record(env: str, ref: str, *, pr_id: str | None = None, deployed_by: str
     }
 
 
+def _close_quietly(conn: duckdb.DuckDBPyConnection, deploy_id: str) -> None:
+    try:
+        conn.close()
+    except Exception as e:
+        logger.warning("deploy %s: closing the target failed: %s", deploy_id, e)
+
+
 def run_deploy(
     project_dir: Path,
     record: dict,
@@ -333,6 +385,7 @@ def run_deploy(
     record_conn: duckdb.DuckDBPyConnection | None = None,
     db_path: str | None = None,
     restore_macros_from: Path | None = None,
+    close_target: bool = False,
 ) -> dict:
     """Deploy ``record["ref"]`` to the warehouse behind ``conn``; returns the record.
 
@@ -340,14 +393,23 @@ def run_deploy(
     ``restore_macros_from`` re-registers that directory's macros on ``conn``
     afterwards, for a long-lived connection (the server's) that must go back
     to serving the working tree's macros.
+    ``close_target`` hands ownership of ``conn`` to the deploy: it is closed
+    before the final status is saved. A reader polling the record can act on
+    "success" straight away -- query the target, deploy again -- and on
+    Windows that fails if the file is still open, so the release has to
+    happen first, not after the record already says done.
     """
     from havn.engine.database import ensure_meta_table
     from havn.engine.macros import register_macros
     from havn.engine.transform import run_transform
 
+    if close_target and (record_conn is None or record_conn is conn):
+        raise ValueError("close_target needs a separate record_conn to save the result on")
     record_conn = record_conn or conn
     start = time.perf_counter()
     if not _deploy_lock.acquire(blocking=False):
+        if close_target:
+            _close_quietly(conn, record["id"])
         record.update(status="error", error="Another deploy is running", finished_at=_now())
         _save(record_conn, record)
         return record
@@ -413,6 +475,8 @@ def run_deploy(
                 register_macros(conn, restore_macros_from, force_reload=True)
             except Exception as e:
                 logger.warning("deploy %s: restoring macros failed: %s", record["id"], e)
+        if close_target:
+            _close_quietly(conn, record["id"])
         record["finished_at"] = _now()
         record["duration_ms"] = int((time.perf_counter() - start) * 1000)
         try:

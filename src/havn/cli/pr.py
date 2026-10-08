@@ -49,7 +49,13 @@ def list_command(
             "merged": "magenta",
             "closed": "dim",
         }.get(pr.status, "white")
-        approvers = ", ".join(pr.approvers) if pr.approvers else "-"
+        from havn.engine.pr import independent_approvers, pr_head_sha, stale_approvers
+
+        head = pr_head_sha(project_dir, pr)
+        current, stale = independent_approvers(pr, head), stale_approvers(pr, head)
+        approvers = ", ".join(current) if current else "-"
+        if stale:
+            approvers += f" [dim](stale: {', '.join(stale)})[/dim]"
         if pr.change_requesters:
             approvers = f"[red]CHANGES[/red] ({', '.join(pr.change_requesters)})"
         table.add_row(
@@ -119,8 +125,14 @@ def show(
     console.print(f"Branch: {pr.head_ref} -> {pr.base_ref}")
     if pr.description:
         console.print(f"\n{pr.description}")
-    if pr.approvers:
-        console.print(f"\n[green]Approved by:[/green] {', '.join(pr.approvers)}")
+    from havn.engine.pr import independent_approvers, pr_head_sha, stale_approval_message, stale_approvers
+
+    head = pr_head_sha(project_dir, pr)
+    current, stale = independent_approvers(pr, head), stale_approvers(pr, head)
+    if current:
+        console.print(f"\n[green]Approved by:[/green] {', '.join(current)}")
+    if stale:
+        console.print(f"[yellow]Not counted:[/yellow] {stale_approval_message(pr, stale)}")
     if pr.change_requesters:
         console.print(f"[red]Changes requested by:[/red] {', '.join(pr.change_requesters)}")
 

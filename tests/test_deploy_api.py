@@ -98,3 +98,40 @@ def test_unknown_environment_or_ref(client):
     assert client.post("/api/deploys", json={"env": "qa", "ref": "main"}).status_code == 404
     resp = client.get("/api/deploy/plan", params={"env": "prod", "ref": "nope"})
     assert resp.status_code == 400 and "Unknown ref" in resp.json()["detail"]
+
+
+def test_auth_editors_deploy_only_merged_code_to_production(project):
+    """An editor could deploy an unmerged, unreviewed branch straight to prod."""
+    import havn.server.app as server_app
+    from havn.server.deps import reset_shared_conn
+
+    _git(project, "checkout", "-b", "feature/y")
+    _commit(project, {"transform/silver/extra.sql": OTHER}, "unreviewed")
+    _git(project, "checkout", "main")
+
+    reset_shared_conn()
+    server_app.PROJECT_DIR = project
+    server_app.AUTH_ENABLED = True
+    try:
+        tc = TestClient(server_app.app)
+        admin = tc.post("/api/auth/setup", json={"username": "ada", "password": "adapass", "role": "admin"}).json()["token"]
+        tc.post("/api/users", json={"username": "ed", "password": "edpass", "role": "editor"},
+                headers={"Authorization": f"Bearer {admin}"})
+        ed = {"Authorization": f"Bearer {tc.post('/api/auth/login', json={'username': 'ed', 'password': 'edpass'}).json()['token']}"}
+        ada = {"Authorization": f"Bearer {admin}"}
+
+        resp = tc.post("/api/deploys", json={"env": "prod", "ref": "feature/y"}, headers=ed)
+        assert resp.status_code == 403
+        assert "merged into main" in resp.json()["detail"]
+
+        # Checked directly so no deploy thread outlives the test: merged code
+        # is fine for an editor, dev takes anything, and admins keep the hatch.
+        from havn.server.routes.deploy import _check_production_ref
+
+        editor, admin_user = {"username": "ed", "role": "editor"}, {"username": "ada", "role": "admin"}
+        _check_production_ref(project, "prod", "main", editor)
+        _check_production_ref(project, "dev", "feature/y", editor)
+        _check_production_ref(project, "prod", "feature/y", admin_user)
+    finally:
+        server_app.AUTH_ENABLED = False
+        reset_shared_conn()

@@ -460,3 +460,24 @@ def test_merge_ignores_environment_warehouses(git_project):
     ignored = merge_ignored_paths(git_project)
     assert "data/prod.duckdb" in ignored
     assert is_dirty(git_project, ignore=ignored) is False
+
+
+def test_lineage_impact_finds_models_only_on_the_pr_branch(tmp_path):
+    """A model the PR adds lives in the build's worktree, not the project root.
+
+    Matching against the project root alone never matched it, so a PR that
+    only added models showed no impact and no metric diff.
+    """
+    from havn.engine.pr import _compute_lineage_impact
+    from havn.engine.transform.models import SQLModel
+
+    project, worktree = tmp_path / "proj", tmp_path / "proj" / ".havn" / "pr-build" / "pr-1"
+    (worktree / "transform" / "gold").mkdir(parents=True)
+
+    def model(root, name, deps):
+        return SQLModel(path=root / "transform" / "gold" / f"{name}.sql", name=name, schema="gold",
+                        full_name=f"gold.{name}", sql="", query="", materialized="table", depends_on=deps)
+
+    dag = [model(worktree, "new", []), model(worktree, "downstream", ["gold.new"])]
+    impact = _compute_lineage_impact(["transform/gold/new.sql"], dag, project, extra_roots=[worktree])
+    assert impact == {"changed": ["gold.new"], "impacted": ["gold.downstream"]}

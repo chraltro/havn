@@ -64,7 +64,19 @@ class CloseRequest(BaseModel):
 
 
 def _pr_to_dict(pr) -> dict:
-    return pr.to_dict()
+    """The PR record, plus which approvals count for the branch's current commit.
+
+    ``approvers`` lists everyone who ever approved; only ``current_approvers``
+    vouch for the code as it is now. Clients that counted ``approvers``
+    offered Merge for a change the server then refused.
+    """
+    from havn.engine.pr import independent_approvers, pr_head_sha, stale_approvers
+
+    data = pr.to_dict()
+    head = pr_head_sha(_get_project_dir(), pr)
+    data["current_approvers"] = independent_approvers(pr, head)
+    data["stale_approvers"] = stale_approvers(pr, head)
+    return data
 
 
 def _actor(user: dict, claimed: str | None) -> str:
@@ -112,6 +124,12 @@ def list_prs_endpoint(
 def create_pr_endpoint(req: CreatePrRequest, request: Request):
     user = _require_permission(request, "write")
     from havn.engine.pr import create_pr
+
+    # Same rule as update_pr_endpoint: waiving review lets the change merge
+    # unreviewed, so only an admin may do it. Without this, an editor could
+    # skip the admin check by opening the PR with approval already off.
+    if req.require_approval is False:
+        _require_permission(request, "manage_users")
 
     project_dir = _get_project_dir()
     try:
@@ -193,6 +211,24 @@ def list_comments_endpoint(pr_id: str, request: Request):
     return [c.to_dict() for c in pr.comments]
 
 
+def _comment_author(user: dict, req) -> str:
+    """Who a comment is shown as.
+
+    A human comment is by whoever is signed in. An AI review keeps its label
+    (the agent's name), but with auth on it also names the account that
+    posted it: the label was free text, so any writer could post a comment
+    under any name, a colleague's included.
+    """
+    from havn.server.deps import _get_auth_enabled
+
+    if req.comment_type != "ai_review":
+        return _actor(user, req.author)
+    label = (req.author or "AI review").strip() or "AI review"
+    if _get_auth_enabled():
+        return f"{label} via {user['username']}"
+    return label
+
+
 @router.post("/api/prs/{pr_id}/comments")
 def add_comment_endpoint(pr_id: str, req: CommentRequest, request: Request):
     user = _require_permission(request, "write")
@@ -203,8 +239,7 @@ def add_comment_endpoint(pr_id: str, req: CommentRequest, request: Request):
         comment = add_comment(
             project_dir,
             pr_id,
-            # An AI review keeps its own label; a human comment is by whoever is signed in.
-            author=req.author if req.comment_type == "ai_review" else _actor(user, req.author),
+            author=_comment_author(user, req),
             body=req.body,
             comment_type=req.comment_type,
             file=req.file,
@@ -334,21 +369,21 @@ def review_prompt_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
 @router.get("/api/prs/{pr_id}/diff")
 def pr_diff_endpoint(pr_id: str, request: Request):
     _require_permission(request, "read")
-    from havn.engine.git import diff_files_between
+    from havn.engine.pr import pr_changed_files
     from havn.engine.pr import get_pr
 
     project_dir = _get_project_dir()
     pr = get_pr(project_dir, pr_id)
     if pr is None:
         raise HTTPException(404, f"PR '{pr_id}' not found")
-    files = diff_files_between(project_dir, pr.base_ref, pr.head_ref)
+    files = pr_changed_files(project_dir, pr)
     return {"files": files, "base_ref": pr.base_ref, "head_ref": pr.head_ref}
 
 
 @router.get("/api/prs/{pr_id}/lineage-impact")
 def pr_lineage_impact_endpoint(pr_id: str, request: Request):
     _require_permission(request, "read")
-    from havn.engine.git import diff_files_between
+    from havn.engine.pr import pr_changed_files
     from havn.engine.pr import _compute_lineage_impact, get_pr
     from havn.engine.transform.discovery import build_dag, discover_all_models
 
@@ -356,7 +391,7 @@ def pr_lineage_impact_endpoint(pr_id: str, request: Request):
     pr = get_pr(project_dir, pr_id)
     if pr is None:
         raise HTTPException(404, f"PR '{pr_id}' not found")
-    files = diff_files_between(project_dir, pr.base_ref, pr.head_ref)
+    files = pr_changed_files(project_dir, pr)
     # Packages are part of the DAG, so a package model that reads a changed
     # project model is part of the impact.
     dag = build_dag(discover_all_models(project_dir))
@@ -376,7 +411,7 @@ def pr_review_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
     ``required``, plus whether a build of the branch's current head passed.
     """
     _require_permission(request, "read")
-    from havn.engine.git import diff_files_between
+    from havn.engine.pr import pr_changed_files
     from havn.engine.pr import (
         _compute_lineage_impact,
         _run_git,
@@ -385,6 +420,9 @@ def pr_review_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
         get_latest_build,
         get_pr,
         independent_approvers,
+        pr_head_sha,
+        stale_approval_message,
+        stale_approvers,
         is_dirty,
         merge_ignored_paths,
     )
@@ -395,7 +433,7 @@ def pr_review_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
     if pr is None:
         raise HTTPException(404, f"PR '{pr_id}' not found")
 
-    files = diff_files_between(project_dir, pr.base_ref, pr.head_ref)
+    files = pr_changed_files(project_dir, pr)
     models = discover_all_models(project_dir)
     by_name = {m.full_name: m for m in models}
 
@@ -429,7 +467,7 @@ def pr_review_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
         if m is None:
             return None
         try:
-            return str(m.path.relative_to(project_dir))
+            return m.path.relative_to(project_dir).as_posix()
         except ValueError:
             return None
 
@@ -475,11 +513,16 @@ def pr_review_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
     else:
         check("changes", "No changes requested", "pass", "No reviewer has requested changes.", True)
 
-    approvals = independent_approvers(pr)
+    head_sha = pr_head_sha(project_dir, pr)
+    approvals = independent_approvers(pr, head_sha)
+    stale = stale_approvers(pr, head_sha)
     if not pr.require_approval:
         check("approval", "Approved", "pass", "This change does not require approval.", True)
     elif approvals:
         check("approval", "Approved", "pass", f"Approved by {', '.join(approvals)}.", True)
+    elif stale:
+        msg = stale_approval_message(pr, stale)
+        check("approval", "Approved", "pending", msg[0].upper() + msg[1:], True)
     else:
         check("approval", "Approved", "pending",
               f"Needs an approval from someone other than {pr.author}.", True)

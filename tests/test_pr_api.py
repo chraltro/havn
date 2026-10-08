@@ -448,6 +448,17 @@ def test_auth_only_admins_waive_approval(auth_client):
     assert resp.status_code == 200
 
 
+def test_auth_an_editor_cannot_open_a_pr_with_approval_already_off(auth_client):
+    """The admin-only waiver used to be skippable by waiving at create time."""
+    tc = auth_client
+    resp = tc.post("/api/prs", json={"title": "T", "base_ref": "main", "head_ref": "feature/x",
+                                      "require_approval": False}, headers=tc.tokens["ed"])
+    assert resp.status_code == 403
+    resp = tc.post("/api/prs", json={"title": "T", "base_ref": "main", "head_ref": "feature/x",
+                                      "require_approval": False}, headers=tc.tokens["ada"])
+    assert resp.status_code == 200 and resp.json()["require_approval"] is False
+
+
 def test_review_dirty_tree_blocks(client, project):
     _ignore_warehouse(project)
     pr = _create_pr(client)
@@ -552,3 +563,60 @@ def test_build_records_metric_delta(tmp_path):
     assert rev["base"] == 200.0 and rev["pr"] == 175.0
     assert rev["delta"] == -25.0 and rev["delta_pct"] == -12.5
     assert [(b["base"], b["pr"]) for b in rev["series"]] == [(100.0, 90.0), (100.0, 85.0)]
+
+
+def test_an_approval_does_not_cover_commits_pushed_after_it(client, project):
+    """Approve, then push to the branch, then merge: the new commit was never reviewed.
+
+    The merge used to check only that someone had approved, then merge the
+    branch tip, which by then included code nobody had looked at.
+    """
+    _ignore_warehouse(project)
+    pr = _create_pr(client)
+    assert client.post(f"/api/prs/{pr['id']}/approve", json={"reviewer": "ingrid"}).status_code == 200
+
+    _git(project, "checkout", "feature/x")
+    (project / "transform" / "bronze" / "sneaky.sql").write_text(
+        "-- config: materialized=table, schema=bronze\n\nSELECT 1 AS x\n"
+    )
+    _git(project, "add", "transform/bronze/sneaky.sql")
+    _git(project, "commit", "-m", "after approval")
+    _git(project, "checkout", "main")
+
+    gate = _gate(client.get(f"/api/prs/{pr['id']}/review").json())
+    assert gate["approval"]["state"] == "pending"
+    assert "approving again" in gate["approval"]["detail"]
+
+    resp = client.post(f"/api/prs/{pr['id']}/merge", json={"user": "ingrid"})
+    assert resp.status_code != 200 or resp.json().get("success") is False
+
+    # Approving the new tip makes it mergeable again.
+    assert client.post(f"/api/prs/{pr['id']}/approve", json={"reviewer": "ingrid"}).status_code == 200
+    resp = client.post(f"/api/prs/{pr['id']}/merge", json={"user": "ingrid"})
+    assert resp.status_code == 200, resp.text
+    assert (project / "transform" / "bronze" / "sneaky.sql").exists()
+
+
+def test_auth_an_ai_review_comment_names_who_posted_it(auth_client):
+    """The AI-review label was free text: anyone could post as anyone."""
+    tc = auth_client
+    pr = tc.post("/api/prs", json={"title": "T", "base_ref": "main", "head_ref": "feature/x"},
+                 headers=tc.tokens["ed"]).json()
+    c = tc.post(f"/api/prs/{pr['id']}/comments",
+                json={"body": "LGTM", "comment_type": "ai_review", "author": "ada"},
+                headers=tc.tokens["ed"]).json()
+    assert c["author"] == "ada via ed"
+
+
+def test_a_merged_change_still_lists_the_files_it_changed(client, project):
+    """After the merge, base...head is empty, so the page said "0 files"."""
+    _ignore_warehouse(project)
+    pr = _create_pr(client)
+    client.post(f"/api/prs/{pr['id']}/approve", json={"reviewer": "ingrid"})
+    assert client.post(f"/api/prs/{pr['id']}/merge", json={"user": "ingrid"}).status_code == 200
+
+    from havn.engine.pr import get_pr, pr_changed_files
+
+    merged = get_pr(project, pr["id"])
+    assert merged.status == "merged" and merged.merge_commit
+    assert pr_changed_files(project, merged) == ["transform/bronze/customers.sql"]

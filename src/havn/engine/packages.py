@@ -19,9 +19,13 @@ argument validated first so it cannot be mistaken for an option.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
+import stat
 import subprocess
+import sys
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -247,6 +251,16 @@ def lock_path(project_dir: Path) -> Path:
     return Path(project_dir) / LOCK_FILENAME
 
 
+def _is_valid_package_name(name: str) -> bool:
+    from havn.engine.utils import validate_identifier
+
+    try:
+        validate_identifier(name, "package name")
+    except ValueError:
+        return False
+    return True
+
+
 def read_lock(project_dir: Path) -> dict[str, LockEntry]:
     """Read ``havn_packages.lock``, keyed by package name.
 
@@ -267,6 +281,11 @@ def read_lock(project_dir: Path) -> dict[str, LockEntry]:
             continue
         name = str(item.get("name", ""))
         if not name:
+            continue
+        if not _is_valid_package_name(name):
+            # The lock is committed, so it is input like project.yml is, and
+            # a name becomes a path under havn_packages/. Same rule as there.
+            logger.warning("Ignoring lock entry with an invalid package name: %r", name)
             continue
         entries[name] = LockEntry(
             name=name,
@@ -377,6 +396,38 @@ def _head_is_branch(repo: Path) -> bool:
     return _run_git(repo, "symbolic-ref", "-q", "HEAD").returncode == 0
 
 
+def _force_rmtree(path: Path) -> None:
+    """``shutil.rmtree`` that also removes read-only files.
+
+    Only ever deletes a package checkout: ``path`` must resolve to a direct
+    child of a ``havn_packages`` directory. Package names reach this from
+    project.yml and from the committed lock file, so a crafted name such as
+    ``../../somewhere`` would otherwise delete an arbitrary directory on the
+    machine of whoever runs ``havn packages install``.
+
+    git marks everything under ``.git/objects`` read-only, and on Windows a
+    read-only file cannot be unlinked -- ``rmtree`` fails with ``WinError 5``
+    part way through, leaving a half-deleted checkout behind. Clearing the
+    bit and retrying is the documented way around it.
+    """
+
+    def on_error(func, failed_path, _exc_info):
+        try:
+            os.chmod(failed_path, stat.S_IWRITE)
+        except OSError:
+            raise
+        func(failed_path)
+
+    resolved = Path(path).resolve()
+    if resolved.parent.name != PACKAGES_DIRNAME or resolved.name in ("", ".", ".."):
+        raise ValueError(f"Refusing to delete {path}: not a package checkout under {PACKAGES_DIRNAME}/")
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(resolved, onexc=lambda f, p, e: on_error(f, p, e))
+    else:
+        shutil.rmtree(resolved, onerror=on_error)
+
+
 def _clone(url: str, rev: str, dest: Path) -> list[str]:
     """Clone *url* at *rev* into *dest*. Returns warnings.
 
@@ -386,7 +437,7 @@ def _clone(url: str, rev: str, dest: Path) -> list[str]:
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists():
-        shutil.rmtree(dest)
+        _force_rmtree(dest)
 
     shallow = _run_git(
         dest.parent,
@@ -403,7 +454,7 @@ def _clone(url: str, rev: str, dest: Path) -> list[str]:
     )
     if shallow.returncode != 0:
         if dest.exists():
-            shutil.rmtree(dest)
+            _force_rmtree(dest)
         full = _run_git(
             dest.parent, "clone", "--quiet", "--", url, dest.name, timeout=_CLONE_TIMEOUT
         )
@@ -461,7 +512,7 @@ def _copy_local(source: Path, dest: Path) -> None:
     dangling one raises ``shutil.Error`` part way through the copy.
     """
     if dest.exists():
-        shutil.rmtree(dest)
+        _force_rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, dest, ignore=_COPY_IGNORE, symlinks=True)
 
@@ -471,9 +522,37 @@ def _discard_partial(dest: Path) -> None:
     if not dest.exists():
         return
     try:
-        shutil.rmtree(dest)
-    except OSError as exc:
+        _force_rmtree(dest)
+    except (OSError, ValueError) as exc:
         logger.warning("Could not remove the partial checkout at %s: %s", dest, exc)
+
+
+def _swap_into_place(staging: Path, dest: Path) -> None:
+    """Replace ``dest`` with the finished checkout in ``staging``.
+
+    Windows cannot rename a directory over an existing one, so the old
+    checkout is moved aside first and removed only after the new one is in
+    place; if the second rename fails the old checkout is put back.
+    """
+    old = None
+    if dest.exists():
+        old = dest.parent / f".{dest.name}.old-{uuid.uuid4().hex[:8]}"
+        try:
+            os.replace(dest, old)
+        except OSError:
+            # The old checkout could not be moved (a file in it is open): it
+            # stays as it was, and the finished clone is discarded.
+            _discard_partial(staging)
+            raise
+    try:
+        os.replace(staging, dest)
+    except OSError:
+        if old is not None:
+            os.replace(old, dest)
+        _discard_partial(staging)
+        raise
+    if old is not None:
+        _discard_partial(old)
 
 
 def _install_one(
@@ -544,18 +623,22 @@ def _install_one(
                 status="unchanged",
             )
 
+    # Clone beside the checkout and swap it in only once it is complete. The
+    # clone used to start by deleting the working checkout, so an upgrade
+    # that failed -- offline, or the remote moved -- left the project with no
+    # package models at all while the lock still pinned the old commit.
+    staging = dest.parent / f".{dest.name}.staging-{uuid.uuid4().hex[:8]}"
     try:
-        warnings = _clone(url, target, dest)
-        commit = _resolve_head(dest)
+        warnings = _clone(url, target, staging)
+        commit = _resolve_head(staging)
+        if not commit:
+            raise PackageError(f"package '{pkg.name}': could not resolve the cloned commit")
     except (PackageError, shutil.Error, OSError):
-        # A clone that succeeded and a checkout that did not leaves a
-        # directory at the wrong revision, which the next run would treat as
-        # installed.
-        _discard_partial(dest)
+        # Covers a clone that succeeded with a checkout that did not, too:
+        # that directory is at the wrong revision and must not become dest.
+        _discard_partial(staging)
         raise
-    if not commit:
-        _discard_partial(dest)
-        raise PackageError(f"package '{pkg.name}': could not resolve the cloned commit")
+    _swap_into_place(staging, dest)
     return InstallResult(
         name=pkg.name,
         source="git",
@@ -691,7 +774,7 @@ def remove_package(project_dir: Path, name: str) -> bool:
     found = dest.is_dir() or name in locked
 
     if dest.is_dir():
-        shutil.rmtree(dest)
+        _force_rmtree(dest)
     if name in locked:
         del locked[name]
         write_lock(project_dir, list(locked.values()))
