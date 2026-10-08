@@ -511,10 +511,17 @@ def _copy_local(source: Path, dest: Path) -> None:
     the package would copy whatever it points at into the checkout, and a
     dangling one raises ``shutil.Error`` part way through the copy.
     """
-    if dest.exists():
-        _force_rmtree(dest)
+    # Copy beside the checkout and swap it in only once complete, as git
+    # installs do: deleting first meant a copy that failed part way left
+    # the project with no package at all.
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, dest, ignore=_COPY_IGNORE, symlinks=True)
+    staging = dest.parent / f".{dest.name}.staging-{uuid.uuid4().hex[:8]}"
+    try:
+        shutil.copytree(source, staging, ignore=_COPY_IGNORE, symlinks=True)
+    except (shutil.Error, OSError):
+        _discard_partial(staging)
+        raise
+    _swap_into_place(staging, dest)
 
 
 def _discard_partial(dest: Path) -> None:
@@ -570,13 +577,9 @@ def _install_one(
             source = project_dir / source
         source = source.resolve()
         _check_local_source(source, dest)
-        try:
-            _copy_local(source, dest)
-        except (shutil.Error, OSError):
-            # A copy that stopped part way leaves a directory that looks
-            # installed and is not. Nothing is better than half.
-            _discard_partial(dest)
-            raise
+        # _copy_local stages the copy and cleans up after itself; on failure
+        # the existing checkout is left exactly as it was.
+        _copy_local(source, dest)
         return InstallResult(
             name=pkg.name,
             source="path",

@@ -1111,3 +1111,27 @@ def test_a_failed_upgrade_keeps_the_working_checkout(tmp_path):
     assert results[0].status == "error"
     assert (checkout / ".git").exists()
     assert not list((project / "havn_packages").glob(".crm.*"))  # no staging left behind
+
+
+def test_a_failed_local_copy_keeps_the_previous_install(tmp_path, monkeypatch):
+    """A path: package copy that fails part way must not leave no package at all."""
+    import shutil as _shutil
+
+    import havn.engine.packages as packages
+
+    source = tmp_path / "shared"
+    _write(source / "transform" / "silver" / "dim.sql", "@config materialized=table, schema=silver\n\nSELECT 1 AS k\n")
+    project = _make_project(tmp_path, f"packages:\n  - name: lib\n    path: {source.as_posix()}\n")
+    install_packages(project, load_project(project))
+    checkout = project / "havn_packages" / "lib"
+    assert (checkout / "transform" / "silver" / "dim.sql").exists()
+
+    def broken_copy(*args, **kwargs):
+        raise _shutil.Error("disk full")
+
+    monkeypatch.setattr(packages.shutil, "copytree", broken_copy)
+    results = install_packages(project, load_project(project), upgrade=True)
+
+    assert results[0].status == "error"
+    assert (checkout / "transform" / "silver" / "dim.sql").exists()
+    assert not list((project / "havn_packages").glob(".lib.*"))

@@ -384,9 +384,9 @@ none of them shipped in a released version.
 - A crafted package name in `havn_packages.lock` could make
   `havn packages install` delete a directory outside the project. Lock names
   are validated and deletes stay inside `havn_packages/`.
-- A package upgrade that failed (offline, or the remote moved) deleted the
-  working checkout. The new revision is now cloned beside it and swapped in
-  only when complete.
+- A package upgrade that failed (offline, the remote moved, or a local copy
+  that stopped part way) deleted the working checkout. The new revision is now
+  cloned or copied beside it and swapped in only when complete.
 - Column lineage came back empty on sqlglot 29, with the error logged only at
   debug level. It works again, a total failure is logged as a warning, and
   sqlglot is capped below 30.

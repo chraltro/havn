@@ -178,6 +178,26 @@ describe("ShipPanel", () => {
     expect(screen.getByRole("img", { name: "revenue by month, base and branch" })).toBeTruthy();
   });
 
+  it("keeps a build on one change from marking every other change as building", async () => {
+    // One page-wide busy flag used to put "Building…" on, and disable, every
+    // other change's actions while change A built.
+    const other = { ...PR, id: "pr-2", title: "Other change", head_ref: "feature/other" };
+    listPrs.mockResolvedValue([PR, other]);
+    getPrReview.mockImplementation((id) =>
+      Promise.resolve(id === "pr-2" ? review({ pr: other, build: null }) : review()));
+    buildPr.mockResolvedValue({});
+    renderShip();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Rebuild" }));
+    await waitFor(() => expect(buildPr).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText("Other change"));
+    expect(await screen.findByRole("heading", { name: "Other change" })).toBeTruthy();
+    const builds = await screen.findAllByRole("button", { name: "Build" });
+    expect(builds.every((b) => !b.disabled)).toBe(true);
+    expect(screen.queryByText("Building…")).toBeNull();
+  });
+
   it("formats metric values compactly", () => {
     expect(fmtMetric(41200000, "en-US")).toBe("41.2M");
     expect(fmtMetric(12345, "en-US")).toBe("12.3K");
