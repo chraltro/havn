@@ -357,6 +357,50 @@ none of them shipped in a released version.
   twice; `--defer-snapshot` leaked a warehouse copy in the temp directory
   when the attach failed.
 
+- A failed severity=error assertion stopped its descendants once, but a plain
+  rerun skipped the rejected model as unchanged and built everything below it
+  on the rejected data. A rejected build is now remembered and keeps blocking
+  -- on every build path (transform, jobs, the web pipeline) and for children
+  built on their own -- until its checks pass.
+- Snapshot and incremental models (microbatch included) were skipped on every
+  run once built, because only their SQL was compared: scheduled runs recorded
+  no new history and loaded no new windows. Snapshots and every incremental
+  that is safe to re-run now run each time (a plain `append` with no
+  `incremental_filter` would duplicate rows, so it keeps the old rule), and a
+  model whose parent was rebuilt in the same run is rebuilt too, so new data
+  reaches the tables below it.
+- A rolled-back deploy left the microbatch windows it had processed marked
+  done, so the next run skipped past rows the rollback had removed. Rollback
+  now restores that progress too.
+- A snapshot with `strategy=timestamp` and a NULL `updated_at` added another
+  current row for its key on every run. It is now refused before anything is
+  written.
+- An approval now counts only for the commit it was given on, and merge merges
+  that commit. Commits pushed after an approval used to merge unreviewed.
+- Opening a change with approval already waived needs an admin, as editing one
+  already did.
+- With sign-in on, only an admin can deploy code that is not yet merged into
+  the base branch to a production environment.
+- A crafted package name in `havn_packages.lock` could make
+  `havn packages install` delete a directory outside the project. Lock names
+  are validated and deletes stay inside `havn_packages/`.
+- A package upgrade that failed (offline, or the remote moved) deleted the
+  working checkout. The new revision is now cloned beside it and swapped in
+  only when complete.
+- Column lineage came back empty on sqlglot 29, with the error logged only at
+  debug level. It works again, a total failure is logged as a warning, and
+  sqlglot is capped below 30.
+- On Windows: API and MCP paths came back with backslashes (the workbench and
+  Home answered 404), `havn diff` could not match changed files,
+  `rename-column` turned LF files into CRLF, package removal failed on
+  read-only git objects, and a deploy could report success while it still held
+  the target warehouse open.
+- The Quality page's pass rate counted every past run of every check,
+  including checks since deleted, so it disagreed with Home. It now shows the
+  latest result of each check the project still declares.
+- Query results drew `***`, `!=` and `->` as font ligatures. Data now renders
+  exactly as stored.
+
 ### First impression
 
 - README leads with `pip install havn`; the clone-and-npm chain moved to the

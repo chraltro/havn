@@ -852,12 +852,9 @@ asks, packages (8) until the macro-pack version has been tried.
 
 ## 12. Status, 2026-09-21
 
-Everything in sections 2 through 9 is implemented on
-`claude/havn-dbt-v2-gaps-8ijjeg`, including the three items this plan
-deferred (rename, microbatch, packages). The build ran as five phases of
-parallel agents in isolated worktrees, merged in dependency order. Test
-counts went from 1474 backend and 42 frontend to about 2100 backend and 104
-frontend. The CHANGELOG `Unreleased` entry is the user-facing summary.
+Everything in sections 2 through 9 is implemented, including the three
+items this plan deferred (rename, microbatch, packages). Test counts went
+from 1474 backend and 42 frontend to about 2100 backend and 104 frontend. The CHANGELOG `Unreleased` entry is the user-facing summary.
 
 Deviations from the plan worth knowing:
 
