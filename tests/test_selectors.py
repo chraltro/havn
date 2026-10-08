@@ -937,3 +937,22 @@ def test_api_transform_has_no_warnings_when_everything_matched(dag_client):
     )
     assert resp.status_code == 200, resp.text
     assert "warnings" not in resp.json()
+
+
+def test_upstream_exclude_does_not_drop_shared_parents(dag_models):
+    """Excluding one gold model keeps the bronze/silver models others still need.
+
+    In "upstream" mode the exclude list was resolved upstream too, so
+    excluding tag:finance (gold.fct_orders) also removed silver.customers and
+    both bronze models, and the job built gold.dim_customer on stale parents.
+    """
+    result = select_models(
+        ["gold.dim_customer"], dag_models, resolve="upstream", exclude=["tag:finance"]
+    )
+    assert set(result.selected) == {"bronze.customers", "bronze.orders", "silver.customers", "gold.dim_customer"}
+
+    # An explicit graph operator in the exclude still widens it.
+    widened = select_models(
+        ["gold.dim_customer"], dag_models, resolve="upstream", exclude=["+gold.fct_orders"]
+    )
+    assert widened.selected == ["gold.dim_customer"]

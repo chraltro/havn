@@ -239,6 +239,19 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
             row_count    BIGINT DEFAULT 0
         )
     """)
+    # Models whose last build was rejected by a severity=error assertion.
+    # Kept apart from model_state on purpose: model_state answers "is this
+    # SQL what was last built" (the UI shows "edited since build" from it),
+    # while this answers "was that build accepted". Change detection needs
+    # both, so a rejected model is rebuilt and re-checked on the next run
+    # instead of being skipped as unchanged. No primary key so the same DDL
+    # works on DuckLake; writers delete before they insert.
+    _exec("""
+        CREATE TABLE IF NOT EXISTS _havn.model_blocked (
+            model_path VARCHAR NOT NULL,
+            blocked_at TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
     # Column names and types of each model as last built. Nothing else in the
     # warehouse records inferred types: model_profiles has names only, and the
     # catalog holds the last successful build, which disappears the moment a

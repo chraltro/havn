@@ -407,6 +407,94 @@ def _has_changed(
     return old_content_hash != model.content_hash or old_upstream_hash != model.upstream_hash
 
 
+def _needs_build(
+    conn: duckdb.DuckDBPyConnection,
+    model: SQLModel,
+) -> bool:
+    """Whether a transform run should build ``model`` rather than skip it.
+
+    Wider than ``_has_changed``, which only says whether the definition
+    moved and backs "edited since build" in the UI and the
+    ``state:modified`` selector. A model whose last build an error
+    assertion rejected has an unchanged definition but must still be
+    rebuilt and re-checked, or a rerun would wave it through.
+    """
+    # Snapshot and incremental models (microbatch included) exist to pick up
+    # new source data, and their SQL does not change between runs -- so
+    # judging them by their definition skipped them forever: a scheduled run
+    # recorded no new history and ingested no new windows. They are built to
+    # be re-run cheaply, so they always run.
+    if model.materialized == "snapshot":
+        return True
+    if model.materialized == "incremental" and _rerun_safe(model):
+        return True
+    return _has_changed(conn, model) or _is_blocked(conn, model)
+
+
+def _rerun_safe(model: SQLModel) -> bool:
+    """Whether running an incremental model again without new data is a no-op.
+
+    merge and delete+insert replace by key, microbatch reprocesses only open
+    windows, and a filtered append reads only rows newer than the target. A
+    plain append with no filter re-inserts everything it selects, so running
+    it every time would duplicate rows: it keeps the changed-or-blocked rule.
+    """
+    strategy = (model.incremental_strategy or "delete+insert").lower()
+    if strategy == "append":
+        return bool(model.incremental_filter)
+    return True
+
+
+def _invalidate_state(
+    conn: duckdb.DuckDBPyConnection,
+    model: SQLModel,
+) -> None:
+    """Make the next run rebuild ``model`` and check its assertions again.
+
+    ``_update_state`` runs as soon as the build succeeds, before assertions
+    are evaluated, so a model whose severity=error assertion then fails is
+    left recorded as up to date. The next run would skip it as unchanged,
+    nothing would block its descendants any more, and they would build on
+    the data the assertion had just rejected. Marking it blocked makes
+    ``_has_changed`` rebuild it; a clean build clears the mark.
+    """
+    conn.execute("DELETE FROM _havn.model_blocked WHERE model_path = ?", [model.full_name])
+    conn.execute("INSERT INTO _havn.model_blocked (model_path) VALUES (?)", [model.full_name])
+
+
+def _clear_block(conn: duckdb.DuckDBPyConnection, model: SQLModel) -> None:
+    """Accept ``model``'s current build: its checks ran and passed.
+
+    Only a passing check clears a block. Building alone does not: the job
+    runner and the stream pipeline build without (or without acting on)
+    assertions, and clearing on build let a scheduled job reopen the gate.
+    """
+    try:
+        conn.execute("DELETE FROM _havn.model_blocked WHERE model_path = ?", [model.full_name])
+    except duckdb.CatalogException:
+        pass
+
+
+def blocked_models(conn: duckdb.DuckDBPyConnection) -> set[str]:
+    """Every model whose last build an error assertion rejected."""
+    try:
+        return {r[0] for r in conn.execute("SELECT model_path FROM _havn.model_blocked").fetchall()}
+    except duckdb.CatalogException:
+        return set()
+
+
+def _is_blocked(conn: duckdb.DuckDBPyConnection, model: SQLModel) -> bool:
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM _havn.model_blocked WHERE model_path = ? LIMIT 1",
+            [model.full_name],
+        ).fetchone()
+    except duckdb.CatalogException:
+        # A warehouse bootstrapped before the table existed has nothing blocked.
+        return False
+    return row is not None
+
+
 def _update_state(
     conn: duckdb.DuckDBPyConnection,
     model: SQLModel,

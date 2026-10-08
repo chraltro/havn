@@ -496,8 +496,13 @@ def select_models(
             chosen |= hit
 
     if exclude:
+        # Exclusions are taken literally: `resolve` widens what is *selected*
+        # (a job's "upstream" mode pulls in parents), but applied here it
+        # turned excluding gold.expensive into excluding everything it reads
+        # from, dropping shared bronze/silver models from the job. An explicit
+        # graph operator (`+gold.expensive`) still widens an exclusion.
         excluded = select_models(
-            exclude, models, conn=conn, project_dir=project_dir, resolve=resolve
+            exclude, models, conn=conn, project_dir=project_dir, resolve="none"
         )
         result.warnings.extend(excluded.warnings)
         chosen -= set(excluded.selected)

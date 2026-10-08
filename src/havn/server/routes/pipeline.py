@@ -376,7 +376,8 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
     from havn.engine.runner import run_script as _run_script
     from havn.server.deps import _get_db_resource_limits, _get_shared_conn
     from havn.engine.transform import discover_models as _dm, build_dag as _bd
-    from havn.engine.transform.discovery import _compute_upstream_hash as _cuh, _has_changed as _hc, _update_state as _us
+    from havn.engine.transform.discovery import _compute_upstream_hash as _cuh, _needs_build as _hc, _update_state as _us
+    from havn.engine.transform.discovery import _clear_block, _invalidate_state, blocked_models
     from havn.engine.transform.execution import execute_model as _em, _record_ephemeral as _re
     from havn.engine.transform.quality import run_assertions as _ra, _save_assertions as _sa, profile_model as _pm, _save_profile as _sp
 
@@ -563,6 +564,20 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
                         _re(local, m, pipeline_run_id)
                         result_q.put((node_id, {"status": "inlined"}))
                         return
+                    # A parent whose build an error assertion rejected -- in
+                    # this run or an earlier one -- blocks this model. The
+                    # skipped model is marked blocked too, so its own children
+                    # skip and it is rebuilt once the parent is fixed.
+                    rejected = [d for d in m.depends_on if d in blocked_models(local)]
+                    if rejected:
+                        _invalidate_state(local, m)
+                        try:
+                            _lr(local, "transform", m.full_name, "skipped", 0, 0,
+                                error=f"upstream blocked: {', '.join(rejected)}", pipeline_run_id=pipeline_run_id)
+                        except Exception:
+                            pass
+                        result_q.put((node_id, {"status": "skipped_upstream_blocked"}))
+                        return
                     if not force and not _hc(local, m):
                         # Log the skip too, so `havn history` and external
                         # readers see "12 steps, 12 skipped" instead of an
@@ -577,11 +592,14 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
                     _us(local, m, duration_ms, row_count)
                     _lr(local, "transform", m.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
                     status = "built"
-                    if m.assertions:
-                        ar = _ra(local, m)
+                    ar = _ra(local, m) if (m.assertions or m.grain) else []
+                    if ar:
                         _sa(local, m, ar)
-                        if any(not a.passed for a in ar):
-                            status = "assertion_failed"
+                    if any(not a.passed and (a.severity or "error") == "error" for a in ar):
+                        status = "assertion_failed"
+                        _invalidate_state(local, m)
+                    else:
+                        _clear_block(local, m)
                     if m.materialized in ("table", "incremental"):
                         prof = _pm(local, m)
                         _sp(local, m, prof)
@@ -699,7 +717,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
             if status in ("error", "assertion_failed"):
                 has_error = True
                 failed_count += 1
-            elif status == "skipped":
+            elif status in ("skipped", "skipped_upstream_blocked"):
                 skipped_count += 1
             else:
                 completed_count += 1
@@ -796,7 +814,8 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
     from havn.engine.runner import run_script as _run_script
     from havn.server.deps import _get_db_resource_limits, _get_shared_conn
     from havn.engine.transform import discover_models as _dm, build_dag as _bd
-    from havn.engine.transform.discovery import _compute_upstream_hash as _cuh, _has_changed as _hc, _update_state as _us
+    from havn.engine.transform.discovery import _compute_upstream_hash as _cuh, _needs_build as _hc, _update_state as _us
+    from havn.engine.transform.discovery import _clear_block, _invalidate_state, blocked_models
     from havn.engine.transform.execution import execute_model as _em, _record_ephemeral as _re
     from havn.engine.transform.quality import run_assertions as _ra, _save_assertions as _sa, profile_model as _pm, _save_profile as _sp
 
@@ -986,6 +1005,20 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
                         _re(local, m, pipeline_run_id)
                         result_q.put((node_id, {"status": "inlined"}))
                         return
+                    # A parent whose build an error assertion rejected -- in
+                    # this run or an earlier one -- blocks this model. The
+                    # skipped model is marked blocked too, so its own children
+                    # skip and it is rebuilt once the parent is fixed.
+                    rejected = [d for d in m.depends_on if d in blocked_models(local)]
+                    if rejected:
+                        _invalidate_state(local, m)
+                        try:
+                            _lr(local, "transform", m.full_name, "skipped", 0, 0,
+                                error=f"upstream blocked: {', '.join(rejected)}", pipeline_run_id=pipeline_run_id)
+                        except Exception:
+                            pass
+                        result_q.put((node_id, {"status": "skipped_upstream_blocked"}))
+                        return
                     if not force and not _hc(local, m):
                         # Log the skip too, so `havn history` and external
                         # readers see "12 steps, 12 skipped" instead of an
@@ -1000,11 +1033,14 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
                     _us(local, m, duration_ms, row_count)
                     _lr(local, "transform", m.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
                     status = "built"
-                    if m.assertions:
-                        ar = _ra(local, m)
+                    ar = _ra(local, m) if (m.assertions or m.grain) else []
+                    if ar:
                         _sa(local, m, ar)
-                        if any(not a.passed for a in ar):
-                            status = "assertion_failed"
+                    if any(not a.passed and (a.severity or "error") == "error" for a in ar):
+                        status = "assertion_failed"
+                        _invalidate_state(local, m)
+                    else:
+                        _clear_block(local, m)
                     if m.materialized in ("table", "incremental"):
                         prof = _pm(local, m)
                         _sp(local, m, prof)
@@ -1104,7 +1140,7 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
             if status in ("error", "assertion_failed"):
                 has_error = True
                 failed_count += 1
-            elif status == "skipped":
+            elif status in ("skipped", "skipped_upstream_blocked"):
                 skipped_count += 1
             else:
                 completed_count += 1
@@ -1732,6 +1768,14 @@ def get_history(request: Request, conn: DbConn, limit: int = 50) -> list[dict]:
 # --- Pipeline run grouping ---
 
 
+def _run_label(first: str | None, targets: list[str] | None) -> str | None:
+    """What a run touched, in one line: its target, or the first plus a count."""
+    distinct = [t for t in (targets or []) if t]
+    if len(distinct) <= 1:
+        return first
+    return f"{first} + {len(distinct) - 1} more"
+
+
 @router.get("/api/history/runs")
 def get_pipeline_runs(request: Request, conn: DbConn, limit: int = 50) -> list[dict]:
     """Get pipeline runs grouped by pipeline_run_id."""
@@ -1742,7 +1786,10 @@ def get_pipeline_runs(request: Request, conn: DbConn, limit: int = 50) -> list[d
         SELECT
             pipeline_run_id,
             MIN(run_type) AS run_type,
-            MIN(target) AS first_target,
+            -- The first thing the run built, not MIN(target): that is just
+            -- the alphabetically first model, so every whole-DAG run was
+            -- labelled "bronze.accounts" or similar.
+            arg_min(target, started_at) AS first_target,
             MIN(started_at) AS started_at,
             -- Roll up to "failed" if ANY step failed. This has to be a numeric
             -- aggregate: MAX() over the status strings sorts alphabetically, and
@@ -1753,12 +1800,17 @@ def get_pipeline_runs(request: Request, conn: DbConn, limit: int = 50) -> list[d
                 THEN 'failed'
                 ELSE 'success'
             END AS status,
-            SUM(duration_ms) AS total_duration_ms,
+            -- Wall-clock time, not the sum of each model's time. The sum was
+            -- wrong both ways: models in a tier run in parallel (overstated),
+            -- and per-model time leaves out assertions, profiling and
+            -- snapshots between models (understated, often by half).
+            (MAX(epoch_ms(started_at) + COALESCE(duration_ms, 0)) - MIN(epoch_ms(started_at))) AS total_duration_ms,
             COUNT(*) AS model_count,
             SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success_count,
             SUM(CASE WHEN status IN ('error', 'failed') THEN 1 ELSE 0 END) AS error_count,
             SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skipped_count,
-            SUM(rows_affected) AS total_rows
+            SUM(rows_affected) AS total_rows,
+            list(DISTINCT target ORDER BY target) AS targets
         FROM _havn.run_log
         WHERE pipeline_run_id IS NOT NULL
         GROUP BY pipeline_run_id
@@ -1772,7 +1824,8 @@ def get_pipeline_runs(request: Request, conn: DbConn, limit: int = 50) -> list[d
         {
             "pipeline_run_id": r[0],
             "run_type": r[1],
-            "target": r[2],
+            "target": _run_label(r[2], r[11]),
+            "targets": list(r[11] or []),
             "started_at": str(r[3]) if r[3] else None,
             "status": r[4],
             "total_duration_ms": r[5],

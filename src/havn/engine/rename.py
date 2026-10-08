@@ -1218,9 +1218,21 @@ def write_files_atomically(
 
 
 def _atomic_write(path: Path, content: str) -> None:
-    """Write ``content`` to ``path`` through a temporary neighbour."""
+    """Write ``content`` to ``path`` through a temporary neighbour.
+
+    ``content`` has LF line endings (files are read in text mode). The
+    file's own line endings are kept: writing in text mode on Windows turned
+    every LF file a rename touched into CRLF, a whole-file diff in git.
+    """
+    newline = "\n"
+    try:
+        if b"\r\n" in path.read_bytes():
+            newline = "\r\n"
+    except OSError:
+        pass  # a new file: LF
     tmp = path.with_name(f".{path.name}.havn-rename")
-    tmp.write_text(content, encoding="utf-8")
+    with open(tmp, "w", encoding="utf-8", newline=newline) as f:
+        f.write(content)
     os.replace(tmp, path)
 
 

@@ -1079,3 +1079,14 @@ def test_batch_file_write_saves_both_files(client, project):
     assert r.status_code == 200
     assert (project / "transform" / "bronze" / "customers.sql").read_text() == "SELECT 1 AS a\n"
     assert (project / "transform" / "silver" / "customers.sql").read_text() == "SELECT 2 AS b\n"
+
+
+@pytest.mark.parametrize("ending", [b"\n", b"\r\n"])
+def test_atomic_write_keeps_the_file_line_endings(tmp_path, ending):
+    """Text-mode writes turned LF files into CRLF on Windows: a whole-file diff."""
+    from havn.engine.rename import _atomic_write
+
+    path = tmp_path / "m.sql"
+    path.write_bytes(b"SELECT a" + ending + b"FROM t" + ending)
+    _atomic_write(path, "SELECT b\nFROM t\n")
+    assert path.read_bytes() == b"SELECT b" + ending + b"FROM t" + ending

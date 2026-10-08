@@ -865,3 +865,15 @@ def test_switching_away_from_new_record_leaves_the_column_in_place(customers):
         (1, "Ann", "gold", False),
         (1, "Ann", "platinum", True),
     ]
+
+
+def test_timestamp_strategy_refuses_null_updated_at(conn):
+    """A NULL updated_at added a fresh is_current row for its key on every run."""
+    conn.execute("CREATE TABLE landing.customers (customer_id INTEGER, name VARCHAR, changed TIMESTAMP)")
+    conn.execute("INSERT INTO landing.customers VALUES (1, 'Ann', NULL), (2, 'Bo', TIMESTAMP '2026-01-01')")
+    model = make_model(
+        "SELECT customer_id, name, changed FROM landing.customers",
+        strategy="timestamp", updated_at="changed",
+    )
+    with pytest.raises(SnapshotError, match="NULL updated_at"):
+        _execute_snapshot(conn, model)

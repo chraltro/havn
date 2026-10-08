@@ -14,7 +14,7 @@ import duckdb
 from havn.engine.database import ensure_meta_table, log_run
 from havn.engine.utils import validate_identifier
 
-from .discovery import _compute_upstream_hash, _has_changed, _update_state
+from .discovery import _clear_block, _compute_upstream_hash, _invalidate_state, _needs_build, _update_state
 from .models import AssertionResult, ModelResult, ProfileResult, SQLModel
 from .quality import (
     _save_assertions,
@@ -1001,6 +1001,23 @@ def _execute_snapshot(
             "usual fix) or widen unique_key."
         )
 
+    # The timestamp strategy compares updated_at against the stored version,
+    # and a NULL compares as neither newer nor unchanged: nothing closed the
+    # current row and the "new key" insert fired again, so every run added
+    # another is_current row for the same key. Refuse it like a duplicate key,
+    # before anything is written.
+    if model.strategy == "timestamp":
+        null_rows = conn.execute(
+            f'SELECT COUNT(*) FROM {staged} WHERE "{model.updated_at}" IS NULL'
+        ).fetchone()[0]
+        if null_rows:
+            raise SnapshotError(
+                f"Model {model.full_name}: {null_rows:,} row(s) have a NULL "
+                f"updated_at ('{model.updated_at}'), so the timestamp strategy "
+                "cannot tell whether they changed. Nothing was written. Filter "
+                "them out, COALESCE them to a timestamp, or use strategy=check."
+            )
+
     run_ts = "current_timestamp::TIMESTAMP"
     # The timestamp strategy dates a version from the source's own clock, so
     # replaying an old extract lands the version where it belongs in history
@@ -1678,6 +1695,7 @@ def _execute_single_model(
     pipeline_run_id: str | None = None,
     batch_range: BatchRange | None = None,
     query_rewriter: Callable[[str], str] | None = None,
+    upstream_built: bool = False,
 ) -> tuple[str, ModelResult]:
     """Execute a single model in its own connection (for parallel execution).
 
@@ -1706,7 +1724,7 @@ def _execute_single_model(
                 conn, model, pipeline_run_id
             )
 
-        changed = force or _has_changed(conn, model)
+        changed = force or upstream_built or _needs_build(conn, model)
 
         if not changed:
             try:
@@ -1747,6 +1765,7 @@ def _execute_single_model(
                 if not ar.passed and (ar.severity or "error") == "error"
             ]
             if failed_error:
+                _invalidate_state(conn, model)
                 return model.full_name, ModelResult(
                     status="assertion_failed",
                     duration_ms=duration_ms,
@@ -1754,6 +1773,8 @@ def _execute_single_model(
                     assertions=assertion_results,
                     schema_changes=schema_changes,
                 )
+
+        _clear_block(conn, model)
 
         # Auto-profile
         profile: ProfileResult | None = None

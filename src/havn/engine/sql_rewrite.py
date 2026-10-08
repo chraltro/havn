@@ -168,7 +168,16 @@ def rewrite_table_refs(
     cte_names = _cte_names(tree)
     lookup = {str(k).lower(): v for k, v in mapping.items()}
 
-    for table in tree.find_all(exp.Table):
+    replaced: set[tuple[str, str]] = set()
+    # How many relations each name could refer to. The implicit alias below
+    # is only safe for a name that is unique in the query: mocking both
+    # bronze.orders and silver.orders and calling both "orders" is a
+    # duplicate-alias error, where the original SQL bound fine.
+    name_uses: dict[str, int] = {}
+    for t in tree.find_all(exp.Table):
+        for name in {(t.name or "").lower(), (t.alias or "").lower()} - {""}:
+            name_uses[name] = name_uses.get(name, 0) + 1
+    for table in list(tree.find_all(exp.Table)):
         if _skip_table(table, cte_names, skip_catalog_qualified):
             continue
         key = table_key(table)
@@ -177,9 +186,30 @@ def rewrite_table_refs(
             continue
         alias = table.alias
         replacement = exp.to_table(target, dialect=dialect)
+        if (
+            not alias
+            and replacement.name.lower() != table.name.lower()
+            and name_uses.get(table.name.lower(), 0) == 1
+        ):
+            # Columns qualified by the table's own name (orders.id) bind to
+            # that name; once the reference points at a differently named
+            # relation (a unit-test mock, a deferred copy) they would not
+            # bind any more, so the original name is kept as the alias.
+            alias = table.name
         if alias:
             replacement.set("alias", exp.TableAlias(this=exp.to_identifier(alias)))
+        replaced.add(((table.db or "").lower(), table.name.lower()))
         table.replace(replacement)
+
+    # schema.table.column qualifiers name the replaced relation by its old
+    # schema too; drop the schema (and catalog) so they bind via the alias.
+    if replaced:
+        for column in tree.find_all(exp.Column):
+            if not column.table or not column.args.get("db"):
+                continue
+            if ((column.text("db") or "").lower(), column.table.lower()) in replaced:
+                column.set("db", None)
+                column.set("catalog", None)
 
     return restore(tree.sql(dialect=dialect))
 

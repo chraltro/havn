@@ -15,7 +15,10 @@ from havn.engine.database import ensure_meta_table, log_run
 
 from .discovery import (
     _compute_upstream_hash,
-    _has_changed,
+    _clear_block,
+    _invalidate_state,
+    _needs_build,
+    blocked_models,
     _update_state,
     build_dag,
     build_dag_tiers,
@@ -270,6 +273,11 @@ def _evaluate_deny_rules(
     return out
 
 
+def _parent_built(model: SQLModel, results: dict[str, str]) -> bool:
+    """Whether any of ``model``'s parents was built earlier in this run."""
+    return any(results.get(dep) == "built" for dep in model.depends_on)
+
+
 def _run_transform_sequential(
     conn: duckdb.DuckDBPyConnection,
     models: list[SQLModel],
@@ -299,6 +307,11 @@ def _run_transform_sequential(
     # so we can skip their descendants (matches the contract documented for
     # @severity).
     blocked: set[str] = set()
+    # A parent rejected on an earlier run and not part of this selection
+    # (`havn transform state:modified+` after editing only the child) still
+    # blocks: building the child would read the rejected data.
+    selected = {m.full_name for m in models}
+    blocked |= blocked_models(conn) - selected
 
     # Apply project-level deny rules to seed the blocked set. Done here so
     # the same logic runs whether we're sequential or parallel — and so
@@ -321,7 +334,11 @@ def _run_transform_sequential(
         if model.full_name in results:
             # Already handled (e.g. policy-denied above).
             continue
-        changed = force or _has_changed(conn, model)
+        # A parent rebuilt in this run (new data in an incremental or
+        # snapshot, a block lifted) means this model's inputs moved even
+        # though its SQL did not, so it is rebuilt too: that is how new data
+        # reaches downstream tables.
+        changed = force or _parent_built(model, results) or _needs_build(conn, model)
         label = f"[bold]{model.full_name}[/bold] ({model.materialized})"
 
         # If any upstream is blocked (error / failed-error-assertion / stale
@@ -466,7 +483,9 @@ def _run_transform_sequential(
                     # descendants — keeping bad data from cascading downstream.
                     results[model.full_name] = "assertion_failed"
                     blocked.add(model.full_name)
+                    _invalidate_state(conn, model)
                     continue
+            _clear_block(conn, model)
 
             # Auto-profile for tables
             if model.materialized in ("table", "incremental", "snapshot"):
@@ -620,6 +639,9 @@ def _run_transform_parallel(
         name for name, status in results.items()
         if status in ("error", "assertion_failed", "policy_denied")
     }
+    # Same rule as the sequential path: a rejected parent outside this
+    # selection still blocks its children.
+    failed_models |= blocked_models(conn) - {m.full_name for m in models}
 
     def _is_blocked(model: SQLModel) -> str | None:
         """Return the upstream that blocks this model, or None."""
@@ -683,7 +705,7 @@ def _run_transform_parallel(
                 ).status
                 continue
 
-            changed = force or _has_changed(conn, model)
+            changed = force or _parent_built(model, results) or _needs_build(conn, model)
 
             if not changed:
                 console.print(f"  [dim]skip[/dim]  {label}")
@@ -731,7 +753,9 @@ def _run_transform_parallel(
                             console.print(f"         [red]FAIL[/red]  assert: {ar.expression} ({ar.detail})")
                         results[model.full_name] = "assertion_failed"
                         failed_models.add(model.full_name)
+                        _invalidate_state(conn, model)
                         continue
+                _clear_block(conn, model)
 
                 # Profile
                 if model.materialized in ("table", "incremental", "snapshot"):
@@ -775,6 +799,7 @@ def _run_transform_parallel(
                         db_path_str, model, force, model_map,
                         db_config, project_dir, pipeline_run_id,
                         batch_range, query_rewriter,
+                        upstream_built=_parent_built(model, results),
                     ): model
                     for model in tier
                 }

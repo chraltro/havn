@@ -180,3 +180,42 @@ def test_rewrite_to_schema_qualified_target():
         "SELECT * FROM bronze.orders o", {"bronze.orders": "prod.orders"}
     )
     assert "prod.orders AS o" in out
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT orders.id FROM bronze.orders",
+    "SELECT bronze.orders.id FROM bronze.orders",
+    "SELECT o.id FROM bronze.orders o",
+    "SELECT id FROM bronze.orders",
+])
+def test_rewritten_reference_still_binds_table_qualified_columns(sql):
+    """`havn test` failed valid SQL that qualified columns with the table name.
+
+    The mock replaced bronze.orders with no alias, so orders.id no longer
+    named anything ("Referenced table orders not found").
+    """
+    import duckdb
+
+    from havn.engine.sql_rewrite import rewrite_table_refs
+
+    conn = duckdb.connect()
+    conn.execute("CREATE TABLE mock_0 AS SELECT 7 AS id")
+    assert conn.execute(rewrite_table_refs(sql, {"bronze.orders": "mock_0"})).fetchall() == [(7,)]
+    conn.close()
+
+
+def test_mocking_two_same_named_tables_still_binds():
+    """bronze.orders and silver.orders both mocked: aliasing both "orders" collided."""
+    import duckdb
+
+    from havn.engine.sql_rewrite import rewrite_table_refs
+
+    conn = duckdb.connect()
+    conn.execute("CREATE TABLE ma AS SELECT 1 AS id")
+    conn.execute("CREATE TABLE mb AS SELECT 1 AS id")
+    out = rewrite_table_refs(
+        "SELECT * FROM bronze.orders JOIN silver.orders USING (id)",
+        {"bronze.orders": "ma", "silver.orders": "mb"},
+    )
+    assert conn.execute(out).fetchall() == [(1,)]
+    conn.close()
