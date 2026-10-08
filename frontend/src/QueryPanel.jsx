@@ -7,15 +7,14 @@ import ExplainPanel from "./ExplainPanel";
 import { useHintTriggerFn } from "./HintSystem";
 import ResizeHandle from "./ResizeHandle";
 import useResizable from "./useResizable";
-import { schemaCompare } from "./schemaOrder";
+import { isSystemSchema, schemaCompare } from "./schemaOrder";
+import { MOD_KEY } from "./platform";
 
 const MAX_HISTORY = 50;
 const DEFAULT_LIMIT = 1000;
 const FMT_OPTS = { language: "sql", keywordCase: "upper", indentStyle: "standard" };
 function fmt(sql) { try { return formatSQL(sql, FMT_OPTS); } catch { return sql; } }
 
-const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || "");
-const MOD_KEY = IS_MAC ? "⌘" : "Ctrl";
 
 function getHistory() {
   try {
@@ -80,6 +79,9 @@ function timeAgo(ts) {
 function SchemaSidebar({ tables, onInsert, maskingPolicies, onOpenModel }) {
   const [expanded, setExpanded] = useState({});
   const [search, setSearch] = useState("");
+  // System schemas (_havn, information_schema, ...) start collapsed so the
+  // user's own data is what the list shows; a search still reaches them.
+  const [openSystem, setOpenSystem] = useState({});
 
   const schemas = {};
   for (const t of tables) {
@@ -149,13 +151,29 @@ function SchemaSidebar({ tables, onInsert, maskingPolicies, onOpenModel }) {
         {displaySchemaNames.length === 0 && query && (
           <div style={sbSt.empty}>No tables matching '{search}'</div>
         )}
-        {displaySchemaNames.map((schema) => (
+        {displaySchemaNames.map((schema) => {
+          const sys = isSystemSchema(schema);
+          const open = !sys || query || openSystem[schema];
+          return (
           <div key={schema}>
-            <div style={sbSt.schemaRow}>
-              <span style={sbSt.schemaName}>{schema}</span>
-              <span style={sbSt.schemaCount}>{displaySchemas[schema].length}</span>
-            </div>
-            {displaySchemas[schema].map((t) => {
+            {sys ? (
+              <button
+                type="button"
+                onClick={() => setOpenSystem((prev) => ({ ...prev, [schema]: !prev[schema] }))}
+                style={{ ...sbSt.schemaRow, ...sbSt.schemaRowButton }}
+                aria-expanded={Boolean(open)}
+                title="System schema (introspection)"
+              >
+                <span style={{ ...sbSt.schemaName, ...sbSt.schemaNameSystem }}>{open ? "▾" : "▸"} {schema}</span>
+                <span style={sbSt.schemaCount}>{displaySchemas[schema].length}</span>
+              </button>
+            ) : (
+              <div style={sbSt.schemaRow}>
+                <span style={sbSt.schemaName}>{schema}</span>
+                <span style={sbSt.schemaCount}>{displaySchemas[schema].length}</span>
+              </div>
+            )}
+            {open && displaySchemas[schema].map((t) => {
               const key = `${t.schema}.${t.name}`;
               const cols = expanded[key];
               return (
@@ -186,7 +204,8 @@ function SchemaSidebar({ tables, onInsert, maskingPolicies, onOpenModel }) {
               );
             })}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -202,6 +221,8 @@ const sbSt = {
   empty: { padding: "16px 10px", color: "var(--havn-text-dim)", fontSize: "12px", textAlign: "center" },
   schemaRow: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 10px 2px", marginTop: "4px" },
   schemaName: { fontWeight: 600, color: "var(--havn-accent)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.3px" },
+  schemaRowButton: { width: "100%", background: "none", border: "none", cursor: "pointer", font: "inherit", textAlign: "left" },
+  schemaNameSystem: { color: "var(--havn-text-dim)", fontStyle: "italic" },
   schemaCount: { fontSize: "10px", color: "var(--havn-text-dim)" },
   tableRow: { display: "flex", alignItems: "center", padding: "2px 6px 2px 8px" },
   expandBtn: { background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "10px", padding: "2px 4px", width: "18px" },
@@ -860,7 +881,9 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
             <div style={st.suggestions}>
               <span style={st.suggestLabel}>Try:</span>
               {suggestions.map((s, i) => (
-                <button key={i} onClick={() => setSql(s.sql)} style={st.suggestBtn}>
+                // "Preview gold.x" should show rows, not just write the SQL and
+                // wait for a second click. Every suggestion is a read-only SELECT.
+                <button key={i} onClick={() => { setSql(s.sql); runQuery(); }} style={st.suggestBtn} title={s.sql}>
                   {s.label}
                 </button>
               ))}

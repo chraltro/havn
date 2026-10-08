@@ -8,6 +8,7 @@ import { api } from "./api";
  */
 
 const POLL_MS = 1500;
+const MAX_POLL_FAILURES = 5;
 const PLAN_PREVIEW = 8;
 
 function pickDefault(envs) {
@@ -23,6 +24,10 @@ export default function DeployCard({ refName, prId, showConfirm, onDeployed }) {
   const [error, setError] = useState(null);
   const [history, setHistory] = useState([]);
   const pollRef = useRef(null);
+  // Which env/ref the plan on screen is for. A slow plan (production's opens
+  // that warehouse) could land after the user picked another environment and
+  // replace the newer plan, so the confirm dialog quoted the wrong env's models.
+  const planKeyRef = useRef("");
 
   useEffect(() => {
     api.getDeployTargets()
@@ -34,12 +39,15 @@ export default function DeployCard({ refName, prId, showConfirm, onDeployed }) {
 
   const loadPlan = useCallback(async () => {
     if (!env || !ref) return;
+    const key = `${env}|${ref}`;
+    planKeyRef.current = key;
     setPlan(null);
     setPlanError(null);
     try {
-      setPlan(await api.getDeployPlan(env, ref));
+      const result = await api.getDeployPlan(env, ref);
+      if (planKeyRef.current === key) setPlan(result);
     } catch (e) {
-      setPlanError(e.message);
+      if (planKeyRef.current === key) setPlanError(e.message);
     }
   }, [env, ref]);
 
@@ -53,9 +61,11 @@ export default function DeployCard({ refName, prId, showConfirm, onDeployed }) {
   // Poll the running deploy until it settles.
   useEffect(() => {
     if (deploy?.status !== "running") return;
+    let failures = 0;
     pollRef.current = setInterval(async () => {
       try {
         const d = await api.getDeploy(deploy.id);
+        failures = 0;
         if (d.status !== "running") {
           setDeploy(d);
           loadPlan();
@@ -63,7 +73,13 @@ export default function DeployCard({ refName, prId, showConfirm, onDeployed }) {
           onDeployed?.(d);
         }
       } catch (e) {
-        setError(e.message);
+        // A deploy that vanished (404) or a server that is down would
+        // otherwise be retried every POLL_MS for as long as the page is open.
+        failures += 1;
+        if (failures >= MAX_POLL_FAILURES) {
+          clearInterval(pollRef.current);
+          setError(`Lost track of the deploy: ${e.message}. Refresh to check its status.`);
+        }
       }
     }, POLL_MS);
     return () => clearInterval(pollRef.current);

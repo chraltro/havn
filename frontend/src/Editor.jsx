@@ -1349,19 +1349,23 @@ export default function Editor({ content, language, onChange, activeFile, dirty,
       editorContext.bindResults.set(path, result);
       seedColumnsFromBind(result);
       const errors = result.errors || [];
-      monaco.editor.setModelMarkers(
-        model,
-        BIND_MARKER_OWNER,
-        bindErrorsToMarkers(
-          errors,
-          { error: monaco.MarkerSeverity.Error, warning: monaco.MarkerSeverity.Warning },
-          model.getLineMaxColumn(1),
-        ),
+      const markers = bindErrorsToMarkers(
+        errors,
+        { error: monaco.MarkerSeverity.Error, warning: monaco.MarkerSeverity.Warning },
+        model.getLineMaxColumn(1),
+      );
+      monaco.editor.setModelMarkers(model, BIND_MARKER_OWNER, markers);
+      // The same resolved positions let the status badge say what the
+      // diagnostics are and jump to the first one.
+      const ordered = [...markers].sort(
+        (a, b) => a.startLineNumber - b.startLineNumber || a.startColumn - b.startColumn,
       );
       reportStatus({
         running: false,
         errorCount: errors.filter((e) => e.severity !== "warning").length,
         warningCount: errors.filter((e) => e.severity === "warning").length,
+        first: ordered.length ? { line: ordered[0].startLineNumber, col: ordered[0].startColumn } : null,
+        messages: ordered.map((m) => `Line ${m.startLineNumber}: ${m.message}`),
       });
     }, BIND_DEBOUNCE_MS);
     return () => clearTimeout(timer);

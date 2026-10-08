@@ -39,6 +39,10 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
   const [review, setReview] = useState(null);
   const [reviewError, setReviewError] = useState(null);
   const [busy, setBusy] = useState(null); // "build" | "approve" | "changes" | "merge"
+  // The change that action belongs to. One page-wide flag made a build on
+  // change A show "Building..." on every other change and disable all of
+  // their actions; the flag now only applies to the change it was started on.
+  const [busyPr, setBusyPr] = useState(null);
   const [merged, setMerged] = useState(null);
   const [reasonOpen, setReasonOpen] = useState(false);
   const [reason, setReason] = useState("");
@@ -79,8 +83,10 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
     loadReview(selected);
   }, [selected, loadReview]);
 
+  const busyHere = busyPr === selected ? busy : null;
+
   // Poll while a build is running.
-  const buildRunning = review?.build?.status === "running" || busy === "build";
+  const buildRunning = review?.build?.status === "running" || busyHere === "build";
   useEffect(() => {
     if (!buildRunning || !selected) return;
     const t = setInterval(() => loadReview(selected), POLL_MS);
@@ -91,11 +97,12 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
   const buildBeforeRef = useRef(null);
   useEffect(() => {
     const b = review?.build;
-    if (busy === "build" && b && b.status !== "running" && b.started_at !== buildBeforeRef.current) setBusy(null);
-  }, [busy, review]);
+    if (busyHere === "build" && b && b.status !== "running" && b.started_at !== buildBeforeRef.current) setBusy(null);
+  }, [busyHere, review]);
 
   async function act(kind, fn, done) {
     setBusy(kind);
+    setBusyPr(selected);
     try {
       await fn();
       if (done) done();
@@ -129,6 +136,7 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
     const ok = await showConfirm(title, msg, review.build_current ? "Merge" : "Merge anyway", !review.build_current);
     if (!ok) return;
     setBusy("merge");
+    setBusyPr(selected);
     try {
       const res = await api.mergePr(review.pr.id, user);
       setMerged(res);
@@ -178,7 +186,7 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
         {reviewError && <div style={{ ...s.err, marginBottom: 12 }}>{reviewError}</div>}
         {selected && !review && !reviewError && <div style={s.dim}>Loading…</div>}
         {review && (
-          <ChangeDetail review={review} busy={busy} buildRunning={buildRunning} onOpenFile={onOpenFile}
+          <ChangeDetail review={review} busy={busyHere} buildRunning={buildRunning} onOpenFile={onOpenFile}
                         onBuild={() => {
                           buildBeforeRef.current = review.build?.started_at ?? null;
                           act("build", () => api.buildPr(review.pr.id));
@@ -198,17 +206,17 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
             <div style={s.authorNote}>
               You opened this change, so someone else has to approve it.
               {" "}
-              <button style={s.link} disabled={!!busy} onClick={waiveApproval}>Merge without review</button>
+              <button style={s.link} disabled={!!busyHere} onClick={waiveApproval}>Merge without review</button>
             </div>
           )}
           {review.pr.status === "open" && (
             <div style={s.reviewActs}>
-              <button style={s.btn} disabled={!!busy || isAuthor}
+              <button style={s.btn} disabled={!!busyHere || isAuthor}
                       title={isAuthor ? "You can't approve your own change" : undefined}
                       onClick={() => act("approve", () => api.approvePr(review.pr.id, user))}>
                 Approve
               </button>
-              <button style={s.btn} disabled={!!busy} onClick={() => setReasonOpen((v) => !v)} aria-expanded={reasonOpen}>
+              <button style={s.btn} disabled={!!busyHere} onClick={() => setReasonOpen((v) => !v)} aria-expanded={reasonOpen}>
                 Request changes
               </button>
             </div>
@@ -222,7 +230,7 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
                 aria-label="What needs to change"
                 style={s.textarea}
               />
-              <button style={{ ...s.btn, marginTop: 6 }} disabled={!!busy || !reason.trim()}
+              <button style={{ ...s.btn, marginTop: 6 }} disabled={!!busyHere || !reason.trim()}
                       onClick={() => act("changes", () => api.requestPrChanges(review.pr.id, user, reason.trim()),
                                          () => { setReason(""); setReasonOpen(false); })}>
                 Send
@@ -234,10 +242,10 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
             <>
               <button
                 style={review.ready ? s.merge : s.mergeOff}
-                disabled={!review.ready || !!busy || running}
+                disabled={!review.ready || !!busyHere || running}
                 onClick={merge}
               >
-                {busy === "merge" ? "Merging…" : `Merge into ${review.pr.base_ref}`}
+                {busyHere === "merge" ? "Merging…" : `Merge into ${review.pr.base_ref}`}
               </button>
               <div style={s.why}>
                 {!review.ready
@@ -275,7 +283,7 @@ function ListItem({ pr, selected, onClick }) {
       <span style={s.itemTitle}>{pr.title}</span>
       <span style={s.itemMeta}>
         <span style={{ color: tone }}>{pr.status}</span> · <span style={{ fontFamily: "var(--havn-font-mono)" }}>{pr.head_ref}</span>
-        {pr.approvers?.length ? ` · ${pr.approvers.length} ✓` : ""}
+        {(pr.current_approvers ?? pr.approvers)?.length ? ` · ${(pr.current_approvers ?? pr.approvers).length} ✓` : ""}
       </span>
     </button>
   );
@@ -392,13 +400,16 @@ function ImpactGraph({ impact, onOpenFile }) {
   );
 }
 
-export function fmtMetric(v) {
+// One formatter for every magnitude, in the viewer's locale. Large values used
+// to go through toFixed (always ".") while small ones were localized, so a
+// Danish reader saw "41.2M" beside "0,5" -- and "1.234" (1234) beside "12.3k".
+// `locale` is for tests; the UI passes nothing and gets the browser's.
+export function fmtMetric(v, locale) {
   if (v == null) return "–";
-  const a = Math.abs(v);
-  if (a >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
-  if (a >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
-  if (a >= 1e4) return `${(v / 1e3).toFixed(1)}k`;
-  return Number.isInteger(v) ? v.toLocaleString() : v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (Math.abs(v) >= 1e4) {
+    return new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(v);
+  }
+  return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(v);
 }
 
 function MetricRow({ m }) {
@@ -406,7 +417,7 @@ function MetricRow({ m }) {
   const arrow = !moved ? "" : m.delta > 0 ? "\u25B2 " : "\u25BC ";
   const change = m.base == null
     ? "new on this branch"
-    : m.delta_pct != null ? `${arrow}${m.delta_pct > 0 ? "+" : ""}${m.delta_pct}%` : moved ? `${arrow}${fmtMetric(m.delta)}` : "unchanged";
+    : m.delta_pct != null ? `${arrow}${m.delta_pct > 0 ? "+" : ""}${fmtMetric(m.delta_pct)}%` : moved ? `${arrow}${fmtMetric(m.delta)}` : "unchanged";
   return (
     <div style={s.metricRow}>
       <div style={{ minWidth: 0 }}>

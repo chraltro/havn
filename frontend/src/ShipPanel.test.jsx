@@ -167,16 +167,28 @@ describe("ShipPanel", () => {
   it("shows how affected metrics move", async () => {
     renderShip();
     expect(await screen.findByText("revenue")).toBeTruthy();
-    expect(screen.getByText("41.2M")).toBeTruthy();
-    expect(screen.getByText("40.2M")).toBeTruthy();
-    expect(screen.getByText("\u25BC -2.4%")).toBeTruthy();
+    // Expectations go through fmtMetric so they hold in any locale the
+    // suite runs under; fmtMetric's own tests pin the exact strings.
+    // getByText collapses whitespace in the page text (a compact "mio." comes
+    // after a non-breaking space) but not in the expected string, so match it.
+    const shown = (text) => text.replace(/\s+/g, " ");
+    expect(screen.getByText(shown(fmtMetric(41200000)))).toBeTruthy();
+    expect(screen.getByText(shown(fmtMetric(40211200)))).toBeTruthy();
+    expect(screen.getByText(shown(`\u25BC ${fmtMetric(-2.4)}%`))).toBeTruthy();
     expect(screen.getByRole("img", { name: "revenue by month, base and branch" })).toBeTruthy();
   });
 
   it("formats metric values compactly", () => {
-    expect(fmtMetric(41200000)).toBe("41.2M");
-    expect(fmtMetric(12345)).toBe("12.3k");
-    expect(fmtMetric(0.5)).toBe("0.5");
+    expect(fmtMetric(41200000, "en-US")).toBe("41.2M");
+    expect(fmtMetric(12345, "en-US")).toBe("12.3K");
+    expect(fmtMetric(0.5, "en-US")).toBe("0.5");
     expect(fmtMetric(null)).toBe("–");
+  });
+
+  it("uses one decimal separator at every magnitude", () => {
+    // Large values were formatted with toFixed and small ones localized, so
+    // a Danish reader got "41.2M" next to "0,5".
+    expect(fmtMetric(41200000, "da-DK")).toContain("41,2");
+    expect(fmtMetric(0.5, "da-DK")).toBe("0,5");
   });
 });

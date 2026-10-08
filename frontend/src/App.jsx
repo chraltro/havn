@@ -50,7 +50,7 @@ import DashboardFilterBar from "./DashboardFilterBar";
 import { DashboardProvider, useDashboard } from "./DashboardContext";
 import { useAuth } from "./AuthContext";
 import { WarehouseProvider, useWarehouse } from "./WarehouseContext";
-import { schemaCompare } from "./schemaOrder";
+import { isSystemSchema, schemaCompare } from "./schemaOrder";
 import { PipelineProvider, usePipeline } from "./PipelineContext";
 
 
@@ -256,22 +256,6 @@ function groupBySchema(tables) {
     schemas[t.schema].push(t);
   }
   return schemas;
-}
-
-// Schemas that hold introspection / bookkeeping rather than user data.
-// They stay visible (so users can browse them) but are dimmed and start
-// collapsed: _havn (havn metadata), main (DuckDB default empty schema),
-// information_schema (SQL standard catalog), and any catalog name that
-// starts with __ (DuckLake's underlying metadata catalog).
-function isSystemSchema(name) {
-  if (!name) return false;
-  if (name === "_havn" || name === "main") return true;
-  if (name === "information_schema") return true;
-  if (name.startsWith("__")) return true;
-  if (name.includes(".")) {
-    return name.split(".").some(p => isSystemSchema(p));
-  }
-  return false;
 }
 
 function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
@@ -866,8 +850,13 @@ function AppContent() {
     }
   }
 
-  async function saveFile() {
-    if (!activeFile) return;
+  // Returns whether the save succeeded, so callers that build right after a
+  // save can stop instead of building the stale file on disk. Those callers
+  // pass runAfter: false -- they are about to build anyway, and a second,
+  // run-on-save build started here raced theirs ("already running") and
+  // flipped the UI to idle mid-run.
+  async function saveFile({ runAfter = true } = {}) {
+    if (!activeFile) return false;
     try {
       await api.saveFile(activeFile, fileContent);
       setDirty(false);
@@ -878,7 +867,7 @@ function AppContent() {
       setHintTrigger("firstFileEdited", true);
       // Run on save: rebuild this single model / re-run this single
       // script after a successful save, if the toggle is on.
-      if (runOnSave && !running) {
+      if (runAfter && runOnSave && !running) {
         if (activeFile.includes("transform/") && activeFile.endsWith(".sql")) {
           const modelName = activeFile.replace(/^transform\//, "").replace(/\.sql$/, "").replace(/\//g, ".");
           runSingleModel(modelName).catch(e => addOutput("error", `Run on save failed: ${e.message}`));
@@ -886,8 +875,10 @@ function AppContent() {
           runCurrentScript(activeFile).catch(e => addOutput("error", `Run on save failed: ${e.message}`));
         }
       }
+      return true;
     } catch (e) {
       addOutput("error", `Failed to save: ${e.message}`);
+      return false;
     }
   }
 
@@ -975,7 +966,7 @@ function AppContent() {
 
   async function runCurrentFile() {
     if (!activeFile) return;
-    if (dirty) await saveFile();
+    if (dirty && !(await saveFile({ runAfter: false }))) return;
     if (activeFile.endsWith(".sql")) {
       await runTransformAll(false);
     } else if (activeFile.endsWith(".py")) {
@@ -987,7 +978,7 @@ function AppContent() {
 
   async function handleRunSingleModel() {
     if (!activeFile || !activeFile.includes("transform/") || !activeFile.endsWith(".sql")) return;
-    if (dirty) await saveFile();
+    if (dirty && !(await saveFile({ runAfter: false }))) return;
     const modelName = activeFile.replace(/^transform\//, "").replace(/\.sql$/, "").replace(/\//g, ".");
     await runSingleModel(modelName);
   }
@@ -1028,7 +1019,7 @@ function AppContent() {
   }
 
   async function handleBuildSelection(selector) {
-    if (dirty) await saveFile();
+    if (dirty && !(await saveFile({ runAfter: false }))) return;
     await runSelection(selector);
   }
 
@@ -1059,7 +1050,7 @@ function AppContent() {
   // Ctrl/Cmd+S saves only while a dirty file is open in the editor (notebooks
   // have their own save).
   saveShortcutRef.current = activeTab === "Editor" && activeFile && dirty && !activeFile.endsWith(".dpnb")
-    ? saveFile : null;
+    ? () => saveFile() : null;
   const bindStatusText = bindStatusLabel(bindStatus);
 
   const editorElement = (
@@ -1256,7 +1247,21 @@ function AppContent() {
                     {activeFile}
                     {dirty && <span style={styles.modifiedDot}> *</span>}
                   </span>
-                  {bindStatusText && (
+                  {bindStatusText && (bindStatus?.first ? (
+                    <button
+                      type="button"
+                      onClick={() => setGoToLine({ line: bindStatus.first.line, col: bindStatus.first.col })}
+                      style={{
+                        ...styles.bindStatus,
+                        ...styles.bindStatusButton,
+                        color: bindStatus.errorCount > 0 ? "var(--havn-red)" : "var(--havn-yellow)",
+                      }}
+                      title={`${bindStatus.messages.join("\n")}\n\nClick to jump to the first one.`}
+                      aria-label={`${bindStatusText}: jump to the first diagnostic`}
+                    >
+                      {bindStatusText}
+                    </button>
+                  ) : (
                     <span
                       style={{
                         ...styles.bindStatus,
@@ -1266,9 +1271,9 @@ function AppContent() {
                     >
                       {bindStatusText}
                     </span>
-                  )}
+                  ))}
                   {!isTransformFile && (
-                    <button onClick={saveFile} disabled={!dirty} style={styles.btn}>
+                    <button onClick={() => saveFile()} disabled={!dirty} style={styles.btn}>
                       Save
                     </button>
                   )}
@@ -1368,12 +1373,12 @@ function AppContent() {
                   onPreview={previewCurrentFile}
                   onPreviewSql={previewSql}
                   onClearPreview={() => { setPreview(null); setPreviewError(null); }}
-                  onSave={saveFile}
+                  onSave={() => saveFile()}
                   onBuild={async (modelName) => {
                     // The workbench knows the model's real name, which a nested
                     // folder or @config schema= makes different from the path.
                     if (!modelName) return handleRunSingleModel();
-                    if (dirty) await saveFile();
+                    if (dirty && !(await saveFile({ runAfter: false }))) return;
                     await runSingleModel(modelName);
                   }}
                   onBuildDownstream={handleBuildSelection}
@@ -1707,6 +1712,10 @@ const styles = {
   fileActions: { marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px", paddingLeft: "16px" },
   fileName: { fontSize: "11px", color: "var(--havn-text-dim)", fontFamily: "var(--havn-font-mono)", maxWidth: "280px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   bindStatus: { fontSize: "11px", fontFamily: "var(--havn-font-mono)", whiteSpace: "nowrap" },
+  bindStatusButton: {
+    background: "none", border: "none", padding: 0, cursor: "pointer",
+    textDecoration: "underline dotted", textUnderlineOffset: "3px",
+  },
   modifiedDot: { color: "var(--havn-accent)", fontWeight: 700 },
 
   // Panel

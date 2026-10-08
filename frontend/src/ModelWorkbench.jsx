@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { RUN_KEYS, SAVE_KEYS } from "./platform";
 import { api } from "./api";
 import ResizeHandle from "./ResizeHandle";
 import useResizable from "./useResizable";
@@ -358,8 +359,8 @@ export default function ModelWorkbench({
           <Dot tone={status.tone} />
           <span style={s.ellipsis}>{status.text}</span>
         </span>
-        <button style={s.btn} onClick={onSave} disabled={!dirty}>Save <kbd style={s.kbd}>⌘S</kbd></button>
-        <button style={s.btn} onClick={onPreview} disabled={previewRunning}>Preview <kbd style={s.kbd}>⌘↵</kbd></button>
+        <button style={s.btn} onClick={onSave} disabled={!dirty}>Save <kbd style={s.kbd}>{SAVE_KEYS}</kbd></button>
+        <button style={s.btn} onClick={onPreview} disabled={previewRunning}>Preview <kbd style={s.kbd}>{RUN_KEYS}</kbd></button>
         <button style={s.btn} onClick={() => onBuild(data?.model)} disabled={running}
                 title={running ? "A run is already in progress" : "Save and build only this model"}>
           Build model
@@ -405,7 +406,7 @@ function PreviewTab({ preview, error, running, label, onPreview, onClear }) {
     return (
       <div style={s.empty}>
         <div>Preview runs the SQL in the editor, including unsaved changes, against the active environment.</div>
-        <button style={{ ...s.btn, marginTop: 10 }} onClick={onPreview}>Preview <kbd style={s.kbd}>⌘↵</kbd></button>
+        <button style={{ ...s.btn, marginTop: 10 }} onClick={onPreview}>Preview <kbd style={s.kbd}>{RUN_KEYS}</kbd></button>
       </div>
     );
   }
