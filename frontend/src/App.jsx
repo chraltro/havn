@@ -647,14 +647,25 @@ function AppContent() {
   // palette, Ctrl/Cmd+S to save the open file. The handler is registered once,
   // so it reads the current save function through a ref.
   const saveShortcutRef = useRef(null);
+  // Ctrl+K / Cmd+K opens the command palette from anywhere, the code editor
+  // included. It is caught in the capture phase, before the event reaches the
+  // focused element: Monaco treats Ctrl+K as the first key of a chord
+  // (Ctrl+K Ctrl+C ...) and stops the event, so a listener in the bubble phase
+  // never saw it while the editor had focus and the shortcut did nothing.
+  useEffect(() => {
+    function handlePaletteKey(e) {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        e.stopPropagation();
+        setPaletteOpen((v) => !v);
+      }
+    }
+    window.addEventListener("keydown", handlePaletteKey, true);
+    return () => window.removeEventListener("keydown", handlePaletteKey, true);
+  }, []);
+
   useEffect(() => {
     function handleKeyDown(e) {
-      // Ctrl+K / Cmd+K — command palette
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
-        e.preventDefault();
-        setPaletteOpen((v) => !v);
-        return;
-      }
       // Ctrl+S / Cmd+S — save the file in the editor instead of the page
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
         if (saveShortcutRef.current) {
