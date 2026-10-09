@@ -4,6 +4,8 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-09
+
 ### Added
 
 - **Row-level security.** Row policies per table (`havn rls`,
