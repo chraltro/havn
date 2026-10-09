@@ -743,3 +743,42 @@ def test_contract_on_python_model(project, conn):
     )
     results = run_contracts(conn, project / "contracts")
     assert results and all(r.passed for r in results)
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def test_cli_validate_reports_python_problems(project):
+    from typer.testing import CliRunner
+
+    from havn.cli import app
+
+    _write(project / "transform/gold/ok.py", "def model(ref):\n    return ref('silver.scores')\n")
+    ok = CliRunner().invoke(app, ["validate", "--project", str(project), "--no-bind"])
+    assert ok.exit_code == 0, ok.output
+    assert "2 Python model(s) read cleanly" in ok.output
+
+    _write(project / "transform/gold/typo.py", "def model(ref):\n    return ref('silver.scorez')\n")
+    _write(
+        project / "transform/gold/bad.py",
+        "from havn import model\n@model(materialized='view')\ndef bad(db):\n    pass\n",
+    )
+    result = CliRunner().invoke(app, ["validate", "--project", str(project), "--no-bind"])
+    assert result.exit_code == 1
+    flat = " ".join(result.output.split())
+    assert "gold.bad:2: a Python model cannot be materialized as view" in flat
+    assert "ref('silver.scorez') names no model and no table" in flat
+
+
+def test_cli_ls_shows_language(project):
+    from typer.testing import CliRunner
+
+    from havn.cli import app
+
+    result = CliRunner().invoke(app, ["ls", "--project", str(project)])
+    assert result.exit_code == 0, result.output
+    assert "language" in result.output and "python" in result.output
+    names = CliRunner().invoke(app, ["ls", "config.language:python", "--names", "--project", str(project)])
+    assert names.output.split() == ["silver.scores"]

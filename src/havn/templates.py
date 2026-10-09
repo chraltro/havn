@@ -478,6 +478,60 @@ ORDER BY total_events DESC
 """
 
 # ---------------------------------------------------------------------------
+# Python model -- a DAG node built by a function instead of a query
+# ---------------------------------------------------------------------------
+
+SAMPLE_GOLD_MAGNITUDE_PY = '''\
+"""Gutenberg-Richter magnitude-frequency table, built in Python.
+
+For each half-magnitude bin: how many events were at least that strong, and
+the b-value (Aki's maximum-likelihood estimate) of the events at or above it.
+A loop over sorted magnitudes is easier to read as code than as SQL, which is
+what a Python model is for. ref() returns a DuckDB relation and makes the
+model a dependency; whatever the function returns (a relation, a DataFrame
+or a pyarrow Table) is materialized like any other model.
+"""
+import math
+
+import pyarrow as pa
+
+from havn import model
+
+BIN = 0.5
+
+
+@model(
+    materialized="table",
+    tags=["seismology"],
+    assertions=["row_count > 0", "unique(min_magnitude)"],
+    columns={
+        "min_magnitude": "Lower edge of the magnitude bin",
+        "events_at_or_above": "Events with magnitude >= min_magnitude (the cumulative count N)",
+        "log10_n": "log10(N): a straight line on a Gutenberg-Richter plot",
+        "b_value": "Aki maximum-likelihood b-value for the events at or above the bin",
+    },
+)
+def magnitude_frequency(ref):
+    events = ref("silver.earthquake_events").filter("magnitude IS NOT NULL")
+    mags = sorted(m for (m,) in events.project("CAST(magnitude AS DOUBLE)").fetchall())
+
+    rows = []
+    for edge in sorted({math.floor(m / BIN) * BIN for m in mags}):
+        above = [m for m in mags if m >= edge]
+        n = len(above)
+        # b = log10(e) / (mean(M) - (Mc - bin/2)); undefined for one event.
+        spread = sum(above) / n - (edge - BIN / 2)
+        b_value = math.log10(math.e) / spread if n > 1 and spread > 0 else None
+        rows.append({
+            "min_magnitude": edge,
+            "events_at_or_above": n,
+            "log10_n": round(math.log10(n), 3),
+            "b_value": round(b_value, 3) if b_value is not None else None,
+        })
+    return pa.Table.from_pylist(rows)
+'''
+
+# ---------------------------------------------------------------------------
 # Python SQL macro — reusable functions callable directly in SQL
 # ---------------------------------------------------------------------------
 

@@ -965,6 +965,104 @@ def run_python_model(
     table exists in this warehouse, which is when the SQL writers would
     merge rather than create.
     """
+    staged = staging_name(model)
+
+    def stage(result: Any) -> str:
+        _stage_result(conn, model, result, staged)
+        return staged
+
+    return _invoke(
+        conn, model, stage,
+        model_map=model_map, query_rewriter=query_rewriter, ref_map=ref_map,
+        output=output, is_incremental=is_incremental,
+    )
+
+
+# A preview is an interactive request; it never gets the two hours a build may.
+PREVIEW_TIMEOUT_SECONDS = 120
+
+
+def preview_python_model(
+    conn: duckdb.DuckDBPyConnection,
+    model: SQLModel,
+    *,
+    model_map: dict[str, SQLModel] | None = None,
+    limit: int = 100,
+) -> dict:
+    """Run the function and return its first ``limit`` rows, writing nothing.
+
+    The editor's Preview for a Python model. Nothing is staged: a relation
+    is read through ``limit``, a DataFrame or Table through ``head`` /
+    ``slice``, so this works on a read-only connection and leaves no TEMP
+    table behind. ``is_incremental`` is False, as for any preview: it shows
+    what a full build would produce.
+
+    Returns ``{"columns", "rows", "truncated", "output"}`` with rows as
+    plain Python values (the caller serialises them).
+    """
+    def head(result: Any) -> dict:
+        import duckdb
+
+        if result is None:
+            raise PythonModelError(
+                f"Python model {model.full_name}: the function returned None. "
+                f"Return {_SUPPORTED_RESULTS}."
+            )
+        obj = result
+        top = type(obj).__module__.split(".")[0]
+        if top == "polars" and hasattr(obj, "to_arrow"):
+            obj, top = obj.to_arrow(), "pyarrow"
+        if isinstance(obj, duckdb.DuckDBPyRelation):
+            rel = obj.limit(limit + 1)
+            return {"columns": list(rel.columns), "rows": [list(r) for r in rel.fetchall()]}
+        if top == "pandas" and hasattr(obj, "head"):
+            frame = obj.head(limit + 1)
+            return {
+                "columns": [str(c) for c in frame.columns],
+                "rows": [list(r) for r in frame.itertuples(index=False, name=None)],
+            }
+        if top == "pyarrow" and hasattr(obj, "slice"):
+            table = obj.slice(0, limit + 1)
+            names = list(table.column_names)
+            return {"columns": names, "rows": [[row[n] for n in names] for row in table.to_pylist()]}
+        raise PythonModelError(
+            f"Python model {model.full_name}: the function returned "
+            f"{type(result).__name__}. Return {_SUPPORTED_RESULTS}."
+        )
+
+    printed: list[str] = []
+    data = _invoke(
+        conn, model, head,
+        model_map=model_map, output=printed, is_incremental=False,
+        timeout_cap=PREVIEW_TIMEOUT_SECONDS,
+    )
+    truncated = len(data["rows"]) > limit
+    return {
+        "columns": data["columns"],
+        "rows": data["rows"][:limit],
+        "truncated": truncated,
+        "output": "".join(printed),
+    }
+
+
+def _invoke(
+    conn: duckdb.DuckDBPyConnection,
+    model: SQLModel,
+    consume: Callable[[Any], Any],
+    *,
+    model_map: dict[str, SQLModel] | None = None,
+    query_rewriter: Callable[[str], str] | None = None,
+    ref_map: dict[str, str] | None = None,
+    output: list[str] | None = None,
+    is_incremental: bool | None = None,
+    timeout_cap: float | None = None,
+) -> Any:
+    """Load the model file, call its function, hand the result to ``consume``.
+
+    Everything from loading to ``consume`` runs in the supervised thread, so
+    a lazy relation evaluated by ``consume`` is covered by the timeout too.
+    Returns whatever ``consume`` returned.
+    """
     from havn.engine.runner import _capture_thread_output, _run_supervised
 
     info = model.python
@@ -982,7 +1080,6 @@ def run_python_model(
 
     if is_incremental is None:
         is_incremental = model.materialized == "incremental" and _target_exists(conn, model)
-    staged = staging_name(model)
     provided = {
         "db": conn,
         "ref": make_ref(
@@ -998,7 +1095,7 @@ def run_python_model(
 
     stdout_buf, stderr_buf = io.StringIO(), io.StringIO()
 
-    def target() -> None:
+    def target() -> Any:
         with _capture_thread_output(stdout_buf, stderr_buf):
             module = _load_module(model)
             fn = getattr(module, info.function, None)
@@ -1007,10 +1104,11 @@ def run_python_model(
                     f"Python model {model.full_name}: '{info.function}' is not a function "
                     "once the file has run"
                 )
-            result = fn(**kwargs)
-            _stage_result(conn, model, result, staged)
+            return consume(fn(**kwargs))
 
     timeout = info.timeout if info.timeout else DEFAULT_TIMEOUT_SECONDS
+    if timeout_cap is not None:
+        timeout = min(timeout, timeout_cap)
     started = time.perf_counter()
     sup = _run_supervised(
         conn, f"model:{model.full_name}", target,
@@ -1043,7 +1141,7 @@ def run_python_model(
         raise PythonModelError(msg, output=printed)
     if sup["error"] is not None:
         raise PythonModelError(_format_failure(model, sup["error"]), output=printed) from sup["error"]
-    return staged
+    return sup["value"]
 
 
 def notebook_cell(model: SQLModel) -> dict:

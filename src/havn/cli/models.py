@@ -369,6 +369,13 @@ def explain(
         if models:
             console.print(f"[dim]Available: {', '.join(m.full_name for m in models)}[/dim]")
         raise typer.Exit(1)
+    if target.is_python:
+        console.print(
+            f"[yellow]{target.full_name} is a Python model: there is no SQL "
+            "query to explain. Explain a query against its built table with "
+            "`havn query \"EXPLAIN SELECT ...\"`.[/yellow]"
+        )
+        raise typer.Exit(1)
 
     conn = open_warehouse(config, project_dir, read_only=not analyze)
     try:
