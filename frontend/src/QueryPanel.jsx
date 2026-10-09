@@ -9,9 +9,12 @@ import ResizeHandle from "./ResizeHandle";
 import useResizable from "./useResizable";
 import { isSystemSchema, schemaCompare } from "./schemaOrder";
 import { MOD_KEY } from "./platform";
+import { buildCompletions, applyCompletionText, caretCoordinates, completionFits } from "./queryAutocomplete";
 
 const MAX_HISTORY = 50;
 const DEFAULT_LIMIT = 1000;
+const AC_WIDTH = 360;
+const AC_MAX_HEIGHT = 220;
 const FMT_OPTS = { language: "sql", keywordCase: "upper", indentStyle: "standard" };
 function fmt(sql) { try { return formatSQL(sql, FMT_OPTS); } catch { return sql; } }
 
@@ -242,6 +245,10 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
     const v = typeof val === "function" ? val(sqlRef.current) : val;
     sqlRef.current = v;
     _setSql(v);
+    // Suggestions describe the old text; replacing it (format, history, a
+    // completion's fallback path) would apply them at the wrong offset.
+    acRequestRef.current++;
+    setAcItems([]);
     // Sync textarea value for programmatic changes (format, history, autocomplete)
     if (textareaRef.current && textareaRef.current.value !== v) {
       textareaRef.current.value = v;
@@ -268,7 +275,11 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
   // Autocomplete state
   const [acItems, setAcItems] = useState([]);
   const [acIndex, setAcIndex] = useState(0);
-  const [acToken, setAcToken] = useState(""); // the token being completed
+  const [acPos, setAcPos] = useState({ left: 0, top: 0 });
+  const acListRef = useRef(null);
+  const acSuppressRef = useRef(false); // true while a completion is being inserted
+  const lastInputAtRef = useRef(0);
+  const acNavigatedRef = useRef(false); // the user moved through the list with the arrows
   const colCacheRef = useRef({}); // schema.table -> columns[]
   const acRequestRef = useRef(0); // monotonic id to drop stale autocomplete responses
 
@@ -466,15 +477,31 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
   function handleKeyDown(e) {
     // Autocomplete navigation
     if (acItems.length > 0) {
-      if (e.key === "ArrowDown") { e.preventDefault(); setAcIndex((i) => Math.min(i + 1, acItems.length - 1)); return; }
-      if (e.key === "ArrowUp")   { e.preventDefault(); setAcIndex((i) => Math.max(i - 1, 0)); return; }
-      if (e.key === "Tab" || (e.key === "Enter" && !e.ctrlKey && !e.metaKey)) {
-        e.preventDefault();
-        applyCompletion(acItems[acIndex]);
-        return;
+      if (e.key === "ArrowDown") { e.preventDefault(); acNavigatedRef.current = true; setAcIndex((i) => Math.min(i + 1, acItems.length - 1)); return; }
+      if (e.key === "ArrowUp")   { e.preventDefault(); acNavigatedRef.current = true; setAcIndex((i) => Math.max(i - 1, 0)); return; }
+      const isTab = e.key === "Tab" && !e.shiftKey;
+      const isEnter = e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.shiftKey;
+      if (isTab || isEnter) {
+        const ta = textareaRef.current;
+        const item = acItems[acIndex];
+        // Skip the list when: a selection is active (the key is meant for it),
+        // the list is a keystroke behind while columns load (it would replace
+        // the wrong characters), or Enter follows a word that is already a
+        // keyword or alias and the user did not pick an item with the arrows.
+        const usable = ta && ta.selectionStart === ta.selectionEnd && completionFits(sqlRef.current, ta.selectionStart, item);
+        if (usable && (isTab || !item.soft || acNavigatedRef.current)) {
+          e.preventDefault();
+          applyCompletion(item);
+          return;
+        }
+        hideCompletions();
+        // Tab was meant to complete; don't send focus out of the editor instead.
+        if (isTab) { e.preventDefault(); return; }
       }
-      if (e.key === "Escape") { setAcItems([]); return; }
+      if (e.key === "Escape") { e.preventDefault(); hideCompletions(); return; }
     }
+    // Moving the caret leaves any list, shown or still loading, describing the wrong word.
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(e.key)) hideCompletions();
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
       runQuery();
@@ -485,170 +512,101 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
     }
   }
 
-  function applyCompletion(item) {
+  // Any resize of the editor (its own handles, the app's sidebars and output
+  // panel, the window) rewraps the text and moves the caret away from the list.
+  useEffect(() => {
     const ta = textareaRef.current;
-    if (!ta) return;
-    const cursor = ta.selectionStart;
-    const before = sql.substring(0, cursor - acToken.length);
-    const after = sql.substring(cursor);
-    const insert = item.insert;
-    const newSql = before + insert + after;
-    setSql(newSql);
+    if (!ta || typeof ResizeObserver === "undefined") return;
+    let first = true;
+    const ro = new ResizeObserver(() => {
+      if (first) { first = false; return; } // the initial observation is not a resize
+      hideCompletions();
+    });
+    ro.observe(ta);
+    return () => ro.disconnect();
+  }, []);
+
+  // Keep the highlighted suggestion in view while arrowing through the list.
+  useEffect(() => {
+    // Scroll only the list: scrollIntoView would also scroll the panel's
+    // overflow:hidden ancestors, shifting the editor with no way back.
+    const list = acListRef.current;
+    const el = list?.children[acIndex];
+    if (!el) return;
+    if (el.offsetTop < list.scrollTop) list.scrollTop = el.offsetTop;
+    else if (el.offsetTop + el.offsetHeight > list.scrollTop + list.clientHeight) {
+      list.scrollTop = el.offsetTop + el.offsetHeight - list.clientHeight;
+    }
+  }, [acIndex, acItems]);
+
+  function hideCompletions() {
+    acRequestRef.current++; // a describeTable still in flight must not reopen the list
+    acNavigatedRef.current = false;
     setAcItems([]);
-    const newCursor = before.length + insert.length;
-    setTimeout(() => { ta.focus(); ta.selectionStart = ta.selectionEnd = newCursor; }, 0);
   }
 
-  // SQL keywords that can follow a table name but are NOT aliases.
-  const ALIAS_STOPWORDS = new Set([
-    "ON", "WHERE", "AND", "OR", "SET", "LEFT", "RIGHT", "INNER", "OUTER",
-    "CROSS", "FULL", "JOIN", "GROUP", "ORDER", "HAVING", "LIMIT", "UNION",
-    "EXCEPT", "INTERSECT", "USING", "QUALIFY", "WINDOW", "OFFSET", "FETCH",
-    "TABLESAMPLE", "AS", "NATURAL", "LATERAL", "PIVOT", "UNPIVOT",
-  ]);
+  function applyCompletion(item) {
+    const ta = textareaRef.current;
+    if (!ta || !item) return;
+    if (ta.selectionStart !== ta.selectionEnd || !completionFits(sqlRef.current, ta.selectionStart, item)) { hideCompletions(); return; }
+    const { value, cursor } = applyCompletionText(sqlRef.current, ta.selectionStart, item);
+    hideCompletions();
+    ta.focus();
+    // Insert through the browser's editing command so Ctrl+Z undoes the
+    // completion; assigning .value would wipe the undo history.
+    ta.setSelectionRange(Math.max(0, ta.selectionStart - item.replace), ta.selectionStart);
+    acSuppressRef.current = true;
+    let inserted = false;
+    try { inserted = document.execCommand("insertText", false, item.insert); } catch { /* unsupported */ }
+    acSuppressRef.current = false;
+    if (!inserted || ta.value !== value) setSql(value);
+    ta.selectionStart = ta.selectionEnd = cursor;
+  }
 
-  // Extract aliases from SQL: FROM/JOIN schema.table [AS] alias.
-  // The alias is optional (so `FROM a.b WHERE ...` doesn't capture `where`),
-  // and a captured token that is a SQL keyword is treated as "no alias".
-  function extractAliases(sqlText) {
-    const aliasMap = {};
-    const re = /\b(?:FROM|JOIN)\s+([\w]+\.[\w]+)(?:\s+(?:AS\s+)?([\w]+))?/gi;
-    let m;
-    while ((m = re.exec(sqlText)) !== null) {
-      const fullTable = m[1]; // e.g. "landing.customers"
-      const aliasTok = m[2];
-      if (!aliasTok) continue;
-      if (ALIAS_STOPWORDS.has(aliasTok.toUpperCase())) continue;
-      aliasMap[aliasTok.toLowerCase()] = fullTable;
+  async function getColumns(schema, table) {
+    const key = `${schema}.${table}`;
+    if (!colCacheRef.current[key]) {
+      try {
+        const info = await api.describeTable(schema, table);
+        colCacheRef.current[key] = info.columns || [];
+      } catch {
+        colCacheRef.current[key] = []; // don't re-ask on every keystroke for a name that isn't a table
+      }
     }
-    return aliasMap;
+    return colCacheRef.current[key];
+  }
+
+  // Where the list goes: under the caret, or above it when the caret is near
+  // the bottom of the panel. It floats over the toolbar instead of pushing it.
+  function completionPosition(ta, cursor) {
+    const wrapper = ta.parentElement;
+    const area = wrapper.parentElement;
+    const caret = caretCoordinates(ta, cursor);
+    const top = caret.top - ta.scrollTop;
+    const left = Math.max(4, Math.min(caret.left - ta.scrollLeft, wrapper.clientWidth - AC_WIDTH - 4));
+    const areaRect = area.getBoundingClientRect();
+    const wrapperTop = wrapper.getBoundingClientRect().top;
+    const below = areaRect.bottom - (wrapperTop + top + caret.height) - 8;
+    const above = wrapperTop + top - areaRect.top - 8;
+    // Never taller than the room on its side: past the panel edge it would be clipped.
+    if (below < AC_MAX_HEIGHT && above > below) {
+      return { left, bottom: wrapper.clientHeight - top + 2, maxHeight: Math.max(60, Math.min(AC_MAX_HEIGHT, above)) };
+    }
+    return { left, top: top + caret.height + 2, maxHeight: Math.max(60, Math.min(AC_MAX_HEIGHT, below)) };
   }
 
   async function computeAutocomplete(value, cursor) {
     // Stamp this invocation so a slow describeTable response from an earlier
     // keystroke can't overwrite suggestions from a newer one.
     const reqId = ++acRequestRef.current;
-    const isStale = () => acRequestRef.current !== reqId;
-    if (cursor == null) cursor = value.length;
-    const beforeCursor = value.substring(0, cursor);
-
-    // Extract the token being typed: word chars and dots, immediately before cursor
-    const tokenMatch = beforeCursor.match(/[\w.]+$/);
-    const token = tokenMatch ? tokenMatch[0] : "";
-
-    if (token.length < 1) { setAcItems([]); return; }
-
-    const dotIdx = token.indexOf(".");
-    const aliases = extractAliases(value);
-
-    if (dotIdx !== -1) {
-      const prefix = token.substring(0, dotIdx).toLowerCase();
-      const partial = token.substring(dotIdx + 1).toLowerCase();
-
-      // Check if prefix is an alias
-      const aliasTarget = aliases[prefix];
-      if (aliasTarget) {
-        // Alias.column — resolve to the aliased table's columns
-        const [aSchema, aTable] = aliasTarget.split(".");
-        const key = `${aSchema}.${aTable}`;
-        let cols = colCacheRef.current[key];
-        if (!cols) {
-          try {
-            const info = await api.describeTable(aSchema, aTable);
-            cols = info.columns || [];
-            colCacheRef.current[key] = cols;
-          } catch { cols = []; }
-        }
-        if (isStale()) return;
-        const colMatches = cols
-          .filter((c) => !partial || c.name.toLowerCase().startsWith(partial))
-          .slice(0, 12)
-          .map((c) => ({
-            label: `${c.name}  ${c.type}`, insert: c.name, kind: "column",
-          }));
-        setAcToken(token);
-        setAcItems(colMatches);
-        setAcIndex(0);
-        return;
-      }
-
-      // "schema.partial" — suggest schema.table matches AND columns for exact schema.table
-      const schema = prefix;
-
-      // schema.table completions
-      const tableMatches = tables
-        .filter((t) => t.schema.toLowerCase() === schema && t.name.toLowerCase().startsWith(partial))
-        .slice(0, 6)
-        .map((t) => ({ label: `${t.schema}.${t.name}`, insert: `${t.schema}.${t.name}`, kind: "table" }));
-
-      // column completions — only when schema.table is an exact match
-      const exactTable = tables.find((t) => t.schema.toLowerCase() === schema && t.name.toLowerCase() === partial);
-      let colMatches = [];
-      if (exactTable) {
-        const key = `${exactTable.schema}.${exactTable.name}`;
-        let cols = colCacheRef.current[key];
-        if (!cols) {
-          try {
-            const info = await api.describeTable(exactTable.schema, exactTable.name);
-            cols = info.columns || [];
-            colCacheRef.current[key] = cols;
-          } catch { cols = []; }
-        }
-        colMatches = cols.slice(0, 8).map((c) => ({
-          label: `${c.name}  ${c.type}`, insert: c.name, kind: "column",
-        }));
-      }
-
-      if (isStale()) return;
-      const items = [...tableMatches, ...colMatches];
-      setAcToken(token);
-      setAcItems(items);
-      setAcIndex(0);
-    } else {
-      // Plain token — match table names, schema names, AND columns from tables in FROM/JOIN
-      const lower = token.toLowerCase();
-      const tableMatches = tables
-        .filter((t) =>
-          t.schema.toLowerCase().startsWith(lower) ||
-          t.name.toLowerCase().startsWith(lower) ||
-          `${t.schema}.${t.name}`.toLowerCase().startsWith(lower)
-        )
-        .slice(0, 6)
-        .map((t) => ({ label: `${t.schema}.${t.name}`, insert: `${t.schema}.${t.name}`, kind: "table" }));
-
-      // Also suggest columns from tables referenced in FROM/JOIN clauses
-      const colMatches = [];
-      const referencedTables = new Set(Object.values(aliases));
-      // Also find direct schema.table refs in FROM/JOIN without aliases
-      const directRe = /\b(?:FROM|JOIN)\s+([\w]+\.[\w]+)/gi;
-      let dm;
-      while ((dm = directRe.exec(value)) !== null) referencedTables.add(dm[1]);
-
-      for (const fullName of referencedTables) {
-        const [s, t] = fullName.split(".");
-        if (!s || !t) continue;
-        const key = `${s}.${t}`;
-        let cols = colCacheRef.current[key];
-        if (!cols) {
-          try {
-            const info = await api.describeTable(s, t);
-            cols = info.columns || [];
-            colCacheRef.current[key] = cols;
-          } catch { cols = []; }
-        }
-        for (const c of cols) {
-          if (c.name.toLowerCase().startsWith(lower)) {
-            colMatches.push({ label: `${c.name}  ${c.type}  (${t})`, insert: c.name, kind: "column" });
-          }
-        }
-      }
-
-      if (isStale()) return;
-      const items = [...colMatches.slice(0, 8), ...tableMatches];
-      setAcToken(token);
-      setAcItems(items.slice(0, 12));
-      setAcIndex(0);
-    }
+    const items = await buildCompletions(value, cursor ?? value.length, tables, getColumns);
+    if (acRequestRef.current !== reqId) return;
+    const ta = textareaRef.current;
+    if (!items.length || !ta || document.activeElement !== ta) { setAcItems([]); return; }
+    setAcPos(completionPosition(ta, ta.selectionStart));
+    acNavigatedRef.current = false;
+    setAcItems(items);
+    setAcIndex(0);
   }
 
   function insertAtCursor(text) {
@@ -703,7 +661,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
         <div data-havn-hint="query-sidebar" style={{ display: "flex", flexDirection: "column", width: sidebarWidth, flexShrink: 0 }}>
           <SchemaSidebar tables={tables} onInsert={insertAtCursor} maskingPolicies={maskingPolicies} onOpenModel={onOpenModel} />
         </div>
-        <ResizeHandle direction="horizontal" onResize={onSidebarResize} onResizeStart={onSidebarResizeStart} />
+        <ResizeHandle direction="horizontal" onResize={onSidebarResize} onResizeStart={() => { hideCompletions(); onSidebarResizeStart(); }} />
 
         {/* Query area */}
         <div style={st.queryArea}>
@@ -712,33 +670,59 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
             <textarea
               ref={textareaRef}
               defaultValue=""
-              onInput={(e) => { const v = e.target.value; const cur = e.target.selectionStart; sqlRef.current = v; _setSql(v); computeAutocomplete(v, cur); }}
+              onInput={(e) => {
+                const v = e.target.value; const cur = e.target.selectionStart;
+                sqlRef.current = v; _setSql(v);
+                lastInputAtRef.current = performance.now();
+                // Undo/redo restores text; reopening the list would make the next Enter redo the completion.
+                const historyEdit = /^history/.test(e.nativeEvent?.inputType || "");
+                if (historyEdit) hideCompletions();
+                else if (!acSuppressRef.current) computeAutocomplete(v, cur);
+              }}
               onKeyDown={handleKeyDown}
-              onBlur={() => setTimeout(() => setAcItems([]), 150)}
+              onBlur={hideCompletions}
+              onMouseDown={hideCompletions}
+              onScroll={() => {
+                // Typing can scroll the textarea itself; only a scroll by the user closes the list.
+                if (performance.now() - lastInputAtRef.current > 150) hideCompletions();
+              }}
               placeholder="SELECT * FROM ..."
               style={{ ...st.textarea, height: "100%", resize: "none" }}
               spellCheck={false}
               aria-label="SQL query editor"
               aria-autocomplete="list"
+              aria-controls={acItems.length > 0 ? "query-ac-list" : undefined}
+              aria-activedescendant={acItems.length > 0 ? `query-ac-${acIndex}` : undefined}
             />
+            {acItems.length > 0 && (
+              <div
+                id="query-ac-list"
+                ref={acListRef}
+                style={{ ...st.acDropdown, ...acPos }}
+                role="listbox"
+                aria-label="Autocomplete suggestions"
+                // Keep focus (and the caret) in the textarea while clicking a suggestion.
+                onMouseDown={(e) => e.preventDefault()}
+              >
+                {acItems.map((item, i) => (
+                  <div
+                    key={`${item.kind}:${item.insert}`}
+                    id={`query-ac-${i}`}
+                    role="option"
+                    aria-selected={i === acIndex}
+                    onClick={() => applyCompletion(item)}
+                    onMouseEnter={() => setAcIndex(i)}
+                    style={i === acIndex ? st.acItemActive : st.acItem}
+                  >
+                    <span style={st.acKind}>{item.kind === "column" ? "col" : "tbl"}</span>
+                    <span style={st.acLabel}>{item.label}</span>
+                    {item.detail && <span style={st.acDetail}>{item.detail}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          {acItems.length > 0 && (
-            <div style={st.acDropdown} role="listbox" aria-label="Autocomplete suggestions">
-              {acItems.map((item, i) => (
-                <div
-                  key={i}
-                  role="option"
-                  aria-selected={i === acIndex}
-                  onMouseDown={(e) => { e.preventDefault(); applyCompletion(item); }}
-                  style={i === acIndex ? st.acItemActive : st.acItem}
-                >
-                  <span style={st.acKind}>{item.kind === "column" ? "col" : "tbl"}</span>
-                  <span style={st.acLabel}>{item.label}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          <ResizeHandle direction="vertical" onResize={onEditorResize} onResizeStart={onEditorResizeStart} />
+          <ResizeHandle direction="vertical" onResize={onEditorResize} onResizeStart={() => { hideCompletions(); onEditorResizeStart(); }} />
           <div style={st.shortcutHint}>
             <span style={st.shortcutKey}>{MOD_KEY}+Enter</span> run selection or all &nbsp;·&nbsp;
             <span style={st.shortcutKey}>{MOD_KEY}+Shift+F</span> format &nbsp;·&nbsp;
@@ -1034,15 +1018,16 @@ const st = {
   viewBtn: { padding: "3px 10px", background: "var(--havn-btn-bg)", border: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "11px", fontWeight: 500 },
   viewBtnActive: { padding: "3px 10px", background: "var(--havn-bg-secondary)", border: "none", color: "var(--havn-text)", cursor: "pointer", fontSize: "11px", fontWeight: 600 },
 
-  editorWrapper: { flexShrink: 0, borderBottom: "1px solid var(--havn-border)" },
+  editorWrapper: { flexShrink: 0, borderBottom: "1px solid var(--havn-border)", position: "relative" },
   textarea: { width: "100%", height: "100%", padding: "12px 14px", background: "var(--havn-bg)", border: "none", color: "var(--havn-text)", fontFamily: "var(--havn-font-mono)", fontSize: "13px", resize: "none", outline: "none", boxSizing: "border-box", lineHeight: 1.6, display: "block" },
   shortcutHint: { height: "22px", display: "flex", alignItems: "center", padding: "0 10px", gap: "2px", fontSize: "10px", color: "var(--havn-text-dim)", background: "var(--havn-bg)", borderBottom: "1px solid var(--havn-border)", flexShrink: 0 },
   shortcutKey: { background: "var(--havn-btn-bg)", border: "1px solid var(--havn-btn-border)", borderRadius: "3px", padding: "0 4px", fontSize: "10px", fontFamily: "var(--havn-font-mono)", color: "var(--havn-text-secondary)" },
-  acDropdown: { maxHeight: "180px", overflow: "auto", background: "var(--havn-bg-secondary)", borderBottom: "1px solid var(--havn-border)", flexShrink: 0 },
+  acDropdown: { position: "absolute", zIndex: 30, width: `${AC_WIDTH}px`, maxWidth: "calc(100% - 8px)", maxHeight: `${AC_MAX_HEIGHT}px`, overflowY: "auto", background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius)", boxShadow: "0 6px 20px rgba(0, 0, 0, 0.3)", padding: "3px 0", boxSizing: "border-box" },
   acItem: { display: "flex", alignItems: "center", gap: "8px", padding: "5px 10px", cursor: "pointer", fontSize: "12px" },
   acItemActive: { display: "flex", alignItems: "center", gap: "8px", padding: "5px 10px", cursor: "pointer", fontSize: "12px", background: "var(--havn-btn-bg)" },
   acKind: { fontSize: "9px", fontFamily: "var(--havn-font-mono)", color: "var(--havn-text-dim)", background: "var(--havn-bg-tertiary)", border: "1px solid var(--havn-border)", borderRadius: "3px", padding: "0 4px", flexShrink: 0, width: "22px", textAlign: "center" },
-  acLabel: { fontFamily: "var(--havn-font-mono)", color: "var(--havn-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  acLabel: { fontFamily: "var(--havn-font-mono)", color: "var(--havn-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 },
+  acDetail: { marginLeft: "auto", paddingLeft: "12px", fontFamily: "var(--havn-font-mono)", fontSize: "11px", color: "var(--havn-text-dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flexShrink: 1, maxWidth: "45%" },
 
   paramRow: { display: "flex", alignItems: "center", gap: "10px", padding: "5px 12px", flexWrap: "wrap", background: "var(--havn-bg-secondary)", borderBottom: "1px solid var(--havn-border)", flexShrink: 0 },
   paramLabel: { fontSize: "10px", fontWeight: 600, color: "var(--havn-text-secondary)", textTransform: "uppercase", letterSpacing: "0.3px", cursor: "help" },

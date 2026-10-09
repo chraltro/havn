@@ -400,6 +400,15 @@ none of them shipped in a released version.
   latest result of each check the project still declares.
 - Query results drew `***`, `!=` and `->` as font ligatures. Data now renders
   exactly as stored.
+- Ctrl+K opens the command palette from inside the code editor too, with
+  the caret in the search field.
+- Query-box autocomplete kept eating the qualifier: picking a column for
+  `c.cus` left `customer_id` with the `c.` gone. It now replaces only the
+  word being typed, and also completes `schema.table.column`, unaliased
+  table names (`orders.id`) and unqualified tables in `FROM`. The list floats
+  under the caret instead of pushing the Run toolbar down, accepting a
+  suggestion can be undone with Ctrl+Z, Enter after a finished word makes a
+  new line, and nothing pops up inside strings, comments or numbers.
 
 ### First impression
 
