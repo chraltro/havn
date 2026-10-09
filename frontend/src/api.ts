@@ -497,6 +497,7 @@ export interface UserEntry {
   display_name?: string;
   created_at?: string;
   last_login?: string;
+  attributes?: Record<string, unknown>;
 }
 
 export interface StreamConfig {
@@ -1430,6 +1431,20 @@ export const api = {
   getCDCStatus: () => request("/cdc"),
   resetCDCWatermark: (name: string) =>
     request(`/cdc/${encodeURIComponent(name)}/reset`, { method: "POST" }),
+
+  // Governance: row policies, user attributes, preview as user
+  getGovernance: () => request<any>("/governance"),
+  listRowPolicies: () => request<any[]>("/governance/row-policies"),
+  createRowPolicy: (policy: unknown) =>
+    request("/governance/row-policies", { method: "POST", body: JSON.stringify(policy) }),
+  updateRowPolicy: (id: string, updates: unknown) =>
+    request(`/governance/row-policies/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(updates) }),
+  deleteRowPolicy: (id: string) =>
+    request(`/governance/row-policies/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  setUserAttributes: (username: string, attributes: Record<string, unknown>) =>
+    request<any>(`/users/${encodeURIComponent(username)}/attributes`, { method: "PUT", body: JSON.stringify({ attributes }) }),
+  previewAsUser: (username: string, sql: string, limit = 200) =>
+    request<any>("/governance/preview", { method: "POST", body: JSON.stringify({ username, sql, limit }) }),
 
   // Masking
   getMaskingMethods: () => request<any>("/masking/methods"),

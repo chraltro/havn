@@ -13,7 +13,7 @@ export const SECTIONS = [
   { id: "Data", label: "Data", slug: "data", aliases: ["explore"], icon: "data", tabs: ["Query", "Ask", "Tables", "DAG", "Dashboards", "Reports", "Data Sources"] },
   { id: "Observe", label: "Observe", slug: "observe", icon: "pulse", tabs: ["Quality", "Performance", "Live", "Unit Tests", "Sentinel", "Diff", "Runs"] },
   { id: "Ship", label: "Ship", slug: "ship", icon: "ship", tabs: [] },
-  { id: "Configure", label: "Settings", slug: "settings", aliases: ["configure"], icon: "gear", secondary: true, tabs: ["Settings", "Masking", "Wiki", "Docs"] },
+  { id: "Configure", label: "Settings", slug: "settings", aliases: ["configure"], icon: "gear", secondary: true, tabs: ["Settings", "Masking", "Governance", "Wiki", "Docs"] },
 ];
 
 // Quick lookup: tab name -> section id

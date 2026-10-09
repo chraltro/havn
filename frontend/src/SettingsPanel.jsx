@@ -260,12 +260,62 @@ function SecretsSection({ showConfirm }) {
   );
 }
 
+function attrToText(v) { return typeof v === "string" ? v : JSON.stringify(v); }
+function textToAttr(v) {
+  const s = v.trim();
+  if (s.startsWith("[") || s.startsWith("{")) { try { return JSON.parse(s); } catch { /* keep as text */ } }
+  return v;
+}
+
+// Key/value attributes per user. Row policies read them with havn_attr('key').
+function AttributesEditor({ user, onSaved }) {
+  const [rows, setRows] = useState(() => Object.entries(user.attributes || {}).map(([k, v]) => [k, attrToText(v)]));
+  const [error, setError] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const setRow = (i, idx, val) => setRows((r) => r.map((x, j) => (j === i ? x.map((c, k) => (k === idx ? val : c)) : x)));
+
+  async function save() {
+    setError(null);
+    const attrs = {};
+    for (const [k, v] of rows) {
+      if (!k.trim()) continue;
+      attrs[k.trim()] = textToAttr(v);
+    }
+    setSaving(true);
+    try { await api.setUserAttributes(user.username, attrs); onSaved(); }
+    catch (e) { setError(e.message || "Failed to save attributes"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{ padding: "8px 4px" }}>
+      <div style={{ fontSize: 11, color: "var(--havn-text-secondary)", marginBottom: 8 }}>
+        Attributes of <strong>{user.username}</strong>, read by row policies as <code style={sec.code}>havn_attr('key')</code>.
+        A list such as <code style={sec.code}>["north","west"]</code> works with <code style={sec.code}>havn_attr_list('key')</code>.
+      </div>
+      {error && <p style={{ color: "var(--havn-red)", fontSize: 12, margin: "4px 0" }}>{error}</p>}
+      {rows.map(([k, v], i) => (
+        <div key={i} style={{ ...sec.addRow, marginBottom: 6 }}>
+          <input value={k} onChange={(e) => setRow(i, 0, e.target.value)} placeholder="key" style={sec.input} aria-label="Attribute key" />
+          <input value={v} onChange={(e) => setRow(i, 1, e.target.value)} placeholder="value" style={sec.input} aria-label="Attribute value" />
+          <button onClick={() => setRows((r) => r.filter((_, j) => j !== i))} style={sec.delBtn} aria-label="Remove attribute">Remove</button>
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <button onClick={() => setRows((r) => [...r, ["", ""]])} style={sec.delBtn} aria-label="Add attribute">+ Attribute</button>
+        <button onClick={save} disabled={saving} style={sec.addBtn} aria-label="Save attributes">{saving ? "Saving..." : "Save attributes"}</button>
+      </div>
+    </div>
+  );
+}
+
 function UsersSection({ showConfirm }) {
   const [users, setUsers] = useState([]);
   const [newUser, setNewUser] = useState("");
   const [newPass, setNewPass] = useState("");
   const [newRole, setNewRole] = useState("viewer");
   const [error, setError] = useState(null);
+  const [editingAttrs, setEditingAttrs] = useState(null);
 
   useEffect(() => { loadUsers(); }, []);
 
@@ -317,7 +367,8 @@ function UsersSection({ showConfirm }) {
           </thead>
           <tbody>
             {users.map((u) => (
-              <tr key={u.username}>
+              <React.Fragment key={u.username}>
+              <tr>
                 <td style={sec.td}><strong>{u.username}</strong></td>
                 <td style={sec.td}>
                   <select value={u.role} onChange={(e) => changeRole(u.username, e.target.value)} style={sec.roleSelect}>
@@ -328,10 +379,23 @@ function UsersSection({ showConfirm }) {
                 </td>
                 <td style={sec.td}>{u.display_name}</td>
                 <td style={{ ...sec.td, color: "var(--havn-text-secondary)" }}>{u.last_login || "never"}</td>
-                <td style={{ ...sec.td, textAlign: "right" }}>
+                <td style={{ ...sec.td, textAlign: "right", whiteSpace: "nowrap" }}>
+                  <button
+                    onClick={() => setEditingAttrs(editingAttrs === u.username ? null : u.username)}
+                    style={{ ...sec.delBtn, color: "var(--havn-text)", marginRight: 6 }}
+                    aria-label={`Edit attributes of ${u.username}`}
+                  >
+                    Attributes{Object.keys(u.attributes || {}).length > 0 ? ` (${Object.keys(u.attributes).length})` : ""}
+                  </button>
                   <button data-havn-danger="" onClick={() => removeUser(u.username)} style={sec.delBtn}>Delete</button>
                 </td>
               </tr>
+              {editingAttrs === u.username && (
+                <tr><td colSpan={5} style={sec.td}>
+                  <AttributesEditor user={u} onSaved={() => { setEditingAttrs(null); loadUsers(); }} />
+                </td></tr>
+              )}
+              </React.Fragment>
             ))}
           </tbody>
         </table>

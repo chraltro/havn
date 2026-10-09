@@ -21,6 +21,7 @@ import { SECTIONS, TAB_TO_SECTION, SECTION_DEFAULT, tabToPath, pathToTab } from 
 import RunSummary from "./RunSummary";
 import SettingsPanel from "./SettingsPanel";
 import MaskingPanel from "./MaskingPanel";
+import GovernancePanel from "./GovernancePanel";
 import QualityPanel from "./QualityPanel";
 import UnitTestsPanel from "./UnitTestsPanel";
 import PerformancePanel from "./PerformancePanel";
@@ -1506,6 +1507,7 @@ function AppContent() {
             {activeTab === "Live" && <ErrorBoundary name="Live"><LivePanel /></ErrorBoundary>}
             {activeTab === "Ask" && <ErrorBoundary name="Ask"><AskPanel /></ErrorBoundary>}
             {activeTab === "Masking" && <ErrorBoundary name="Masking"><MaskingPanel showConfirm={showConfirm} /></ErrorBoundary>}
+            {activeTab === "Governance" && <ErrorBoundary name="Governance"><GovernancePanel showConfirm={showConfirm} /></ErrorBoundary>}
             {activeTab === "Wiki" && <ErrorBoundary name="Wiki"><WikiPanel /></ErrorBoundary>}
             {activeTab === "Runs" && <ErrorBoundary name="Runs"><HistoryPanel onOpenFile={openFile} /></ErrorBoundary>}
             {activeTab === "Resources" && <ErrorBoundary name="Resources"><ResourcePanel /></ErrorBoundary>}
