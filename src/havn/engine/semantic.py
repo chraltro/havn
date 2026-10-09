@@ -27,6 +27,8 @@ as defense in depth (the API and MCP surfaces do).
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -164,7 +166,7 @@ def load_metrics(project_dir: Path) -> tuple[dict[str, MetricDef], list[str]]:
     for path in files:
         rel = path.name
         try:
-            raw = yaml.safe_load(path.read_text()) or {}
+            raw = yaml.safe_load(read_project_text(path)) or {}
         except Exception as e:
             errors.append(f"{rel}: invalid YAML ({e})")
             continue

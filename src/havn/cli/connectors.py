@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -88,7 +90,7 @@ def connect(
         config_path = Path(config_json)
         if config_path.exists():
             try:
-                config = json_mod.loads(config_path.read_text())
+                config = json_mod.loads(read_project_text(config_path))
             except json_mod.JSONDecodeError as e:
                 console.print(f"[red]Invalid JSON in {config_json}: {e}[/red]")
                 raise typer.Exit(1)

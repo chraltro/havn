@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import json
 from pathlib import Path
 
@@ -30,7 +32,7 @@ def load_notebook(path: Path) -> dict:
     """Load a notebook from a .dpnb file."""
     if not path.exists():
         raise FileNotFoundError(f"Notebook not found: {path}")
-    return json.loads(path.read_text())
+    return json.loads(read_project_text(path))
 
 
 def save_notebook(path: Path, notebook: dict) -> None:

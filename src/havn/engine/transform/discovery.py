@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import hashlib
 import logging
 from dataclasses import replace
@@ -66,7 +68,7 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
     claimed: dict[str, Path] = {}
 
     for sql_file in sorted(transform_dir.rglob("*.sql")):
-        sql = sql_file.read_text()
+        sql = read_project_text(sql_file)
         config = parse_config(sql)
         depends = parse_depends(sql)
         description = parse_description(sql)

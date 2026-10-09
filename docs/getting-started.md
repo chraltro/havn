@@ -29,7 +29,7 @@ cd frontend && npm install && npm run build
 ### Docker
 
 ```bash
-docker run -v $(pwd):/project -p 3000:3000 ghcr.io/chraltro/havn serve
+docker run -v "$(pwd)":/project -p 3000:3000 ghcr.io/chraltro/havn
 ```
 
 ## Create a New Project

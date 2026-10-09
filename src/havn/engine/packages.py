@@ -18,6 +18,8 @@ argument validated first so it cannot be mistaken for an option.
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import logging
 import os
 import re
@@ -271,7 +273,7 @@ def read_lock(project_dir: Path) -> dict[str, LockEntry]:
     if not path.is_file():
         return {}
     try:
-        raw = yaml.safe_load(path.read_text()) or {}
+        raw = yaml.safe_load(read_project_text(path)) or {}
     except Exception as exc:
         logger.warning("Could not read %s: %s", path, exc)
         return {}
@@ -305,7 +307,7 @@ def write_lock(project_dir: Path, entries: list[LockEntry]) -> Path:
         "version": 1,
         "packages": [e.to_dict() for e in sorted(entries, key=lambda e: e.name)],
     }
-    path.write_text(yaml.safe_dump(payload, sort_keys=False))
+    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     return path
 
 
@@ -315,7 +317,7 @@ def read_manifest(package_path: Path) -> PackageManifest:
     if not path.is_file():
         return PackageManifest()
     try:
-        raw = yaml.safe_load(path.read_text()) or {}
+        raw = yaml.safe_load(read_project_text(path)) or {}
     except Exception as exc:
         logger.warning("Could not read %s: %s", path, exc)
         return PackageManifest()

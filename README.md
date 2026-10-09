@@ -4,7 +4,7 @@
   <br />
   <strong>Data in safe waters.</strong>
   <br />
-  The open-source data platform that runs on your machine. DuckDB + SQL + Python. No cloud required.
+  A self-hosted data platform built on DuckDB. Plain SQL transforms, Python ingest, one warehouse file.
   <br />
   <br />
   <a href="#quick-start">Quick Start</a> &middot; <a href="#features">Features</a> &middot; <a href="#why-havn">Why havn?</a> &middot; <a href="#documentation">Docs</a> &middot; <a href="CONTRIBUTING.md">Contributing</a>
@@ -21,32 +21,27 @@
 
 > **License notice:** havn is source-available under the [Business Source License 1.1](LICENSE). You can read, run, modify, and use it for any internal or commercial purpose -- including in production at your company or at client sites. The one restriction is that you may not offer havn to third parties as a competing hosted or managed service. Each release automatically converts to Apache 2.0 four years after its release date (the current release converts on **2030-04-05**). See the [License FAQ](#license) below for details.
 
-**havn** (Danish/Norwegian for *harbour*) is a self-hosted data platform - a Nordic alternative to Databricks and Snowflake for teams that want analytics without the complexity, cost, or data leaving their infrastructure.
+**havn** (Danish and Norwegian for *harbour*) is a self-hosted data platform, a Nordic alternative to Databricks and Snowflake for teams whose data fits on one machine.
 
-Your entire warehouse lives in a single DuckDB file. Transforms are plain SQL. Ingest and export scripts are Python. There's no Jinja, no compilation step, no profiles.yml, and no YAML spaghetti.
+The whole warehouse is a single DuckDB file. Transforms are plain SQL files with a one-line `@config` header; ingest and export are Python scripts. A web UI covers editing, querying, runs, checks and deploys, and every part also works from the CLI.
 
 ```
 pip install havn && havn init my-project && cd my-project && havn jobs run full-refresh && havn serve
 ```
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/chraltro/havn/main/.github/assets/screenshot.webp" width="800" alt="havn web UI showing the project overview: pipeline health with running models, warehouse schemas, and live log output" />
+  <img src="https://raw.githubusercontent.com/chraltro/havn/main/.github/assets/screenshot.webp" width="800" alt="havn Home page: pipeline health with nine models up to date, fifteen checks passing, recent runs, and the landing, bronze, silver and gold layers" />
 </p>
 
 ## Why havn?
 
-Most data tools force a choice: **powerful but complex** (Databricks, Snowflake, dbt + Airflow) or **simple but limited** (CSVs in a folder).
+The usual choice is between a stack of cloud services (a warehouse, dbt, an orchestrator, an ingest tool, a catalog) and a folder of CSV exports. havn sits in between: one package you install with pip, running on a machine you control.
 
-havn gives you the analytical power of a modern data stack in something you can install in one command and run on a laptop.
-
-| Pain point | havn's answer |
-|---|---|
-| Cloud costs spiraling | **Runs locally.** DuckDB on your machine. $0/month. |
-| Data leaving your infrastructure | **Self-hosted.** Your data stays on your hardware. Full stop. |
-| Jinja-templated SQL nobody understands | **Plain SQL.** A one-line `@config` directive, dependencies auto-derived from your `FROM` and `JOIN` clauses, no templating. SQL is just SQL. |
-| 30-minute onboarding | **30-second onboarding.** One `pip install`, then `havn init` gives you a working pipeline with sample data. |
-| Separate tools for ingest, transform, orchestration, UI | **One tool does it all.** CLI, web UI, scheduler, connectors - included. |
-| LLMs can't write your DSL | **AI-native.** Plain SQL + simple conventions = LLMs write correct transforms on the first try. |
+- **It runs where you put it.** A laptop, a server or your own cloud account. Data does not leave it.
+- **SQL stays SQL.** Dependencies come from the `FROM` and `JOIN` clauses. There is no templating language to learn or debug.
+- **Starting takes a minute.** `havn init` creates a project with a working sample pipeline.
+- **The parts are already connected.** Connectors, the scheduler, checks, deploys and the web UI share one project and one warehouse.
+- **Assistants can work on it.** Models are plain files with simple conventions, and `havn mcp` gives an AI agent structured access to the project.
 
 ## Features
 
@@ -88,18 +83,28 @@ havn connect csv --path /data/customers.csv
 ### Notebooks
 Interactive `.dpnb` notebooks with code cells, markdown, and inline results. Use them for exploration, or wire them into your pipeline as ingest/export steps.
 
-### Pipeline Orchestration
-Define multi-step pipelines in `project.yml`. Schedule them with cron. Get webhook notifications on completion.
+### Jobs and Scheduling
+A job is a YAML file in `orchestration/` that names what to run. havn works out the order and the upstream steps it needs, retries on failure and runs it on a cron schedule.
 
 ```yaml
-streams:
-  daily-refresh:
-    schedule: "0 6 * * *"
-    steps:
-      - ingest: [all]
-      - transform: [all]
-      - export: [all]
-    webhook_url: https://hooks.slack.com/...
+# orchestration/full-refresh.yml
+name: full-refresh
+targets:
+  - gold.*
+  - export/earthquake_report.py
+resolve: upstream
+retry: 1
+schedules:
+  - "0 6 * * *"
+```
+
+### Environments and Deploys
+Each environment has its own warehouse file. `havn deploy prod --plan` shows what a deploy would rebuild; a deploy snapshots the target first and rolls back if a model fails.
+
+```bash
+havn env use dev
+havn deploy prod --plan
+havn deploy prod
 ```
 
 ### Git Integration & CI
@@ -113,7 +118,7 @@ havn ci generate                   # create GitHub Actions workflow
 ```
 
 ### AI-Native Design
-Every project scaffolded with `havn init` includes LLM context files. Plain SQL + simple conventions means AI assistants write correct code on the first try.
+Every project scaffolded with `havn init` includes context files for AI coding assistants, and `havn mcp` starts an MCP server they can use to read models, run queries and build.
 
 ```bash
 havn context   # generate project summary, paste into any AI chat
@@ -138,6 +143,12 @@ pip install havn
 
 The wheel ships the built web UI, so that is everything you need. Node and npm
 are only for working on havn itself.
+
+With Docker, from a project directory:
+
+```bash
+docker run -v "$(pwd)":/project -p 3000:3000 ghcr.io/chraltro/havn
+```
 
 From source (for development):
 
@@ -260,7 +271,7 @@ The warehouse is a single DuckDB file. Copy it, back it up, version it - it's ju
 
 The type checking is a bind pass: `havn validate` hands each model to DuckDB's binder against a shadow catalog, so a missing table, an unknown column or a type mismatch is caught before anything runs. It does not execute the query, so value conversions are not caught - a `VARCHAR` column that happens to hold `'n/a'` still fails its `CAST` when the model builds.
 
-havn is the right choice when you want a complete data platform without the infrastructure overhead. It's not trying to replace Snowflake at 10TB scale - it's the best tool for teams working with data that fits on a single machine (which is most teams).
+havn is made for data that fits on a single machine, which covers most teams. It is not trying to replace Snowflake at 10 TB.
 
 For the feature-by-feature version of that answer - what works today, what works with caveats, and what isn't built yet - see [What havn Supports](docs/limitations.md).
 
@@ -273,7 +284,7 @@ For the feature-by-feature version of that answer - what works today, what works
 
 ## Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up and what to expect.
 
 ```bash
 # Development setup

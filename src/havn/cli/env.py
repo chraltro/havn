@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -17,7 +19,7 @@ def _read_env_file(project_dir: Path) -> str | None:
     """Read the active environment from .havn-env file, or None if not set."""
     env_path = project_dir / ENV_FILE
     if env_path.exists():
-        content = env_path.read_text().strip()
+        content = read_project_text(env_path).strip()
         return content if content else None
     return None
 
@@ -55,7 +57,7 @@ def env(
 
     if action == "list":
         config_path = project_dir / "project.yml"
-        raw = yaml.safe_load(config_path.read_text()) or {}
+        raw = yaml.safe_load(read_project_text(config_path)) or {}
         # `environments:` with nothing under it parses as None, not {}, so
         # every read of it has to fall back explicitly.
         environments = raw.get("environments") or {}
@@ -96,7 +98,7 @@ def env(
 
         # Validate the environment exists in project.yml
         config_path = project_dir / "project.yml"
-        raw = yaml.safe_load(config_path.read_text()) or {}
+        raw = yaml.safe_load(read_project_text(config_path)) or {}
         environments = raw.get("environments") or {}
 
         if name not in environments:
@@ -124,7 +126,7 @@ def env(
         # transform, and that is easy to forget once it is in project.yml.
         if active:
             config_path = project_dir / "project.yml"
-            raw = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
+            raw = yaml.safe_load(read_project_text(config_path)) if config_path.exists() else {}
             raw = raw or {}
             environments = raw.get("environments") or {}
             env_raw = environments.get(active) or {}

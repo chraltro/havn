@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -42,20 +44,20 @@ def promote(
         if not file.exists():
             console.print(f"[red]File not found: {file}[/red]")
             raise typer.Exit(1)
-        sql_source = file.read_text()
+        sql_source = read_project_text(file)
     elif sql_source:
         source_path = Path(sql_source)
         if source_path.exists() and source_path.suffix in (".sql", ".dpnb"):
             if source_path.suffix == ".dpnb":
                 import json as _json
-                nb_data = _json.loads(source_path.read_text())
+                nb_data = _json.loads(read_project_text(source_path))
                 sql_cells = [c["source"] for c in nb_data.get("cells", []) if c.get("type") == "sql"]
                 if not sql_cells:
                     console.print("[red]No SQL cells found in notebook[/red]")
                     raise typer.Exit(1)
                 sql_source = sql_cells[-1]  # Use the last SQL cell
             else:
-                sql_source = source_path.read_text()
+                sql_source = read_project_text(source_path)
     else:
         console.print("[red]SQL source is required (positional arg, --file, or pipe)[/red]")
         raise typer.Exit(1)

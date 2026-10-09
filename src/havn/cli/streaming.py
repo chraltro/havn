@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import logging
 import os
 import signal
@@ -28,7 +30,7 @@ def _pidfile_path(project_dir: Path, connector: str) -> Path:
 
 def _read_pid(pidfile: Path) -> int | None:
     try:
-        return int(pidfile.read_text().strip())
+        return int(read_project_text(pidfile).strip())
     except Exception:
         return None
 

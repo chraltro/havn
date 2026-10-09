@@ -7,6 +7,8 @@ Shared dependencies (DB injection, auth, caching) live in havn.server.deps.
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import logging
 
 from pathlib import Path
@@ -323,7 +325,7 @@ def serve_frontend(path: str = "") -> HTMLResponse:
 
     index = _FRONTEND_DIR / "index.html"
     if index.exists():
-        return HTMLResponse(content=index.read_text())
+        return HTMLResponse(content=read_project_text(index))
     return HTMLResponse(
         content="<h1>havn</h1><p>Frontend not built. Run <code>cd frontend && npm run build</code></p>",
         status_code=200,

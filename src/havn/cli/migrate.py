@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -164,7 +166,7 @@ def _rewrite_project_yml(project_dir: Path, dest_config) -> None:
     killed process never leaves a truncated project.yml.
     """
     yml_path = project_dir / "project.yml"
-    raw = yaml.safe_load(yml_path.read_text()) or {}
+    raw = yaml.safe_load(read_project_text(yml_path)) or {}
     raw["database"] = dest_config.model_dump(exclude_none=True, exclude_defaults=False)
     if dest_config.backend == "duckdb":
         for k in ("catalog", "data_path", "metadata_schema", "encrypted"):

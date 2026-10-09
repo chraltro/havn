@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import json
 
 from fastapi import APIRouter, HTTPException, Request
@@ -426,7 +428,7 @@ def update_anomaly_config(request: Request, req: AnomalyConfigUpdate) -> dict:
     if not config_path.exists():
         raise HTTPException(404, "project.yml not found")
 
-    raw = yaml.safe_load(config_path.read_text()) or {}
+    raw = yaml.safe_load(read_project_text(config_path)) or {}
     quality = raw.setdefault("quality", {})
     anomaly = quality.setdefault("anomaly_detection", {})
 

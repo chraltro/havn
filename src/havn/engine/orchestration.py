@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import datetime
 import json
 import logging
@@ -167,7 +169,7 @@ def discover_jobs(project_dir: Path) -> list[Job]:
     jobs: list[Job] = []
     for yml_file in sorted(orch_dir.glob("*.yml")):
         try:
-            data = yaml.safe_load(yml_file.read_text())
+            data = yaml.safe_load(read_project_text(yml_file))
             if not isinstance(data, dict):
                 logger.warning("Skipping invalid job file: %s", yml_file.name)
                 continue
@@ -387,7 +389,7 @@ def resolve_execution_plan(
                 # Scan the script source to discover landing tables it creates
                 script_path = project_dir / inner
                 try:
-                    src = script_path.read_text() if script_path.exists() else ""
+                    src = read_project_text(script_path) if script_path.exists() else ""
                 except Exception:
                     src = ""
                 # For each model whose depends_on matches something in the
@@ -409,7 +411,7 @@ def resolve_execution_plan(
             if up:
                 script_path = project_dir / inner
                 try:
-                    src = script_path.read_text() if script_path.exists() else ""
+                    src = read_project_text(script_path) if script_path.exists() else ""
                 except Exception:
                     src = ""
                 for m_name in model_map:
@@ -457,7 +459,7 @@ def resolve_execution_plan(
                 if script.name.startswith("_"):
                     continue
                 try:
-                    src = script.read_text()
+                    src = read_project_text(script)
                     for dep in external_deps:
                         # Match on the fully-qualified name first, then fall
                         # back to the bare table name so scripts that build

@@ -7,6 +7,8 @@ contract: a class that can test, discover, and generate scripts.
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import logging
 import re
 import time
@@ -593,7 +595,7 @@ def _update_project_yml(
     """Add a connection and sync stream to project.yml."""
     config_path = project_dir / "project.yml"
     if config_path.exists():
-        raw = yaml.safe_load(config_path.read_text()) or {}
+        raw = yaml.safe_load(read_project_text(config_path)) or {}
     else:
         raw = {"name": project_dir.name, "database": {"path": "warehouse.duckdb"}}
 
@@ -624,7 +626,7 @@ def _remove_from_project_yml(project_dir: Path, connection_name: str) -> bool:
     if not config_path.exists():
         return False
 
-    raw = yaml.safe_load(config_path.read_text()) or {}
+    raw = yaml.safe_load(read_project_text(config_path)) or {}
     removed = False
 
     # Remove connection

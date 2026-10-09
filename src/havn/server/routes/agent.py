@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import json
 import logging
 import re
@@ -162,7 +164,7 @@ def _build_system_prompt(project_path: str, port: int = 3000) -> str:
     project_yml = Path(project_path) / "project.yml"
     if project_yml.exists():
         try:
-            content = project_yml.read_text()
+            content = read_project_text(project_yml)
             parts.extend(["", "# project.yml contents:", "```yaml", content, "```"])
         except Exception:
             pass
@@ -171,7 +173,7 @@ def _build_system_prompt(project_path: str, port: int = 3000) -> str:
     wiki_index = Path(__file__).resolve().parent.parent.parent / "wiki" / "pages" / "index.md"
     if wiki_index.exists():
         try:
-            wiki_content = wiki_index.read_text()
+            wiki_content = read_project_text(wiki_index)
             parts.extend([
                 "",
                 "# havn documentation reference",

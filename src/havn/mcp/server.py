@@ -17,6 +17,8 @@ to stderr or it corrupts the stream.
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import json
 import logging
 import sys
@@ -170,7 +172,7 @@ class MCPServer:
         if not info_path.exists():
             return None
         try:
-            info = json.loads(info_path.read_text())
+            info = json.loads(read_project_text(info_path))
             host = info.get("host", "127.0.0.1")
             port = int(info.get("port", 3000))
             pid = info.get("pid")

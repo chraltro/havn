@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import logging
 from pathlib import Path
 
@@ -461,7 +463,7 @@ def get_model_notebook_view(
         else:
             raise HTTPException(404, f"Model '{model_name}' not found")
 
-    sql_source = target.path.read_text()
+    sql_source = read_project_text(target.path)
     rel_path = target.path.relative_to(_get_project_dir()).as_posix()
 
     sample_data = None
