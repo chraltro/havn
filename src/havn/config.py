@@ -279,6 +279,8 @@ class ProjectConfig(BaseModel):
     packages: list[PackageConfig] = Field(default_factory=list)
     resources: dict[str, dict[str, Any]] = Field(default_factory=dict)
     streaming: dict[str, Any] = Field(default_factory=dict)
+    # Raw `live:` section; read through havn.engine.live.settings.LiveSettings.
+    live: dict[str, Any] = Field(default_factory=dict)
     project_dir: Path = Field(default_factory=Path.cwd)
     _raw: dict[str, Any] = PrivateAttr(default_factory=dict)
 
@@ -648,6 +650,7 @@ def load_project(
         sources=sources,
         exposures=exposures,
         packages=packages,
+        live=raw.get("live") if isinstance(raw.get("live"), dict) else {},
         project_dir=project_dir,
     )
     config._raw = raw

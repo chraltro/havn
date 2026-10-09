@@ -127,7 +127,16 @@ CONFIG_KEYS = frozenset({
     "batch_size",
     "begin",
     "lookback",
+    # Live models (continuous refresh) and CDC apply.
+    "live",
+    "live_interval",
+    "cdc_op",
+    "cdc_seq",
+    "cdc_deletes",
 })
+
+# How a CDC-applying model treats a delete event.
+CDC_DELETE_POLICIES = frozenset({"hard", "soft"})
 
 # Accepted values of `materialized`, checked at validation time rather than
 # only when execution reaches "Unknown materialization".

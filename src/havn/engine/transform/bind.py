@@ -529,6 +529,12 @@ def _bindable_query(model: SQLModel) -> str:
     are replaced in place the line numbers in any error still point at the
     line the user wrote.
     """
+    if "{watermark" in model.query:
+        # A live model's consumed watermark: an integer at build time, so a
+        # zero binds with the right type and leaves line numbers alone.
+        from havn.engine.live.graph import WATERMARK_RE
+
+        return WATERMARK_RE.sub("0", model.query)
     if model.incremental_strategy != "microbatch":
         return model.query
     if "{start}" not in model.query and "{end}" not in model.query:
