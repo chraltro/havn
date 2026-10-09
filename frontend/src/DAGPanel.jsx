@@ -817,11 +817,23 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
         }
       } else if (!rewindMode) {
         // Type badge
-        const badge = n.type === "ingest" ? "I" : n.type === "import" ? "\u2191" : n.type === "source" ? "S" : n.type === "seed" ? "D" : n.type === "exposure" ? "E" : n.type === "table" ? "T" : n.type === "ephemeral" ? "\u25ca" : n.type === "snapshot" ? "\u29d6" : "V";
+        const badge = n.type === "ingest" ? "I" : n.type === "import" ? "\u2191" : n.type === "source" ? "S" : n.type === "seed" ? "D" : n.type === "exposure" ? "E" : n.type === "table" ? "T" : n.type === "ephemeral" ? "\u25ca" : n.type === "snapshot" ? "\u29d6" : n.type === "incremental" ? "\u0394" : "V";
         ctx.fillStyle = color;
         ctx.font = `bold 9px ${monoFamily}`;
         ctx.textAlign = "right";
         ctx.fillText(badge, pos.x + NODE_W - 6, pos.y + 12);
+
+        // A Python model: built by a function, not a query. Marked in the
+        // footer so it reads at a glance without crowding the label or the type.
+        // Bottom-left, where the package line goes; that line moves right.
+        let footX = pos.x + 8;
+        if (n.language === "python") {
+          ctx.fillStyle = getCV("--havn-green") || "#3fb950";
+          ctx.font = `bold 9px ${monoFamily}`;
+          ctx.textAlign = "left";
+          ctx.fillText("python", footX, pos.y + NODE_H - 9);
+          footX += ctx.measureText("python ").width + 4;
+        }
 
         // Package provenance. A model from havn_packages/ is not this
         // project's to edit, so it says where it came from — quietly, since
@@ -832,7 +844,7 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
           ctx.fillStyle = getCV("--havn-text-secondary") || "#8b949e";
           ctx.font = `9px ${monoFamily}`;
           ctx.textAlign = "left";
-          ctx.fillText(`pkg:${n.package}`, pos.x + 8, pos.y + NODE_H - 9, NODE_W - 20);
+          ctx.fillText(`pkg:${n.package}`, footX, pos.y + NODE_H - 9, NODE_W - 12 - (footX - pos.x));
           ctx.globalAlpha = prevAlpha;
         }
       }
@@ -1050,6 +1062,11 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
               <span style={styles.legendItem}>
                 <span style={{ ...styles.legendDot, background: SCHEMA_COLORS.seed }} />seed
               </span>
+              {dag?.nodes?.some((n) => n.language === "python") && (
+                <span style={styles.legendItem} title="Built by a Python function (transform/**/*.py)">
+                  <span style={{ color: "var(--havn-green)", fontFamily: "var(--havn-font-mono)", fontWeight: 700, fontSize: "10px" }}>python</span>model
+                </span>
+              )}
             </div>
           )}
           {!rewindMode && (

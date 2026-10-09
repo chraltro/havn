@@ -1545,7 +1545,7 @@ export default function Editor({ content, language, onChange, activeFile, dirty,
         </div>
         <p style={styles.emptyText}>Select a file to edit</p>
         <p style={styles.emptyHint}>
-          SQL files in <code style={styles.code}>transform/</code> are transformation models.
+          SQL files in <code style={styles.code}>transform/</code> are transformation models, and so are Python files there with a <code style={styles.code}>@model</code> function.
           <br />
           Python files in <code style={styles.code}>ingest/</code> and <code style={styles.code}>export/</code> are data scripts.
         </p>

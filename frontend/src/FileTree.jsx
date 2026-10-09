@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { schemaCompare } from "./schemaOrder";
+import { isPythonModelPath } from "./modelFiles";
 
 // Files under havn_packages/ come from `havn packages install` and are
 // replaced wholesale by the next one, so the tree marks them and the editor
@@ -168,6 +169,11 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
     >
       <span style={{ ...styles.dot, background: iconColor }} />
       <span style={isActive ? styles.activeFileName : styles.fileName}>{node.name}</span>
+      {isPythonModelPath(node.path) && (
+        // A Python model, as opposed to a helper module or a script: it is a
+        // node in the DAG like the .sql files beside it.
+        <span style={styles.modelTag} title="Python model: built by a function">ƒ</span>
+      )}
       {onDeleteFile && !isPackage && (
         <button
           onClick={(e) => { e.stopPropagation(); onDeleteFile(node.path); }}
@@ -323,6 +329,7 @@ const styles = {
   filterInput: { flex: 1, padding: "3px 6px", background: "var(--havn-bg)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", outline: "none", minWidth: 0 },
   filterClear: { background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", padding: "0 2px", lineHeight: 1, flexShrink: 0 },
   item: { display: "flex", alignItems: "center", gap: "6px", padding: "5px 8px", cursor: "pointer", fontSize: "12px", whiteSpace: "nowrap", margin: "0 4px", borderRadius: "var(--havn-radius)" },
+  modelTag: { fontSize: "9px", fontFamily: "var(--havn-font-mono)", color: "var(--havn-green)", border: "1px solid color-mix(in srgb, var(--havn-green) 40%, transparent)", borderRadius: "3px", padding: "0 3px", lineHeight: "13px", flexShrink: 0, fontStyle: "italic" },
   icon: { fontSize: "10px", color: "var(--havn-text-dim)", width: "12px", display: "inline-flex", alignItems: "center", justifyContent: "center", transition: "transform 0.12s ease", flexShrink: 0 },
   dirName: { color: "var(--havn-text)", fontWeight: 600, fontFamily: "var(--havn-font-mono)", fontSize: "11px", letterSpacing: "0.01em", textTransform: "lowercase" },
   addBtn: { marginLeft: "auto", width: "18px", height: "18px", background: "none", border: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: "14px", lineHeight: "18px", textAlign: "center", padding: 0, flexShrink: 0, borderRadius: "var(--havn-radius)", transition: "color 0.1s ease" },

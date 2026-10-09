@@ -7,7 +7,7 @@ import SortableTable from "./SortableTable";
 import { safeGetItem, safeSetItem } from "./safeStorage";
 
 /*
- * The editor workbench for a single SQL model: lineage above the code, an
+ * The editor workbench for a single model, SQL or Python: lineage above the code, an
  * inspector (Preview / Checks / Columns / Runs) beside it, failed assertions
  * marked on their own line, and an action bar that says what a build touches.
  * Everything besides the preview comes from one GET /api/models/workbench.
@@ -24,11 +24,27 @@ const INSPECTOR_KEY = "havn_workbench_inspector_open";
 const ASSERT_RE = /^\s*(?:@assert\b\s*\(?|--\s*assert:)\s*(.*)$/i;
 const GRAIN_RE = /^\s*(?:@grain\b|--\s*grain:)/i;
 
-/** 1-based line number of the directive that declares `expr`, or 0. */
+/**
+ * 1-based line number of the directive that declares `expr`, or 0.
+ *
+ * In a Python model the assertions are strings in @model(assertions=[...]),
+ * so failing a directive match, the line holding the quoted expression is
+ * the answer.
+ */
 export function findAssertionLine(text, expr) {
   const lines = (text || "").split("\n");
   const want = (expr || "").replace(/\s+/g, " ").trim();
   if (!want) return 0;
+  const directive = findDirectiveLine(lines, want);
+  if (directive) return directive;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].replace(/\s+/g, " ");
+    if (line.includes(`"${want}`) || line.includes(`'${want}`)) return i + 1;
+  }
+  return 0;
+}
+
+function findDirectiveLine(lines, want) {
   if (/^grain\(/.test(want)) {
     const i = lines.findIndex((l) => GRAIN_RE.test(l));
     return i + 1;
@@ -179,6 +195,7 @@ function useAssertionDecorations(editor, content, checks) {
 export default function ModelWorkbench({
   children,
   activeFile,
+  language = "sql",
   content,
   dirty,
   running,
@@ -337,7 +354,7 @@ export default function ModelWorkbench({
               <div role="tabpanel" style={s.tabBody}>
                 {tab === "preview" && (
                   <PreviewTab preview={preview} error={previewError} running={previewRunning} label={previewLabel}
-                              onPreview={onPreview} onClear={onClearPreview} />
+                              onPreview={onPreview} onClear={onClearPreview} language={language} />
                 )}
                 {tab !== "preview" && loadError && <div style={s.empty}>{loadError}</div>}
                 {tab === "checks" && data && (
@@ -345,7 +362,12 @@ export default function ModelWorkbench({
                              onShowRows={(c) => onPreviewSql(c.failing_sql, `Failing rows · ${c.expression}`)}
                              onGoTo={(c) => goToLine(findAssertionLine(content, c.expression))} />
                 )}
-                {tab === "columns" && data && <ColumnsTab columns={data.columns} onAddDoc={addColDoc} />}
+                {tab === "columns" && data && (
+                  // A Python model documents columns in @model(columns={...}),
+                  // which is not a line the workbench can insert for you.
+                  <ColumnsTab columns={data.columns} onAddDoc={language === "python" ? null : addColDoc}
+                              docHint={language === "python" ? "document in @model(columns={...})" : null} />
+                )}
                 {tab === "runs" && data && <RunsTab runs={data.runs} />}
               </div>
             </section>
@@ -392,7 +414,7 @@ function Chip({ name, dashed, onClick, title }) {
     : <span style={style} title={title}>{name}</span>;
 }
 
-function PreviewTab({ preview, error, running, label, onPreview, onClear }) {
+function PreviewTab({ preview, error, running, label, onPreview, onClear, language }) {
   if (running) return <div style={s.empty}>Running…</div>;
   if (error) {
     return (
@@ -405,7 +427,11 @@ function PreviewTab({ preview, error, running, label, onPreview, onClear }) {
   if (!preview) {
     return (
       <div style={s.empty}>
-        <div>Preview runs the SQL in the editor, including unsaved changes, against the active environment.</div>
+        <div>
+          {language === "python"
+            ? "Preview runs the model function in the editor, including unsaved changes, against the active environment. It reads only; nothing is written."
+            : "Preview runs the SQL in the editor, including unsaved changes, against the active environment."}
+        </div>
         <button style={{ ...s.btn, marginTop: 10 }} onClick={onPreview}>Preview <kbd style={s.kbd}>{RUN_KEYS}</kbd></button>
       </div>
     );
@@ -473,7 +499,7 @@ function ChecksTab({ checks, content, built, onShowRows, onGoTo }) {
   );
 }
 
-function ColumnsTab({ columns, onAddDoc }) {
+function ColumnsTab({ columns, onAddDoc, docHint }) {
   if (!columns?.length) return <div style={s.empty}>No columns known yet. Build the model to record its schema.</div>;
   const missing = columns.filter((c) => !c.description).length;
   return (
@@ -485,7 +511,9 @@ function ColumnsTab({ columns, onAddDoc }) {
           <span style={{ ...s.mono, color: "var(--havn-purple)", fontSize: 11 }}>{c.type || "not built"}</span>
           {c.description
             ? <span style={{ color: "var(--havn-text-secondary)" }}>{c.description}</span>
-            : <button style={{ ...s.link, textAlign: "left" }} onClick={() => onAddDoc(c.name)}>+ add @col</button>}
+            : onAddDoc
+              ? <button style={{ ...s.link, textAlign: "left" }} onClick={() => onAddDoc(c.name)}>+ add @col</button>
+              : <span style={s.dim}>{docHint}</span>}
         </div>
       ))}
     </div>

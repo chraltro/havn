@@ -3,8 +3,8 @@ import MonacoEditor from "@monaco-editor/react";
 import { api } from "./api";
 
 /**
- * Notebook-style view for SQL models.
- * Cell 1: editable SQL source (saved back to .sql file)
+ * Notebook-style view for a model, SQL or Python.
+ * Cell 1: editable source (saved back to the .sql or .py file)
  * Cell 2: sample output (SELECT * FROM model LIMIT 50)
  * Sidebar: upstream/downstream lineage with column-level details
  */
@@ -61,6 +61,7 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
   if (loading) return <div className="model-notebook loading">Loading model...</div>;
   if (error && !data) return <div className="model-notebook error">Error: {error}</div>;
   if (!data) return null;
+  const isPython = data.language === "python";
 
   return (
     <div className="model-notebook">
@@ -68,6 +69,7 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
         <div className="model-notebook-title">
           <span className="model-name">{data.model}</span>
           <span className="model-type">{data.materialized}</span>
+          {isPython && <span className="model-type" title="Built by a Python function">python</span>}
           {dirty && <span className="model-dirty">modified</span>}
         </div>
         <div className="model-notebook-actions">
@@ -90,15 +92,15 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
 
       <div className="model-notebook-body" style={{ display: "flex" }}>
         <div className="model-notebook-cells" style={{ flex: 1 }}>
-          {/* Cell 1: SQL Editor */}
+          {/* Cell 1: the model's source */}
           <div className="notebook-cell">
             <div className="cell-header">
-              <span className="cell-label">SQL</span>
+              <span className="cell-label">{isPython ? "Python" : "SQL"}</span>
               <span className="cell-path">{data.path}</span>
             </div>
             <div style={{ height: Math.max(200, (sql || "").split("\n").length * 19 + 20), border: "1px solid var(--havn-border, #333)", borderRadius: 4, overflow: "hidden" }}>
               <MonacoEditor
-                language="sql"
+                language={isPython ? "python" : "sql"}
                 value={sql}
                 onChange={(val) => { setSql(val || ""); setDirty(true); }}
                 onMount={(editor, monaco) => {
