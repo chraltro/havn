@@ -1229,6 +1229,21 @@ export const api = {
       body: JSON.stringify(model ? { model } : {}),
     }),
 
+  // Performance advisor
+  getPerfSummary: (days: number = 7) => request<any>(`/perf/summary?days=${days}`),
+  getPerfModel: (model: string) => request<any>(`/perf/models/${encodeURIComponent(model)}`),
+  getPerfBuild: (id: string) => request<any>(`/perf/builds/${encodeURIComponent(id)}`),
+  getPerfDiff: (fast: string, slow: string) =>
+    request<any>(`/perf/diff?fast=${encodeURIComponent(fast)}&slow=${encodeURIComponent(slow)}`),
+  getPerfAdvice: (includeDismissed: boolean = false) =>
+    request<any[]>(`/perf/advice?include_dismissed=${includeDismissed}`),
+  setPerfAdviceState: (model: string, rule: string, status: string, days: number | null = null) =>
+    request<any>("/perf/advice/state", {
+      method: "POST",
+      body: JSON.stringify(days ? { model, rule, status, days } : { model, rule, status }),
+    }),
+  getPerfCriticalPath: (runId: string) => request<any>(`/perf/runs/${encodeURIComponent(runId)}/critical-path`),
+
   // Contracts
   runContracts: () => request("/contracts/run", { method: "POST" }),
 
