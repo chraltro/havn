@@ -123,9 +123,11 @@ def _cache_key(
     misses the old cache entry instead of serving stale results until the
     TTL expires; the orphaned entries age out via expires_at.
 
-    The role is part of the key because widget results are masked per role
-    (see _execute_widget_query). Without it, an admin's unmasked rows would be
-    served straight out of the cache to the next viewer who opens the widget.
+    The viewer is part of the key because widget results are governed per
+    identity (see _execute_widget_query): callers pass
+    ``QueryIdentity.cache_key()`` (role and username). Without it, an admin's
+    unmasked rows would be served straight out of the cache to the next
+    viewer who opens the widget.
     """
     payload = json.dumps(
         {"w": widget_id, "f": filters, "p": parameters, "s": sql_query, "r": role},
@@ -164,138 +166,60 @@ def _store_cache(cache_key: str, result: dict, cache_ttl: int) -> None:
         logger.debug("Dashboard cache write failed", exc_info=True)
 
 
+def _filter_types_for(conn, dashboard_id: str) -> dict[str, str]:
+    """Declared filter column -> type for a dashboard (empty when none)."""
+    from havn.engine.dashboard_queries import declared_filter_types, parse_json
+
+    try:
+        row = conn.execute(
+            "SELECT filters FROM _havn.dashboards WHERE id = ?", [dashboard_id]
+        ).fetchone()
+    except Exception:
+        return {}
+    return declared_filter_types(parse_json(row[0]) if row else [])
+
+
 def _execute_widget_query(
     conn,
     sql_query: str,
     filters: dict,
     parameters: dict,
     timeout: int | None = None,
-    user_role: str = "admin",
+    identity=None,
+    filter_types: dict[str, str] | None = None,
 ) -> dict:
-    """Execute a widget SQL query with filter injection and parameter substitution.
+    """Execute a widget's SQL with its filters and parameters bound.
 
-    Returns {columns, rows, row_count}.
+    Runs through the shared governed read path
+    (:mod:`havn.engine.governed_query`): read-only validation, masking for
+    the viewer (filter predicates included), the query governor and
+    post-query masking. Returns {columns, rows, row_count}.
     """
-    if not sql_query or not sql_query.strip():
-        return {"columns": [], "rows": [], "row_count": 0}
+    from havn.engine.dashboard_queries import FilterValueError, run_widget_query
+    from havn.engine.governed_query import GovernedQueryError, QueryIdentity
 
-    # Validate the SQL is a safe read-only query
-    from havn.server.routes.query import _validate_query_sql
-    _validate_query_sql(sql_query)
-
-    # Apply column masking for the viewer's role, the same way /api/query does.
-    # Widgets are a full SQL surface, so without this a viewer could read raw
-    # PII from any masked column simply by putting it in a widget.
-    from havn.engine.masking_rewriter import (
-        MaskedColumnAccessError,
-        rewrite_query_with_masking,
-    )
+    if identity is None:
+        identity = QueryIdentity(username="anonymous", role="admin", source="dashboard")
     try:
-        rewritten_sql, rewrite_ok, handled_ids = rewrite_query_with_masking(
-            sql_query, user_role, conn,
+        result = run_widget_query(
+            conn,
+            sql_query,
+            identity,
+            filters=filters,
+            parameters=parameters,
+            filter_types=filter_types,
+            timeout_s=timeout if timeout is not None else _QUERY_TIMEOUT_SECONDS,
         )
-    except MaskedColumnAccessError as e:
-        raise HTTPException(403, str(e))
-    if rewrite_ok:
-        sql_query = rewritten_sql
-
-    # Build parameterized filter injection
-    base_sql = sql_query.strip().rstrip(";")
-    params: list = []
-    where_clauses: list[str] = []
-
-    import re
-    _ASCII_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
-    for col, val in filters.items():
-        if not isinstance(col, str) or not _ASCII_IDENT_RE.match(col):
-            continue
-        params.append(val)
-        if "." in col:
-            schema_, name_ = col.split(".", 1)
-            where_clauses.append(f'"{schema_}"."{name_}" = ${len(params)}')
-        else:
-            where_clauses.append(f'"{col}" = ${len(params)}')
-
-    param_pattern = re.compile(r"\$\{(\w+)\}")
-    unresolved: list[str] = []
-
-    def _replace_param(m):
-        name = m.group(1)
-        if name in parameters:
-            params.append(parameters[name])
-            return f"${len(params)}"
-        unresolved.append(name)
-        return "NULL"
-
-    base_sql = param_pattern.sub(_replace_param, base_sql)
-    if unresolved:
-        logger.warning("Dashboard query had unresolved parameters: %s", unresolved)
-
-    if where_clauses:
-        # Try to inject WHERE into the base SQL before GROUP BY/ORDER BY/LIMIT
-        # This avoids the CTE column-name mismatch with aggregated queries
-        import re as _re
-        upper_sql = base_sql.upper()
-        # Find the first GROUP BY, ORDER BY, HAVING, or LIMIT clause
-        insert_pos = None
-        for keyword in [r'\bGROUP\s+BY\b', r'\bORDER\s+BY\b', r'\bHAVING\b', r'\bLIMIT\b']:
-            m = _re.search(keyword, upper_sql)
-            if m and (insert_pos is None or m.start() < insert_pos):
-                insert_pos = m.start()
-
-        filter_clause = " AND ".join(where_clauses)
-
-        if insert_pos is not None:
-            # Check if there's already a WHERE clause
-            where_match = _re.search(r'\bWHERE\b', upper_sql[:insert_pos])
-            if where_match:
-                # Append to existing WHERE
-                sql = base_sql[:insert_pos] + f" AND {filter_clause} " + base_sql[insert_pos:]
-            else:
-                # Insert new WHERE before GROUP BY/ORDER BY
-                sql = base_sql[:insert_pos] + f" WHERE {filter_clause} " + base_sql[insert_pos:]
-        elif _re.search(r'\bWHERE\b', upper_sql):
-            # Has WHERE but no GROUP BY — append with AND
-            sql = base_sql + f" AND {filter_clause}"
-        else:
-            # No WHERE, no GROUP BY — simple CTE wrapper is safe
-            sql = f"WITH _src AS ({base_sql}) SELECT * FROM _src WHERE {filter_clause}"
-    else:
-        sql = base_sql
-
-    # Enforce the per-widget (or default) timeout. `SET statement_timeout` is
-    # not a DuckDB setting -- it always raised, the exception was swallowed, and
-    # WidgetQueryRequest.timeout was a silent no-op. execute_governed applies
-    # the limit for real via conn.interrupt(), the same way /api/query does.
-    from havn.engine.query_governor import QueryTimeoutError, execute_governed
-
-    effective_timeout = timeout if timeout is not None else _QUERY_TIMEOUT_SECONDS
-    try:
-        result, _duration_ms = execute_governed(conn, sql, effective_timeout, params)
-        columns = [desc[0] for desc in result.description] if result.description else []
-        rows = result.fetchall()
-        serialized = [[_serialize(v) for v in row] for row in rows]
-    except QueryTimeoutError as e:
-        raise HTTPException(408, str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(400, f"Widget query error: {e}")
-
-    # Post-query masking for policies the rewriter couldn't handle (conditional
-    # policies, unsupported methods) — mirrors /api/query.
-    from havn.engine.masking import apply_masking
-    if not rewrite_ok:
-        serialized = apply_masking(columns, serialized, user_role, conn)
-    elif handled_ids:
-        serialized = apply_masking(
-            columns, serialized, user_role, conn, skip_policy_ids=handled_ids,
-        )
-
+    except FilterValueError as e:
+        raise HTTPException(400, str(e))
+    except GovernedQueryError as e:
+        if e.status_code == 400:
+            raise HTTPException(400, f"Widget query error: {e}")
+        raise HTTPException(e.status_code, str(e))
     return {
-        "columns": columns,
-        "rows": serialized,
-        "row_count": len(serialized),
+        "columns": result["columns"],
+        "rows": result["rows"],
+        "row_count": result["row_count"],
     }
 
 
@@ -539,6 +463,14 @@ def delete_dashboard(request: Request, dashboard_id: str, conn: DbConn) -> dict:
     conn.execute(
         "DELETE FROM _havn.dashboards WHERE id = ?", [dashboard_id]
     )
+
+    # Published links stop with the dashboard; its reports are disabled with
+    # the reason recorded, so their owners see why they stopped.
+    from havn.engine.reports import disable_reports_for_dashboard
+    from havn.engine.sharing import delete_shares_for_dashboard
+
+    delete_shares_for_dashboard(conn, dashboard_id)
+    disable_reports_for_dashboard(conn, dashboard_id)
 
     return {"status": "deleted", "id": dashboard_id}
 
@@ -899,7 +831,10 @@ def query_widget(
 ) -> dict:
     """Execute a widget's SQL query with filter injection."""
     user = _require_permission(request, "read")
-    role = user.get("role", "admin")
+    from havn.engine.governed_query import QueryIdentity
+
+    identity = QueryIdentity.from_user(user, source="dashboard")
+    role = identity.cache_key()
 
     widget = conn.execute(
         """
@@ -934,7 +869,8 @@ def query_widget(
     # Execute query (pass per-widget timeout if provided)
     result = _execute_widget_query(
         conn, sql_query, req.filters, req.parameters,
-        timeout=req.timeout, user_role=role,
+        timeout=req.timeout, identity=identity,
+        filter_types=_filter_types_for(conn, dashboard_id),
     )
 
     # Store in cache
@@ -956,12 +892,17 @@ def query_batch(
 ) -> dict:
     """Execute all widget queries for a dashboard in one call."""
     user = _require_permission(request, "read")
-    role = user.get("role", "admin")
+    from havn.engine.governed_query import QueryIdentity
+
+    identity = QueryIdentity.from_user(user, source="dashboard")
+    role = identity.cache_key()
+    filter_types = _filter_types_for(conn, dashboard_id)
 
     widgets = conn.execute(
         """
         SELECT id, sql_query, cache_ttl FROM _havn.dashboard_widgets
         WHERE dashboard_id = ? AND sql_query IS NOT NULL AND sql_query != ''
+          AND widget_type NOT IN ('text', 'image', 'divider')
         ORDER BY sort_order, created_at
         """,
         [dashboard_id],
@@ -990,7 +931,8 @@ def query_batch(
 
         try:
             result = _execute_widget_query(
-                conn, sql_query, req.filters, req.parameters, user_role=role,
+                conn, sql_query, req.filters, req.parameters,
+                identity=identity, filter_types=filter_types,
             )
             results[w_id] = result
 
@@ -1000,8 +942,8 @@ def query_batch(
                     _cache_key(w_id, req.filters, req.parameters, sql_query, role),
                     result, cache_ttl,
                 )
-        except HTTPException:
-            results[w_id] = {"columns": [], "rows": [], "row_count": 0, "error": "Query failed"}
+        except HTTPException as e:
+            results[w_id] = {"columns": [], "rows": [], "row_count": 0, "error": str(e.detail) or "Query failed"}
         except Exception as e:
             results[w_id] = {"columns": [], "rows": [], "row_count": 0, "error": str(e)}
 

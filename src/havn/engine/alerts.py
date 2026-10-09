@@ -138,13 +138,24 @@ def _send_slack(alert: Alert, config: AlertConfig) -> None:
         ],
     })
 
-    payload = json.dumps({"blocks": blocks}).encode()
+    post_slack_payload(config.slack_webhook_url, {"blocks": blocks})
+
+
+def post_slack_payload(webhook_url: str, payload: dict, timeout: float = 10) -> None:
+    """POST a JSON payload to a Slack incoming webhook (or anything Slack-compatible).
+
+    Raises on a non-2xx response or a transport error. Only http(s) URLs are
+    accepted, so a mistyped ``file:`` URL in config cannot be opened.
+    """
+    if not webhook_url or not webhook_url.lower().startswith(("https://", "http://")):
+        raise ValueError("Slack webhook URL must be an http(s) URL")
     req = Request(
-        config.slack_webhook_url,
-        data=payload,
+        webhook_url,
+        data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"},
     )
-    urlopen(req, timeout=10)
+    with urlopen(req, timeout=timeout) as resp:  # noqa: S310 - scheme checked above
+        resp.read()
 
 
 def _send_webhook(alert: Alert, config: AlertConfig) -> None:

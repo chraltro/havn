@@ -133,10 +133,36 @@ app.add_middleware(
 async def security_headers(request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if request.url.path.startswith(_PUBLISHED_PAGE_PREFIX):
+        # Published dashboard pages (/p/<key>) are the one document that may
+        # be framed, and only by the origins in sharing.embed.allowed_origins.
+        # The key in the URL is a credential for public links, so it must not
+        # leak through Referer, and the page must not be indexed.
+        response.headers["Content-Security-Policy"] = _published_frame_policy()
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+        response.headers["Cache-Control"] = "no-store"
+    else:
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
+
+
+_PUBLISHED_PAGE_PREFIX = "/p/"
+
+
+def _published_frame_policy() -> str:
+    """CSP frame-ancestors for published pages from sharing.embed.allowed_origins."""
+    from havn.engine.embed import frame_ancestors_policy
+
+    try:
+        from havn.server.deps import _get_config
+
+        origins = _get_config().sharing.embed.allowed_origins
+    except Exception:
+        origins = []
+    return frame_ancestors_policy(origins)
 
 # ---------------------------------------------------------------------------
 # Memory management: periodic checkpoint to release DuckDB buffers
@@ -215,6 +241,8 @@ from havn.server.routes.streaming import router as streaming_router  # noqa: E40
 from havn.server.routes.unit_tests import router as unit_tests_router  # noqa: E402
 from havn.server.routes.bind import router as bind_router  # noqa: E402
 from havn.server.routes.rename import router as rename_router  # noqa: E402
+from havn.server.routes.sharing import router as sharing_router  # noqa: E402
+from havn.server.routes.reports import router as reports_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(files_router)
@@ -254,6 +282,8 @@ app.include_router(sql_api_router)
 app.include_router(export_router)
 app.include_router(streaming_router)
 app.include_router(unit_tests_router)
+app.include_router(sharing_router)
+app.include_router(reports_router)
 
 # Register WebSocket endpoints (can't use APIRouter for WebSocket)
 register_websocket(app)

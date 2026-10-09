@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 
 class DatabaseConfig(BaseModel):
@@ -218,6 +218,63 @@ class ValidationConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     schema_drift: str = "off"  # "warn" | "off"
+
+
+class EmbedConfig(BaseModel):
+    """Which sites may frame published dashboards, under ``sharing.embed:``."""
+    model_config = ConfigDict(extra="ignore")
+
+    # Origins allowed in the published page's CSP frame-ancestors, e.g.
+    # "https://intranet.example.com". Empty means same-origin framing only.
+    allowed_origins: list[str] = Field(default_factory=list)
+
+
+class SharingConfig(BaseModel):
+    """Published dashboards, declared under ``sharing:`` in ``project.yml``."""
+    model_config = ConfigDict(extra="ignore")
+
+    public_links: bool = True  # false refuses to create or serve public links
+    max_public_link_days: int | None = None  # cap on a public link's expiry
+    embed: EmbedConfig = Field(default_factory=EmbedConfig)
+
+
+class SmtpConfig(BaseModel):
+    """Outgoing mail for scheduled reports, under ``reports.smtp:``.
+
+    Values may reference ``.env`` secrets as ``${VAR}``.
+    """
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    host: str | None = None
+    port: int = 587
+    username: str | None = None
+    password: str | None = None
+    from_address: str | None = Field(default=None, alias="from")
+    starttls: bool = True
+    ssl: bool = False  # implicit TLS (port 465); overrides starttls
+    timeout: int = 30
+
+
+class ReportsConfig(BaseModel):
+    """Scheduled dashboard reports, under ``reports:`` in ``project.yml``."""
+    model_config = ConfigDict(extra="ignore")
+
+    base_url: str | None = None  # e.g. https://havn.example.com, for links in reports
+    smtp: SmtpConfig = Field(default_factory=SmtpConfig)
+    slack_webhook_url: str | None = None  # default Slack target; falls back to alerts.slack_webhook_url
+    allowed_recipient_domains: list[str] = Field(default_factory=list)  # empty = any
+    max_rows_per_widget: int = 1000  # rows rendered/attached per widget
+    charts: str = "auto"  # "auto" (matplotlib when installed) | "off"
+
+    @field_validator("charts", mode="before")
+    @classmethod
+    def _charts_flag(cls, v: Any) -> str:
+        # YAML reads a bare `off` / `on` as a boolean.
+        if v is False:
+            return "off"
+        if v is True or v is None:
+            return "auto"
+        return str(v).lower()
 class PackageConfig(BaseModel):
     """One entry under ``packages:`` in ``project.yml``.
 
@@ -271,6 +328,8 @@ class ProjectConfig(BaseModel):
     sentinel: SentinelConfig = Field(default_factory=SentinelConfig)
     policies: PoliciesConfig = Field(default_factory=PoliciesConfig)
     validation: ValidationConfig = Field(default_factory=ValidationConfig)
+    sharing: SharingConfig = Field(default_factory=SharingConfig)
+    reports: ReportsConfig = Field(default_factory=ReportsConfig)
     snapshots: SnapshotsConfig = Field(default_factory=SnapshotsConfig)
     environments: dict[str, EnvironmentConfig] = Field(default_factory=dict)
     active_environment: str | None = None
@@ -281,6 +340,21 @@ class ProjectConfig(BaseModel):
     streaming: dict[str, Any] = Field(default_factory=dict)
     project_dir: Path = Field(default_factory=Path.cwd)
     _raw: dict[str, Any] = PrivateAttr(default_factory=dict)
+
+
+def _parse_section(model: type[BaseModel], raw_section: Any, name: str) -> BaseModel:
+    """Parse an optional mapping section, falling back to defaults on bad input.
+
+    A malformed optional section (a typo in ``reports.smtp.port``) is logged
+    and ignored rather than failing every command that loads the project.
+    """
+    if not isinstance(raw_section, dict):
+        return model()
+    try:
+        return model.model_validate(raw_section)
+    except Exception as e:  # pydantic.ValidationError
+        logging.getLogger("havn.config").warning("Ignoring invalid '%s:' section: %s", name, e)
+        return model()
 
 
 def _expand_env_vars(value: Any) -> Any:
@@ -642,6 +716,8 @@ def load_project(
         sentinel=sentinel,
         policies=policies,
         validation=ValidationConfig(schema_drift=str((raw.get("validation") or {}).get("schema_drift", "off") or "off")),
+        sharing=_parse_section(SharingConfig, raw.get("sharing"), "sharing"),
+        reports=_parse_section(ReportsConfig, raw.get("reports"), "reports"),
         snapshots=snapshots,
         environments=environments,
         active_environment=active_env if active_env and active_env in environments else None,
