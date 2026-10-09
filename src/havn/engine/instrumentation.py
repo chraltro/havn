@@ -183,6 +183,16 @@ def instrument_run(
         return
     with _runs_lock:
         _runs[pipeline_run_id] = state
+    if settings.performance.enabled:
+        # Created here, on the run's own connection, before any parallel
+        # worker exists: workers racing CREATE TABLE IF NOT EXISTS on a
+        # fresh warehouse hit DuckDB's catalog write-write conflict.
+        try:
+            from havn.engine.perf import ensure_perf_tables
+
+            ensure_perf_tables(conn)
+        except Exception as e:
+            logger.debug("Could not create perf tables: %s", e)
     error: str | None = None
     try:
         yield state
@@ -309,7 +319,8 @@ def _want_plan(conn: Any, perf: Any, model: Any) -> bool:
         row = conn.execute(
             """
             SELECT count(*) FILTER (WHERE plan_captured),
-                   arg_max(id, finished_at)
+                   arg_max(id, finished_at),
+                   arg_max(plan_captured, finished_at)
             FROM (
                 SELECT id, plan_captured, finished_at FROM _havn.model_perf
                 WHERE model_path = ? AND status = 'success'
@@ -318,8 +329,13 @@ def _want_plan(conn: Any, perf: Any, model: Any) -> bool:
             """,
             [model.full_name],
         ).fetchone()
-        if not row or (row[0] or 0) < 3:
+        # Retention clears old plans, so "few" is capped by plan_retention:
+        # otherwise a plan_retention of 2 would profile every build.
+        wanted = min(3, max(int(perf.plan_retention), 1))
+        if not row or (row[0] or 0) < wanted:
             return True
+        if row[2]:
+            return False
         flagged = conn.execute(
             "SELECT 1 FROM _havn.perf_regressions WHERE perf_id = ? LIMIT 1", [row[1]]
         ).fetchone()
@@ -366,6 +382,16 @@ def _rows_before_and_in(conn: Any, model: Any) -> tuple[int | None, int | None]:
     return before, (total if found else None)
 
 
+def _side_cursor(conn: Any) -> Any:
+    try:
+        from havn.engine.write_queue import cursor_for
+
+        return cursor_for(conn)
+    except Exception as e:
+        logger.debug("No side cursor for perf bookkeeping: %s", e)
+        return None
+
+
 def _is_uuid(value: str | None) -> bool:
     try:
         uuid.UUID(str(value))
@@ -396,10 +422,17 @@ class _Build:
         perf = self.settings.performance
         self.perf_on = bool(perf.enabled)
         self.capture = None
+        self.side = None
         self.rows_before = self.rows_in = None
         if self.perf_on:
-            self.capture = BuildCapture(model.full_name, want_plan=_want_plan(conn, perf, model))
-            self.rows_before, self.rows_in = _rows_before_and_in(conn, model)
+            # Perf bookkeeping runs on a cursor of its own: a write or a
+            # failed read on the build connection could abort a transaction
+            # the caller holds, and a perf row written inside one that later
+            # rolls back would vanish with it.
+            self.side = _side_cursor(conn)
+            side = self.side or conn
+            self.capture = BuildCapture(model.full_name, want_plan=_want_plan(side, perf, model))
+            self.rows_before, self.rows_in = _rows_before_and_in(side, model)
 
         tele = self.settings.telemetry
         self.tracer = get_tracer(tele.opentelemetry)
@@ -498,9 +531,16 @@ class _Build:
         cap = self.capture
         if self.perf_on:
             try:
-                self._record(conn, status, duration, error)
+                self._record(self.side or conn, status, duration, error)
             except Exception as e:
                 logger.debug("Could not record perf for %s: %s", self.model.full_name, e)
+            finally:
+                if self.side is not None:
+                    try:
+                        self.side.close()
+                    except Exception:
+                        pass
+                    self.side = None
         if error:
             try:
                 from havn.engine.observability import TRANSFORM_DURATION

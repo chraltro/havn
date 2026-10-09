@@ -414,17 +414,17 @@ def rule_materialize_view(ctx: AdviceContext, model: Any) -> AdviceItem | None:
 def _referenced_elsewhere(ctx: AdviceContext, name: str, since: datetime) -> list[str]:
     """Where a model is read outside the DAG: audit log, slow queries, dashboards, metrics."""
     places: list[str] = []
-    like = f"%{name}%"
+    needle = name.lower()
     probes = (
         ("audit log", "SELECT count(*) FROM _havn.audit_log WHERE action = 'query' "
-                      "AND lower(resource) LIKE ? AND \"timestamp\" >= ?", True),
+                      "AND contains(lower(resource), ?) AND \"timestamp\" >= ?", True),
         ("slow query log", "SELECT count(*) FROM _havn.slow_queries "
-                           "WHERE lower(query_text) LIKE ? AND executed_at >= ?", True),
-        ("dashboard", "SELECT count(*) FROM _havn.dashboard_widgets WHERE lower(sql_query) LIKE ?", False),
+                           "WHERE contains(lower(query_text), ?) AND executed_at >= ?", True),
+        ("dashboard", "SELECT count(*) FROM _havn.dashboard_widgets WHERE contains(lower(sql_query), ?)", False),
     )
     for label, sql, timed in probes:
         try:
-            params = [like, since] if timed else [like]
+            params = [needle, since] if timed else [needle]
             if (ctx.conn.execute(sql, params).fetchone() or [0])[0]:
                 places.append(label)
         except duckdb.Error:

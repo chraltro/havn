@@ -52,17 +52,22 @@ async def traced_request(tracer: Any, request: Any, call_next: Any) -> Any:
             "client.address": request.client.host if request.client else None,
         },
     )
+    def _rename() -> str:
+        route = _route_template(request)
+        if span is not None:
+            try:
+                span.update_name(f"{request.method} {route}")
+            except Exception:
+                pass
+        return route
+
     try:
         response = await call_next(request)
     except Exception as e:
-        end_span(span, error=str(e) or type(e).__name__)
+        route = _rename()
+        end_span(span, error=str(e) or type(e).__name__, attributes={"http.route": route})
         raise
-    route = _route_template(request)
-    if span is not None:
-        try:
-            span.update_name(f"{request.method} {route}")
-        except Exception:
-            pass
+    route = _rename()
     status = response.status_code
     end_span(
         span,

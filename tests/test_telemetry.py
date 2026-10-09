@@ -152,6 +152,9 @@ def test_metrics_localhost_only(tmp_path, monkeypatch):
     assert client.get("/metrics").status_code == 401
     monkeypatch.setattr(prom, "_LOCAL_HOSTS", {"testclient"})
     assert client.get("/metrics").status_code == 200
+    # Through a reverse proxy on the same box everything looks local; a
+    # forwarded request is not trusted as one.
+    assert client.get("/metrics", headers={"X-Forwarded-For": "203.0.113.9"}).status_code == 401
 
 
 def test_env_token_still_switches_metrics_on(tmp_path, monkeypatch):

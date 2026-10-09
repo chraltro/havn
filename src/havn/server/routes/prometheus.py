@@ -64,7 +64,11 @@ def _authorize(request: Request, cfg, metrics_token: str | None) -> None:
     if cfg.allow_unauthenticated == "true":
         return
     client = request.client.host if request.client else ""
-    if cfg.allow_unauthenticated == "localhost" and client in _LOCAL_HOSTS:
+    # Behind a reverse proxy on the same box every request arrives from
+    # loopback, so a proxied request (one carrying forwarding headers) never
+    # counts as local.
+    proxied = any(h in request.headers for h in ("x-forwarded-for", "forwarded", "x-real-ip"))
+    if cfg.allow_unauthenticated == "localhost" and client in _LOCAL_HOSTS and not proxied:
         return
     provided = _bearer(request)
     if metrics_token and provided and hmac.compare_digest(provided, metrics_token):

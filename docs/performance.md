@@ -32,8 +32,8 @@ One row per build in `_havn.model_perf`:
 | `rows_in` | Size of the model's upstreams at build time (catalog estimate) |
 | `rows_scanned` | Rows the build's scans actually read (from the profile) |
 | `rows_produced` | Rows the build query produced (an incremental's new slice) |
-| `peak_memory_bytes` | Memory DuckDB allocated for the build, or the buffer high-water mark when the build raised it |
-| `spill_bytes` | Bytes spilled to the temp directory, when the build raised that mark |
+| `peak_memory_bytes` | Memory DuckDB allocated for the build, or the connection's buffer high-water mark when the build raised it (DuckDB reports peaks per connection, not per query, so this is approximate) |
+| `spill_bytes` | Growth of the temp-directory high-water mark during the build (a lower bound on what it spilled) |
 | `cpu_time_ms`, `bytes_read`, `bytes_written` | From the profile |
 | `full_refresh` | True when the build rewrote the whole table |
 | `plan` | Compact operator tree with real timings and row counts |

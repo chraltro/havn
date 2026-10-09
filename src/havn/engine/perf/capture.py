@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -71,15 +72,20 @@ class BuildCapture:
         self.latency_s += latency
         self.cpu_time_s += _num(profile.get("cpu_time"))
         self.rows_scanned += int(_num(profile.get("cumulative_rows_scanned")))
-        prev_mem, prev_spill = previous_marks or (-1, -1)
+        prev_mem, prev_spill = previous_marks or (-1, 0)
+        # Memory peaks do not add up, so a raised mark is the best figure
+        # there is (an upper bound when an earlier statement got close).
         peak = int(_num(profile.get("total_memory_allocated")))
         system_peak = int(_num(profile.get("system_peak_buffer_memory")))
         if system_peak > prev_mem:
             peak = max(peak, system_peak)
         self.peak_memory_bytes = max(self.peak_memory_bytes, peak)
+        # Spill is charged as the growth of the temp-directory mark: a lower
+        # bound, and zero when this statement spilled less than an earlier
+        # one on the same connection did.
         spill = int(_num(profile.get("system_peak_temp_dir_size")))
         if spill > prev_spill:
-            self.spill_bytes = max(self.spill_bytes, spill)
+            self.spill_bytes += spill - max(prev_spill, 0)
         self.bytes_read += int(_num(profile.get("total_bytes_read")))
         self.bytes_written += int(_num(profile.get("total_bytes_written")))
         plan = compact_plan(profile)
@@ -135,43 +141,65 @@ def run_build_statement(
     if not capture.want_plan:
         return conn.execute(sql)
 
-    previous = _profiling_setting(conn)
-    try:
-        conn.execute("PRAGMA enable_profiling='no_output'")
-    except duckdb.Error as e:
-        logger.debug("Could not enable profiling for %s: %s", capture.model, e)
-        return conn.execute(sql)
-    try:
-        result = conn.execute(sql)
+    # Two builds sharing one connection (the server's shared connection
+    # serves several threads) must not interleave save / enable / restore:
+    # the second would "restore" the first one's setting and leave profiling
+    # on for good. The lock is per connection, so separate connections
+    # (parallel workers) still build at the same time.
+    with _lock_for(conn):
+        previous = _profiling_setting(conn)
         try:
-            raw = conn.get_profiling_information(format="json")
-            profile = json.loads(raw) if raw else None
-            # The shared server connection is used from several threads; a
-            # profile whose query is not ours belongs to someone else.
-            if profile and _same_query(profile.get("query_name"), sql):
-                key = id(conn)
-                capture.absorb(profile, _marks.get(key))
-                _remember_marks(key, profile)
-        except Exception as e:  # a profile is a bonus, never a build failure
-            logger.debug("Could not read the profile for %s: %s", capture.model, e)
-        return result
-    finally:
-        _restore_profiling(conn, previous)
+            conn.execute("PRAGMA enable_profiling='no_output'")
+        except duckdb.Error as e:
+            logger.debug("Could not enable profiling for %s: %s", capture.model, e)
+            return conn.execute(sql)
+        try:
+            result = conn.execute(sql)
+            try:
+                raw = conn.get_profiling_information(format="json")
+                profile = json.loads(raw) if raw else None
+                # Something outside the build may still use the connection
+                # between the two calls; a profile of another query is dropped.
+                if profile and _same_query(profile.get("query_name"), sql):
+                    key = id(conn)
+                    capture.absorb(profile, _marks.get(key))
+                    _remember_marks(key, profile)
+            except Exception as e:  # a profile is a bonus, never a build failure
+                logger.debug("Could not read the profile for %s: %s", capture.model, e)
+            return result
+        finally:
+            _restore_profiling(conn, previous)
 
+
+_registry_lock = threading.Lock()
+_conn_locks: dict[int, threading.RLock] = {}
 
 # High-water marks last seen per connection, keyed by id(). A recycled id
-# carries over a higher mark, which only makes the next reading conservative
-# (it falls back to the statement's own allocation).
+# carries over a higher mark, which only makes the next reading conservative.
 _marks: dict[int, tuple[int, int]] = {}
 
 
+def _lock_for(conn: duckdb.DuckDBPyConnection) -> threading.RLock:
+    key = id(conn)
+    with _registry_lock:
+        lock = _conn_locks.get(key)
+        if lock is None:
+            if len(_conn_locks) > 512:
+                # Ids of closed connections pile up; dropping unheld locks is
+                # safe, a held one is still referenced by its holder.
+                _conn_locks.clear()
+            lock = _conn_locks[key] = threading.RLock()
+        return lock
+
+
 def _remember_marks(key: int, profile: dict) -> None:
-    if len(_marks) > 256:
-        _marks.clear()
-    _marks[key] = (
-        int(_num(profile.get("system_peak_buffer_memory"))),
-        int(_num(profile.get("system_peak_temp_dir_size"))),
-    )
+    with _registry_lock:
+        if len(_marks) > 512 and key not in _marks:
+            _marks.pop(next(iter(_marks)))
+        _marks[key] = (
+            int(_num(profile.get("system_peak_buffer_memory"))),
+            int(_num(profile.get("system_peak_temp_dir_size"))),
+        )
 
 
 def _profiling_setting(conn: duckdb.DuckDBPyConnection) -> str | None:

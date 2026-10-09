@@ -308,6 +308,26 @@ def test_small_absolute_slowdowns_and_short_history_are_ignored(tmp_path):
         conn.close()
 
 
+def test_an_incremental_full_reload_is_compared_with_full_reloads_only(tmp_path):
+    conn = duckdb.connect(str(tmp_path / "w.duckdb"))
+    try:
+        base = datetime.now() - timedelta(days=1)
+        for i in range(6):  # quick incremental runs
+            pid = _fake_build(conn, "silver.inc", 100 + i, when=base + timedelta(minutes=i),
+                              materialized="incremental")
+            conn.execute("UPDATE _havn.model_perf SET full_refresh = FALSE WHERE id = ?", [pid])
+        forced = _fake_build(conn, "silver.inc", 5000, when=base + timedelta(hours=1),
+                             materialized="incremental")
+        conn.execute("UPDATE _havn.model_perf SET full_refresh = TRUE WHERE id = ?", [forced])
+        assert check_build(conn, forced, _perf_cfg()) is None  # no full-reload history yet
+        slow_inc = _fake_build(conn, "silver.inc", 5000, when=base + timedelta(hours=2),
+                               materialized="incremental")
+        conn.execute("UPDATE _havn.model_perf SET full_refresh = FALSE WHERE id = ?", [slow_inc])
+        assert check_build(conn, slow_inc, _perf_cfg()) is not None
+    finally:
+        conn.close()
+
+
 def test_detected_regressions_are_saved_and_alerted(tmp_path):
     from havn.config import AlertsConfig
     from havn.engine.perf import alert_regressions

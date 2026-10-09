@@ -125,8 +125,20 @@ class BuildRecord:
 
 
 def record_build(conn: duckdb.DuckDBPyConnection, rec: BuildRecord) -> str:
-    """Write one build's row and return its id."""
-    ensure_perf_tables(conn)
+    """Write one build's row and return its id.
+
+    The tables are created only when the insert finds them missing: a
+    ``CREATE TABLE IF NOT EXISTS`` per build from parallel workers is a
+    catalog write that can conflict with another worker's.
+    """
+    try:
+        return _insert_build(conn, rec)
+    except duckdb.CatalogException:
+        ensure_perf_tables(conn)
+        return _insert_build(conn, rec)
+
+
+def _insert_build(conn: duckdb.DuckDBPyConnection, rec: BuildRecord) -> str:
     cap = rec.capture
     plan = cap.plan if cap else None
     full_refresh = cap.full_refresh if cap else None

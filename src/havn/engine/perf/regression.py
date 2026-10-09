@@ -37,7 +37,7 @@ from typing import Any
 import duckdb
 
 from .capture import iter_nodes
-from .store import ensure_perf_tables, get_build, local_now, model_history
+from .store import ensure_perf_tables, get_build, local_now
 
 logger = logging.getLogger("havn.perf")
 
@@ -104,6 +104,29 @@ def _basis_key(current: dict, history: list[dict], min_history: int) -> str | No
     return None
 
 
+def _baseline(conn: duckdb.DuckDBPyConnection, current: dict, lookback: int) -> list[dict]:
+    """Successful builds of the same model before ``current``, newest first.
+
+    An incremental or snapshot model is compared like with like: a full
+    reload (first build, ``--force``) against full reloads, an ordinary
+    incremental run against incremental runs. A table always rebuilds fully.
+    """
+    from .store import _LIGHT_COLUMNS, _fetch
+
+    where = "model_path = ? AND status = 'success' AND id <> ? AND finished_at <= ?"
+    params: list = [current["model_path"], current["id"], current.get("finished_at")]
+    if current.get("materialized") in ("incremental", "snapshot") and current.get("full_refresh") is not None:
+        where += " AND full_refresh IS NOT DISTINCT FROM ?"
+        params.append(bool(current["full_refresh"]))
+    params.append(int(lookback))
+    return _fetch(
+        conn,
+        f"SELECT {_LIGHT_COLUMNS} FROM _havn.model_perf WHERE {where} "
+        "ORDER BY finished_at DESC LIMIT ?",
+        params,
+    )
+
+
 def check_build(
     conn: duckdb.DuckDBPyConnection,
     perf_id: str,
@@ -119,10 +142,7 @@ def check_build(
     min_ratio = float(getattr(settings, "regression_min_ratio", 1.5))
     min_delta = float(getattr(settings, "regression_min_delta_ms", 500))
 
-    history = [
-        h for h in model_history(conn, current["model_path"], limit=lookback + 1)
-        if h["id"] != perf_id and h.get("finished_at", "") <= (current.get("finished_at") or "~")
-    ][:lookback]
+    history = _baseline(conn, current, lookback)
     if len(history) < min_history:
         return None
 
