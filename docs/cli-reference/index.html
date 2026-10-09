@@ -3623,8 +3623,14 @@
 <td><code>./&lt;NAME&gt;</code></td>
 <td>Target directory</td>
 </tr>
+<tr>
+<td><code>--force</code></td>
+<td>false</td>
+<td>Scaffold into a non-empty directory, adding only missing files</td>
+</tr>
 </tbody>
 </table>
+<p>A target directory that already has files in it (other than <code>.git/</code>) is refused. With <code>--force</code>, only the scaffold files that do not exist yet are written; existing files, <code>.env</code> and <code>project.yml</code> included, are never overwritten.</p>
 <p>Creates project structure with sample earthquake data pipeline, seeds, contracts, and notebooks.</p>
 <h3 id="havn-validate">havn validate<a class="headerlink" href="#havn-validate" title="Permanent link">&para;</a></h3>
 <p>Validate project structure, config, and SQL model dependencies.</p>
@@ -3710,7 +3716,7 @@ arity mismatches. It does not catch value conversions such as
 <tr>
 <td><code>--keep</code></td>
 <td>none</td>
-<td>Retention: keep only the last N backups, remove older ones</td>
+<td>Retention: keep only the last N backups (N &gt;= 1), remove older ones</td>
 </tr>
 </tbody>
 </table>
@@ -3719,6 +3725,7 @@ arity mismatches. It does not catch value conversions such as
 <p>List all tracked backups from the manifest.</p>
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>backup-list<span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
 </code></pre></div>
+<p>Each file on disk is re-checked against its recorded SHA-256; one that has changed since it was taken shows <code>checksum mismatch</code> instead of <code>yes</code> under Verified.</p>
 <h3 id="havn-backup-verify">havn backup-verify<a class="headerlink" href="#havn-backup-verify" title="Permanent link">&para;</a></h3>
 <p>Verify the integrity of a backup file against its stored checksum.</p>
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>backup-verify<span class="w"> </span>BACKUP_PATH<span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
@@ -3727,6 +3734,7 @@ arity mismatches. It does not catch value conversions such as
 <p>Restore the warehouse database from a backup.</p>
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>backup-restore<span class="w"> </span>BACKUP_PATH<span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
 </code></pre></div>
+<p>The backup is verified first (including its manifest checksum), copied to a temporary file beside the warehouse and swapped in with an atomic rename, so a failure part-way leaves the original warehouse and its WAL untouched. A warehouse held open by another process (such as <code>havn serve</code>) is reported as such; stop that process and retry.</p>
 <h2 id="pipeline-execution">Pipeline Execution<a class="headerlink" href="#pipeline-execution" title="Permanent link">&para;</a></h2>
 <h3 id="havn-run">havn run<a class="headerlink" href="#havn-run" title="Permanent link">&para;</a></h3>
 <p>Run a single ingest or export script.</p>
@@ -4400,7 +4408,8 @@ Ingest does not run; deploy the models, not the data feeding them.</p>
 <p>Shows all macros discovered from the <code>macros/</code> directory, from installed packages, and from havn's built-in library: name, parameters, return type, origin, source file, and docstring.</p>
 <h3 id="havn-packages">havn packages<a class="headerlink" href="#havn-packages" title="Permanent link">&para;</a></h3>
 <p>Install and inspect shared model and macro packages. See <a href="../packages/">Packages</a>.</p>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>packages<span class="w">                    </span><span class="c1"># list installed packages (default action)</span>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>packages<span class="w"> </span>list<span class="w">               </span><span class="c1"># list installed packages: rev, commit, counts</span>
+havn<span class="w"> </span>packages<span class="w">                    </span><span class="c1"># same as `havn packages list`</span>
 havn<span class="w"> </span>packages<span class="w"> </span>install<span class="w">            </span><span class="c1"># install what project.yml declares</span>
 havn<span class="w"> </span>packages<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w">  </span><span class="c1"># re-resolve each rev instead of using the lock</span>
 havn<span class="w"> </span>packages<span class="w"> </span>remove<span class="w"> </span>crm<span class="w">         </span><span class="c1"># delete a checkout and its lock entry</span>

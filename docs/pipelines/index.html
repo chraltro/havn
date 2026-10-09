@@ -1434,6 +1434,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#full_refresh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        full_refresh
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2071,6 +2082,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#full_refresh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        full_refresh
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2404,6 +2426,18 @@ models in dependency order, then exports.</p>
 <p>New jobs should set <code>resolve: none</code> and say what they mean with the selector
 syntax instead. <code>havn jobs preview &lt;name&gt;</code> prints the resolved plan, which is
 the quickest way to see which mode a job is in.</p>
+<h3 id="full_refresh">full_refresh<a class="headerlink" href="#full_refresh" title="Permanent link">&para;</a></h3>
+<p>By default a job rebuilds every model in its plan, changed or not, so models
+that read sources change detection cannot see (<code>read_csv</code>, external tables)
+stay fresh. Assertions run either way, and a failed one blocks everything
+downstream.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">incremental</span>
+<span class="nt">targets</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gold.*</span>
+<span class="nt">full_refresh</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">   </span><span class="c1"># skip models whose SQL and upstream are unchanged</span>
+</code></pre></div>
+<p>With <code>full_refresh: false</code> the job builds the way <code>havn transform</code> does.
+<code>havn jobs run &lt;name&gt; --force</code> rebuilds everything regardless.</p>
 <h2 id="python-ingest-scripts">Python Ingest Scripts<a class="headerlink" href="#python-ingest-scripts" title="Permanent link">&para;</a></h2>
 <p>Ingest scripts are plain Python files. A DuckDB connection is pre-injected as <code>db</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># ingest/customers.py</span>
@@ -2427,6 +2461,13 @@ the quickest way to see which mode a job is in.</p>
 <li><code>stdout</code> and <code>stderr</code> are captured and logged</li>
 <li>Scripts prefixed with <code>_</code> are skipped</li>
 <li>Script output is masked to prevent leaking secrets from <code>.env</code></li>
+<li>A script is stopped after 2 hours, or after 30 minutes with no output and no
+  CPU use (stuck on a lock or a dead connection). A script that legitimately
+  waits longer on a slow remote source can say so in its first lines:
+  <code># @havn: idle_timeout=3600</code> (seconds; <code>0</code> turns the idle check off). A
+  notebook puts the same line at the top of its first code cell. In a
+  job, a script also never runs past what is left of <code>timeout_minutes</code>.</li>
+<li>A notebook used as a pipeline step stops at the first cell that fails.</li>
 </ul>
 <h2 id="running-individual-steps">Running Individual Steps<a class="headerlink" href="#running-individual-steps" title="Permanent link">&para;</a></h2>
 <p>You can run steps independently without a stream:</p>

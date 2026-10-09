@@ -2073,7 +2073,14 @@
 <span class="w">    </span><span class="nt">database</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">":memory:"</span><span class="w">             </span><span class="c1"># In-memory database for tests</span>
 </code></pre></div>
-<p>Each environment can override the <code>database.path</code> setting. When no environment is specified, the top-level <code>database.path</code> is used.</p>
+<p>Each environment can override the <code>database.path</code> setting. The active environment is resolved in this order:</p>
+<ol>
+<li><code>--env &lt;name&gt;</code> on the command line</li>
+<li>the name in <code>.havn-env</code> (written by <code>havn env use</code>)</li>
+<li><code>dev</code>, when an environment of that name is defined</li>
+<li>otherwise none: the top-level <code>database.path</code> is used</li>
+</ol>
+<p>A name in step 1 or 2 that <code>project.yml</code> does not define is an error, so a typo such as <code>--env prdo</code> never builds into a different warehouse. <code>havn env show</code> reports the same resolution, including which step picked it. An environment with nothing under it (<code>dev:</code>) is valid and means "no overrides".</p>
 <h2 id="using-environments">Using Environments<a class="headerlink" href="#using-environments" title="Permanent link">&para;</a></h2>
 <h3 id="setting-an-active-environment">Setting an Active Environment<a class="headerlink" href="#setting-an-active-environment" title="Permanent link">&para;</a></h3>
 <p>Instead of passing <code>--env</code> on every command, set a persistent active environment:</p>
@@ -2091,7 +2098,7 @@ havn<span class="w"> </span>env<span class="w"> </span>show
 <span class="c1"># List all available environments</span>
 havn<span class="w"> </span>env<span class="w"> </span>list
 
-<span class="c1"># Reset to default (no environment override)</span>
+<span class="c1"># Clear .havn-env (back to dev if defined, else the top-level database)</span>
 havn<span class="w"> </span>env<span class="w"> </span>reset
 </code></pre></div>
 <p>The active environment is stored in a <code>.havn-env</code> file in the project root. This file is local (added to <code>.gitignore</code>) and not shared with the team.</p>
