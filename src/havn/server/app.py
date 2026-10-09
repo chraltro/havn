@@ -95,8 +95,24 @@ async def _lifespan(app: FastAPI):
     except Exception:
         _maintenance = None
 
+    # Live models: refresh continuously from streaming ingest. Started only
+    # when the project has a live model (and live.enabled is not false); a
+    # project without one never pays for the thread.
+    try:
+        from havn.server.routes.live import start_live_runner
+
+        start_live_runner()
+    except Exception as e:
+        logger.warning("Live runner not started: %s", e)
+
     yield
 
+    try:
+        from havn.server.routes.live import stop_live_runner
+
+        stop_live_runner()
+    except Exception:
+        pass
     try:
         from havn.server.routes.streaming import shutdown_flush_worker
         shutdown_flush_worker()
@@ -212,6 +228,7 @@ from havn.server.routes.semantic import router as semantic_router  # noqa: E402
 from havn.server.routes.sql_api import router as sql_api_router  # noqa: E402
 from havn.server.routes.export import router as export_router  # noqa: E402
 from havn.server.routes.streaming import router as streaming_router  # noqa: E402
+from havn.server.routes.live import router as live_router  # noqa: E402
 from havn.server.routes.unit_tests import router as unit_tests_router  # noqa: E402
 from havn.server.routes.bind import router as bind_router  # noqa: E402
 from havn.server.routes.rename import router as rename_router  # noqa: E402
@@ -253,6 +270,7 @@ app.include_router(semantic_router)
 app.include_router(sql_api_router)
 app.include_router(export_router)
 app.include_router(streaming_router)
+app.include_router(live_router)
 app.include_router(unit_tests_router)
 
 # Register WebSocket endpoints (can't use APIRouter for WebSocket)

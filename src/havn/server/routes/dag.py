@@ -157,6 +157,8 @@ def get_dag(request: Request) -> dict:
                 # None for project models. The panel labels the rest so a
                 # node that cannot be edited here is visibly not yours.
                 "package": getattr(m, "package", None),
+                # Live models get a lag badge (from /api/live/status).
+                "live": bool(getattr(m, "live", False)),
             }
         )
 
@@ -414,6 +416,7 @@ def get_full_dag(request: Request) -> dict:
                 "type": m.materialized,
                 "path": m.path.relative_to(project_dir).as_posix(),
                 "package": getattr(m, "package", None),
+                "live": bool(getattr(m, "live", False)),
             }
         )
 
