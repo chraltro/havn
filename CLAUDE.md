@@ -74,6 +74,17 @@ havn backup --keep 10           # backup with retention
 havn backup-list                # list tracked backups
 havn backup-verify <path>       # verify backup integrity
 havn backup-restore <path>         # restore from backup
+havn branch status              # branch warehouse: local, deferred, stale models
+havn branch build               # build what this branch changed, against the base
+havn branch diff --markdown     # data diff vs the base (what CI posts on a PR)
+havn rls list                   # row-level security policies
+havn pii                        # PII classifications, explicit and inherited
+havn reports send weekly        # deliver a scheduled report now
+havn ask "revenue by region"    # answer from metrics/*.yml
+havn changes list               # agent change sets and their verification
+havn perf                       # slow models, regressions, advice
+havn perf --critical-path       # what set the last run's duration
+havn live                       # run live models in the foreground
 ```
 
 ## Project Structure
@@ -109,6 +120,17 @@ src/havn/                       # Python package (the platform itself)
     unit_tests.py             # Model unit tests (tests/unit/*.yml loader + runner)
     sql_rewrite.py            # Table-reference rewriter (mocks, ephemeral, defer)
     sql_safety.py             # Shared read-only SQL validation
+    governed_query.py         # The governed read path every read-only query goes through
+    governance/               # Masking + row policies, lineage inheritance, governed Python
+    row_policies.py           # Row-level security policies (_havn.row_policies)
+    branches.py               # Warehouse per git branch (resolution, build, diff)
+    sharing.py / reports.py   # Published dashboards, scheduled reports
+    ai/                       # havn ask (spec, providers, catalog, eval)
+    changesets/               # Verified agent change sets
+    perf/                     # Performance advisor (capture, regression, advice)
+    telemetry/                # Prometheus, OpenTelemetry, OpenLineage
+    live/                     # Live models (sources, runner, refresh)
+    transform/python_models.py # Python models (@model in transform/**/*.py)
     notebook/                 # .dpnb notebook execution
     docs.py                   # Markdown doc generator
   mcp/                          # MCP stdio server for AI agents (havn mcp)
@@ -211,6 +233,29 @@ GROUP BY 1, 2
 - Legacy `-- config:` / `-- depends_on:` / `-- assert:` lines still parse (back-compat) but new code should use the `@`-prefixed form.
 - No Jinja, no templating -- just plain SQL (use Python macros for reusable logic).
 - Change detection uses SHA256 hash of normalized SQL content + transitive upstream hashes.
+
+### Python Models
+
+A `.py` file under `transform/` with an `@model` function is a model:
+
+```python
+# transform/gold/order_stats.py
+from havn import model
+
+@model(materialized="table", tags=["daily"])
+def order_stats(db, ref):
+    return db.sql(f"SELECT region, count(*) AS n FROM {ref('silver.orders')} GROUP BY 1")
+```
+
+- Parameters by name: `db`, `ref`, `this`, `is_incremental`. Return a DuckDB relation, pandas/polars DataFrame or pyarrow table.
+- `@model(...)` arguments must be literals (read without running). `view`, `ephemeral` and microbatch are refused. Files starting with `_` are helpers.
+- See `docs/python-models.md`.
+
+### Governance directives
+
+- `@pii col[, col]` classifies output columns; classifications and masking follow column lineage downstream.
+- `@declassify col: reason` / `@declassify rows: reason` stops inheritance (aggregated or hashed columns).
+- Live models: `@config live=true` (incremental or view), `{watermark}` in `incremental_filter`, `cdc_op=` / `cdc_seq=` / `cdc_deletes=` for CDC apply. See `docs/live-models.md`.
 
 ### Python SQL Macros
 
