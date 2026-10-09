@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://chraltro.github.io/db/mcp/">
+        <link rel="canonical" href="https://chraltro.github.io/db/unit-tests/">
       
       
-        <link rel="prev" href="../auth/">
+        <link rel="prev" href="../quality/">
       
       
-        <link rel="next" href="../limitations/">
+        <link rel="next" href="../contracts/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>MCP Server - havn</title>
+        <title>Unit Tests - havn</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#mcp-server" class="md-skip">
+        <a href="#unit-tests" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              MCP Server
+              Unit Tests
             
           </span>
         </div>
@@ -342,9 +342,11 @@
   
   
   
+    
   
-    <li class="md-tabs__item">
-      <a href="../unit-tests/" class="md-tabs__link">
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
         
   
   
@@ -627,11 +629,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../mcp/" class="md-tabs__link">
         
   
   
@@ -939,10 +939,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../unit-tests/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unit Tests
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -958,6 +985,154 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#file-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File format
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="File format">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#csv-fixtures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CSV fixtures
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-a-test-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a test runs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How a test runs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#column-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Column types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparison
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#warehouse-free-on-purpose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warehouse-free, on purpose
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Warehouse-free, on purpose">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#and-file-free-for-the-same-reason" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        And file-free, for the same reason
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related Pages
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1344,37 +1519,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    MCP Server
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
         
   
   
@@ -1390,70 +1538,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Setup
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#tools" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Tools
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#how-it-coexists-with-havn-serve" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        How it coexists with havn serve
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#safety-model" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Safety model
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1566,10 +1650,105 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
+  <a href="#file-format" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Setup
+        File format
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="File format">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#csv-fixtures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CSV fixtures
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-a-test-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a test runs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How a test runs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#column-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Column types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparison
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#warehouse-free-on-purpose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warehouse-free, on purpose
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Warehouse-free, on purpose">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#and-file-free-for-the-same-reason" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        And file-free, for the same reason
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
       
     </span>
   </a>
@@ -1577,10 +1756,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tools" class="md-nav__link">
+  <a href="#api" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Tools
+        API
       
     </span>
   </a>
@@ -1588,21 +1767,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-it-coexists-with-havn-serve" class="md-nav__link">
+  <a href="#related-pages" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How it coexists with havn serve
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#safety-model" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Safety model
+        Related Pages
       
     </span>
   </a>
@@ -1629,117 +1797,206 @@
   
 
 
-<h1 id="mcp-server">MCP Server<a class="headerlink" href="#mcp-server" title="Permanent link">&para;</a></h1>
-<p><code>havn mcp</code> starts a <a href="https://modelcontextprotocol.io">Model Context Protocol</a>
-server over stdio, exposing your warehouse to AI agents — Claude Code,
-Codex CLI, or any other MCP client. The agent can explore tables, run
-read-only queries, inspect the transform DAG and lineage, query
-semantic-layer metrics, and (optionally) build models.</p>
-<p>No extra dependencies: the protocol implementation ships with havn.</p>
-<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># Claude Code</span>
-claude<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span>havn<span class="w"> </span>--<span class="w"> </span>havn<span class="w"> </span>mcp<span class="w"> </span>-p<span class="w"> </span>/path/to/your/project
-
-<span class="c1"># Any other MCP client: configure a stdio server with</span>
-<span class="c1">#   command: havn</span>
-<span class="c1">#   args: ["mcp", "-p", "/path/to/your/project"]</span>
+<h1 id="unit-tests">Unit Tests<a class="headerlink" href="#unit-tests" title="Permanent link">&para;</a></h1>
+<p>Assertions and contracts check the data that is currently in the warehouse.
+A unit test checks the <strong>SQL itself</strong>: you give a model fixed input rows and
+declare the rows it should produce.</p>
+<p>Each test runs on a throwaway in-memory DuckDB database with your project's
+macros registered. Nothing is read from the warehouse and nothing is written
+to it, so a unit test cannot pass because of what happens to be built, and it
+works on a clone that has never run a pipeline.</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span><span class="nb">test</span><span class="w">                      </span><span class="c1"># run every unit test</span>
+havn<span class="w"> </span><span class="nb">test</span><span class="w"> </span>--model<span class="w"> </span>silver.customers
+havn<span class="w"> </span><span class="nb">test</span><span class="w"> </span>-v<span class="w">                   </span><span class="c1"># show the rows that differ</span>
+havn<span class="w"> </span>check<span class="w">                     </span><span class="c1"># validation + assertions + contracts + unit tests</span>
 </code></pre></div>
-<p>Options:</p>
+<h2 id="file-format">File format<a class="headerlink" href="#file-format" title="Permanent link">&para;</a></h2>
+<p>Unit tests live in <code>tests/unit/*.yml</code> (or <code>.yaml</code>) inside your project.
+<code>havn init</code> scaffolds one worked example there.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># tests/unit/customers.yml</span>
+<span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">silver.customers</span>
+
+<span class="nt">tests</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">counts orders per customer</span>
+<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Customers with no orders must still appear, with a zero count.</span>
+<span class="w">    </span><span class="nt">given</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">bronze.customers</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">customer_id</span><span class="p">:</span><span class="w"> </span><span class="nv">INTEGER</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">VARCHAR</span><span class="p p-Indicator">}</span>
+<span class="w">        </span><span class="nt">rows</span><span class="p">:</span>
+<span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">1</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"Ann"</span><span class="p p-Indicator">]</span><span class="w">                       </span><span class="c1"># list form: columns order</span>
+<span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">customer_id</span><span class="p">:</span><span class="w"> </span><span class="nv">2</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="s">"Bo"</span><span class="p p-Indicator">}</span><span class="w">     </span><span class="c1"># mapping form: by name</span>
+<span class="w">      </span><span class="nt">bronze.orders</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">rows</span><span class="p">:</span>
+<span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">order_id</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="p p-Indicator">,</span><span class="nt"> customer_id</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="p p-Indicator">,</span><span class="nt"> amount</span><span class="p">:</span><span class="w"> </span><span class="nv">5.0</span><span class="p p-Indicator">}</span>
+<span class="w">    </span><span class="nt">expect</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">rows</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">customer_id</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="s">"Ann"</span><span class="p p-Indicator">,</span><span class="nt"> order_count</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="p p-Indicator">}</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">customer_id</span><span class="p">:</span><span class="w"> </span><span class="nv">2</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="s">"Bo"</span><span class="p p-Indicator">,</span><span class="nt"> order_count</span><span class="p">:</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">ordered</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">                          </span><span class="c1"># the default</span>
+</code></pre></div>
 <table>
 <thead>
 <tr>
-<th>Flag</th>
+<th>Key</th>
 <th>Meaning</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>-p, --project</code></td>
-<td>Project directory (default: current dir)</td>
+<td><code>model</code></td>
+<td>The model under test, <code>schema.name</code>. Can be set per test instead of per file.</td>
 </tr>
 <tr>
-<td><code>-e, --env</code></td>
-<td>Environment to use (<code>dev</code>, <code>prod</code>, ...)</td>
+<td><code>tests[].name</code></td>
+<td>Free text, unique within the model.</td>
 </tr>
 <tr>
-<td><code>--read-only</code></td>
-<td>Disable the <code>run_transform</code> tool entirely</td>
+<td><code>tests[].description</code></td>
+<td>Optional. Say why the case matters, not what it does.</td>
+</tr>
+<tr>
+<td><code>given</code></td>
+<td>One entry per upstream table. Every upstream must be here.</td>
+</tr>
+<tr>
+<td><code>given.&lt;table&gt;.columns</code></td>
+<td>Optional column name to DuckDB type mapping. Recommended.</td>
+</tr>
+<tr>
+<td><code>given.&lt;table&gt;.rows</code></td>
+<td>Lists (positional) or mappings (by name).</td>
+</tr>
+<tr>
+<td><code>expect.rows</code></td>
+<td>The rows the model must produce.</td>
+</tr>
+<tr>
+<td><code>expect.columns</code></td>
+<td>Required only when <code>expect.rows</code> uses the list form.</td>
+</tr>
+<tr>
+<td><code>expect.ordered</code></td>
+<td><code>true</code> compares row N to row N. Default <code>false</code>.</td>
 </tr>
 </tbody>
 </table>
-<h2 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Tool</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>query</code></td>
-<td>Read-only SQL (mutations and file-access functions are rejected)</td>
-</tr>
-<tr>
-<td><code>list_tables</code></td>
-<td>Tables and views, optionally filtered by schema</td>
-</tr>
-<tr>
-<td><code>describe_table</code></td>
-<td>Columns, types, and row count</td>
-</tr>
-<tr>
-<td><code>list_models</code></td>
-<td>Transform models with materialization, tags and dependencies; takes a <code>select</code> graph selector</td>
-</tr>
-<tr>
-<td><code>get_model</code></td>
-<td>A model's SQL source, config, and dependencies</td>
-</tr>
-<tr>
-<td><code>model_lineage</code></td>
-<td>Direct + transitive upstreams and downstreams</td>
-</tr>
-<tr>
-<td><code>run_history</code></td>
-<td>Recent pipeline runs from <code>_havn.run_log</code></td>
-</tr>
-<tr>
-<td><code>list_metrics</code></td>
-<td>Semantic-layer metrics from <code>metrics/*.yml</code></td>
-</tr>
-<tr>
-<td><code>query_metric</code></td>
-<td>Query a metric by dimensions / grain / time range</td>
-</tr>
-<tr>
-<td><code>run_transform</code></td>
-<td>Build models; <code>select</code> and <code>exclude</code> take graph selectors (omitted with <code>--read-only</code>)</td>
-</tr>
-</tbody>
-</table>
-<p><code>select</code> and <code>exclude</code> take the same grammar as <code>havn transform</code>: <code>+x</code>, <code>x+</code>,
-<code>@x</code>, <code>gold.fct_*</code>, <code>tag:daily</code>, <code>path:transform/gold/</code>,
-<code>config.materialized:incremental</code>, <code>state:modified+</code>, and a comma to
-intersect. See <a href="transforms#selecting-models">Selecting models</a>.</p>
-<h2 id="how-it-coexists-with-havn-serve">How it coexists with <code>havn serve</code><a class="headerlink" href="#how-it-coexists-with-havn-serve" title="Permanent link">&para;</a></h2>
-<p>DuckDB allows one writing process at a time. When <code>havn serve</code> is running,
-it holds the warehouse lock — the MCP server detects this and routes read
-queries through the server's HTTP API instead of opening the file directly
-(the same strategy the CLI uses). <code>run_transform</code> refuses to run while the
-lock is held and tells the agent why.</p>
-<h2 id="safety-model">Safety model<a class="headerlink" href="#safety-model" title="Permanent link">&para;</a></h2>
-<p>The MCP server has the same trust level as your local CLI:</p>
+<div class="admonition note">
+<p class="admonition-title">Quoting parameterized types</p>
+<p>In YAML flow style, <code>{amount: DECIMAL(10,2)}</code> splits on the comma. Write
+<code>amount: "DECIMAL(10,2)"</code>, or use block style.</p>
+</div>
+<h3 id="csv-fixtures">CSV fixtures<a class="headerlink" href="#csv-fixtures" title="Permanent link">&para;</a></h3>
+<p>Wide tables read better as CSV, the same as in dbt. Use <code>format: csv</code> with a
+<code>csv:</code> block, on <code>given</code> entries and on <code>expect</code> alike:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span><span class="nt">given</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">bronze.orders</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">order_id</span><span class="p">:</span><span class="w"> </span><span class="nv">INTEGER</span><span class="p p-Indicator">,</span><span class="nt"> customer_id</span><span class="p">:</span><span class="w"> </span><span class="nv">INTEGER</span><span class="p p-Indicator">,</span><span class="nt"> amount</span><span class="p">:</span><span class="w"> </span><span class="nv">DOUBLE</span><span class="p p-Indicator">}</span>
+<span class="w">        </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">csv</span>
+<span class="w">        </span><span class="nt">csv</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<span class="w">          </span><span class="no">order_id,customer_id,amount</span>
+<span class="w">          </span><span class="no">1,1,5.0</span>
+<span class="w">          </span><span class="no">2,1,7.5</span>
+<span class="w">    </span><span class="nt">expect</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">csv</span>
+<span class="w">      </span><span class="nt">csv</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<span class="w">        </span><span class="no">customer_id,total</span>
+<span class="w">        </span><span class="no">1,12.5</span>
+</code></pre></div>
+<p>An empty field is NULL. Fields that look like numbers become numbers;
+everything else stays a string and is cast to the column's type on insert.</p>
+<h2 id="how-a-test-runs">How a test runs<a class="headerlink" href="#how-a-test-runs" title="Permanent link">&para;</a></h2>
+<ol>
+<li>A fresh <code>:memory:</code> DuckDB connection is opened and your <code>macros/</code> are
+   registered on it, so Python macros work exactly as they do in a build.
+   The connection is then locked down: <code>enable_external_access</code> is turned off
+   and the configuration is locked, so nothing that runs on it afterwards can
+   reach the filesystem or the network.</li>
+<li>One <code>TEMP TABLE</code> is created per <code>given</code> entry.</li>
+<li>Every reference to a mocked table in the model's SQL is rewritten to point
+   at its mock, preserving aliases and leaving CTE names alone.</li>
+<li>The rewritten query runs into a temp table and is compared to <code>expect</code>.</li>
+</ol>
+<h3 id="column-types">Column types<a class="headerlink" href="#column-types" title="Permanent link">&para;</a></h3>
+<p>Types come from the first of these that is available:</p>
+<ol>
+<li>the <code>columns:</code> block on the mock,</li>
+<li>the live warehouse catalog, when a warehouse exists (the CLI, API and MCP
+   all pass one in),</li>
+<li>the Python types of the fixture values (<code>1</code> is BIGINT, <code>5.0</code> is DOUBLE,
+   <code>"x"</code> is VARCHAR, a bare date is DATE).</li>
+</ol>
+<p>Declaring <code>columns:</code> is worth the lines. It pins the fixture to the shape you
+mean, and it keeps the test reproducible on a machine where the warehouse has
+not been built.</p>
+<h3 id="comparison">Comparison<a class="headerlink" href="#comparison" title="Permanent link">&para;</a></h3>
+<p>Rows are compared by hashing every column as text, the same comparator
+<code>havn diff</code> uses. That means DECIMAL versus DOUBLE, or a <code>SUM</code> coming back
+wider than you wrote in the fixture, cannot fail a test on their own:
+expected rows are cast into the model's own output types before hashing.</p>
+<p>Comparison is a multiset by default, so order does not matter but duplicates
+do: two identical output rows need two identical expected rows. Set
+<code>ordered: true</code> to compare positionally, which is what you want for a model
+whose <code>ORDER BY</code> is part of its contract.</p>
+<p>A failure reports three things: rows that were expected but not produced,
+rows that were produced but not expected, and column-set mismatches.</p>
+<h2 id="warehouse-free-on-purpose">Warehouse-free, on purpose<a class="headerlink" href="#warehouse-free-on-purpose" title="Permanent link">&para;</a></h2>
+<p>If a model reads an upstream that has no <code>given</code> entry, the test is an
+<strong>error</strong>, not a silent read of the real table:</p>
+<div class="highlight"><pre><span></span><code>error  no mock for upstream bronze.orders: every upstream must be mocked,
+       unit tests never read the warehouse
+</code></pre></div>
+<p>This is the property that makes the result mean something. dbt's local unit
+tests still need the direct upstream models to exist in the warehouse so the
+schema can be fetched; havn's do not, because the engine and the warehouse
+are the same thing and the mocks carry their own types.</p>
+<h3 id="and-file-free-for-the-same-reason">And file-free, for the same reason<a class="headerlink" href="#and-file-free-for-the-same-reason" title="Permanent link">&para;</a></h3>
+<p>The test connection cannot read or write files either. A model under test
+that calls <code>read_csv</code>, <code>read_text</code>, <code>glob</code> or a bare <code>FROM '&lt;path&gt;'</code>, or that
+tries <code>COPY ... TO</code>, <code>ATTACH</code>, <code>INSTALL</code> or <code>LOAD</code>, fails its test with a
+permission error rather than touching the disk. <code>havn test</code> runs on the
+server too, where the SQL being tested is a file anyone with write permission
+just saved, so the run gets no filesystem at all.</p>
+<p>Nothing legitimate needs it: fixture rows are the input a unit test is for.
+If a test seems to need a file read, put the rows it would have read into a
+<code>given</code> block, in the inline <code>csv:</code> form when there are a lot of columns.</p>
+<h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Every <code>query</code> / <code>query_metric</code> / introspection call goes through the same
-  read-only SQL validation as the web API: single statement, no mutation
-  verbs, no <code>read_csv</code> / <code>read_parquet</code> / HTTP functions.</li>
-<li>Reads use a read-only DuckDB connection — even a validator bypass could
-  not write.</li>
-<li><code>run_transform</code> is the only mutating tool. It builds your own transform
-  models (with Pipeline Rewind snapshots when enabled, so agent-triggered
-  builds can be rolled back like any other run). Start with <code>--read-only</code>
-  if the agent shouldn't build at all.</li>
+<li><strong>Incremental models are tested as a full refresh.</strong> The model's query runs
+  as written; <code>incremental_filter</code>, <code>unique_key</code> and the merge strategy are
+  not exercised, because there is no prior state to merge into. Test the
+  transformation logic here and the incremental behaviour with <code>havn diff</code>.</li>
+<li><strong><code>SELECT *</code> models are only as wide as the mock.</strong> A mock that declares
+  three columns makes a star model produce three columns, and the test then
+  passes against a narrower fiction. When a warehouse is available, havn warns
+  about this:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>warn  mock for bronze.customers omits 2 column(s) present in the warehouse
+      (name, email); a SELECT * model is being tested against a narrower table
+</code></pre></div>
+<p>The warning only appears for models that actually project a star.
+- <strong>Unparseable SQL cannot be tested.</strong> Dependency extraction can fall back to
+  regex, but rewriting cannot: a partial rewrite would point some references
+  at the real warehouse. A model sqlglot cannot parse fails its test with a
+  clear message instead.
+- <strong>Sources and seeds are mocked like anything else.</strong> There is no special
+  handling; mock them by name under <code>given</code>.</p>
+<h2 id="api">API<a class="headerlink" href="#api" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># List declared tests (read permission)</span>
+curl<span class="w"> </span>http://localhost:3000/api/unit-tests
+
+<span class="c1"># Run them (execute permission)</span>
+curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:3000/api/unit-tests/run<span class="w"> </span><span class="se">\</span>
+<span class="w">     </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">     </span>-d<span class="w"> </span><span class="s1">'{"model": "silver.customers"}'</span>
+</code></pre></div>
+<p>The web UI has the same thing under <strong>Observe &gt; Unit Tests</strong>, and AI agents
+can call the <code>run_unit_tests</code> MCP tool.</p>
+<h2 id="related-pages">Related Pages<a class="headerlink" href="#related-pages" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="quality">Data Quality</a> -- Assertions, profiling, freshness</li>
+<li><a href="contracts">Contracts</a> -- Standalone YAML rules against built data</li>
+<li><a href="transforms">Transforms</a> -- Model configuration and directives</li>
+<li><a href="macros">Macros</a> -- Python functions callable from model SQL</li>
 </ul>
 
 

@@ -1,0 +1,2936 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="The open-source data platform that runs on your machine. DuckDB + SQL transforms + Python. Data in safe waters.">
+      
+      
+      
+        <link rel="canonical" href="https://chraltro.github.io/db/internal/dbt-v2-gap-plan/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>dbt v2 gap plan - havn</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Outfit:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Outfit";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#dbt-v2-gap-plan" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="havn" class="md-header__button md-logo" aria-label="havn" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            havn
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              dbt v2 gap plan
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/chraltro/havn" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    chraltro/havn
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../transforms/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Transforms
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../seeds/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Seeds
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../sources/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Sources
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../quality/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Data Quality
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../unit-tests/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Unit Tests
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contracts/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contracts
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../macros/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Macros
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../packages/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Packages
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../semantic-layer/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Semantic Layer
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../lineage/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Lineage
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../masking/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Masking
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../notebooks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Notebooks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../pipelines/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Pipelines
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../scheduler/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Scheduler
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../connectors/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Connectors
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../cdc/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CDC
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../versioning/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Versioning
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../environments/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Environments
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../auth/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Auth
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../mcp/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  MCP Server
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../limitations/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  What havn Supports
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../cli-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../api-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="havn" class="md-nav__button md-logo" aria-label="havn" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    havn
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/chraltro/havn" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    chraltro/havn
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../transforms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transforms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../seeds/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Seeds
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../unit-tests/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unit Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contracts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../macros/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Macros
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../packages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../semantic-layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Semantic Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../lineage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lineage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../masking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Masking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../pipelines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../scheduler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scheduler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cdc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CDC
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../versioning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../environments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../auth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What havn Supports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#0-what-dbt-v2-actually-is-as-of-this-week" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0. What dbt v2 actually is, as of this week
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-verdict-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Verdict table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-prerequisites-bugs-found-while-researching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Prerequisites: bugs found while researching
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-sql-comprehension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. SQL comprehension
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. SQL comprehension">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-static-type-inference-delegate-to-the-duckdb-binder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Static type inference: delegate to the DuckDB binder
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-inferred-types-into-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Inferred types into contracts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-lineage-conformance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Lineage conformance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-editor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Editor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Editor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-live-error-markers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Live error markers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-go-to-definition-on-a-model-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Go-to-definition on a model reference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-preview-a-single-cte" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Preview a single CTE
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-rename-a-column-across-downstream-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Rename a column across downstream models
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-unit-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Unit tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-modeling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Modeling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Modeling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-scd2-snapshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 SCD2 snapshots
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-ephemeral-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Ephemeral models
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-schema-change-policy-for-incrementals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Schema-change policy for incrementals
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-microbatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Microbatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-running-things" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Running things
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Running things">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-graph-selectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Graph selectors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-defer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Defer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-parse-and-lineage-time-at-scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 Parse and lineage time at scale
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-reuse-packages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Reuse: packages
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-first-impression" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. First impression
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-sequencing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Sequencing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-what-i-would-push-back-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. What I would push back on
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-status-2026-09-21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Status, 2026-09-21
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-review-round-2026-09-22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Review round, 2026-09-22
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="dbt-v2-gap-plan">dbt v2 gap plan<a class="headerlink" href="#dbt-v2-gap-plan" title="Permanent link">&para;</a></h1>
+<p>Written 2026-09-21. Input: the gap list from the dbt v2 comparison, plus five
+research passes over the current code (sqlglot 30.18, DuckDB 1.5.5, havn 0.2.27).
+Every claim below about "what exists today" was checked against the tree or run
+as an experiment; scratch scripts are referenced where a number came from one.</p>
+<p>Effort scale is the ideas-catalog one: S = hours to a day, M = days, L = a week
+or more.</p>
+<h2 id="0-what-dbt-v2-actually-is-as-of-this-week">0. What dbt v2 actually is, as of this week<a class="headerlink" href="#0-what-dbt-v2-actually-is-as-of-this-week" title="Permanent link">&para;</a></h2>
+<p>Checked against the docs source repo and GitHub on 2026-09-21 (docs.getdbt.com
+itself is blocked from this environment, so the docs were read from
+<code>dbt-labs/docs.getdbt.com@current</code>).</p>
+<ul>
+<li>dbt v2.0 went GA on 2026-09-16. Fusion was renamed to plain "dbt", v2.0.5
+  is current, and v1.12 is maintained in parallel. Two distributions, both
+  free: <code>dbt</code> (Rust, proprietary product license) and <code>dbt-oss</code> (Apache 2.0).
+  No model-count gate anywhere in the licensing docs.</li>
+<li>Static analysis has three modes: <code>off</code>, <code>baseline</code> (default, findings are
+  warnings, uses the remote warehouse as the source of truth) and <code>strict</code>
+  (nothing runs until the whole project binds). <strong>Strict requires <code>dbt login</code>
+  with a free platform account; unauthenticated runs fall back to baseline.</strong>
+  Column-level lineage, SQL type diagnostics, rename column and go-to-column
+  in the VS Code extension are strict-only, so in practice they need the login.
+  Table lineage, ref go-to-definition, rename model and CTE preview are free
+  without login.</li>
+<li>DuckDB in v2: built in, CLI only, not supported on the platform. The
+  bundled driver cannot load DuckDB extensions (<code>httpfs</code>, <code>parquet</code>,
+  <code>spatial</code>); the workaround is a system driver. Static analysis cannot infer
+  the schema of <code>read_csv</code>, <code>read_parquet</code> or <code>read_json</code> at analysis time.
+  Gaps are tracked in an open epic, <code>dbt-labs/dbt-core#14393</code> "[EPIC] DuckDB",
+  opened 2026-03-17. There is no DuckDB function-support table; those exist
+  for Snowflake and BigQuery only. dbt's own docs call DuckDB both a community
+  adapter and a trusted adapter in the same paragraph.</li>
+<li>Unit tests: <code>compute: local</code> runs the test in DuckDB, but it is behind an
+  experimental env var, Snowflake and BigQuery only, and the direct upstream
+  models must already exist in the warehouse so dbt can fetch their schemas.
+  It is warehouse-compute-free per test, not warehouse-free.</li>
+<li>Snapshots: <code>strategy: timestamp|check</code>, <code>hard_deletes: ignore|invalidate|
+  new_record</code>, <code>snapshot_meta_column_names</code> to rename the four meta columns,
+  <code>dbt_valid_to_current</code> for a sentinel instead of NULL. Nothing changed for
+  v2.</li>
+<li>Microbatch: GA on v1.9+. <code>event_time</code>, <code>begin</code>, <code>batch_size: hour|day|month|
+  year</code>, <code>lookback</code>, <code>concurrent_batches</code>. <code>dbt-duckdb</code> 1.10.1 (2026-02-17)
+  supports it, but <code>dbt-duckdb</code> is a v1 adapter and v2's DuckDB adapter is a
+  separate Rust implementation with a parity bug-bash still going.</li>
+<li><code>on_schema_change</code> default is <code>ignore</code>, under which a removed column fails
+  the run and an added column is not appended. <code>sync_all_columns</code> includes
+  type changes. No option backfills old rows. Nested columns are not tracked.</li>
+<li>Selectors: <code>+</code>, <code>n+</code>, <code>@</code>, <code>*</code>, <code>,</code>; methods include <code>tag</code>, <code>path</code>, <code>fqn</code>,
+  <code>config.*</code>, <code>state:modified</code> with subselectors, <code>result:</code>, <code>source_status</code>,
+  <code>unit_test</code>. Tags and meta do not trigger <code>state:modified</code>. Defer needs
+  <code>--defer</code> plus <code>--state &lt;manifest dir&gt;</code>; ephemeral models are never
+  deferred; <code>--favor-state</code> prefers the manifest over local objects.</li>
+<li>Packages: <code>packages.yml</code> or <code>dependencies.yml</code>, hub with version, git with
+  revision, local path, <code>package-lock.yml</code>. v2 requires a <code>provider</code> key for
+  private packages, clones over system SSH, and warns (soon errors) on
+  packages that do not declare <code>2.0.0</code> compatibility.</li>
+<li>Install: <code>python -m pip install dbt</code>, brew, curl or winget; a single
+  self-contained binary. The GitHub README carries no shell one-liner at all,
+  just a link to the install page.</li>
+</ul>
+<p>What this means for the plan: havn's "no data leaves the machine" pitch lines
+up exactly against the two places v2 sends you online. Strict analysis and
+column-level features need a login; havn can do the same analysis fully
+offline because the binder is in-process. And v2's unit tests need the
+warehouse for schemas; havn's can be genuinely warehouse-free. Those are the
+two sentences the README comparison should be built around once phases 1 and
+2 ship.</p>
+<h2 id="1-verdict-table">1. Verdict table<a class="headerlink" href="#1-verdict-table" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Feasible</th>
+<th>Effort</th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Static type inference</td>
+<td>Yes, via the DuckDB binder</td>
+<td>M</td>
+<td>Build. Do not reimplement types in sqlglot.</td>
+</tr>
+<tr>
+<td>Types into contracts</td>
+<td>Yes, but contracts have no column surface yet</td>
+<td>M</td>
+<td>Build after type inference; needs a type-equivalence policy or it is a false-positive generator.</td>
+</tr>
+<tr>
+<td>Lineage conformance suite</td>
+<td>Yes</td>
+<td>M</td>
+<td>Build. 6 of 13 constructs are wrong today. 39 s per 1000 models is 78 % redundant catalog I/O, not sqlglot.</td>
+</tr>
+<tr>
+<td>Editor: live markers</td>
+<td>Yes</td>
+<td>M</td>
+<td>Build. Same bind endpoint as type inference; the work is position plumbing.</td>
+</tr>
+<tr>
+<td>Editor: go-to-definition</td>
+<td>Yes</td>
+<td>S</td>
+<td>Build. Cheapest item on the list.</td>
+</tr>
+<tr>
+<td>Editor: CTE preview</td>
+<td>Yes</td>
+<td>S</td>
+<td>Build. Execution half already exists.</td>
+</tr>
+<tr>
+<td>Editor: rename column</td>
+<td>Yes, but not on today's lineage</td>
+<td>L</td>
+<td>Defer. Would ship silently wrong edits until the lineage rewrite lands.</td>
+</tr>
+<tr>
+<td>Unit tests</td>
+<td>Yes</td>
+<td>M</td>
+<td>Build. Rewriter, comparator and macro registration all exist in pieces.</td>
+</tr>
+<tr>
+<td>SCD2 snapshots</td>
+<td>Yes</td>
+<td>M</td>
+<td>Build, after the incremental path is made transactional. Naming collision with three existing "snapshot" modules.</td>
+</tr>
+<tr>
+<td>Ephemeral models</td>
+<td>Yes</td>
+<td>S to M</td>
+<td>Build. Transitive hashing already handles invalidation.</td>
+</tr>
+<tr>
+<td>Schema-change policy</td>
+<td>Yes</td>
+<td>S, plus a prerequisite fix</td>
+<td>Build. Today: removed columns silently diverge, int to double silently rounds, int to varchar loses rows.</td>
+</tr>
+<tr>
+<td>Microbatch</td>
+<td>Yes, but thin foundation</td>
+<td>M</td>
+<td>Defer. The loop and per-batch state are the work; nothing exists.</td>
+</tr>
+<tr>
+<td>Graph selectors</td>
+<td>Yes</td>
+<td>S</td>
+<td>Build. The grammar already exists for jobs; it is one call site plus a hash-corruption fix.</td>
+</tr>
+<tr>
+<td>Defer to prod</td>
+<td>Yes, with a hard DuckDB constraint</td>
+<td>M</td>
+<td>Build as opt-in. Fails whenever any process holds prod open for writing.</td>
+</tr>
+<tr>
+<td>Parse and lineage at 1000 models</td>
+<td>Yes</td>
+<td>S</td>
+<td>Fix now. One bulk catalog fetch removes 36 of 39 seconds.</td>
+</tr>
+<tr>
+<td>Packages</td>
+<td>Yes</td>
+<td>L</td>
+<td>Defer. No config, no fetch, no multi-root discovery, no namespacing, silent name collisions.</td>
+</tr>
+<tr>
+<td>README hero</td>
+<td>Yes</td>
+<td>S</td>
+<td>Do first. The wheel bundles the frontend; the one-pip-line hero is honest today.</td>
+</tr>
+<tr>
+<td>Screenshot</td>
+<td>Yes</td>
+<td>S</td>
+<td>Do first. <code>landing/screenshots/overview.webp</code> already exists.</td>
+</tr>
+<tr>
+<td>Supported / not supported page</td>
+<td>Yes</td>
+<td>S</td>
+<td>Do first.</td>
+</tr>
+</tbody>
+</table>
+<p>The three items Christian called out (type inference, editor diagnostics, unit
+tests) are all buildable and none of them needs a Rust rewrite. The first two are
+one feature seen from two sides: a bind endpoint that types a model without
+running it, and an editor that shows what the bind endpoint says.</p>
+<h2 id="2-prerequisites-bugs-found-while-researching">2. Prerequisites: bugs found while researching<a class="headerlink" href="#2-prerequisites-bugs-found-while-researching" title="Permanent link">&para;</a></h2>
+<p>These are not features. Several of the features above would inherit them or make
+them worse, so they go first.</p>
+<ol>
+<li>
+<p><strong>Incremental path is not transactional.</strong> <code>_execute_incremental</code>
+   (<code>engine/transform/execution.py:25-197</code>) issues ALTER, DELETE, UPDATE and
+   INSERT as separate auto-commit statements. The only <code>BEGIN TRANSACTION</code> in
+   the transform package is the DuckLake branch of <code>_update_state</code>. Reproduced:
+   <code>delete+insert</code> with a retyped column commits the DELETE, fails the INSERT,
+   and leaves the target empty. SCD2, microbatch and <code>on_schema_change</code> all
+   layer more dependent writes on this path. Fix: wrap the staging branch in a
+   transaction, rollback on any exception. Effort S.</p>
+</li>
+<li>
+<p><strong>Targeted runs corrupt change detection.</strong> <code>run_transform</code> filters models
+   before <code>build_dag</code>, so <code>_compute_upstream_hash</code> sees no upstream models and
+   writes <code>sha256("")</code> as the upstream hash. Reproduced on the sample project:
+   <code>havn transform gold.earthquake_summary</code> followed by a plain
+   <code>havn transform</code> spuriously rebuilds the model. Fix: hash against the full
+   model map, execute against the selected subset. Selectors make this worse
+   if not fixed. Effort S.</p>
+</li>
+<li>
+<p><strong>Column lineage does O(n) catalog scans per model.</strong>
+   <code>extract_column_lineage</code> runs <code>information_schema.columns</code> once per
+   dependency (<code>engine/sql_analysis.py:537-546</code>), and that query costs 3 to
+   19 ms depending on catalog size. Over 1000 models: 39 s, of which 78 % is
+   <code>_duckdb.execute</code>. <code>validate_models</code> already does one bulk fetch
+   (<code>transform/analysis.py:86-92</code>). Hoist the same into lineage. Ideas-catalog
+   1.8 (content-hash lineage cache) is aimed at the remaining 2 s. Effort S.</p>
+</li>
+<li>
+<p><strong>Each model is parsed four times per pass.</strong> Discovery, validation,
+   deny-rule check and lineage each call <code>parse_one</code> on the same SQL. Cache the
+   AST on <code>SQLModel</code>. Effort S.</p>
+</li>
+<li>
+<p><strong>sqlglot floor is too low for positions.</strong> <code>pyproject.toml</code> says
+   <code>sqlglot&gt;=26.0</code>. Token positions on <code>Identifier.meta</code> appear in 26.17.
+   Below that, position-based features return empty results with no error.
+   Raise the floor to 26.17 before any editor work. Effort S.</p>
+</li>
+<li>
+<p><strong><code>strip_config_comments</code> destroys the line map.</strong> It deletes <code>@</code>-prefixed
+   lines anywhere in the file, so sqlglot line numbers do not map to file lines
+   by a constant offset. Blank the lines in place instead of removing them, or
+   return a line map. Also: <code>lint_file</code> only strips the legacy <code>-- config:</code>
+   form, so <code>/api/lint/file</code> line numbers are wrong for every modern model.
+   Effort S.</p>
+</li>
+<li>
+<p><strong>Unknown <code>@config</code> keys are silently ignored.</strong> <code>materialised=table</code> builds
+   a view. Any new key added below (<code>on_schema_change</code>, <code>tags</code>) would suffer the
+   same. Add an unknown-key error in <code>validate_models</code>. Effort S.</p>
+</li>
+<li>
+<p><strong>Model-name collisions are silent.</strong> Two files producing the same
+   <code>schema.name</code> make <code>build_dag</code> keep one with no warning. Packages would make
+   this common; it is already possible with <code>@config schema=</code> overrides. Add a
+   duplicate check in discovery. Effort S.</p>
+</li>
+<li>
+<p><strong><code>onOpenModel</code> in <code>App.jsx:1296</code> hardcodes <code>transform/{schema}/{name}.sql</code>.</strong>
+   Wrong whenever <code>@config schema=</code> overrides the folder. <code>/api/models</code> already
+   returns the real path. Effort S.</p>
+</li>
+</ol>
+<p>All nine together are roughly two to three days and make the codebase honest
+before anything visible is built on it.</p>
+<h2 id="3-sql-comprehension">3. SQL comprehension<a class="headerlink" href="#3-sql-comprehension" title="Permanent link">&para;</a></h2>
+<h3 id="31-static-type-inference-delegate-to-the-duckdb-binder">3.1 Static type inference: delegate to the DuckDB binder<a class="headerlink" href="#31-static-type-inference-delegate-to-the-duckdb-binder" title="Permanent link">&para;</a></h3>
+<p><strong>What exists.</strong> <code>validate_models</code> (<code>transform/analysis.py:32-294</code>) is a
+sqlglot walk plus name lookups against <code>information_schema</code>. It does not select
+<code>data_type</code>. It skips column checks entirely for any upstream that has not been
+built, so on a fresh warehouse a bad column on an unbuilt upstream passes.
+There is no type checking anywhere.</p>
+<p><strong>Why the binder and not sqlglot.</strong> Measured on DuckDB 1.5.5:</p>
+<ul>
+<li><code>DESCRIBE</code>, <code>EXPLAIN</code> and <code>PREPARE</code> all bind without reading data. On a
+  10M-row table each takes under 1 ms, flat in table size. Full execution of the
+  same query: 53 ms.</li>
+<li>The binder catches, at bind time: wrong arity, unknown functions, operator
+  overload failures (<code>'a' + 1</code>), missing columns, missing struct keys, ambiguous
+  references, aggregation without GROUP BY, set-operation column count
+  mismatch.</li>
+<li>The binder does not catch value-domain conversion: <code>CAST(varchar_col AS
+  INTEGER)</code>, <code>varchar = int</code> in a WHERE, <code>int JOIN varchar</code> in an ON. Those bind
+  fine and fail at execution. This is exactly dbt Fusion's boundary too.</li>
+<li>sqlglot <code>annotate_types</code> with a schema dict: 18 of 30 DuckDB expressions
+  exactly right, 8 UNKNOWN (including <code>date_trunc</code>, which is in every model),
+  and <code>epoch_ms</code> silently wrong (TIMESTAMP instead of BIGINT). It cannot see
+  havn's Python <code>@macro</code> UDFs at all. Owning that gap against a <code>&gt;=26.0</code> pin
+  is a permanent tax.</li>
+</ul>
+<p><strong>Design: shadow catalog bind pass.</strong> Verified in <code>scratchpad/shadow_probe.py</code>:</p>
+<ol>
+<li>Take a cursor off the write queue's connection (the read pool is
+   <code>read_only=True</code>, and DuckDB refuses <code>ATTACH ':memory:'</code> on a read-only
+   connection).</li>
+<li><code>ATTACH ':memory:' AS shadow_&lt;request_id&gt;</code>. ATTACH is instance-scoped, so the
+   name must be unique per request. Create the model schemas inside it.</li>
+<li>For every base object (landing tables, seeds, sources, anything not a
+   model): <code>CREATE VIEW shadow.landing.x AS SELECT * FROM &lt;main&gt;.landing.x</code>.
+   This binds the real types without copying rows.</li>
+<li>Register macros on the cursor (<code>register_macros</code> works on any connection).</li>
+<li><code>USE shadow_&lt;id&gt;</code>, then for each model in topological order
+   <code>CREATE VIEW schema.name AS &lt;model.query&gt;</code> using the file's SQL verbatim.
+   Two-part names resolve inside the shadow, so a stale built table in the
+   main catalog is shadowed by the fresh definition. This is the property that
+   makes validation reflect the file, not the last build.</li>
+<li><code>DESCRIBE</code> each view to get <code>(column, type)</code>. Collect bind errors per model
+   with the DuckDB message. Continue past a failed model; downstream models
+   report "upstream failed to bind" rather than a cascade.</li>
+<li><code>USE &lt;main&gt;; DETACH shadow_&lt;id&gt;</code> in a finally block.</li>
+</ol>
+<p>Cost: 2.6 ms per model on the synthetic 1000-model project, 2.6 s total, which
+is cheaper than the current lineage pass. Single model with a short upstream
+chain: about 6 ms end to end.</p>
+<p><strong>Where it plugs in.</strong></p>
+<ul>
+<li><code>validate_models</code> gains a <code>bind=True</code> path that returns <code>ValidationError</code>
+  rows with severity error for bind failures, and returns the inferred schema
+  per model as a side result.</li>
+<li><code>havn validate</code> prints bind errors. The pre-build gate in
+  <code>server/routes/pipeline.py:510</code> and <code>:908</code> already calls <code>validate_models</code>;
+  note it is skipped when the run includes ingest steps, which needs a
+  decision (run it after ingest, before transforms).</li>
+<li>New endpoint <code>POST /api/bind</code> taking <code>{sql, model}</code> for the editor
+  (section 4).</li>
+<li>Persist the inferred schema per model in <code>_havn.model_columns</code> (or a JSON
+  column on <code>model_state</code>) from <code>_update_state</code>, keyed by <code>content_hash</code>. Nothing
+  persists column types today; <code>model_profiles</code> has names only.</li>
+</ul>
+<p><strong>Risks.</strong></p>
+<ul>
+<li>The shadow must be seeded completely: extensions loaded, macros registered,
+  sources and seeds present. A missing UDF produces a spurious "function does
+  not exist" which is worse than no check. Seed the shadow from the same code
+  path <code>connect()</code> uses.</li>
+<li>Marketing: this is "resolves types and catches bind errors", not "catches
+  type errors". The first <code>CAST</code> that binds clean and dies mid-build will burn
+  trust if the docs overclaim.</li>
+<li>DuckLake backend: the catalog is already an ATTACH and rejects a second
+  file attach in-process. In-memory attach should still work, but verify.</li>
+<li><code>DECIMAL(38,1)</code> for a <code>SUM</code>: inferred types are precise in ways users find
+  surprising. Relevant for 3.2, not for the bind check itself.</li>
+<li>File reads: <code>read_parquet('x.parquet')</code> binds by reading the file footer,
+  which is cheap; <code>read_csv</code> sniffs rows and can be slow on a large file.
+  Cache by file mtime. This is an advantage to state plainly: dbt v2 cannot
+  type these calls at analysis time on DuckDB at all.</li>
+<li>Extensions: the bind cursor must load the same extensions the run does, or
+  <code>httpfs</code> and <code>spatial</code> calls fail to bind. Same seeding rule as macros.</li>
+</ul>
+<p>Effort M. Steps: shadow bind function in <code>transform/analysis.py</code> (1 day),
+wire into <code>validate_models</code> and CLI (half day), persistence (half day),
+tests including the seeded-shadow cases (1 day).</p>
+<h3 id="32-inferred-types-into-contracts">3.2 Inferred types into contracts<a class="headerlink" href="#32-inferred-types-into-contracts" title="Permanent link">&para;</a></h3>
+<p><strong>What exists.</strong> Less than the gap list assumes. <code>Contract</code>
+(<code>engine/contracts.py:59-70</code>) is name, assertions, severity, freshness. There
+is no column, type or nullability declaration in the schema or the docs.
+Contracts run strictly post-build against a materialized table and return
+"table does not exist" otherwise. So this is not "move a check earlier"; the
+check does not exist.</p>
+<p><strong>Design.</strong></p>
+<ol>
+<li>Add a <code>columns:</code> block to contract YAML: name, type, optional <code>nullable</code>,
+   optional <code>description</code>. Also accept a <code>@contract</code> directive form if the
+   YAML feels heavy for one model.</li>
+<li>Compare the bind-pass schema (3.1) to the declaration before the build.
+   Missing column, extra column when <code>strict: true</code>, type change.</li>
+<li>Type-equivalence policy, or this is a false-positive generator. Reuse
+   <code>_TYPE_GROUPS</code> and <code>_TYPE_WIDTH</code> from <code>engine/sentinel.py:250-289</code>, which
+   already classify widen/narrow/changed for source schemas. Default: warn on
+   widening (<code>INTEGER</code> to <code>BIGINT</code>, <code>DOUBLE</code> to <code>DECIMAL(38,p)</code>), error on
+   narrowing or category change.</li>
+<li>Secondary use: with the baseline persisted per model, "this change alters
+   the output schema of gold.orders" becomes a validate-time warning even
+   without a contract, which is the dbt Fusion pitch.</li>
+</ol>
+<p><strong>Risk.</strong> Volume of noise. The existing <code>Ambiguous column</code> warning fired 400
+times on 1000 synthetic models. Ship the schema-change warning off by default
+until the equivalence rules have been tuned on a real project.</p>
+<p>Effort M, after 3.1.</p>
+<h3 id="33-lineage-conformance">3.3 Lineage conformance<a class="headerlink" href="#33-lineage-conformance" title="Permanent link">&para;</a></h3>
+<p><strong>What exists.</strong> A bespoke 360-line walker (<code>engine/sql_analysis.py:467-640</code>),
+not <code>sqlglot.lineage</code>. Table-level dependency extraction is healthy and got
+every construct right, including PIVOT and ASOF JOIN. Column lineage, on 13
+constructs (<code>scratchpad/lineage_probe.py</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Construct</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CTE chain</td>
+<td>correct</td>
+</tr>
+<tr>
+<td>Nested subquery in FROM</td>
+<td>wrong: emits the subquery alias <code>t</code> as a source table</td>
+</tr>
+<tr>
+<td>Window function</td>
+<td>correct</td>
+</tr>
+<tr>
+<td>UNION ALL</td>
+<td>wrong: every branch after the first is dropped (<code>_find_main_select</code>)</td>
+</tr>
+<tr>
+<td><code>SELECT *</code> over a join</td>
+<td>wrong: duplicate <code>customer_id</code> collapses to one source by dict-key collision</td>
+</tr>
+<tr>
+<td><code>SELECT * EXCLUDE (x)</code></td>
+<td>wrong: <code>x</code> still reported</td>
+</tr>
+<tr>
+<td><code>SELECT * REPLACE (expr AS x)</code></td>
+<td>wrong: the replacement expression is never inspected</td>
+</tr>
+<tr>
+<td>Struct dot <code>s.field</code></td>
+<td>wrong: <code>s</code> emitted as a table</td>
+</tr>
+<tr>
+<td>Struct bracket <code>s['field']</code></td>
+<td>correct but lossy</td>
+</tr>
+<tr>
+<td><code>unnest</code></td>
+<td>correct</td>
+</tr>
+<tr>
+<td>Correlated subquery</td>
+<td>correct, over-broad</td>
+</tr>
+<tr>
+<td>QUALIFY</td>
+<td>correct</td>
+</tr>
+<tr>
+<td>PIVOT</td>
+<td>empty result</td>
+</tr>
+</tbody>
+</table>
+<p><code>sqlglot.lineage</code> with a schema dict fixed nested-subquery and UNION ALL
+outright in the same harness. It will not fix EXCLUDE, REPLACE or PIVOT,
+because those are star-expansion features.</p>
+<p><strong>Design.</strong></p>
+<ol>
+<li>Turn <code>scratchpad/lineage_probe.py</code> into <code>tests/test_lineage_conformance.py</code>
+   with DuckDB <code>DESCRIBE</code> as ground truth for the output column set. This is
+   the suite the gap list asks for and it exists as a script already. Add
+   ASOF JOIN, UNPIVOT, LATERAL, <code>COLUMNS(...)</code>, <code>GROUP BY ALL</code>, <code>UNION BY
+   NAME</code> and recursive CTE.</li>
+<li>Replace the walker's core with <code>sqlglot.lineage</code> fed by the bind-pass
+   schema from 3.1. That is what makes <code>SELECT *</code> resolvable: the shadow
+   <code>DESCRIBE</code> says what the star expands to, per CTE and per subquery.</li>
+<li>Keep a star-expansion layer for EXCLUDE and REPLACE driven by the same
+   schema.</li>
+<li>PIVOT: derive the output columns from <code>DESCRIBE</code> and map them all to the
+   pivoted source columns. Precise per-column lineage through PIVOT is not
+   worth the effort.</li>
+<li>Prerequisite 3 (bulk catalog fetch) and 4 (shared AST) first.</li>
+</ol>
+<p><strong>Risk.</strong> It is a rewrite of a module with four call sites and accumulated
+regression fixes (see the <code>_is_cte_ref</code> comment at <code>sql_analysis.py:420</code>).
+The conformance suite is the safety net; build it first and run the current
+walker against it so the regressions are visible.</p>
+<p>Effort M.</p>
+<h2 id="4-editor">4. Editor<a class="headerlink" href="#4-editor" title="Permanent link">&para;</a></h2>
+<p><strong>What exists.</strong> <code>Editor.jsx</code> registers a completion provider and a hover
+provider on language <code>sql</code> at module load, and two actions (format, preview).
+No markers, no definition, no rename, no code actions anywhere in
+<code>frontend/</code>. Providers close over three caches and know nothing about which
+file is open; the model's identity is not available to them. The column cache
+has no TTL and no invalidation. <code>QueryPanel.jsx</code> is a textarea, not Monaco, so
+nothing built here reaches the Query tab.</p>
+<p><strong>Prerequisite for all four sub-features.</strong> Plumb <code>activeFile</code> (and the
+model's <code>full_name</code>) into provider scope, and give each open file a real Monaco
+model URI. Today every file shares one anonymous model. Effort S, and it is
+the same work for markers, definition and rename.</p>
+<h3 id="41-live-error-markers">4.1 Live error markers<a class="headerlink" href="#41-live-error-markers" title="Permanent link">&para;</a></h3>
+<p><strong>Design.</strong> One endpoint, two sources of diagnostics.</p>
+<ul>
+<li><code>POST /api/bind</code> with <code>{path, content}</code>: runs the shadow bind (3.1) for the
+  single model with its upstream chain, against the unsaved buffer. Returns
+  <code>[{severity, message, line, col, endLine, endCol}]</code> plus the inferred output
+  schema. Read permission, pooled cursor. Debounce at 300 to 500 ms in the
+  editor. Also returns the inferred schema so hover can show types.</li>
+<li>Lint diagnostics from <code>/api/lint/file</code> (already accepts inline content and
+  already returns <code>line</code> and <code>col</code>) on save or a 1 s idle debounce. SQLFluff
+  is 155 ms per lint on a 60-line model, not a per-keystroke budget. Note it
+  needs <code>execute</code> permission today; drop to <code>read</code> for the diagnostics use.</li>
+<li><code>setModelMarkers</code> with owner <code>havn-bind</code> and <code>havn-lint</code> separately.</li>
+</ul>
+<p><strong>Positions.</strong> DuckDB binder and catalog errors carry <code>LINE n:</code> and a caret.
+Column is <code>caret_index - len("LINE n: ")</code>. Two problems, both solvable:</p>
+<ul>
+<li>Long lines are truncated with a <code>...</code> prefix, so the caret offset is wrong.
+  Recovery: search the real source line for the quoted identifier from the
+  message. Ambiguous when the identifier appears twice on the line; fall back
+  to a whole-line marker.</li>
+<li>Parser errors sometimes have no position ("syntax error at end of input").
+  Whole-file marker on the last line.</li>
+<li>Prerequisite 6 (line map through <code>strip_config_comments</code>).</li>
+</ul>
+<p><strong>Hover with types.</strong> With the bind result cached per buffer, hover on a
+column shows the inferred type. Cheap once 4.1 is done, and it is the most
+visible "the editor understands my SQL" signal.</p>
+<p>Effort M. Backend endpoint half a day on top of 3.1, frontend markers and
+debounce one day, position recovery and tests one day.</p>
+<h3 id="42-go-to-definition-on-a-model-reference">4.2 Go-to-definition on a model reference<a class="headerlink" href="#42-go-to-definition-on-a-model-reference" title="Permanent link">&para;</a></h3>
+<p><strong>What exists.</strong> <code>/api/models</code> returns <code>full_name</code> and <code>path</code> from
+mtime-cached discovery. <code>openFileAtLine</code> and the <code>goToLine</code> prop already
+exist. Nothing wires them to a definition provider.</p>
+<p><strong>Design.</strong> <code>registerDefinitionProvider</code> on <code>sql</code>: regex the token under the
+cursor as <code>schema.name</code>, look it up in a cached <code>/api/models</code> map, return a
+<code>Location</code> with the file's URI. If URI plumbing is annoying, a
+<code>registerLinkProvider</code> plus a click handler calling <code>openFile</code> sidesteps it.
+Column-level definition (jump to the line that defines a column upstream)
+needs positions from lineage, which arrive with 3.3; skip for now.</p>
+<p>Effort S.</p>
+<h3 id="43-preview-a-single-cte">4.3 Preview a single CTE<a class="headerlink" href="#43-preview-a-single-cte" title="Permanent link">&para;</a></h3>
+<p><strong>What exists.</strong> <code>/api/query</code> accepts <code>WITH ... SELECT</code> (the safety validator
+walks CTEs to find the real verb), applies masking (CTE-aware), the query
+governor, and a <code>limit</code>. The whole-model preview on Cmd+Enter exists. Nothing
+enumerates CTEs.</p>
+<p><strong>Design.</strong> Parse with sqlglot, enumerate <code>parsed.args["with"].expressions</code>,
+find the CTE containing the cursor, slice the original text by
+<code>Identifier.meta</code> <code>start</code> and <code>end</code> offsets (preserves formatting, avoids
+round-trip drift on DuckDB syntax) to build <code>WITH &lt;ctes 0..n&gt; SELECT * FROM
+&lt;n&gt; LIMIT 100</code>. Post to <code>/api/query</code> with <code>limit</code>. Surface as a code lens above
+each CTE and as a Cmd+Shift+Enter action. Refuse recursive CTEs and CTEs that
+reference later siblings.</p>
+<p>While there: <code>previewCurrentFile</code> sends no limit and its directive-stripping
+loop stops at the first non-directive line, so a mid-file <code>@assert</code> is sent to
+DuckDB as SQL.</p>
+<p>Effort S.</p>
+<h3 id="44-rename-a-column-across-downstream-models">4.4 Rename a column across downstream models<a class="headerlink" href="#44-rename-a-column-across-downstream-models" title="Permanent link">&para;</a></h3>
+<p><strong>What exists.</strong> <code>impact_analysis</code> (<code>transform/analysis.py:297-373</code>) gives
+forward impact, but it is built on <code>extract_column_lineage</code>, which only walks
+SELECT-list expressions. There is no reference to <code>exp.Where</code>, <code>exp.Join</code>,
+<code>exp.Group</code>, <code>exp.Order</code> or <code>exp.Having</code> anywhere in <code>sql_analysis.py</code>. A
+downstream model that filters or joins on the column without projecting it
+produces zero hits. A rename built on this ships broken SQL with a green
+check.</p>
+<p>sqlglot positions are sufficient for exact edits: verified that both
+occurrences of <code>customer_id</code> in <code>SELECT a.customer_id ... ON a.customer_id =
+b.cid</code> carry distinct <code>start</code>/<code>end</code> offsets on <code>Identifier.meta</code>, including
+qualifiers and aliases. <code>SELECT *</code> yields no <code>Column</code> nodes, so a rename cannot
+see through a star and must refuse.</p>
+<p><strong>Design, when it is time.</strong> A new reference index that walks every
+<code>exp.Column</code> in every downstream model (the shape already exists at
+<code>analysis.py:179</code>), resolves each to a source via the schema from 3.1, and
+returns <code>{path, start, end}</code> per occurrence. Then <code>registerRenameProvider</code>
+returning a <code>WorkspaceEdit</code>, applied through a new multi-file write endpoint
+(today <code>PUT /api/files/{path}</code> writes one file, non-transactionally). Refuse
+when any downstream model reaches the column through <code>SELECT *</code>.</p>
+<p><strong>Verdict.</strong> Defer until 3.1 and 3.3 are in. Effort L including the multi-file
+write path. Impact preview ("these 7 places reference this column") is a good
+intermediate that needs the index but not the edit path, and it is honest.</p>
+<h2 id="5-unit-tests">5. Unit tests<a class="headerlink" href="#5-unit-tests" title="Permanent link">&para;</a></h2>
+<p><strong>What exists.</strong> Nothing in product code. The closest primitives, and all of
+them are reusable:</p>
+<ul>
+<li><code>diff.py:236-238</code> already runs a model's SQL into a temp table without
+  touching the target.</li>
+<li><code>_row_hash_expr</code> (<code>diff.py:195-209</code>) is a type-drift-proof row comparator.</li>
+<li><code>register_macros(conn, project_dir)</code> works on any connection, including
+  <code>:memory:</code> (verified).</li>
+<li>References are literal <code>schema.table</code>, with no <code>ref()</code> indirection, so the
+  harness must rewrite <code>exp.Table</code> nodes. Nothing in the tree mutates Table
+  nodes today, but the round-trip through sqlglot 30 was verified on 10
+  DuckDB-specific constructs (EXCLUDE, REPLACE, lambdas, struct dot, slices,
+  QUALIFY, UNION BY NAME, COLUMNS regex, TRY_CAST, GROUP BY ALL), all
+  semantically identical after regeneration.</li>
+</ul>
+<p><strong>File format.</strong> YAML, following <code>load_metrics</code> in <code>engine/semantic.py:147</code>
+(non-fatal collected errors, identifier validation, duplicate detection).
+Multi-row fixtures do not fit the single-line <code>@</code> directive shape, and
+<code>_split_config_pairs</code> would break on them.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># tests/unit/silver_customers.yml</span>
+<span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">silver.customers</span>
+<span class="nt">tests</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">counts orders per customer</span>
+<span class="w">    </span><span class="nt">given</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">bronze.customers</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">customer_id</span><span class="p">:</span><span class="w"> </span><span class="nv">INTEGER</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">VARCHAR</span><span class="p p-Indicator">}</span>
+<span class="w">        </span><span class="nt">rows</span><span class="p">:</span>
+<span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">1</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"Ann"</span><span class="p p-Indicator">]</span>
+<span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">2</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"Bo"</span><span class="p p-Indicator">]</span>
+<span class="w">      </span><span class="nt">bronze.orders</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">rows</span><span class="p">:</span>
+<span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">order_id</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="p p-Indicator">,</span><span class="nt"> customer_id</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="p p-Indicator">,</span><span class="nt"> amount</span><span class="p">:</span><span class="w"> </span><span class="nv">5.0</span><span class="p p-Indicator">}</span>
+<span class="w">    </span><span class="nt">expect</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">rows</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">customer_id</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="s">"Ann"</span><span class="p p-Indicator">,</span><span class="nt"> order_count</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="p p-Indicator">}</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">customer_id</span><span class="p">:</span><span class="w"> </span><span class="nv">2</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="s">"Bo"</span><span class="p p-Indicator">,</span><span class="nt"> order_count</span><span class="p">:</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p><code>columns:</code> is optional but recommended: a <code>(VALUES ...)</code> mock retypes <code>5.0</code>
+to DECIMAL, so mocks should be <code>CREATE TEMP TABLE</code> with declared types, and
+when not declared, take the types from the bind pass (3.1) or from the live
+catalog.</p>
+<p><strong>Execution.</strong></p>
+<ol>
+<li>Fresh <code>:memory:</code> connection, <code>register_macros</code>, load extensions.</li>
+<li>Create one temp table per <code>given</code> entry.</li>
+<li>Parse the model, replace every <code>exp.Table</code> whose <code>schema.name</code> is in
+   <code>given</code> with the mock name, preserving the alias. Any upstream reference
+   not mocked is an error, not a fallback to the warehouse; that is the
+   "no warehouse state" property.</li>
+<li>Run into a temp table, compare to <code>expect</code> with <code>_row_hash_expr</code>, order
+   insensitive by default with an <code>ordered: true</code> option. Report missing and
+   unexpected rows.</li>
+<li><code>havn test</code>, <code>POST /api/unit-tests/run</code>, and a UI tab beside Quality.
+   <code>havn check</code> runs them too.</li>
+</ol>
+<p><strong>Risks.</strong> <code>SELECT *</code> models: a mock declaring fewer columns than production
+silently narrows the output and the test passes against a fiction. Mitigate
+by defaulting missing mock columns from the bind schema and warning when a
+mock is narrower than the real table. Incremental models: test the full-refresh
+SQL only, state it in the docs (dbt has the same limitation and tracks it in
+an open issue). Models sqlglot cannot parse currently fall back to regex for
+dependency extraction; the rewriter has no safe fallback and must hard-fail
+with a clear message.</p>
+<p><strong>Positioning.</strong> dbt's <code>given</code>/<code>expect</code> shape is worth copying so the YAML
+reads familiar. The difference to advertise: dbt v2's local unit tests are
+experimental, Snowflake and BigQuery only, and need the upstream models to
+exist in the warehouse for schema fetch. havn's run on an in-memory DuckDB
+with nothing but the mocks, because the engine and the warehouse are the
+same thing.</p>
+<p>Effort M: engine one to two days, CLI and API half a day, UI one day, docs
+half a day.</p>
+<h2 id="6-modeling">6. Modeling<a class="headerlink" href="#6-modeling" title="Permanent link">&para;</a></h2>
+<h3 id="61-scd2-snapshots">6.1 SCD2 snapshots<a class="headerlink" href="#61-scd2-snapshots" title="Permanent link">&para;</a></h3>
+<p><strong>What exists.</strong> Three modules already called snapshot-something, none of them
+row-level: <code>snapshot.py</code> is metadata fingerprints, <code>snapshots.py</code> and
+<code>versioning.py</code> are whole-table Parquet for rewind. <code>cdc.py</code> is extraction
+watermarks. Grep for <code>valid_from</code>, <code>valid_to</code>, <code>is_current</code>, <code>check_cols</code>
+across product code: zero hits. The <code>merge</code> incremental strategy is an
+unconditional UPDATE plus anti-join INSERT with no hash comparison.</p>
+<p>The SQL was verified in <code>scratchpad/exp_scd2.py</code> across three runs (initial
+load, changes plus hard delete plus new key, identical replay): correct and
+idempotent, including the A to B to A revert case. DuckDB 1.5.5 has <code>MERGE
+INTO</code> but it cannot close and insert for the same key in one pass, so three
+statements plus one for hard deletes are needed regardless.</p>
+<p><strong>Design.</strong></p>
+<ul>
+<li><code>@config materialized=snapshot, unique_key=customer_id, strategy=check</code>
+  (or <code>strategy=timestamp, updated_at=updated_at</code>), <code>check_cols=all|[a,b]</code>,
+  <code>hard_deletes=ignore|invalidate|new_record</code> (dbt's exact values, so the
+  migration is a search and replace). Lives in <code>transform/</code> like any model;
+  no fourth directory.</li>
+<li>Target columns: user columns plus <code>valid_from</code>, <code>valid_to</code>, <code>is_current</code>,
+  <code>row_hash</code>. Make the meta column names configurable in project.yml for people
+  migrating from dbt (<code>dbt_valid_from</code>, <code>dbt_valid_to</code>, <code>dbt_scd_id</code>,
+  <code>dbt_updated_at</code>), and offer a <code>valid_to_current</code> sentinel option since
+  dbt has one and BI tools prefer <code>9999-12-31</code> to NULL.</li>
+<li>Statements, inside one transaction (prerequisite 1): hash staging with
+  <code>_row_hash_expr</code>; close changed (<code>IS NOT DISTINCT FROM</code> on the key, the
+  <code>execution.py:142</code> comment documents why); close hard-deleted if enabled;
+  insert new and changed.</li>
+<li>Enforce key uniqueness in staging before the merge, reusing
+  <code>_evaluate_grain</code>. <code>UPDATE ... FROM</code> with a multi-matching source is
+  non-deterministic in DuckDB and will silently pick a row.</li>
+<li>Naming: call the materialization <code>snapshot</code> in <code>@config</code> because that is
+  what warehouse people will search for, and rename the internal modules in
+  the same change (<code>snapshot.py</code> to <code>fingerprint.py</code>, <code>snapshots.py</code> to
+  <code>rewind.py</code>) so the word means one thing. <code>havn snapshot</code> the CLI verb stays
+  for rewind unless it gets renamed too; decide in the PR.</li>
+</ul>
+<p>Effort M: execution one day, config and validation half a day, tests one day,
+docs and the module renames half a day.</p>
+<h3 id="62-ephemeral-models">6.2 Ephemeral models<a class="headerlink" href="#62-ephemeral-models" title="Permanent link">&para;</a></h3>
+<p><strong>What exists.</strong> Three hardcoded materializations. Transitive hashing
+(<code>_compute_upstream_hash</code>, <code>discovery.py:183-199</code>) already folds upstream
+content hashes into consumers, so editing an ephemeral model already
+invalidates every consumer. Nothing inlines SQL from one model into another
+today.</p>
+<p><strong>Design.</strong></p>
+<ul>
+<li><code>materialized=ephemeral</code>: <code>execute_model</code> skips it; consumers get the
+  ephemeral's query inlined as a CTE prepended to their own query (better error
+  messages than a subquery, and DuckDB handles CTE chains well). Preserve the
+  original alias. Recursive ephemeral chains resolve in topological order.</li>
+<li><code>_drop_conflicting</code> gains a branch: a model switching to ephemeral drops the
+  orphan table or view at <code>schema.name</code>.</li>
+<li><code>@assert</code> on an ephemeral model: reject at validate time with a clear
+  message, or evaluate it against the inlined SQL as a temp view. Reject is
+  the honest first version.</li>
+<li>Frontend: a badge in the DAG panel; the table browser correctly does not
+  list it.</li>
+<li>The bind pass (3.1) creates a view for it in the shadow, so validation and
+  typing work unchanged.</li>
+</ul>
+<p><strong>Risk.</strong> Error messages: a DuckDB error in a three-level inlined query
+reports a line the user never wrote. With named CTEs the message at least
+names the CTE, which is the ephemeral model's name. That is the same
+limitation dbt has.</p>
+<p>Effort S to M.</p>
+<h3 id="63-schema-change-policy-for-incrementals">6.3 Schema-change policy for incrementals<a class="headerlink" href="#63-schema-change-policy-for-incrementals" title="Permanent link">&para;</a></h3>
+<p><strong>What exists.</strong> <code>execution.py:133-137</code> is the whole policy: columns in
+staging but not in target are <code>ALTER TABLE ADD COLUMN</code>ed. The loop never looks
+the other way and never compares types. Measured (<code>scratchpad/exp_schema.py</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>delete+insert</th>
+<th>merge</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Added column</td>
+<td>auto-added</td>
+<td>auto-added</td>
+</tr>
+<tr>
+<td>Removed column</td>
+<td>silent: new rows NULL, old rows stale</td>
+<td>same</td>
+</tr>
+<tr>
+<td>INTEGER to DOUBLE</td>
+<td>silent: 20.5 stored as 21</td>
+<td>same</td>
+</tr>
+<tr>
+<td>INTEGER to VARCHAR</td>
+<td>error, and the target is left empty</td>
+<td>error, data intact by accident</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Design.</strong> <code>on_schema_change=fail|ignore|append_new_columns|sync_all_columns</code>
+as a <code>@config</code> key, hashed into <code>content_hash</code> like the other incremental keys.
+Compare staging and target on name and type in both directions.</p>
+<ul>
+<li><code>append_new_columns</code>: today's behavior.</li>
+<li><code>ignore</code>: no ALTER, INSERT restricted to the intersection.</li>
+<li><code>fail</code>: any delta raises before any write, with a message naming the column
+  and both types.</li>
+<li><code>sync_all_columns</code>: add, drop, and for retyped columns rebuild the column
+  via <code>ALTER ... ALTER COLUMN TYPE</code> where DuckDB allows it, otherwise fail.</li>
+</ul>
+<p>Default: dbt's default is <code>ignore</code>, under which a removed column fails the
+run and an added column is dropped on the floor. havn's current behavior is
+closest to <code>append_new_columns</code>. Keep <code>append_new_columns</code> as the default for
+compatibility, but make retyped and removed columns always fail unless
+<code>ignore</code> or <code>sync_all_columns</code> is explicit, because the current silent
+rounding is a bug, not a feature. Like dbt, no option backfills old rows for a
+new column, and only top-level columns are tracked; say both in the docs.
+Prerequisite 1 first, or <code>fail</code> prevents one crash and every other crash
+still loses the DELETEd rows.</p>
+<p>Effort S plus prerequisite 1.</p>
+<h3 id="64-microbatch">6.4 Microbatch<a class="headerlink" href="#64-microbatch" title="Permanent link">&para;</a></h3>
+<p><strong>What exists.</strong> <code>{this}</code> is the only placeholder in <code>incremental_filter</code>.
+<code>@watermark</code> synthesizes a one-sided open-ended filter and always runs one
+batch. No <code>{start}</code>/<code>{end}</code>, no batch loop, no per-batch state, no backfill
+command. Ideas-catalog 1.27 (backfill with date range) is scoped to streams,
+not transform models, so it would not deliver this even if built.</p>
+<p><strong>Design, when it is time.</strong> Mirror dbt's keys so the docs can say "same
+config": <code>event_time=col, batch_size=hour|day|month|year, begin=2024-01-01,
+lookback=1</code> in <code>@config</code>; the engine computes windows, runs the model once
+per window with <code>{start}</code>/<code>{end}</code> substituted, and records each window in
+<code>_havn.batch_state</code> so a failed backfill resumes. <code>havn transform gold.events
+--event-time-start 2024-01-01 --event-time-end 2024-03-01</code> for explicit
+backfill (dbt's flag names). All timestamps UTC. The model must be written to
+process exactly one batch, as in dbt.</p>
+<p><strong>Verdict.</strong> Defer. The placeholder is two lines; the loop, the state and the
+CLI are the work, and it inherits prerequisite 1 in the worst way (a 30-batch
+backfill failing at batch 17). Note that <code>dbt-duckdb</code> has had microbatch
+since February 2026, so the gap is real for people coming from v1 on DuckDB.
+Build it after 6.3 and after there is a user asking for it.</p>
+<h2 id="7-running-things">7. Running things<a class="headerlink" href="#7-running-things" title="Permanent link">&para;</a></h2>
+<h3 id="71-graph-selectors">7.1 Graph selectors<a class="headerlink" href="#71-graph-selectors" title="Permanent link">&para;</a></h3>
+<p><strong>What exists.</strong> <code>havn transform</code> takes exact <code>schema.name</code> or bare <code>name</code>
+strings (<code>orchestration.py:79-88</code>). Jobs already have the whole dbt grammar:
+<code>+x</code>, <code>x+</code>, <code>+x+</code>, <code>schema.*</code>, script paths, in <code>resolve_execution_plan</code>
+(<code>engine/orchestration.py:302-445</code>) with <code>_collect_upstream</code> and
+<code>_collect_downstream</code>. <code>state:modified</code> is essentially <code>_has_changed</code>, and
+<code>diff.py:428-440</code> already composes <code>state:modified+</code>. There are three separate
+downstream-closure implementations in the tree.</p>
+<p><strong>Design.</strong></p>
+<ol>
+<li>Factor the model-selection half of <code>resolve_execution_plan</code> out of the
+   script-scheduling half into <code>select_models(selectors, dag, conn)</code> and use
+   it from <code>havn transform</code>, <code>/api/transform</code> and jobs. Fold the diff.py
+   closure into the same function.</li>
+<li>Replace the <code>schema.*</code> prefix hack with <code>fnmatch</code> so <code>gold.fct_*</code> works.</li>
+<li>Add <code>state:modified</code> and <code>state:modified+</code> backed by <code>_has_changed</code>.</li>
+<li>Add <code>tag:</code> after adding <code>@config tags=a,b</code>. Decision: tags are not hashed
+   into <code>content_hash</code> (retagging should not rebuild), and <code>validate_models</code>
+   checks them for typos.</li>
+<li><code>path:transform/gold/</code> selector is free once selection takes the model
+   list.</li>
+<li>Prerequisite 2 in the same PR, or selectors poison state on every use.</li>
+</ol>
+<p>Effort S to M. The grammar and closures exist; this is factoring and a CLI
+argument.</p>
+<h3 id="72-defer">7.2 Defer<a class="headerlink" href="#72-defer" title="Permanent link">&para;</a></h3>
+<p><strong>What exists.</strong> Environments override only <code>database.path</code>. <code>pr.py:709,942</code>
+already attaches a second warehouse and queries it three-part, so the
+precedent is in the tree. Verified (<code>scratchpad/exp4.py</code>): <code>ATTACH
+'prod.duckdb' AS prod (READ_ONLY)</code> then <code>CREATE TABLE silver.x AS SELECT *
+FROM prod.bronze.customers</code> works, cross-database joins work, writes to prod
+are refused. Parallel workers share one attach with <code>ATTACH IF NOT EXISTS</code>.
+The sqlglot rewrite to three-part names is about 20 lines and leaves CTEs,
+aliases and already-qualified refs alone.</p>
+<p><strong>The hard constraint.</strong> DuckDB's file lock: attaching prod read-only fails
+with <code>Could not set lock on file</code> whenever any other process holds prod open
+for writing, and with <code>Unique file handle conflict</code> if the same process has
+it open already. That is exactly when a scheduled prod job is running. Not a
+havn limitation, no workaround short of deferring to a copy.</p>
+<p><strong>Design.</strong></p>
+<ul>
+<li><code>environments.dev.defer: prod</code> in project.yml (new <code>EnvironmentConfig</code>
+  field).</li>
+<li>At transform start: attach the defer target read-only, once per process,
+  <code>IF NOT EXISTS</code>. On lock failure: clear error naming the holder PID, and a
+  <code>--defer-snapshot</code> option that copies prod to a temp file first (DuckDB's
+  <code>COPY FROM DATABASE</code>, already used in <code>routes/export.py:61</code>) for the case
+  where prod is busy.</li>
+<li>Rewrite predicate: "not present in the local catalog", not "not in the
+  model list", so landing, seeds and sources fall through to prod as
+  intended. Rewrite at execution time only; never into <code>content_hash</code> or the
+  file.</li>
+<li><code>masking_rewriter</code> strips the catalog part when resolving policies
+  (verified), so policies still apply to deferred reads.</li>
+<li>DuckLake backend: it already occupies the ATTACH slot; defer is unsupported
+  there in the first version.</li>
+</ul>
+<p>Effort M. Opt-in, documented with the lock caveat up front.</p>
+<h3 id="73-parse-and-lineage-time-at-scale">7.3 Parse and lineage time at scale<a class="headerlink" href="#73-parse-and-lineage-time-at-scale" title="Permanent link">&para;</a></h3>
+<p>Measured on the synthetic 1000-model project:</p>
+<table>
+<thead>
+<tr>
+<th>Pass</th>
+<th>Time</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>discover_models (parse plus deps)</td>
+<td>1.6 s</td>
+</tr>
+<tr>
+<td>build_dag</td>
+<td>3 ms</td>
+</tr>
+<tr>
+<td>validate_models, built catalog</td>
+<td>2.7 s</td>
+</tr>
+<tr>
+<td>column lineage, unbuilt catalog</td>
+<td>2.1 s</td>
+</tr>
+<tr>
+<td>column lineage, built catalog</td>
+<td>39.0 s</td>
+</tr>
+<tr>
+<td>shadow bind pass (3.1)</td>
+<td>2.6 s</td>
+</tr>
+</tbody>
+</table>
+<p>Prerequisites 3 and 4 take lineage from 39 s to roughly 2 to 3 s. After that,
+ideas-catalog 1.8 (content-hash cache) addresses the residual and makes
+incremental validation near-instant. The Rust question does not arise at
+1000 models; Python is at 1.6 ms per model for parsing and the binder is in
+C++ already. Add <code>benchmarks/bench_parse.py</code> from <code>scratchpad/scale_bench.py</code>
+so regressions show up.</p>
+<p>Effort S.</p>
+<h2 id="8-reuse-packages">8. Reuse: packages<a class="headerlink" href="#8-reuse-packages" title="Permanent link">&para;</a></h2>
+<p><strong>What exists.</strong> Nothing. No config key (<code>ProjectConfig</code> has <code>extra="ignore"</code>,
+so a <code>packages:</code> block is silently dropped today), no fetch command,
+<code>engine/git.py</code> is a UI git wrapper, macros scan one hardcoded non-recursive
+directory, <code>project_dir / "transform"</code> is hardcoded at 149 sites. The stdlib
+macro path (<code>_discover_stdlib_macros</code>, with user override and shadow logging)
+is the one precedent for namespaced reuse.</p>
+<p><strong>Design, when it is time.</strong> <code>packages: [{name, git, rev}]</code> in project.yml;
+<code>havn packages install</code> cloning into <code>havn_packages/&lt;name&gt;/</code> (not <code>havn
+deps</code>; <code>engine/deps.py</code> already means something else); <code>discover_all_models</code>
+walking <code>transform/</code> plus each package's <code>transform/</code>; package models forced
+into a <code>&lt;pkg&gt;_</code>-prefixed schema or a three-part <code>pkg.schema.name</code> full name;
+macro module names prefixed with the package to avoid the <code>havn_macros.utils</code>
+collision in <code>sys.modules</code>; lint, DAG, jobs and the UI all going through the
+same multi-root discovery.</p>
+<p><strong>Verdict.</strong> Defer. It is L, the hardcoded-path count makes a half-finished
+state (works in CLI, invisible in the DAG panel) very likely, and prerequisite
+8 (duplicate detection) is the part that matters even without packages. The
+to-do list's "share macro packs (pip-installable)" is a cheaper first step:
+a pip package exposing a <code>havn.macros</code> entry point gets macro reuse without
+touching model discovery.</p>
+<h2 id="9-first-impression">9. First impression<a class="headerlink" href="#9-first-impression" title="Permanent link">&para;</a></h2>
+<p>All verified, all README-only edits, all S.</p>
+<ul>
+<li><strong>Hero.</strong> <code>README.md:29</code> is <code>git clone ... &amp;&amp; npm install &amp;&amp; npm run build
+  &amp;&amp; ...</code>. The PyPI wheel (<code>havn 0.2.27</code>, 30 releases) bundles the built
+  frontend via <code>hatch_build.py</code> and <code>publish.yml</code>; verified end to end in a
+  clean venv that <code>pip install havn &amp;&amp; havn init demo &amp;&amp; havn serve</code> serves
+  the full SPA. The landing page already uses the honest four-line version.
+  Replace the hero with:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>pip install havn &amp;&amp; havn init my-project &amp;&amp; cd my-project &amp;&amp; havn jobs run full-refresh &amp;&amp; havn serve
+</code></pre></div>
+<p>Keep the clone-and-npm line under Contributing.</p>
+<ul>
+<li>
+<p><strong>Screenshot.</strong> <code>README.md:32-38</code> is commented out and points at
+  <code>.github/assets/screenshot.png</code>, which does not exist.
+  <code>landing/screenshots/overview.webp</code> (2560 by 1600) does. GitHub renders
+  WebP. Uncomment and point at it. One more shot of the editor with markers
+  once 4.1 lands.</p>
+</li>
+<li>
+<p><strong>Supported and not supported.</strong> No limitations page exists; the two
+  comparison tables (README and <code>docs/index.md</code>) disagree on axes and neither
+  is feature-level. Add <code>docs/limitations.md</code>: one table per area (SQL
+  features, materializations, selectors, environments, editor) with
+  supported / partial / not supported / planned, and link it from the README
+  comparison. Seed it from this document. Reads as maturity precisely because
+  it admits things. dbt does this for DuckDB with an open GitHub epic, and
+  for Snowflake and BigQuery with weekly-refreshed function tables; a single
+  honest page beats both for a project this size.</p>
+</li>
+<li>
+<p><strong>The comparison row that matters.</strong> Once phases 1 and 2 ship, the README
+  comparison should carry two rows dbt cannot match on DuckDB today: "type
+  checking and column lineage work offline, no login" and "unit tests run
+  with no warehouse". Not before; overclaiming is the one way to lose the
+  first-impression fight.</p>
+</li>
+</ul>
+<h2 id="10-sequencing">10. Sequencing<a class="headerlink" href="#10-sequencing" title="Permanent link">&para;</a></h2>
+<p>Phase 0, prerequisites and README (about a week). Items 1 to 9 in section 2,
+plus section 9. Nothing user-visible except the README, but every later phase
+gets cheaper and the codebase stops lying about incremental safety.</p>
+<p>Phase 1, the bind pass (about two weeks). 3.1 shadow bind, persist schemas,
+<code>havn validate</code> with bind errors, <code>/api/bind</code>, editor markers (4.1), hover
+types, go-to-definition (4.2), CTE preview (4.3). This is the phase that
+closes the perceived quality gap; everything visible in the editor comes from
+it.</p>
+<p>Phase 2, tests and modeling (about two weeks). Unit tests (5), schema-change
+policy (6.3), ephemeral (6.2), selectors (7.1). Four independent items, can be
+parallelized.</p>
+<p>Phase 3, coverage (about two weeks). Lineage rewrite on the conformance suite
+(3.3), types into contracts (3.2), SCD2 (6.1), defer (7.2).</p>
+<p>Deferred with reasons: rename (4.4) until 3.3, microbatch (6.4) until a user
+asks, packages (8) until the macro-pack version has been tried.</p>
+<h2 id="11-what-i-would-push-back-on">11. What I would push back on<a class="headerlink" href="#11-what-i-would-push-back-on" title="Permanent link">&para;</a></h2>
+<ul>
+<li>"Static type inference" as a phrase. The binder resolves types and catches
+  bind errors; it does not catch conversion errors, and neither does Fusion.
+  Say what it does.</li>
+<li>Rust versus Python at 500 to 1000 models. The measured bottleneck is a
+  catalog query in a loop. Fix the loop before drawing conclusions about the
+  language.</li>
+<li>Packages before there are two projects that want to share a model. Macro
+  packs via pip cover the realistic case at a tenth of the cost.</li>
+<li>SCD2 under the name "snapshot" without renaming the three modules that
+  already use the word. Do both or the docs will be unreadable.</li>
+</ul>
+<h2 id="12-status-2026-09-21">12. Status, 2026-09-21<a class="headerlink" href="#12-status-2026-09-21" title="Permanent link">&para;</a></h2>
+<p>Everything in sections 2 through 9 is implemented, including the three
+items this plan deferred (rename, microbatch, packages). Test counts went
+from 1474 backend and 42 frontend to about 2100 backend and 104 frontend. The CHANGELOG <code>Unreleased</code> entry is the user-facing summary.</p>
+<p>Deviations from the plan worth knowing:</p>
+<ul>
+<li>The snapshot, rewind and versioning modules were not renamed. The
+  materialization is called <code>snapshot</code> anyway; docs carry a disambiguation
+  paragraph. The rename is still a good idea and still a separate change.</li>
+<li>Unit tests do not default missing mock columns from the bind schema; they
+  warn when a mock is narrower than the real table and the model projects a
+  star. Filling NULL columns silently would have forced every expect row to
+  enumerate them.</li>
+<li><code>impact_analysis</code> keeps SELECT-list hits on the lineage path and adds only
+  non-projection hits from the reference index, so existing counts hold.</li>
+<li>Contract nullability is checked only when DuckDB reports a real NOT NULL
+  constraint; <code>CREATE TABLE AS</code> objects report everything nullable, which
+  would have failed every <code>nullable: false</code> declaration.</li>
+<li>Defer's snapshot mode cannot use <code>COPY FROM DATABASE</code> on a locked file
+  (it needs the attach that just failed), so the locked case falls back to
+  the newest verified backup, and a raw file copy is not offered.</li>
+<li><code>concurrent_batches</code> for microbatch is not implemented; windows run in
+  order because the per-window transaction is what makes resume honest.</li>
+<li><code>result:</code> and <code>source_status:</code> selectors are not implemented; havn keeps no
+  per-model result set from the previous run.</li>
+<li>Lint does not walk installed packages, deliberately.</li>
+</ul>
+<p>Bugs found and fixed along the way that were not on the gap list: the
+non-transactional incremental path (row loss on a failed INSERT), the
+targeted-run upstream hash corruption, <code>havn diff</code> in changed mode comparing
+against an empty upstream hash, partial wildcards in job targets matching
+nothing, lint line numbers wrong for every <code>@config</code> model, sqlglot 30
+keying <code>FROM</code> and <code>WITH</code> as <code>from_</code> and <code>with_</code> (broke star detection and
+CTE handling in two places), and macro registration inside the shadow
+catalog dying with the DETACH.</p>
+<p>Follow-ups that fell out of the work: switch <code>engine/sentinel.py</code>,
+<code>engine/snapshots.py</code> and the notebook promote path to
+<code>discover_all_models</code> so packages are covered there too; a selector input
+in the DAG panel; a frontend surface for the environment's defer status;
+DuckLake support for the bind pass and defer; the module renames above.</p>
+<h2 id="13-review-round-2026-09-22">13. Review round, 2026-09-22<a class="headerlink" href="#13-review-round-2026-09-22" title="Permanent link">&para;</a></h2>
+<p>Four read-only reviews (transform engine, server and CLI, frontend, security)
+ran over the full diff after everything merged, followed by four fix rounds.
+Every finding was reproduced before it was fixed and every fix carries a
+test that failed first.</p>
+<p>What the reviews found, in order of weight:</p>
+<ul>
+<li><code>POST /api/bind</code> spliced a viewer's buffer into <code>CREATE VIEW</code> on a cursor
+  of the writable connection with no read-only validation. A viewer could
+  create a table in the real warehouse via a three-part name and a second
+  statement, <code>COPY</code> rows to a server path, read <code>/etc/passwd</code> line by line
+  through <code>read_csv</code> header sniffing, and <code>ATTACH</code> arbitrary files. Fixed by
+  redesign: the shadow is a private in-memory database seeded with empty
+  typed tables, external access is disabled and the configuration locked
+  before any model SQL, and the shared read-only validator runs first on the
+  API and MCP paths. This never shipped in a release.</li>
+<li>The defer rewriter was process-global, so concurrent runs contaminated
+  each other. Now per run, attach refcounted, alias per target path.</li>
+<li>Ephemeral inlining round-tripped <code>{start}</code>/<code>{end}</code> through sqlglot and
+  broke every microbatch model with an ephemeral upstream. Masking now wraps
+  every round trip.</li>
+<li>The defer scoping pass (<code>table_catalog = current_database()</code>) had swept
+  execution.py but not the rest of the tree; about thirty probes were
+  scoped.</li>
+<li>F2 rename applied disk offsets to a dirty buffer and corrupted it; a
+  CTE-local column could retarget a rename at an upstream model.</li>
+<li><code>incremental_strategy=append</code> bypassed <code>on_schema_change</code> and inserted
+  positionally.</li>
+<li>A future <code>--event-time-end</code> poisoned the microbatch resume cursor.</li>
+<li>Plus fourteen medium and low items listed in the CHANGELOG's "Fixed
+  before release" section.</li>
+</ul>
+<p>The pattern behind most of the high findings: an invariant introduced by one
+feature's author (defer's catalog scoping and placeholder masking, the
+security model of the query surfaces) that the other features' code paths
+did not know to honour. Pairwise feature interactions are where the residual
+risk sits; the conformance and scenario tests added in this round cover the
+pairs the reviewers named (defer with profiling, contracts, diff and unit
+tests; ephemeral with microbatch and defer; rename with packages and
+directives).</p>
+<p>Reviewers' remaining unverified notes, for a later pass: a fixed temp-file
+name in the atomic file writer could collide under two concurrent batch
+writes to the same path; <code>modelsCacheRef</code> in the frontend has no TTL; the
+sql providers are global so the Query panel's editor shares them; DuckLake
+was not exercised anywhere.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

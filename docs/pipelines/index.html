@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -344,6 +344,25 @@
   
   
     <li class="md-tabs__item">
+      <a href="../unit-tests/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Unit Tests
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
       <a href="../contracts/" class="md-tabs__link">
         
   
@@ -370,6 +389,25 @@
     
   
   Macros
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../packages/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Packages
 
       </a>
     </li>
@@ -600,6 +638,25 @@
     
   
   MCP Server
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../limitations/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  What havn Supports
 
       </a>
     </li>
@@ -885,6 +942,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../unit-tests/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unit Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../contracts/" class="md-nav__link">
         
   
@@ -920,6 +1004,33 @@
     
   
     Macros
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../packages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packages
   
 
     
@@ -1279,6 +1390,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#orchestration-jobs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Orchestration Jobs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Orchestration Jobs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Targets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exclude" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exclude
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#python-ingest-scripts" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1593,6 +1754,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What havn Supports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../cli-reference/" class="md-nav__link">
         
   
@@ -1839,6 +2027,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#orchestration-jobs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Orchestration Jobs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Orchestration Jobs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Targets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exclude" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exclude
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#python-ingest-scripts" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1975,7 +2213,7 @@
 <p>Streams are configured in <code>project.yml</code> under the <code>streams:</code> key:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">streams</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">full-refresh</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Full</span><span class="nv"> </span><span class="s">pipeline</span><span class="nv"> </span><span class="s">rebuild&quot;</span>
+<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">"Full</span><span class="nv"> </span><span class="s">pipeline</span><span class="nv"> </span><span class="s">rebuild"</span>
 <span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">seed</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">all</span><span class="p p-Indicator">]</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">ingest</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">all</span><span class="p p-Indicator">]</span>
@@ -1983,14 +2221,14 @@
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">export</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">all</span><span class="p p-Indicator">]</span>
 
 <span class="w">  </span><span class="nt">daily-etl</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Daily</span><span class="nv"> </span><span class="s">incremental</span><span class="nv"> </span><span class="s">ETL&quot;</span>
-<span class="w">    </span><span class="nt">schedule</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;0</span><span class="nv"> </span><span class="s">6</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*&quot;</span>
+<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">"Daily</span><span class="nv"> </span><span class="s">incremental</span><span class="nv"> </span><span class="s">ETL"</span>
+<span class="w">    </span><span class="nt">schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"0</span><span class="nv"> </span><span class="s">6</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span>
 <span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">ingest</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">all</span><span class="p p-Indicator">]</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">transform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">all</span><span class="p p-Indicator">]</span>
 
 <span class="w">  </span><span class="nt">export-only</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Re-export</span><span class="nv"> </span><span class="s">without</span><span class="nv"> </span><span class="s">rebuilding&quot;</span>
+<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">"Re-export</span><span class="nv"> </span><span class="s">without</span><span class="nv"> </span><span class="s">rebuilding"</span>
 <span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">export</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">all</span><span class="p p-Indicator">]</span>
 </code></pre></div>
@@ -2042,7 +2280,7 @@
 <p>Streams support automatic retries for transient failures:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">streams</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">daily-etl</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Daily</span><span class="nv"> </span><span class="s">ETL</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">retries&quot;</span>
+<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">"Daily</span><span class="nv"> </span><span class="s">ETL</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">retries"</span>
 <span class="w">    </span><span class="nt">retries</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
 <span class="w">    </span><span class="nt">retry_delay</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
 <span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
@@ -2057,24 +2295,24 @@
 <p>Get notified when a stream completes or fails:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">streams</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">daily-etl</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">webhook_url</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;https://hooks.slack.com/services/T.../B.../...&quot;</span>
+<span class="w">    </span><span class="nt">webhook_url</span><span class="p">:</span><span class="w"> </span><span class="s">"https://hooks.slack.com/services/T.../B.../..."</span>
 <span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">ingest</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">all</span><span class="p p-Indicator">]</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">transform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">all</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 <p>The webhook receives a JSON POST with:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;stream&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;daily-etl&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;success&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;duration_seconds&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">12.3</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;timestamp&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2025-01-15T06:00:00&quot;</span>
+<span class="w">  </span><span class="nt">"stream"</span><span class="p">:</span><span class="w"> </span><span class="s2">"daily-etl"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"success"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"duration_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mf">12.3</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"timestamp"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2025-01-15T06:00:00"</span>
 <span class="p">}</span>
 </code></pre></div>
 <h2 id="scheduling">Scheduling<a class="headerlink" href="#scheduling" title="Permanent link">&para;</a></h2>
 <p>Streams can be scheduled with cron expressions:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">streams</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">daily-etl</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">schedule</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;0</span><span class="nv"> </span><span class="s">6</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*&quot;</span><span class="w">    </span><span class="c1"># 6 AM daily</span>
+<span class="w">    </span><span class="nt">schedule</span><span class="p">:</span><span class="w"> </span><span class="s">"0</span><span class="nv"> </span><span class="s">6</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span><span class="w">    </span><span class="c1"># 6 AM daily</span>
 <span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">ingest</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">all</span><span class="p p-Indicator">]</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">transform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">all</span><span class="p p-Indicator">]</span>
@@ -2083,22 +2321,105 @@
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>schedule
 </code></pre></div>
 <p>See <a href="scheduler">Scheduler</a> for the full cron reference.</p>
+<h2 id="orchestration-jobs">Orchestration Jobs<a class="headerlink" href="#orchestration-jobs" title="Permanent link">&para;</a></h2>
+<p>A job is a YAML file in <code>orchestration/</code> that names what to run and, optionally,
+when. Unlike a stream, which is an explicit list of steps, a job names <em>targets</em>
+and lets havn work out the order and the upstream it needs:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># orchestration/full-refresh.yml</span>
+<span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">full-refresh</span>
+<span class="nt">targets</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gold.*</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">export/earthquake_report.py</span>
+<span class="nt">resolve</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">upstream</span>
+<span class="nt">retry</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="nt">schedules</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"0</span><span class="nv"> </span><span class="s">6</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span><span class="nb">jobs</span><span class="w">                    </span><span class="c1"># list jobs with last and next run</span>
+havn<span class="w"> </span><span class="nb">jobs</span><span class="w"> </span>preview<span class="w"> </span>full-refresh<span class="w">   </span><span class="c1"># show the resolved plan, without running it</span>
+havn<span class="w"> </span><span class="nb">jobs</span><span class="w"> </span>run<span class="w"> </span>full-refresh
+</code></pre></div>
+<h3 id="targets">Targets<a class="headerlink" href="#targets" title="Permanent link">&para;</a></h3>
+<p><code>targets:</code> takes the full selector grammar documented under
+<a href="transforms#selecting-models">Selecting models</a> -- wildcards, <code>+x</code> / <code>x+</code> /
+<code>@x</code>, <code>n+</code> depth bounds, and the <code>tag:</code>, <code>path:</code>, <code>config.&lt;key&gt;:</code> and
+<code>state:modified</code> methods -- plus two things only jobs have:</p>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Runs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ingest/orders.py</code></td>
+<td>that ingest script</td>
+</tr>
+<tr>
+<td><code>ingest/orders.py+</code></td>
+<td>that script, then every model downstream of the tables it creates</td>
+</tr>
+<tr>
+<td><code>export/report.py</code></td>
+<td>that export script</td>
+</tr>
+<tr>
+<td><code>+export/report.py</code></td>
+<td>the models the script references, their upstream, then the script</td>
+</tr>
+</tbody>
+</table>
+<p>Script targets are scheduled around the model selection: ingest first, then
+models in dependency order, then exports.</p>
+<h3 id="exclude">Exclude<a class="headerlink" href="#exclude" title="Permanent link">&para;</a></h3>
+<p><code>exclude:</code> takes the same grammar and is subtracted from the selection:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nightly</span>
+<span class="nt">targets</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tag:daily</span>
+<span class="nt">exclude</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tag:expensive</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gold.experimental_*</span>
+</code></pre></div>
+<h3 id="resolve">resolve<a class="headerlink" href="#resolve" title="Permanent link">&para;</a></h3>
+<p><code>resolve:</code> is a compatibility knob for jobs written before selectors existed.</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>upstream</code> (default)</td>
+<td>A target with no <code>+</code> markers means <code>+target</code>: its upstream is pulled in. A downstream expansion also pulls in the upstream of everything it reached, so the plan is always buildable from scratch.</td>
+</tr>
+<tr>
+<td><code>none</code></td>
+<td>Targets run literally. <code>gold.orders</code> is <code>gold.orders</code> and nothing else.</td>
+</tr>
+</tbody>
+</table>
+<p>New jobs should set <code>resolve: none</code> and say what they mean with the selector
+syntax instead. <code>havn jobs preview &lt;name&gt;</code> prints the resolved plan, which is
+the quickest way to see which mode a job is in.</p>
 <h2 id="python-ingest-scripts">Python Ingest Scripts<a class="headerlink" href="#python-ingest-scripts" title="Permanent link">&para;</a></h2>
 <p>Ingest scripts are plain Python files. A DuckDB connection is pre-injected as <code>db</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># ingest/customers.py</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">requests</span>
 
-<span class="n">response</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;https://api.example.com/customers&quot;</span><span class="p">)</span>
+<span class="n">response</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"https://api.example.com/customers"</span><span class="p">)</span>
 <span class="n">data</span> <span class="o">=</span> <span class="n">response</span><span class="o">.</span><span class="n">json</span><span class="p">()</span>
 
-<span class="n">db</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;CREATE SCHEMA IF NOT EXISTS landing&quot;</span><span class="p">)</span>
-<span class="n">db</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;CREATE OR REPLACE TABLE landing.customers AS SELECT * FROM ?&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">data</span><span class="p">])</span>
+<span class="n">db</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">"CREATE SCHEMA IF NOT EXISTS landing"</span><span class="p">)</span>
+<span class="n">db</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">"CREATE OR REPLACE TABLE landing.customers AS SELECT * FROM ?"</span><span class="p">,</span> <span class="p">[</span><span class="n">data</span><span class="p">])</span>
 </code></pre></div>
 <h3 id="legacy-format">Legacy Format<a class="headerlink" href="#legacy-format" title="Permanent link">&para;</a></h3>
 <p>The older <code>def run(db)</code> function format is still supported for backward compatibility:</p>
 <div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">db</span><span class="p">):</span>
-    <span class="n">db</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;CREATE SCHEMA IF NOT EXISTS landing&quot;</span><span class="p">)</span>
-    <span class="n">db</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;CREATE OR REPLACE TABLE landing.data AS SELECT 1&quot;</span><span class="p">)</span>
+    <span class="n">db</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">"CREATE SCHEMA IF NOT EXISTS landing"</span><span class="p">)</span>
+    <span class="n">db</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">"CREATE OR REPLACE TABLE landing.data AS SELECT 1"</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="script-execution">Script Execution<a class="headerlink" href="#script-execution" title="Permanent link">&para;</a></h3>
 <ul>
@@ -2187,7 +2508,7 @@ havn<span class="w"> </span>run<span class="w"> </span>export/daily_report.py<sp
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

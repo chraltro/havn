@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -346,6 +346,25 @@
   
   
     <li class="md-tabs__item">
+      <a href="../unit-tests/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Unit Tests
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
       <a href="../contracts/" class="md-tabs__link">
         
   
@@ -372,6 +391,25 @@
     
   
   Macros
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../packages/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Packages
 
       </a>
     </li>
@@ -600,6 +638,25 @@
     
   
   MCP Server
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../limitations/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  What havn Supports
 
       </a>
     </li>
@@ -939,6 +996,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#editor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Editor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#with-authentication" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1126,6 +1194,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../unit-tests/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unit Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../contracts/" class="md-nav__link">
         
   
@@ -1161,6 +1256,33 @@
     
   
     Macros
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../packages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packages
   
 
     
@@ -1504,6 +1626,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What havn Supports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../cli-reference/" class="md-nav__link">
         
   
@@ -1734,6 +1883,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#editor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Editor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#with-authentication" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1806,7 +1966,7 @@
 <h3 id="install-from-source-development">Install from Source (development)<a class="headerlink" href="#install-from-source-development" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/chraltro/havn
 <span class="nb">cd</span><span class="w"> </span>havn
-pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[dev]&quot;</span>
+pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">".[dev]"</span>
 <span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>install<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>build
 </code></pre></div>
 <h3 id="docker">Docker<a class="headerlink" href="#docker" title="Permanent link">&para;</a></h3>
@@ -1837,6 +1997,9 @@ pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </s
     magnitude_scale.csv
   contracts/            # YAML data quality contracts
     quality.yml
+  tests/
+    unit/               # Model unit tests (fixtures in, expected rows out)
+      top_earthquakes.yml
   notebooks/            # Interactive .dpnb notebooks
     explore.dpnb
   project.yml           # Project configuration
@@ -1861,12 +2024,12 @@ pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </s
 </code></pre></div>
 <p>This shows all tables and views in the warehouse, organized by schema.</p>
 <h3 id="run-queries">Run Queries<a class="headerlink" href="#run-queries" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>query<span class="w"> </span><span class="s2">&quot;SELECT * FROM gold.earthquake_summary LIMIT 10&quot;</span>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>query<span class="w"> </span><span class="s2">"SELECT * FROM gold.earthquake_summary LIMIT 10"</span>
 </code></pre></div>
 <p>Output options:</p>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>query<span class="w"> </span><span class="s2">&quot;SELECT * FROM gold.top_earthquakes&quot;</span><span class="w"> </span>--csv
-havn<span class="w"> </span>query<span class="w"> </span><span class="s2">&quot;SELECT * FROM gold.top_earthquakes&quot;</span><span class="w"> </span>--json
-havn<span class="w"> </span>query<span class="w"> </span><span class="s2">&quot;SELECT COUNT(*) FROM landing.earthquakes&quot;</span><span class="w"> </span>--limit<span class="w"> </span><span class="m">5</span>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>query<span class="w"> </span><span class="s2">"SELECT * FROM gold.top_earthquakes"</span><span class="w"> </span>--csv
+havn<span class="w"> </span>query<span class="w"> </span><span class="s2">"SELECT * FROM gold.top_earthquakes"</span><span class="w"> </span>--json
+havn<span class="w"> </span>query<span class="w"> </span><span class="s2">"SELECT COUNT(*) FROM landing.earthquakes"</span><span class="w"> </span>--limit<span class="w"> </span><span class="m">5</span>
 </code></pre></div>
 <h3 id="check-data-quality">Check Data Quality<a class="headerlink" href="#check-data-quality" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>contracts
@@ -1888,6 +2051,53 @@ havn<span class="w"> </span>query<span class="w"> </span><span class="s2">&quot;
 <li><strong>Notebook Runner</strong> -- Execute <code>.dpnb</code> notebooks interactively</li>
 <li><strong>Pipeline Controls</strong> -- Run streams and view history</li>
 </ul>
+<h3 id="editor">Editor<a class="headerlink" href="#editor" title="Permanent link">&para;</a></h3>
+<p>Open a <code>.sql</code> file under <code>transform/</code> and the editor works against the
+warehouse catalog rather than just colouring text.</p>
+<ul>
+<li><strong>Live error markers.</strong> As you type, the model is bound against its upstream
+  tables and the errors are underlined in place: a misspelled column, a table
+  that does not exist, a syntax error. Lint warnings from SQLFluff appear the
+  same way, on save and after a short pause in typing. The count sits next to
+  the filename above the editor.</li>
+<li><strong>Hover types.</strong> Hover a column and the inferred type appears at the top of
+  the tooltip, for the model's own output columns and for <code>alias.column</code>
+  references into upstream models. Hovering a table still lists its columns,
+  and hovering a macro still shows its signature.</li>
+<li><strong>Go to definition.</strong> <code>Ctrl+Click</code> (<code>Cmd+Click</code> on macOS) or <code>F12</code> on a
+  <code>schema.model</code> reference opens the file that declares it.</li>
+<li><strong>Preview a single CTE.</strong> A <code>Preview</code> link appears above each CTE in a <code>WITH</code>
+  chain. Click it, or press <code>Ctrl+Shift+Enter</code> (<code>Cmd+Shift+Enter</code>) with the
+  cursor inside a CTE, to run just that step and see the rows below the editor.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Shortcut</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl/Cmd+Enter</code></td>
+<td>Preview the whole model</td>
+</tr>
+<tr>
+<td><code>Ctrl/Cmd+Shift+Enter</code></td>
+<td>Preview the CTE at the cursor</td>
+</tr>
+<tr>
+<td><code>Ctrl/Cmd+Shift+F</code></td>
+<td>Format the file (<code>havn lint --fix</code>)</td>
+</tr>
+<tr>
+<td><code>F12</code> or <code>Ctrl/Cmd+Click</code></td>
+<td>Go to the definition of a model reference</td>
+</tr>
+</tbody>
+</table>
+<p>Previews are capped at 100 rows. Renaming a column across downstream models is
+not available yet; see <a href="limitations">Limitations</a>.</p>
 <h3 id="with-authentication">With Authentication<a class="headerlink" href="#with-authentication" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>serve<span class="w"> </span>--auth
 </code></pre></div>
@@ -1899,7 +2109,7 @@ havn<span class="w"> </span>query<span class="w"> </span><span class="s2">&quot;
 <span class="w">  </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warehouse.duckdb</span>
 <span class="nt">streams</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">full-refresh</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Full</span><span class="nv"> </span><span class="s">pipeline</span><span class="nv"> </span><span class="s">rebuild&quot;</span>
+<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">"Full</span><span class="nv"> </span><span class="s">pipeline</span><span class="nv"> </span><span class="s">rebuild"</span>
 <span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">seed</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">all</span><span class="p p-Indicator">]</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">ingest</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">all</span><span class="p p-Indicator">]</span>
@@ -1966,7 +2176,7 @@ havn<span class="w"> </span>query<span class="w"> </span><span class="s2">&quot;
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

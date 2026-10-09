@@ -10,13 +10,9 @@
       
       
       
-        <link rel="canonical" href="https://chraltro.github.io/db/mcp/">
+        <link rel="canonical" href="https://chraltro.github.io/db/mockups/">
       
       
-        <link rel="prev" href="../auth/">
-      
-      
-        <link rel="next" href="../limitations/">
       
       
         
@@ -27,7 +23,7 @@
     
     
       
-        <title>MCP Server - havn</title>
+        <title>havn UX mockups - havn</title>
       
     
     
@@ -78,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#mcp-server" class="md-skip">
+        <a href="#havn-ux-mockups" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              MCP Server
+              havn UX mockups
             
           </span>
         </div>
@@ -627,11 +623,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../mcp/" class="md-tabs__link">
         
   
   
@@ -1344,37 +1338,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    MCP Server
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
         
   
   
@@ -1390,70 +1357,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Setup
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#tools" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Tools
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#how-it-coexists-with-havn-serve" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        How it coexists with havn serve
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#safety-model" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Safety model
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1559,58 +1462,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Setup
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#tools" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Tools
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#how-it-coexists-with-havn-serve" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        How it coexists with havn serve
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#safety-model" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Safety model
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -1629,118 +1480,36 @@
   
 
 
-<h1 id="mcp-server">MCP Server<a class="headerlink" href="#mcp-server" title="Permanent link">&para;</a></h1>
-<p><code>havn mcp</code> starts a <a href="https://modelcontextprotocol.io">Model Context Protocol</a>
-server over stdio, exposing your warehouse to AI agents — Claude Code,
-Codex CLI, or any other MCP client. The agent can explore tables, run
-read-only queries, inspect the transform DAG and lineage, query
-semantic-layer metrics, and (optionally) build models.</p>
-<p>No extra dependencies: the protocol implementation ships with havn.</p>
-<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># Claude Code</span>
-claude<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span>havn<span class="w"> </span>--<span class="w"> </span>havn<span class="w"> </span>mcp<span class="w"> </span>-p<span class="w"> </span>/path/to/your/project
-
-<span class="c1"># Any other MCP client: configure a stdio server with</span>
-<span class="c1">#   command: havn</span>
-<span class="c1">#   args: ["mcp", "-p", "/path/to/your/project"]</span>
-</code></pre></div>
-<p>Options:</p>
+<h1 id="havn-ux-mockups">havn UX mockups<a class="headerlink" href="#havn-ux-mockups" title="Permanent link">&para;</a></h1>
+<p>Static HTML concepts for a reworked web UI. Open any file in a browser. Each one has a
+<strong>Design notes</strong> button (bottom right) that shows numbered pins and the reasoning behind them.
+They use the real <code>havn-dark</code> / <code>havn-light</code> tokens from <code>frontend/src/themes.js</code> and follow the
+OS light/dark setting.</p>
 <table>
 <thead>
 <tr>
-<th>Flag</th>
-<th>Meaning</th>
+<th>Mockup</th>
+<th>Problem it addresses</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>-p, --project</code></td>
-<td>Project directory (default: current dir)</td>
+<td><a href="01-harbour-home.html">01 · Harbour Home</a></td>
+<td>5 sections × 17 sub-tabs is a lot to navigate, and Overview shows state without saying what to do next. Proposes a 5-destination rail, an object-search omnibox, a loud env pill, and a ranked "Needs attention" queue.</td>
 </tr>
 <tr>
-<td><code>-e, --env</code></td>
-<td>Environment to use (<code>dev</code>, <code>prod</code>, ...)</td>
+<td><a href="02-model-workbench.html">02 · Model Workbench</a></td>
+<td>Fixing one model means hopping between Editor, Query, Quality, DAG and Runs. Proposes one screen per model: a lineage strip, inline assertion failures, a Preview/Checks/Columns/Runs inspector, and a blast-radius action bar.</td>
 </tr>
 <tr>
-<td><code>--read-only</code></td>
-<td>Disable the <code>run_transform</code> tool entirely</td>
+<td><a href="03-change-review.html">03 · Change Review</a></td>
+<td>Diff, Git, Quality, Masking and environments are separate tabs with no "ship it" flow. Proposes a dev → prod promotion page: impact subgraph, data and schema diff, metric delta, and an explicit gate with a promote plan.</td>
 </tr>
 </tbody>
 </table>
-<h2 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Tool</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>query</code></td>
-<td>Read-only SQL (mutations and file-access functions are rejected)</td>
-</tr>
-<tr>
-<td><code>list_tables</code></td>
-<td>Tables and views, optionally filtered by schema</td>
-</tr>
-<tr>
-<td><code>describe_table</code></td>
-<td>Columns, types, and row count</td>
-</tr>
-<tr>
-<td><code>list_models</code></td>
-<td>Transform models with materialization, tags and dependencies; takes a <code>select</code> graph selector</td>
-</tr>
-<tr>
-<td><code>get_model</code></td>
-<td>A model's SQL source, config, and dependencies</td>
-</tr>
-<tr>
-<td><code>model_lineage</code></td>
-<td>Direct + transitive upstreams and downstreams</td>
-</tr>
-<tr>
-<td><code>run_history</code></td>
-<td>Recent pipeline runs from <code>_havn.run_log</code></td>
-</tr>
-<tr>
-<td><code>list_metrics</code></td>
-<td>Semantic-layer metrics from <code>metrics/*.yml</code></td>
-</tr>
-<tr>
-<td><code>query_metric</code></td>
-<td>Query a metric by dimensions / grain / time range</td>
-</tr>
-<tr>
-<td><code>run_transform</code></td>
-<td>Build models; <code>select</code> and <code>exclude</code> take graph selectors (omitted with <code>--read-only</code>)</td>
-</tr>
-</tbody>
-</table>
-<p><code>select</code> and <code>exclude</code> take the same grammar as <code>havn transform</code>: <code>+x</code>, <code>x+</code>,
-<code>@x</code>, <code>gold.fct_*</code>, <code>tag:daily</code>, <code>path:transform/gold/</code>,
-<code>config.materialized:incremental</code>, <code>state:modified+</code>, and a comma to
-intersect. See <a href="transforms#selecting-models">Selecting models</a>.</p>
-<h2 id="how-it-coexists-with-havn-serve">How it coexists with <code>havn serve</code><a class="headerlink" href="#how-it-coexists-with-havn-serve" title="Permanent link">&para;</a></h2>
-<p>DuckDB allows one writing process at a time. When <code>havn serve</code> is running,
-it holds the warehouse lock — the MCP server detects this and routes read
-queries through the server's HTTP API instead of opening the file directly
-(the same strategy the CLI uses). <code>run_transform</code> refuses to run while the
-lock is held and tells the agent why.</p>
-<h2 id="safety-model">Safety model<a class="headerlink" href="#safety-model" title="Permanent link">&para;</a></h2>
-<p>The MCP server has the same trust level as your local CLI:</p>
-<ul>
-<li>Every <code>query</code> / <code>query_metric</code> / introspection call goes through the same
-  read-only SQL validation as the web API: single statement, no mutation
-  verbs, no <code>read_csv</code> / <code>read_parquet</code> / HTTP functions.</li>
-<li>Reads use a read-only DuckDB connection — even a validator bypass could
-  not write.</li>
-<li><code>run_transform</code> is the only mutating tool. It builds your own transform
-  models (with Pipeline Rewind snapshots when enabled, so agent-triggered
-  builds can be rolled back like any other run). Start with <code>--read-only</code>
-  if the agent shouldn't build at all.</li>
-</ul>
+<p>The three share one shell (rail + omnibox + env pill), so they can be read as one
+direction, but each also stands on its own and could ship separately. Suggested order by
+value per effort: 02 → 01 → 03.</p>
 
 
 

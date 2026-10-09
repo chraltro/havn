@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -344,6 +344,25 @@
   
   
     <li class="md-tabs__item">
+      <a href="../unit-tests/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Unit Tests
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
       <a href="../contracts/" class="md-tabs__link">
         
   
@@ -370,6 +389,25 @@
     
   
   Macros
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../packages/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Packages
 
       </a>
     </li>
@@ -600,6 +638,25 @@
     
   
   MCP Server
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../limitations/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  What havn Supports
 
       </a>
     </li>
@@ -885,6 +942,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../unit-tests/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unit Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../contracts/" class="md-nav__link">
         
   
@@ -920,6 +1004,33 @@
     
   
     Macros
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../packages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packages
   
 
     
@@ -1776,6 +1887,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What havn Supports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../cli-reference/" class="md-nav__link">
         
   
@@ -2345,7 +2483,7 @@ financial data, and analytics-safe transformations. Use the catalog API
 <h4 id="hash">hash<a class="headerlink" href="#hash" title="Permanent link">&para;</a></h4>
 <p>Replaces the value with the first 8 characters of its SHA-256 hash.
 Deterministic per value, NOT JOIN-safe (use <code>consistent_hash</code> for that).</p>
-<div class="highlight"><pre><span></span><code>&quot;john@example.com&quot; -&gt; &quot;a1b2c3d4&quot;
+<div class="highlight"><pre><span></span><code>"john@example.com" -&gt; "a1b2c3d4"
 </code></pre></div>
 <h4 id="redact">redact<a class="headerlink" href="#redact" title="Permanent link">&para;</a></h4>
 <p>Replaces the value with <code>***</code>.</p>
@@ -2354,7 +2492,7 @@ Deterministic per value, NOT JOIN-safe (use <code>consistent_hash</code> for tha
 <h4 id="partial">partial<a class="headerlink" href="#partial" title="Permanent link">&para;</a></h4>
 <p>Shows the first and/or last N characters, masking the middle with <code>*</code>.</p>
 <div class="highlight"><pre><span></span><code># show_first=2, show_last=4
-&quot;555-123-4567&quot; -&gt; &quot;55*******4567&quot;
+"555-123-4567" -&gt; "55*******4567"
 </code></pre></div>
 <p>Configuration: <code>show_first</code> (default 0), <code>show_last</code> (default 0).</p>
 <h4 id="truncate">truncate<a class="headerlink" href="#truncate" title="Permanent link">&para;</a></h4>
@@ -2364,25 +2502,25 @@ the column prefix is informative.</p>
 <h3 id="pii">PII<a class="headerlink" href="#pii" title="Permanent link">&para;</a></h3>
 <h4 id="email">email<a class="headerlink" href="#email" title="Permanent link">&para;</a></h4>
 <p>Hides the local part of an email address, keeps the domain.</p>
-<div class="highlight"><pre><span></span><code>&quot;john.doe@company.com&quot; -&gt; &quot;***@company.com&quot;
+<div class="highlight"><pre><span></span><code>"john.doe@company.com" -&gt; "***@company.com"
 </code></pre></div>
 <h4 id="phone">phone<a class="headerlink" href="#phone" title="Permanent link">&para;</a></h4>
 <p>Keeps the last N digits of a phone number, masks the rest.</p>
 <p>Configuration: <code>show_last</code> (default 4).</p>
 <h4 id="first_initial">first_initial<a class="headerlink" href="#first_initial" title="Permanent link">&para;</a></h4>
 <p>Reduces a name to initials separated by periods.</p>
-<div class="highlight"><pre><span></span><code>&quot;Jane Smith Doe&quot; -&gt; &quot;J. S. D.&quot;
+<div class="highlight"><pre><span></span><code>"Jane Smith Doe" -&gt; "J. S. D."
 </code></pre></div>
 <h4 id="ip_address">ip_address<a class="headerlink" href="#ip_address" title="Permanent link">&para;</a></h4>
 <p>Masks host octets of an IPv4 address.</p>
 <div class="highlight"><pre><span></span><code># keep_octets=2
-&quot;192.168.1.42&quot; -&gt; &quot;192.168.x.x&quot;
+"192.168.1.42" -&gt; "192.168.x.x"
 </code></pre></div>
 <p>Configuration: <code>keep_octets</code> (default 2).</p>
 <h3 id="financial">Financial<a class="headerlink" href="#financial" title="Permanent link">&para;</a></h3>
 <h4 id="credit_card">credit_card<a class="headerlink" href="#credit_card" title="Permanent link">&para;</a></h4>
 <p>PCI-DSS-compliant: masks all but the last N digits of a credit card number.</p>
-<div class="highlight"><pre><span></span><code>&quot;4111-1111-1111-1234&quot; -&gt; &quot;************1234&quot;
+<div class="highlight"><pre><span></span><code>"4111-1111-1111-1234" -&gt; "************1234"
 </code></pre></div>
 <p>Configuration: <code>show_last</code> (default 4).</p>
 <h3 id="analytics-safe">Analytics-safe<a class="headerlink" href="#analytics-safe" title="Permanent link">&para;</a></h3>
@@ -2390,13 +2528,13 @@ the column prefix is informative.</p>
 <p>Buckets a numeric value into a fixed-size range string. Preserves rough
 distributions for analytics while hiding precise values.</p>
 <div class="highlight"><pre><span></span><code># bucket_size=10000
-42_500 -&gt; &quot;40000-49999&quot;
+42_500 -&gt; "40000-49999"
 </code></pre></div>
 <p>Configuration: <code>bucket_size</code> (default 10000).</p>
 <h4 id="noise">noise<a class="headerlink" href="#noise" title="Permanent link">&para;</a></h4>
 <p>Adds deterministic random noise within <code>+/- percentage</code>. Same input always
 returns the same output for a given <code>seed_key</code>.</p>
-<div class="highlight"><pre><span></span><code># percentage=10, seed_key=&quot;salary&quot;
+<div class="highlight"><pre><span></span><code># percentage=10, seed_key="salary"
 50000 -&gt; 51234   (or 48721, etc., but stable per value)
 </code></pre></div>
 <p>Configuration: <code>percentage</code> (default 10.0), <code>seed_key</code> (default "").</p>
@@ -2407,8 +2545,8 @@ returns the same output for a given <code>seed_key</code>.</p>
 <h4 id="consistent_hash">consistent_hash<a class="headerlink" href="#consistent_hash" title="Permanent link">&para;</a></h4>
 <p>JOIN-safe pseudonym: same input always produces the same output. Use this
 when masked columns are used as join keys.</p>
-<div class="highlight"><pre><span></span><code># prefix=&quot;cust_&quot;, length=8
-&quot;123e4567-...&quot; -&gt; &quot;cust_a1b2c3d4&quot;
+<div class="highlight"><pre><span></span><code># prefix="cust_", length=8
+"123e4567-..." -&gt; "cust_a1b2c3d4"
 </code></pre></div>
 <p>Configuration: <code>prefix</code> (default ""), <code>length</code> (default 8).</p>
 <h2 id="creating-masking-policies">Creating Masking Policies<a class="headerlink" href="#creating-masking-policies" title="Permanent link">&para;</a></h2>
@@ -2429,26 +2567,26 @@ when masked columns are used as join keys.</p>
 <h3 id="via-rest-api">Via REST API<a class="headerlink" href="#via-rest-api" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># Create a policy</span>
 curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:3000/api/masking/policies<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<span class="s1">    &quot;schema_name&quot;: &quot;gold&quot;,</span>
-<span class="s1">    &quot;table_name&quot;: &quot;customers&quot;,</span>
-<span class="s1">    &quot;column_name&quot;: &quot;email&quot;,</span>
-<span class="s1">    &quot;method&quot;: &quot;hash&quot;,</span>
-<span class="s1">    &quot;exempted_roles&quot;: [&quot;admin&quot;]</span>
-<span class="s1">  }&#39;</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{</span>
+<span class="s1">    "schema_name": "gold",</span>
+<span class="s1">    "table_name": "customers",</span>
+<span class="s1">    "column_name": "email",</span>
+<span class="s1">    "method": "hash",</span>
+<span class="s1">    "exempted_roles": ["admin"]</span>
+<span class="s1">  }'</span>
 
 <span class="c1"># Create a partial masking policy</span>
 curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:3000/api/masking/policies<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<span class="s1">    &quot;schema_name&quot;: &quot;gold&quot;,</span>
-<span class="s1">    &quot;table_name&quot;: &quot;customers&quot;,</span>
-<span class="s1">    &quot;column_name&quot;: &quot;phone&quot;,</span>
-<span class="s1">    &quot;method&quot;: &quot;partial&quot;,</span>
-<span class="s1">    &quot;method_config&quot;: {&quot;show_first&quot;: 0, &quot;show_last&quot;: 4},</span>
-<span class="s1">    &quot;exempted_roles&quot;: [&quot;admin&quot;]</span>
-<span class="s1">  }&#39;</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{</span>
+<span class="s1">    "schema_name": "gold",</span>
+<span class="s1">    "table_name": "customers",</span>
+<span class="s1">    "column_name": "phone",</span>
+<span class="s1">    "method": "partial",</span>
+<span class="s1">    "method_config": {"show_first": 0, "show_last": 4},</span>
+<span class="s1">    "exempted_roles": ["admin"]</span>
+<span class="s1">  }'</span>
 </code></pre></div>
 <h3 id="via-cli">Via CLI<a class="headerlink" href="#via-cli" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>mask<span class="w"> </span>add<span class="w"> </span>--schema<span class="w"> </span>gold<span class="w"> </span>--table<span class="w"> </span>customers<span class="w"> </span>--column<span class="w"> </span>email<span class="w"> </span>--method<span class="w"> </span><span class="nb">hash</span>
@@ -2520,22 +2658,22 @@ havn<span class="w"> </span>mask<span class="w"> </span>remove<span class="w"> <
 <h2 id="conditional-masking">Conditional Masking<a class="headerlink" href="#conditional-masking" title="Permanent link">&para;</a></h2>
 <p>Masking can be applied conditionally based on another column's value:</p>
 <div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:3000/api/masking/policies<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<span class="s1">    &quot;schema_name&quot;: &quot;gold&quot;,</span>
-<span class="s1">    &quot;table_name&quot;: &quot;customers&quot;,</span>
-<span class="s1">    &quot;column_name&quot;: &quot;email&quot;,</span>
-<span class="s1">    &quot;method&quot;: &quot;redact&quot;,</span>
-<span class="s1">    &quot;condition_column&quot;: &quot;country&quot;,</span>
-<span class="s1">    &quot;condition_value&quot;: &quot;EU&quot;,</span>
-<span class="s1">    &quot;exempted_roles&quot;: [&quot;admin&quot;]</span>
-<span class="s1">  }&#39;</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{</span>
+<span class="s1">    "schema_name": "gold",</span>
+<span class="s1">    "table_name": "customers",</span>
+<span class="s1">    "column_name": "email",</span>
+<span class="s1">    "method": "redact",</span>
+<span class="s1">    "condition_column": "country",</span>
+<span class="s1">    "condition_value": "EU",</span>
+<span class="s1">    "exempted_roles": ["admin"]</span>
+<span class="s1">  }'</span>
 </code></pre></div>
 <p>This masks the <code>email</code> column only for rows where <code>country = 'EU'</code>, useful for GDPR compliance.</p>
 <h2 id="role-exemptions">Role Exemptions<a class="headerlink" href="#role-exemptions" title="Permanent link">&para;</a></h2>
 <p>By default, only users with the <code>admin</code> role see unmasked data. You can customize this per policy:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;exempted_roles&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;admin&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;editor&quot;</span><span class="p">]</span>
+<span class="w">  </span><span class="nt">"exempted_roles"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"admin"</span><span class="p">,</span><span class="w"> </span><span class="s2">"editor"</span><span class="p">]</span>
 <span class="p">}</span>
 </code></pre></div>
 <p>When a user queries data:
@@ -2575,8 +2713,8 @@ havn<span class="w"> </span>mask<span class="w"> </span>remove<span class="w"> <
 </code></pre></div>
 <h3 id="update-a-policy">Update a Policy<a class="headerlink" href="#update-a-policy" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>http://localhost:3000/api/masking/policies/&lt;policy_id&gt;<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;method&quot;: &quot;partial&quot;, &quot;method_config&quot;: {&quot;show_first&quot;: 2, &quot;show_last&quot;: 0}}&#39;</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"method": "partial", "method_config": {"show_first": 2, "show_last": 0}}'</span>
 </code></pre></div>
 <h3 id="delete-a-policy">Delete a Policy<a class="headerlink" href="#delete-a-policy" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>DELETE<span class="w"> </span>http://localhost:3000/api/masking/policies/&lt;policy_id&gt;
@@ -2706,7 +2844,7 @@ havn<span class="w"> </span>mask<span class="w"> </span>remove<span class="w"> <
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

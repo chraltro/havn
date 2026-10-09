@@ -1,0 +1,2384 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="The open-source data platform that runs on your machine. DuckDB + SQL transforms + Python. Data in safe waters.">
+      
+      
+      
+        <link rel="canonical" href="https://chraltro.github.io/db/limitations/">
+      
+      
+        <link rel="prev" href="../mcp/">
+      
+      
+        <link rel="next" href="../cli-reference/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>What havn Supports - havn</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Outfit:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Outfit";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#what-havn-supports" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="havn" class="md-header__button md-logo" aria-label="havn" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            havn
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              What havn Supports
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/chraltro/havn" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    chraltro/havn
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../transforms/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Transforms
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../seeds/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Seeds
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../sources/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Sources
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../quality/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Data Quality
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../unit-tests/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Unit Tests
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../contracts/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contracts
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../macros/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Macros
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../packages/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Packages
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../semantic-layer/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Semantic Layer
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../lineage/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Lineage
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../masking/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Masking
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../notebooks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Notebooks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../pipelines/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Pipelines
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../scheduler/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Scheduler
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../connectors/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Connectors
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../cdc/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CDC
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../versioning/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Versioning
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../environments/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Environments
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../auth/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Auth
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../mcp/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  MCP Server
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  What havn Supports
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../cli-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../api-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="havn" class="md-nav__button md-logo" aria-label="havn" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    havn
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/chraltro/havn" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    chraltro/havn
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transforms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transforms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../seeds/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Seeds
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../unit-tests/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unit Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contracts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../macros/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Macros
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../packages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../semantic-layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Semantic Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lineage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lineage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../masking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Masking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipelines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scheduler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scheduler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cdc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CDC
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../versioning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../auth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What havn Supports
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What havn Supports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#sql-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SQL features
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#materializations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Materializations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Validation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#column-lineage-per-construct" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Column lineage, per construct
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running models
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#editor-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Editor (web UI)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reuse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reuse
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#sql-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SQL features
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#materializations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Materializations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Validation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#column-lineage-per-construct" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Column lineage, per construct
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running models
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#editor-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Editor (web UI)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reuse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reuse
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="what-havn-supports">What havn Supports<a class="headerlink" href="#what-havn-supports" title="Permanent link">&para;</a></h1>
+<p>This page lists, feature by feature, what havn does today and what it does not.
+It is updated with each release, so if something here looks out of date against
+the version you are running, it is a bug in this page. Missing something you
+need, or found a gap we have not written down? Open an issue at
+<a href="https://github.com/chraltro/havn/issues">github.com/chraltro/havn/issues</a>.</p>
+<p>Status words mean exactly this:</p>
+<table>
+<thead>
+<tr>
+<th>Word</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Supported</strong></td>
+<td>Works today, covered by tests, safe to build on.</td>
+</tr>
+<tr>
+<td><strong>Partial</strong></td>
+<td>Works with a stated limitation. Read the note before you rely on it.</td>
+</tr>
+<tr>
+<td><strong>Not supported</strong></td>
+<td>Does not work and is not being built right now. The note says why.</td>
+</tr>
+<tr>
+<td><strong>Planned</strong></td>
+<td>Designed and queued, but not in a release yet.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="sql-features">SQL features<a class="headerlink" href="#sql-features" title="Permanent link">&para;</a></h2>
+<p>havn hands your SQL to DuckDB unchanged, so anything DuckDB can run, havn can
+build. What varies is how well havn's own analysis (dependency extraction for
+the DAG, and column-level lineage) understands the construct. Dependency
+extraction is what decides build order, and it handles every construct below.</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CTEs</td>
+<td>Supported</td>
+<td>Build order and column lineage both correct through CTE chains, including recursive CTEs.</td>
+</tr>
+<tr>
+<td>Window functions</td>
+<td>Supported</td>
+<td>Including <code>QUALIFY</code>. Column lineage traces <code>PARTITION BY</code> and <code>ORDER BY</code> columns into the window's output column.</td>
+</tr>
+<tr>
+<td><code>UNION</code> / <code>UNION ALL</code></td>
+<td>Supported</td>
+<td>Every branch is traced, including <code>UNION ALL BY NAME</code>.</td>
+</tr>
+<tr>
+<td><code>SELECT *</code> over a join</td>
+<td>Supported</td>
+<td>A column name present on both sides stays two output columns, named the way DuckDB names them when the model is built. Star expansion needs a column catalog, a connection or a bind-pass schema.</td>
+</tr>
+<tr>
+<td><code>SELECT * EXCLUDE (...)</code></td>
+<td>Supported</td>
+<td>Excluded columns are gone from the lineage output too.</td>
+</tr>
+<tr>
+<td><code>SELECT * REPLACE (...)</code></td>
+<td>Supported</td>
+<td>The replacement expression is the source of the replaced column.</td>
+</tr>
+<tr>
+<td>Nested subquery in <code>FROM</code></td>
+<td>Supported</td>
+<td>The subquery alias is not reported as a source table.</td>
+</tr>
+<tr>
+<td>Struct and list columns</td>
+<td>Partial</td>
+<td>Builds correctly, and <code>unnest</code> lineage is exact. <code>s.field</code> and <code>s['field']</code> both resolve to the struct column <code>s</code>; lineage does not point inside the struct.</td>
+</tr>
+<tr>
+<td><code>PIVOT</code></td>
+<td>Partial</td>
+<td>Builds correctly and the DAG sees the source table. The grouping columns are exact; each pivoted output column maps to the <code>ON</code> and <code>USING</code> columns together. Enumerating a pivot's output columns needs a live connection.</td>
+</tr>
+<tr>
+<td><code>UNPIVOT</code></td>
+<td>Supported</td>
+<td>The <code>NAME</code> and <code>VALUE</code> outputs map to every unpivoted column.</td>
+</tr>
+<tr>
+<td><code>QUALIFY</code></td>
+<td>Supported</td>
+<td>Builds correctly, column lineage correct.</td>
+</tr>
+<tr>
+<td><code>ASOF JOIN</code></td>
+<td>Supported</td>
+<td>Builds correctly, dependencies detected, column lineage exact.</td>
+</tr>
+<tr>
+<td><code>LATERAL</code></td>
+<td>Partial</td>
+<td>Over-broad, never wrong: sqlglot gives a <code>LATERAL</code> body no scope of its own, so the correlation predicate's columns come along with the projection.</td>
+</tr>
+<tr>
+<td><code>COLUMNS('regex')</code></td>
+<td>Supported</td>
+<td>Needs a live connection to enumerate the matched columns.</td>
+</tr>
+<tr>
+<td><code>GROUP BY ALL</code></td>
+<td>Supported</td>
+<td></td>
+</tr>
+<tr>
+<td>Python macros (<code>@macro</code>)</td>
+<td>Supported</td>
+<td>Registered as DuckDB scalar UDFs, callable anywhere in a model.</td>
+</tr>
+<tr>
+<td>Table macros (<code>@table_macro</code>)</td>
+<td>Supported</td>
+<td>Called with <code>FROM</code>. Output columns come from the declared <code>schema=</code>.</td>
+</tr>
+<tr>
+<td><code>CREATE MACRO</code> SQL macros</td>
+<td>Supported</td>
+<td><code>.sql</code> files in <code>macros/</code> are registered alongside the Python ones.</td>
+</tr>
+<tr>
+<td>Jinja templating</td>
+<td>Not supported</td>
+<td>Deliberate. Models are plain SQL; reusable logic goes in a macro instead.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="materializations">Materializations<a class="headerlink" href="#materializations" title="Permanent link">&para;</a></h2>
+<p>Set with <code>@config materialized=...</code> at the top of a model.</p>
+<table>
+<thead>
+<tr>
+<th>Materialization</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>view</code></td>
+<td>Supported</td>
+<td></td>
+</tr>
+<tr>
+<td><code>table</code></td>
+<td>Supported</td>
+<td>Rebuilt when the model's content hash or any upstream hash changes.</td>
+</tr>
+<tr>
+<td><code>incremental</code>, <code>delete+insert</code></td>
+<td>Supported</td>
+<td>Default strategy. Needs <code>unique_key</code>.</td>
+</tr>
+<tr>
+<td><code>incremental</code>, <code>merge</code></td>
+<td>Supported</td>
+<td>Needs <code>unique_key</code>. Updates every matched row rather than only changed ones.</td>
+</tr>
+<tr>
+<td><code>incremental</code>, <code>append</code></td>
+<td>Supported</td>
+<td>No <code>unique_key</code> needed and no dedup.</td>
+</tr>
+<tr>
+<td><code>on_schema_change</code> policy</td>
+<td>Supported</td>
+<td><code>append_new_columns</code> (default), <code>ignore</code>, <code>fail</code>, <code>sync_all_columns</code>, set with <code>@config on_schema_change=</code>. Staging and target are compared on name and type in both directions before any write, so a policy that refuses the change leaves the target untouched. No option backfills old rows for a newly added column, and only top-level columns are tracked: a field inside a <code>STRUCT</code>, <code>MAP</code> or <code>LIST</code> is invisible to the comparison.</td>
+</tr>
+<tr>
+<td><code>ephemeral</code></td>
+<td>Supported</td>
+<td>Inlined into every consumer as a <code>__havn_</code>-prefixed CTE rather than materialized; chains and the model's own CTEs are hoisted in dependency order, and aliases are preserved. Reported as <code>inlined</code>. <code>@assert</code>, <code>@grain</code>, <code>{this}</code>, <code>@watermark</code> and <code>incremental_filter</code> are rejected on an ephemeral model, because each of them needs a target table that never exists.</td>
+</tr>
+<tr>
+<td><code>snapshot</code> (SCD2 history)</td>
+<td>Supported</td>
+<td><code>@config materialized=snapshot, unique_key=...</code> with <code>strategy=check</code> (optionally <code>check_cols=</code>) or <code>strategy=timestamp, updated_at=</code>, and <code>hard_deletes=ignore|invalidate|new_record</code>. Writes <code>valid_from</code>, <code>valid_to</code>, <code>is_current</code>, <code>row_hash</code> (plus <code>is_deleted</code> under <code>new_record</code>), renameable project-wide under <code>snapshots.meta_columns</code>. Replays are no-ops; a duplicate <code>unique_key</code> in the query is refused before any write; <code>--force</code> re-runs the merge and never drops history, so dropping the table is the reset. New source columns are appended with NULL history, removed or retyped columns are an error, and <code>incremental_filter</code> / <code>@watermark</code> are rejected. Not to be confused with <code>havn snapshot</code> / <code>havn rewind</code>, which save whole-warehouse restore points.</td>
+</tr>
+<tr>
+<td><code>incremental</code>, <code>microbatch</code></td>
+<td>Supported</td>
+<td><code>@config incremental_strategy=microbatch, event_time=, batch_size=hour\|day\|month\|year, begin=, lookback=</code> (dbt's names). The model filters itself on the <code>{start}</code> and <code>{end}</code> placeholders; havn adds no WHERE clause of its own. Each window is a DELETE plus INSERT in its own transaction, recorded in <code>_havn.batch_state</code>, so a failed backfill resumes at the window that failed. Boundaries are UTC and naive. <code>havn transform --event-time-start/--event-time-end</code> backfills an explicit range; <code>--force</code> reprocesses from <code>begin</code>. <code>incremental_filter</code> and <code>@watermark</code> are rejected with it, and more than 100,000 windows is refused rather than attempted. No parallel batches: windows run in order, one at a time.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
+<p><code>havn validate</code> checks project structure, config and the DAG before you build.</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DAG construction, cycle detection</td>
+<td>Supported</td>
+<td>Circular dependencies are reported by name.</td>
+</tr>
+<tr>
+<td>Table and column name checking</td>
+<td>Supported</td>
+<td>The bind pass resolves every model against a shadow catalog, so columns on upstreams that have never been built are checked too. <code>--no-bind</code> falls back to the name-level check, which skips unbuilt upstreams.</td>
+</tr>
+<tr>
+<td>Type resolution and bind errors</td>
+<td>Supported</td>
+<td><code>havn validate</code> hands each model's SQL to the DuckDB binder against a shadow catalog. Resolves output types and catches wrong arity, unknown functions, operator overload failures, missing columns, missing struct keys, ambiguous references, aggregation without GROUP BY and set-operation arity mismatches, without reading a row. Caveat: it does not catch value conversions. <code>CAST(some_varchar AS INTEGER)</code> binds clean and fails at run time on the first row that is not a number, as does comparing a numeric column to a string constant. A clean bind is not a guarantee that the build will succeed. See <a href="../quality/#validation-and-type-resolution">Data Quality</a>.</td>
+</tr>
+<tr>
+<td>Column-level lineage</td>
+<td>Partial</td>
+<td>See the per-construct table below.</td>
+</tr>
+<tr>
+<td>Contract column declarations</td>
+<td>Supported</td>
+<td>A contract's <code>columns:</code> block is checked against the schema the bind pass infers, so a break is reported before the build rather than after it. See <a href="#testing">Testing</a>.</td>
+</tr>
+<tr>
+<td>Schema drift without a contract</td>
+<td>Partial</td>
+<td>Off by default behind <code>validation.schema_drift: warn</code> and <code>--schema-drift</code>. See <a href="#testing">Testing</a>.</td>
+</tr>
+<tr>
+<td>Unknown <code>@config</code> keys</td>
+<td>Partial</td>
+<td>Unrecognised keys are ignored rather than rejected, so a typo such as <code>materialised=table</code> silently builds a view.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="column-lineage-per-construct">Column lineage, per construct<a class="headerlink" href="#column-lineage-per-construct" title="Permanent link">&para;</a></h3>
+<p>Column lineage is what powers the lineage view and impact analysis. Every row
+below is pinned by <code>tests/test_lineage_conformance.py</code>, which checks the output
+column set against DuckDB's own <code>DESCRIBE</code> of the built model and the per-column
+source mapping against a written-out expectation. See
+<a href="../lineage/#what-lineage-gets-right">Lineage</a> for the detail.</p>
+<table>
+<thead>
+<tr>
+<th>Construct</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CTE chain, recursive CTE</td>
+<td>Supported</td>
+<td></td>
+</tr>
+<tr>
+<td>Nested subquery in <code>FROM</code></td>
+<td>Supported</td>
+<td></td>
+</tr>
+<tr>
+<td>Window function, <code>QUALIFY</code></td>
+<td>Supported</td>
+<td></td>
+</tr>
+<tr>
+<td><code>UNION ALL</code>, <code>UNION ALL BY NAME</code></td>
+<td>Supported</td>
+<td>Every branch.</td>
+</tr>
+<tr>
+<td><code>SELECT *</code> over a join</td>
+<td>Supported</td>
+<td>Both sides of a duplicated name survive.</td>
+</tr>
+<tr>
+<td><code>SELECT * EXCLUDE</code>, <code>SELECT * REPLACE</code></td>
+<td>Supported</td>
+<td></td>
+</tr>
+<tr>
+<td><code>unnest</code>, <code>UNPIVOT</code>, <code>ASOF JOIN</code>, <code>GROUP BY ALL</code></td>
+<td>Supported</td>
+<td></td>
+</tr>
+<tr>
+<td>Correlated subquery</td>
+<td>Supported</td>
+<td></td>
+</tr>
+<tr>
+<td><code>COLUMNS('regex')</code></td>
+<td>Supported</td>
+<td>Needs a live connection.</td>
+</tr>
+<tr>
+<td>Struct dot <code>s.field</code>, bracket <code>s['field']</code></td>
+<td>Partial</td>
+<td>Resolves to the struct column, not the field inside it.</td>
+</tr>
+<tr>
+<td><code>PIVOT</code></td>
+<td>Partial</td>
+<td>Grouping columns exact; a pivoted output column maps to the <code>ON</code> and <code>USING</code> columns together. Needs a live connection to enumerate the outputs.</td>
+</tr>
+<tr>
+<td><code>LATERAL</code></td>
+<td>Partial</td>
+<td>Over-broad, never wrong: the correlation predicate's columns come along with the projection.</td>
+</tr>
+<tr>
+<td>Columns used only in <code>WHERE</code>, <code>JOIN</code>, <code>GROUP BY</code>, <code>ORDER BY</code></td>
+<td>Not applicable</td>
+<td>They feed no output column, so they have no lineage entry by construction. Impact analysis finds them through the reference index and labels each hit with its clause.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="running-models">Running models<a class="headerlink" href="#running-models" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>havn transform</code> (whole project)</td>
+<td>Supported</td>
+<td>Content-hash change detection rebuilds only what changed, <code>--force</code> rebuilds everything.</td>
+</tr>
+<tr>
+<td>Selectors on <code>havn transform</code></td>
+<td>Supported</td>
+<td>The full grammar, positionally or with <code>--select/-s</code>, plus <code>--exclude/-x</code>. <code>havn ls</code> dry-runs a selector without building.</td>
+</tr>
+<tr>
+<td>Job selectors in <code>orchestration/*.yml</code></td>
+<td>Supported</td>
+<td>The same grammar, plus ingest/export script paths, a job-level <code>exclude:</code>, and <code>resolve: upstream</code>.</td>
+</tr>
+<tr>
+<td>Graph operators (<code>+x</code>, <code>x+</code>, <code>+x+</code>, <code>n+x</code>, <code>x+n</code>, <code>@x</code>)</td>
+<td>Supported</td>
+<td><code>n+</code>/<code>+n</code> bound the walk to N hops; <code>@x</code> is x, its downstream, and every upstream of those.</td>
+</tr>
+<tr>
+<td>Glob selectors (<code>gold.fct_*</code>, <code>*.customers</code>)</td>
+<td>Supported</td>
+<td>fnmatch anywhere in the name, in either half.</td>
+</tr>
+<tr>
+<td>Selector methods (<code>tag:</code>, <code>path:</code>, <code>config.&lt;key&gt;:</code>, <code>state:modified</code>)</td>
+<td>Supported</td>
+<td><code>state:modified</code> reads the same content and upstream hashes change detection uses. Comma intersects, e.g. <code>tag:daily,gold.*</code>.</td>
+</tr>
+<tr>
+<td>Selectors on the API and MCP</td>
+<td>Supported</td>
+<td><code>POST /api/transform</code> takes <code>targets</code> and <code>exclude</code>; <code>GET /api/models?select=</code> filters the listing; the MCP <code>run_transform</code> and <code>list_models</code> tools take <code>select</code>.</td>
+</tr>
+<tr>
+<td>Selectors in the web UI</td>
+<td>Supported</td>
+<td>The DAG panel takes a selector, previews what it matches by highlighting those nodes, and runs it as the transform target. The grammar is in the input's tooltip.</td>
+</tr>
+<tr>
+<td><code>result:</code> and <code>source_status:</code> selectors</td>
+<td>Not supported</td>
+<td>These need a stored result set from the previous run, which havn does not keep per model beyond its status.</td>
+</tr>
+<tr>
+<td>Environments</td>
+<td>Supported</td>
+<td><code>havn env use &lt;name&gt;</code> switches the database path, connection overrides and defer target declared in <code>project.yml</code>.</td>
+</tr>
+<tr>
+<td>Defer to another environment</td>
+<td>Partial</td>
+<td><code>environments.&lt;name&gt;.defer: &lt;other&gt;</code> plus <code>havn transform --defer</code> attaches that environment's warehouse read-only, so a dev run reads every model it has not built from there and writes only locally. The limitation is DuckDB's file lock: the attach fails whenever another process holds the target open for writing, which is whenever a run against it is going. Not removable, so <code>--defer-snapshot</code> defers to a consistent copy instead (<code>COPY FROM DATABASE</code>, or the newest verified backup when the target is locked). Unlike dbt, no manifest or <code>--state</code> is involved; what havn needs is the other environment's file.</td>
+</tr>
+<tr>
+<td>Defer on the DuckLake backend</td>
+<td>Not supported</td>
+<td>DuckLake already occupies the ATTACH slot defer would use. A deferred run on it stops with that message rather than half-working.</td>
+</tr>
+<tr>
+<td>Defer across machines</td>
+<td>Not supported</td>
+<td>The defer target is a warehouse file this machine can open. A remote environment would need a copy on local disk.</td>
+</tr>
+<tr>
+<td>Defer status in the web UI</td>
+<td>Supported</td>
+<td>The header shows the active environment's defer target with a green dot when the target can be attached read-only right now and amber when it cannot. The tooltip carries the path, why the probe failed, and the <code>--defer-snapshot</code> way out. It describes the instant it was fetched, since the lock can be taken a moment later.</td>
+</tr>
+<tr>
+<td>Scheduler</td>
+<td>Supported</td>
+<td>Cron schedules in job files, run by <code>havn schedule</code>, plus <code>havn watch</code> for rebuild on file change.</td>
+</tr>
+<tr>
+<td>Parallel execution</td>
+<td>Supported</td>
+<td>Independent models run concurrently by default; <code>--sequential</code> turns it off.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="editor-web-ui">Editor (web UI)<a class="headerlink" href="#editor-web-ui" title="Permanent link">&para;</a></h2>
+<p>The Monaco editor in <code>havn serve</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Autocomplete</td>
+<td>Supported</td>
+<td>Schemas, tables, columns and macros.</td>
+</tr>
+<tr>
+<td>Hover</td>
+<td>Supported</td>
+<td>Shows inferred column types for output columns and <code>alias.column</code> references, plus macro signatures and docstrings and table and column metadata.</td>
+</tr>
+<tr>
+<td>Format and whole-model preview</td>
+<td>Supported</td>
+<td></td>
+</tr>
+<tr>
+<td>Live error markers</td>
+<td>Supported</td>
+<td>Bind diagnostics 400 ms after a keystroke, lint diagnostics on save and after 1.5 s idle, under separate marker owners. Only for <code>.sql</code> files under <code>transform/</code>.</td>
+</tr>
+<tr>
+<td>Go to definition on a model reference</td>
+<td>Supported</td>
+<td><code>F12</code> or Ctrl/Cmd+Click on <code>schema.model</code>. Resolves through the model's own path, so <code>@config schema=</code> overrides are followed. Column-level definition is still planned.</td>
+</tr>
+<tr>
+<td>Preview a single CTE</td>
+<td>Supported</td>
+<td>A <code>Preview</code> code lens above each CTE, or Ctrl/Cmd+Shift+Enter at the cursor. Capped at 100 rows, like the whole-model preview.</td>
+</tr>
+<tr>
+<td>Rename a column across downstream models</td>
+<td>Supported</td>
+<td><code>F2</code> on a column, or <code>havn rename-column</code>. Built on a reference index that sees <code>WHERE</code>, <code>JOIN</code>, <code>GROUP BY</code>, <code>ORDER BY</code>, <code>HAVING</code> and <code>QUALIFY</code>, not only the SELECT list, and follows the column downstream only while it keeps its name. A downstream <code>SELECT *</code> over the column is a blocker, not a silent skip: a star yields no identifier to rewrite. So are <code>COLUMNS(...)</code>, <code>UNION BY NAME</code>, a relation-position macro call, an unqualified reference two relations could own, and a metrics or contracts YAML that names the column. <code>--force</code> renames everything else and leaves those for a person. See <a href="../refactoring/">Refactoring</a>.</td>
+</tr>
+<tr>
+<td>Find column references</td>
+<td>Supported</td>
+<td>Right-click in the editor, or <code>havn rename-column --dry-run</code>. Lists every site with the clause it sits in and click-to-jump.</td>
+</tr>
+<tr>
+<td>Multi-file write</td>
+<td>Supported</td>
+<td><code>PUT /api/files</code> writes a batch as one unit, hash-checking every file first and restoring what it wrote if a later write fails.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="reuse">Reuse<a class="headerlink" href="#reuse" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Project macros (<code>macros/</code>)</td>
+<td>Supported</td>
+<td>Python and SQL macros, auto-registered.</td>
+</tr>
+<tr>
+<td>Built-in macro library</td>
+<td>Supported</td>
+<td>Shipped with havn, and a project macro of the same name overrides it.</td>
+</tr>
+<tr>
+<td>Shared macro packs (pip-installable)</td>
+<td>Planned</td>
+<td>Packages cover the same ground today; this would be the lighter option for sharing macros alone.</td>
+</tr>
+<tr>
+<td>Packages (shared models across projects)</td>
+<td>Supported</td>
+<td><code>packages:</code> in <code>project.yml</code>, a git source with a required <code>rev</code> or a local path, installed into <code>havn_packages/</code> and pinned by <code>havn_packages.lock</code>. See <a href="../packages/">Packages</a>.</td>
+</tr>
+<tr>
+<td>Package namespacing</td>
+<td>Supported</td>
+<td>A package's schemas become <code>&lt;pkg&gt;_&lt;schema&gt;</code> and its references to its own models are rewritten to match, so a package can never take a name the project was already using. Overridable per schema in the package's <code>havn_package.yml</code>.</td>
+</tr>
+<tr>
+<td>Package macros</td>
+<td>Supported</td>
+<td>Registered between the built-in library and your project, so your macros win. Module names are package-scoped, so two packages can both ship <code>utils.py</code>.</td>
+</tr>
+<tr>
+<td>Package version ranges and resolution</td>
+<td>Not supported</td>
+<td>One pinned revision per package, no transitive dependencies and no solver. A package that itself needs a package says so in its README and you install both.</td>
+</tr>
+<tr>
+<td>Private package authentication</td>
+<td>Partial</td>
+<td>Whatever the machine's git already has: an SSH key, a credential helper, or a token in the URL. havn stores no credentials of its own.</td>
+</tr>
+<tr>
+<td>Package models in the rest of the tooling</td>
+<td>Supported</td>
+<td>Every command and endpoint that lists or builds the project's DAG sees package models: <code>transform</code>, <code>validate</code>, <code>ls</code> and the selectors, the DAG panel, docs, <code>diff</code>, the MCP tools, sentinel's impact analysis, Pipeline Rewind's downstream walk, both notebook paths, <code>@source_freshness</code>, and unit tests, which can target a package model by its namespaced name. The single-directory listing is kept only where one directory is genuinely what is meant, such as the PR diff comparing two checkouts.</td>
+</tr>
+<tr>
+<td>Linting installed packages</td>
+<td>Not supported</td>
+<td><code>havn lint</code> walks the project's own <code>transform/</code> only. Rewriting a file the next install overwrites would be busywork; lint the package in its own repository. Pointing <code>--fix</code> inside <code>havn_packages/</code> is refused with that message rather than silently rewriting a file the next install replaces. Checking a package file still reports its violations.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>@assert</code> data-quality assertions</td>
+<td>Supported</td>
+<td>One expression per line in a model, evaluated against the built model.</td>
+</tr>
+<tr>
+<td>Contracts (<code>contracts/*.yml</code>)</td>
+<td>Supported</td>
+<td>Assertions, freshness windows, severity, notification and escalation all work. Assertions run after the model is built, and a contract whose assertions target a model that does not exist yet reports a missing table.</td>
+</tr>
+<tr>
+<td>Contract column and type declarations</td>
+<td>Supported</td>
+<td>A <code>columns:</code> block of name, type, optional <code>nullable</code> and <code>description</code>, plus <code>strict:</code> and <code>on_widen:</code>. Checked before the build against the bind pass, so a break is caught on a warehouse where the table does not exist yet, and again after the build against the live table. Missing column, narrowing and a change of type category are errors; an undeclared column is an error only under <code>strict:</code>; a widening warns by default because <code>SUM</code> of a <code>DOUBLE</code> legitimately resolves to <code>DECIMAL(38,1)</code>. Type names are validated by DuckDB when the contract loads. See <a href="../contracts/#column-contracts">Contracts</a>.</td>
+</tr>
+<tr>
+<td><code>nullable: false</code> in a contract</td>
+<td>Partial</td>
+<td>Only enforced where DuckDB distinguishes nullable from not-null. Every havn model is built with <code>CREATE TABLE AS</code>, and <code>DESCRIBE</code> reports every such column as nullable, so the check is skipped there rather than failing every declaration. Use <code>no_nulls(column)</code> in <code>assertions:</code> for a data-level guarantee.</td>
+</tr>
+<tr>
+<td>Schema drift warning without a contract</td>
+<td>Partial</td>
+<td><code>havn validate</code> can compare the bind-pass schema to the one recorded at the model's last build and report added, removed and retyped columns. Off by default behind <code>validation.schema_drift: warn</code> and <code>--schema-drift</code>, until the equivalence rules have been tuned on a real project.</td>
+</tr>
+<tr>
+<td>Unit tests (fixed input rows, expected output)</td>
+<td>Supported</td>
+<td><code>tests/unit/*.yml</code> declares mock upstream rows and the expected output; <code>havn test</code> runs each case on an in-memory DuckDB with the project's macros, reading nothing from the warehouse. An unmocked upstream is an error, not a fallback. Incremental models are tested as a full refresh: <code>incremental_filter</code> and the merge strategy are not exercised.</td>
+</tr>
+<tr>
+<td>Anomaly detection</td>
+<td>Supported</td>
+<td>Statistical checks over run history, configured under <code>quality.anomaly_detection</code> and surfaced in the web UI.</td>
+</tr>
+<tr>
+<td><code>havn diff</code></td>
+<td>Supported</td>
+<td>Row-level diff of what a change would do, before you build it.</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

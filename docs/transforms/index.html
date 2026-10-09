@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -346,6 +346,25 @@
   
   
     <li class="md-tabs__item">
+      <a href="../unit-tests/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Unit Tests
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
       <a href="../contracts/" class="md-tabs__link">
         
   
@@ -372,6 +391,25 @@
     
   
   Macros
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../packages/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Packages
 
       </a>
     </li>
@@ -600,6 +638,25 @@
     
   
   MCP Server
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../limitations/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  What havn Supports
 
       </a>
     </li>
@@ -1042,6 +1099,78 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#selecting-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selecting models
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Selecting models">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#names-and-wildcards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Names and wildcards
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#graph-operators" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Graph operators
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Methods
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#combining" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Combining
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dry-running-a-selector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dry-running a selector
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#materialization" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1083,6 +1212,156 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Incremental">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#schema-changes-on_schema_change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Schema changes: on_schema_change
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ephemeral" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ephemeral
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#microbatch-incremental-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Microbatch incremental models
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Microbatch incremental models">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-a-run-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a run does
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#backfilling-an-explicit-range" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backfilling an explicit range
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-to-expect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What to expect
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snapshot-models-scd2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Snapshot models (SCD2)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Snapshot models (SCD2)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-the-table-looks-like" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the table looks like
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#strategies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Strategies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hard-deletes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hard deletes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#running-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running them
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#coming-from-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coming from dbt
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -1220,6 +1499,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../unit-tests/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unit Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../contracts/" class="md-nav__link">
         
   
@@ -1255,6 +1561,33 @@
     
   
     Macros
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../packages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packages
   
 
     
@@ -1598,6 +1931,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What havn Supports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../cli-reference/" class="md-nav__link">
         
   
@@ -1877,6 +2237,78 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#selecting-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selecting models
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Selecting models">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#names-and-wildcards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Names and wildcards
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#graph-operators" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Graph operators
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Methods
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#combining" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Combining
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dry-running-a-selector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dry-running a selector
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#materialization" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1918,6 +2350,156 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Incremental">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#schema-changes-on_schema_change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Schema changes: on_schema_change
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ephemeral" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ephemeral
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#microbatch-incremental-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Microbatch incremental models
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Microbatch incremental models">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-a-run-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a run does
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#backfilling-an-explicit-range" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backfilling an explicit range
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-to-expect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What to expect
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snapshot-models-scd2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Snapshot models (SCD2)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Snapshot models (SCD2)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-the-table-looks-like" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the table looks like
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#strategies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Strategies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hard-deletes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hard deletes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#running-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running them
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#coming-from-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coming from dbt
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -2036,7 +2618,7 @@
 <tbody>
 <tr>
 <td><code>materialized</code></td>
-<td><code>table</code>, <code>view</code>, <code>incremental</code></td>
+<td><code>table</code>, <code>view</code>, <code>incremental</code>, <code>ephemeral</code>, <code>snapshot</code></td>
 <td><code>view</code></td>
 </tr>
 <tr>
@@ -2051,7 +2633,7 @@
 </tr>
 <tr>
 <td><code>incremental_strategy</code></td>
-<td><code>delete+insert</code>, <code>merge</code>, <code>append</code></td>
+<td><code>delete+insert</code>, <code>merge</code>, <code>append</code>, <code>microbatch</code></td>
 <td><code>delete+insert</code></td>
 </tr>
 <tr>
@@ -2064,8 +2646,74 @@
 <td>column name</td>
 <td>none</td>
 </tr>
+<tr>
+<td><code>watermark</code></td>
+<td>column name</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>on_schema_change</code></td>
+<td><code>append_new_columns</code>, <code>ignore</code>, <code>fail</code>, <code>sync_all_columns</code></td>
+<td><code>append_new_columns</code></td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td>comma-separated labels</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>strategy</code></td>
+<td><code>check</code>, <code>timestamp</code> (snapshot only)</td>
+<td><code>check</code></td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>column name (snapshot, <code>strategy=timestamp</code>)</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>check_cols</code></td>
+<td><code>all</code> or comma-separated columns (snapshot, <code>strategy=check</code>)</td>
+<td><code>all</code></td>
+</tr>
+<tr>
+<td><code>hard_deletes</code></td>
+<td><code>ignore</code>, <code>invalidate</code>, <code>new_record</code> (snapshot only)</td>
+<td><code>ignore</code></td>
+</tr>
+<tr>
+<td><code>event_time</code></td>
+<td>column name (microbatch only)</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>batch_size</code></td>
+<td><code>hour</code>, <code>day</code>, <code>month</code>, <code>year</code> (microbatch only)</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>begin</code></td>
+<td>date or timestamp, UTC (microbatch only)</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>lookback</code></td>
+<td>whole number of windows (microbatch only)</td>
+<td><code>1</code></td>
+</tr>
 </tbody>
 </table>
+<p><code>tags</code> labels a model for the <code>tag:</code> selector:</p>
+<div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="k">table</span><span class="p">,</span><span class="w"> </span><span class="n">tags</span><span class="o">=</span><span class="n">daily</span><span class="p">,</span><span class="n">finance</span>
+</code></pre></div>
+<p>Tags are not part of the model's content hash, so retagging a hundred models
+labels them rather than rebuilding a hundred tables. Each tag must be an
+identifier (letters, digits, underscore, hyphen, not starting with a digit);
+<code>havn check</code> reports anything else, which catches <code>tags = daily finance</code>
+written with a space instead of a comma.</p>
+<p>Keys outside this table are rejected by <code>havn check</code>, rather than being read as nothing: <code>@config materialised=table</code> used to build a view without complaining. An unrecognised key, and an unsupported value of <code>materialized</code>, are both validation errors, with a suggestion when the name is a near miss:</p>
+<div class="highlight"><pre><span></span><code>error  gold.orders  Unknown @config key 'materialised'. Did you mean 'materialized'? Known keys: ...
+</code></pre></div>
 <h4 id="depends_on-optional"><code>@depends_on</code> (optional)<a class="headerlink" href="#depends_on-optional" title="Permanent link">&para;</a></h4>
 <p>Declares upstream dependencies explicitly. Auto-extraction handles most cases:</p>
 <div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">depends_on</span><span class="w"> </span><span class="n">bronze</span><span class="p">.</span><span class="n">customers</span><span class="p">,</span><span class="w"> </span><span class="n">bronze</span><span class="p">.</span><span class="n">orders</span>
@@ -2085,8 +2733,8 @@
 <div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="k">row_count</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span>
 <span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="k">unique</span><span class="p">(</span><span class="n">customer_id</span><span class="p">)</span>
 <span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="n">no_nulls</span><span class="p">(</span><span class="n">email</span><span class="p">)</span>
-<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="n">accepted_values</span><span class="p">(</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;active&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;inactive&#39;</span><span class="p">])</span>
-<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="ss">&quot;total_amount &gt;= 0&quot;</span>
+<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="n">accepted_values</span><span class="p">(</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="s1">'active'</span><span class="p">,</span><span class="w"> </span><span class="s1">'inactive'</span><span class="p">])</span>
+<span class="o">@</span><span class="n">assert</span><span class="w"> </span><span class="ss">"total_amount &gt;= 0"</span>
 </code></pre></div>
 <p>See <a href="quality">Quality</a> for the full assertion reference.</p>
 <h3 id="legacy-comment-syntax-still-supported">Legacy comment syntax (still supported)<a class="headerlink" href="#legacy-comment-syntax-still-supported" title="Permanent link">&para;</a></h3>
@@ -2125,7 +2773,8 @@ bronze.orders ─────┘
 <h3 id="build-specific-models">Build Specific Models<a class="headerlink" href="#build-specific-models" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>transform<span class="w"> </span>gold.customer_summary<span class="w"> </span>silver.dim_customer
 </code></pre></div>
-<p>Builds only the specified models (and their upstream dependencies if needed).</p>
+<p>Builds only the named models. See <a href="#selecting-models">Selecting models</a> for
+everything else the argument accepts.</p>
 <h3 id="parallel-execution">Parallel Execution<a class="headerlink" href="#parallel-execution" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>transform<span class="w"> </span>--parallel<span class="w"> </span>--workers<span class="w"> </span><span class="m">4</span>
 </code></pre></div>
@@ -2134,6 +2783,167 @@ bronze.orders ─────┘
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>transform<span class="w"> </span>--env<span class="w"> </span>prod
 </code></pre></div>
 <p>Uses the database path and settings from the <code>prod</code> environment. See <a href="environments">Environments</a>.</p>
+<h2 id="selecting-models">Selecting models<a class="headerlink" href="#selecting-models" title="Permanent link">&para;</a></h2>
+<p>Everywhere havn takes a set of models -- the positional argument to <code>havn
+transform</code>, <code>--select</code>, <code>havn ls</code>, <code>targets:</code> in a job file, <code>targets</code> on
+<code>POST /api/transform</code>, <code>?select=</code> on <code>GET /api/models</code>, the MCP tools -- it
+takes the same grammar. One implementation, so a selector that works in one
+place works in all of them.</p>
+<h3 id="names-and-wildcards">Names and wildcards<a class="headerlink" href="#names-and-wildcards" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Selector</th>
+<th>Selects</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>gold.orders</code></td>
+<td>exactly that model</td>
+</tr>
+<tr>
+<td><code>orders</code></td>
+<td>the model named <code>orders</code>, whatever schema it lives in</td>
+</tr>
+<tr>
+<td><code>gold.*</code></td>
+<td>every model in the <code>gold</code> schema</td>
+</tr>
+<tr>
+<td><code>gold.fct_*</code></td>
+<td>every <code>gold</code> model whose name starts with <code>fct_</code></td>
+</tr>
+<tr>
+<td><code>*.customers</code></td>
+<td>every <code>customers</code> model, in any schema</td>
+</tr>
+<tr>
+<td><code>*</code></td>
+<td>every model</td>
+</tr>
+</tbody>
+</table>
+<p>Wildcards are fnmatch patterns and work anywhere in the name, in either half.</p>
+<h3 id="graph-operators">Graph operators<a class="headerlink" href="#graph-operators" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Selector</th>
+<th>Selects</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>+gold.orders</code></td>
+<td>the model and everything it depends on, transitively</td>
+</tr>
+<tr>
+<td><code>gold.orders+</code></td>
+<td>the model and everything that depends on it, transitively</td>
+</tr>
+<tr>
+<td><code>+gold.orders+</code></td>
+<td>both directions</td>
+</tr>
+<tr>
+<td><code>2+gold.orders</code></td>
+<td>the model and two hops of upstream</td>
+</tr>
+<tr>
+<td><code>gold.orders+1</code></td>
+<td>the model and one hop of downstream</td>
+</tr>
+<tr>
+<td><code>@silver.customers</code></td>
+<td>the model, its downstream, and every upstream of those</td>
+</tr>
+</tbody>
+</table>
+<p><code>@x</code> is the "make this runnable from scratch" selector: it pulls in whatever
+else the downstream models need, so the whole selection can be built in one
+pass against an empty warehouse.</p>
+<p>The operators combine with wildcards and methods: <code>+gold.*</code>, <code>tag:daily+</code>,
+<code>@path:transform/silver/</code>.</p>
+<h3 id="methods">Methods<a class="headerlink" href="#methods" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Selector</th>
+<th>Selects</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tag:daily</code></td>
+<td>models carrying <code>@config tags=daily</code></td>
+</tr>
+<tr>
+<td><code>path:transform/gold/</code></td>
+<td>models whose file lives under that path</td>
+</tr>
+<tr>
+<td><code>path:transform/**/fct_*.sql</code></td>
+<td>a path glob, when a prefix is not enough</td>
+</tr>
+<tr>
+<td><code>config.materialized:incremental</code></td>
+<td>any <code>@config</code> key, matched by value</td>
+</tr>
+<tr>
+<td><code>config.unique_key:customer_id</code></td>
+<td>... including the incremental settings</td>
+</tr>
+<tr>
+<td><code>state:modified</code></td>
+<td>models whose SQL or upstream hash changed since the last run</td>
+</tr>
+<tr>
+<td><code>state:modified+</code></td>
+<td>... plus everything downstream of them</td>
+</tr>
+</tbody>
+</table>
+<p><code>state:</code> compares against the same <code>_havn.model_state</code> hashes that change
+detection uses, so <code>havn transform state:modified+</code> builds exactly what a
+plain <code>havn transform</code> would build, and <code>havn ls state:modified+</code> tells you
+in advance what that is. It needs a warehouse; in a project that has never
+been built, everything counts as modified.</p>
+<h3 id="combining">Combining<a class="headerlink" href="#combining" title="Permanent link">&para;</a></h3>
+<p>A comma intersects. Each piece is resolved in full, operators and all, and
+only models in every piece survive:</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>transform<span class="w"> </span><span class="s1">'tag:daily,gold.*'</span><span class="w">          </span><span class="c1"># daily models in gold</span>
+havn<span class="w"> </span>transform<span class="w"> </span><span class="s1">'state:modified,tag:daily'</span><span class="w">  </span><span class="c1"># daily models that changed</span>
+</code></pre></div>
+<p>Several selectors union. Repeat the positional argument, or <code>--select</code>:</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>transform<span class="w"> </span>gold.orders<span class="w"> </span>silver.customers
+havn<span class="w"> </span>transform<span class="w"> </span>-s<span class="w"> </span>tag:daily<span class="w"> </span>-s<span class="w"> </span>tag:hourly
+</code></pre></div>
+<p><code>--exclude/-x</code> subtracts a second selection from the first:</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>transform<span class="w"> </span><span class="s1">'gold.*'</span><span class="w"> </span>-x<span class="w"> </span>tag:expensive
+havn<span class="w"> </span>transform<span class="w"> </span>state:modified+<span class="w"> </span>-x<span class="w"> </span><span class="s1">'gold.experimental_*'</span>
+</code></pre></div>
+<p>Quote anything containing <code>*</code>, or the shell expands it first.</p>
+<h3 id="dry-running-a-selector">Dry-running a selector<a class="headerlink" href="#dry-running-a-selector" title="Permanent link">&para;</a></h3>
+<p><code>havn ls</code> resolves a selector and prints what it matched, without building
+anything:</p>
+<div class="highlight"><pre><span></span><code>$<span class="w"> </span>havn<span class="w"> </span>ls<span class="w"> </span><span class="s1">'@silver.customers'</span>
+<span class="w">                    </span><span class="m">4</span><span class="w"> </span>model<span class="o">(</span>s<span class="o">)</span>
+<span class="w"> </span>model<span class="w">               </span>schema<span class="w">   </span>materialized<span class="w">   </span>tags
+<span class="w"> </span>bronze.customers<span class="w">    </span>bronze<span class="w">   </span>table<span class="w">          </span>daily
+<span class="w"> </span>silver.customers<span class="w">    </span>silver<span class="w">   </span>table<span class="w">          </span>daily
+<span class="w"> </span>gold.fct_orders<span class="w">     </span>gold<span class="w">     </span>incremental<span class="w">    </span>finance
+<span class="w"> </span>gold.dim_customer<span class="w">   </span>gold<span class="w">     </span>table<span class="w">          </span>-
+</code></pre></div>
+<p><code>havn ls --names</code> prints bare names one per line for piping. A selector that
+matched nothing is a warning and a non-zero exit, on both <code>havn ls</code> and
+<code>havn transform</code>, so a typo does not look like a project that was already up
+to date. <code>havn transform -v</code> prints which selector matched what before it
+starts.</p>
+<p>The DAG panel in <code>havn serve</code> does the same thing visually. Type a selector
+into the input beside the model search, press <strong>Preview</strong> to highlight the
+nodes it matched and dim the rest, then <strong>Run selection</strong> to build exactly
+that set. The grammar is in the input's tooltip.</p>
 <h2 id="materialization">Materialization<a class="headerlink" href="#materialization" title="Permanent link">&para;</a></h2>
 <h3 id="view-default">View (Default)<a class="headerlink" href="#view-default" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="k">view</span>
@@ -2147,6 +2957,252 @@ bronze.orders ─────┘
 <div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="n">incremental</span><span class="p">,</span><span class="w"> </span><span class="n">unique_key</span><span class="o">=</span><span class="n">event_id</span><span class="p">,</span><span class="w"> </span><span class="n">incremental_strategy</span><span class="o">=</span><span class="k">delete</span><span class="o">+</span><span class="k">insert</span>
 </code></pre></div>
 <p>Builds the table incrementally: on first run, it materialises the full result; on subsequent runs, only new rows (filtered by <code>incremental_filter</code> if provided) are appended or merged. See <code>incremental_strategy</code> in the <code>@config</code> table above.</p>
+<p>Incremental runs that use a <code>unique_key</code> (the <code>delete+insert</code> and <code>merge</code> strategies) apply all their writes in a single transaction: the schema-evolution <code>ALTER</code>s that add newly appeared columns, the <code>DELETE</code>/<code>UPDATE</code> that clears the rows being replaced, and the <code>INSERT</code> that writes the new ones. If any of them fails, the whole run is rolled back and the target keeps exactly the data it had before. A source column whose type changed underneath you (say an integer that arrived as text) now fails the run cleanly instead of leaving the model with the deleted rows missing.</p>
+<h4 id="schema-changes-on_schema_change">Schema changes: <code>on_schema_change</code><a class="headerlink" href="#schema-changes-on_schema_change" title="Permanent link">&para;</a></h4>
+<p>Before it writes anything, an incremental run compares its query's columns against the target table on name <strong>and</strong> type, in both directions. Every strategy does this, <code>append</code> included, and every strategy writes through an explicit column list, so reordering a projection moves nothing between columns. What happens next is the model's <code>on_schema_change</code> policy:</p>
+<div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="n">incremental</span><span class="p">,</span><span class="w"> </span><span class="n">unique_key</span><span class="o">=</span><span class="n">event_id</span><span class="p">,</span><span class="w"> </span><span class="n">on_schema_change</span><span class="o">=</span><span class="n">sync_all_columns</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Policy</th>
+<th>Added column</th>
+<th>Removed column</th>
+<th>Retyped column</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>append_new_columns</code> (default)</td>
+<td><code>ALTER TABLE ADD COLUMN</code>, then written</td>
+<td>Error, nothing written</td>
+<td>Error, nothing written</td>
+</tr>
+<tr>
+<td><code>ignore</code></td>
+<td>Not added, not written</td>
+<td>Left in place, not written</td>
+<td>Error unless the cast is a lossless widening inside one type family</td>
+</tr>
+<tr>
+<td><code>fail</code></td>
+<td>Error, nothing written</td>
+<td>Error, nothing written</td>
+<td>Error, nothing written</td>
+</tr>
+<tr>
+<td><code>sync_all_columns</code></td>
+<td><code>ALTER TABLE ADD COLUMN</code></td>
+<td><code>ALTER TABLE DROP COLUMN</code></td>
+<td><code>ALTER TABLE ALTER COLUMN ... TYPE</code></td>
+</tr>
+</tbody>
+</table>
+<p>Two of those cells used to be silent data loss, which is why the default refuses them rather than carrying on:</p>
+<ul>
+<li>A <strong>removed column</strong> left the target diverging without a word. Rows written from then on got <code>NULL</code> while every older row kept its stale value.</li>
+<li>A <strong>retyped column</strong> was cast back into the target's old type on the way in. A <code>DOUBLE</code> of <code>20.5</code> written into an <code>INTEGER</code> column became <code>21</code>.</li>
+</ul>
+<p>The error message names the column, both types, and the policy that would accept the change. Nothing is written when a policy refuses, so the target still holds exactly the rows it held before the run. To take the new shape wholesale instead, rebuild with <code>havn transform --force</code>.</p>
+<p>Two limits worth stating plainly, both shared with dbt:</p>
+<ul>
+<li><strong>No option backfills old rows.</strong> A column added to the target is <code>NULL</code> for every row that was already there; only rows written from this run on carry a value.</li>
+<li><strong>Only top-level columns are tracked.</strong> A field that appears, disappears or changes type inside a <code>STRUCT</code>, <code>MAP</code> or <code>LIST</code> column is invisible to the comparison, because the column's own type is what is compared.</li>
+</ul>
+<p><code>sync_all_columns</code> depends on DuckDB accepting the <code>ALTER</code>. DuckDB refuses to drop or retype a column that a constraint or an index depends on; havn reports that as an error naming the column, and the run leaves the table untouched.</p>
+<p>The policy is folded into the model's content hash, so changing it rebuilds the model's change-detection state on the next run rather than being picked up silently on the run after.</p>
+<h3 id="ephemeral">Ephemeral<a class="headerlink" href="#ephemeral" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="n">ephemeral</span>
+</code></pre></div>
+<p>Builds nothing. Every model that references an ephemeral model gets its query prepended as a named CTE, and the reference rewritten to that CTE, so DuckDB sees one query. Use it for a step that exists to be read once by the models downstream, where a view would add a name to the warehouse that nobody should query directly.</p>
+<p><div class="highlight"><pre><span></span><code><span class="c1">-- transform/silver/active_orders.sql</span>
+<span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="n">ephemeral</span>
+
+<span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">bronze</span><span class="p">.</span><span class="n">orders</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="o">&lt;&gt;</span><span class="w"> </span><span class="s1">'cancelled'</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="c1">-- transform/gold/revenue.sql</span>
+<span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="k">table</span>
+
+<span class="k">SELECT</span><span class="w"> </span><span class="n">customer_id</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">revenue</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">silver</span><span class="p">.</span><span class="n">active_orders</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="mi">1</span>
+</code></pre></div></p>
+<p><code>havn transform</code> builds that as:</p>
+<div class="highlight"><pre><span></span><code><span class="k">WITH</span><span class="w"> </span><span class="n">__havn_silver_active_orders</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="p">(</span>
+<span class="w">  </span><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">bronze</span><span class="p">.</span><span class="n">orders</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="o">&lt;&gt;</span><span class="w"> </span><span class="s1">'cancelled'</span>
+<span class="p">)</span>
+<span class="k">SELECT</span><span class="w"> </span><span class="n">customer_id</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">revenue</span>
+<span class="k">FROM</span><span class="w"> </span><span class="n">__havn_silver_active_orders</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">active_orders</span>
+<span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="mi">1</span>
+</code></pre></div>
+<p>What to expect:</p>
+<ul>
+<li>The model is reported as <code>inlined</code> rather than <code>built</code> or <code>skipped</code>, and gets a <code>model_state</code> row with <code>materialized_as = ephemeral</code> so change detection has something honest to read. Editing an ephemeral model rebuilds every model downstream of it, through the same transitive upstream hash every other model uses.</li>
+<li>Aliases survive. <code>FROM silver.active_orders o</code> stays <code>o</code>, and an unaliased reference keeps the model's own name, so <code>active_orders.amount</code> still resolves.</li>
+<li>Chains work. An ephemeral model that reads another is inlined first, and an ephemeral model's own CTEs are hoisted ahead of it under the same <code>__havn_</code> prefix, so two ephemeral models can both define a CTE called <code>base</code>.</li>
+<li>Switching a model to <code>ephemeral</code> drops the table or view it used to materialize, so a stale copy cannot answer queries that look like they hit the model.</li>
+<li>Consumers may be views, tables or incrementals. For an incremental consumer the inlined query is what builds both the first full load and every staging table after it.</li>
+</ul>
+<p>Two limits:</p>
+<ul>
+<li><strong><code>@assert</code> is rejected on an ephemeral model.</strong> There is no table to query after the build. <code>havn check</code> says so and points you at moving the assertion to a consumer.</li>
+<li><strong><code>{this}</code>, <code>@watermark</code> and <code>incremental_filter</code> are rejected.</strong> They all name a target table, and an ephemeral model has none.</li>
+</ul>
+<p>The trade, which dbt makes too: a DuckDB error inside a three-level inlined query reports a line the user never wrote. Naming each CTE after the model it came from is what makes the message readable.</p>
+<h3 id="microbatch-incremental-models">Microbatch incremental models<a class="headerlink" href="#microbatch-incremental-models" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="n">incremental</span><span class="p">,</span><span class="w"> </span><span class="n">incremental_strategy</span><span class="o">=</span><span class="n">microbatch</span><span class="p">,</span><span class="w"> </span><span class="n">event_time</span><span class="o">=</span><span class="n">event_at</span><span class="p">,</span><span class="w"> </span><span class="n">batch_size</span><span class="o">=</span><span class="k">day</span><span class="p">,</span><span class="w"> </span><span class="k">begin</span><span class="o">=</span><span class="mi">2024</span><span class="o">-</span><span class="mi">01</span><span class="o">-</span><span class="mi">01</span>
+</code></pre></div>
+<p>An ordinary incremental model runs its query once and writes whatever comes back. A microbatch model runs it once per time window and writes each window separately. That is what makes a three-year backfill survivable: it is a thousand small transactions instead of one enormous one, each window is recorded, and a failure at window 700 leaves 699 windows committed and resumes there next time.</p>
+<p>The model does its own filtering, exactly as in dbt. <code>{start}</code> and <code>{end}</code> are substituted per window with typed timestamp literals:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">-- transform/gold/events.sql</span>
+<span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="n">incremental</span><span class="p">,</span><span class="w"> </span><span class="n">incremental_strategy</span><span class="o">=</span><span class="n">microbatch</span><span class="p">,</span><span class="w"> </span><span class="n">event_time</span><span class="o">=</span><span class="n">event_at</span><span class="p">,</span><span class="w"> </span><span class="n">batch_size</span><span class="o">=</span><span class="k">day</span><span class="p">,</span><span class="w"> </span><span class="k">begin</span><span class="o">=</span><span class="mi">2024</span><span class="o">-</span><span class="mi">01</span><span class="o">-</span><span class="mi">01</span>
+
+<span class="k">SELECT</span>
+<span class="w">    </span><span class="n">event_at</span><span class="p">,</span>
+<span class="w">    </span><span class="n">user_id</span><span class="p">,</span>
+<span class="w">    </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">events</span>
+<span class="k">FROM</span><span class="w"> </span><span class="n">silver</span><span class="p">.</span><span class="n">events</span>
+<span class="k">WHERE</span><span class="w"> </span><span class="n">event_at</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="err">{</span><span class="k">start</span><span class="err">}</span>
+<span class="w">  </span><span class="k">AND</span><span class="w"> </span><span class="n">event_at</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="err">{</span><span class="k">end</span><span class="err">}</span>
+<span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span>
+</code></pre></div>
+<p>havn does not append a <code>WHERE</code> clause for you. An event-time predicate pushed into the wrong place in a query with a <code>GROUP BY</code>, a window function or a join to a dimension changes the answer, and only the model's author knows where it belongs. <code>havn check</code> warns about a microbatch model whose SQL never mentions <code>{start}</code>, because every window would then read the whole source and the last one would win.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Values</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>event_time</code></td>
+<td>column name, the one windows are cut on</td>
+<td>required</td>
+</tr>
+<tr>
+<td><code>batch_size</code></td>
+<td><code>hour</code>, <code>day</code>, <code>month</code>, <code>year</code></td>
+<td>required</td>
+</tr>
+<tr>
+<td><code>begin</code></td>
+<td>first window, <code>2024-01-01</code> or <code>2024-01-01 06:00:00</code></td>
+<td>required</td>
+</tr>
+<tr>
+<td><code>lookback</code></td>
+<td>whole number of finished windows to redo each run</td>
+<td><code>1</code></td>
+</tr>
+</tbody>
+</table>
+<p>All boundaries are UTC, and all of them are naive timestamps: a window is a range compared against the <code>event_time</code> column, and mixing an aware boundary with a naive column is a comparison DuckDB refuses rather than one it guesses at. <code>begin</code> is rounded down to its window, so <code>begin=2024-01-15</code> with <code>batch_size=month</code> starts at 2024-01-01.</p>
+<h4 id="what-a-run-does">What a run does<a class="headerlink" href="#what-a-run-does" title="Permanent link">&para;</a></h4>
+<p>Per window, inside its own transaction: run the query, <code>DELETE</code> that window's rows from the target on <code>event_time</code>, <code>INSERT</code> the new ones, record the window as <code>done</code>. Because the window is deleted before it is written, re-running a window is a replace rather than a duplicate, which is also how a late-arriving row lands.</p>
+<p>Between runs, the windows live in <code>_havn.batch_state</code>:</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>query<span class="w"> </span><span class="s2">"SELECT window_start, status, \"rows\" FROM _havn.batch_state WHERE model_path = 'gold.events' ORDER BY window_start"</span>
+</code></pre></div>
+<p>The next ordinary run starts at the first window that is not <code>done</code>, or at the window after the last one recorded, and then goes <code>lookback</code> windows further back so rows that arrived late for a finished window are picked up. <code>lookback=1</code> is the default because an hourly or daily feed almost always has stragglers; <code>lookback=0</code> is the right setting when the source is genuinely immutable once written.</p>
+<h4 id="backfilling-an-explicit-range">Backfilling an explicit range<a class="headerlink" href="#backfilling-an-explicit-range" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>transform<span class="w"> </span>gold.events<span class="w"> </span>--event-time-start<span class="w"> </span><span class="m">2024</span>-01-01<span class="w"> </span>--event-time-end<span class="w"> </span><span class="m">2024</span>-03-01
+</code></pre></div>
+<p>Windows in that range are processed regardless of what state says, and <code>--event-time-end</code> is exclusive. Either flag may be given alone: an open start falls back to the model's <code>begin</code>, an open end to now. The same two fields exist on <code>POST /api/transform</code> as <code>event_time_start</code> and <code>event_time_end</code>.</p>
+<p><code>havn transform gold.events --force</code> reprocesses every window from <code>begin</code>.</p>
+<p>An explicit range also substitutes <code>{start}</code> and <code>{end}</code> inside an <code>incremental_filter</code> on models that are <em>not</em> microbatch, which is a way to scope one ordinary incremental run to a date range without editing the model. Without the flags the placeholders are left alone rather than guessed at.</p>
+<h4 id="what-to-expect">What to expect<a class="headerlink" href="#what-to-expect" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>The window holding "now" is processed too</strong>, even though it is not over. The alternative is that data written in the last hour waits for the hour to turn.</li>
+<li><strong>Columns evolve per window</strong> under the model's <code>on_schema_change</code> policy, the same as any incremental model. A column added part-way through a backfill is <code>NULL</code> for the windows already written.</li>
+<li><strong><code>incremental_filter</code> and <code>@watermark</code> are rejected.</strong> The batch window is already the filter; a second one would narrow every window and leave gaps nothing refills.</li>
+<li><strong>A window count above 100,000 is refused</strong> rather than attempted. <code>begin=1970-01-01</code> with <code>batch_size=hour</code> is close to half a million windows and is almost always a typo.</li>
+<li><strong>Failures name the window.</strong> The error says which window of how many failed, how many are committed, and that re-running resumes there.</li>
+</ul>
+<h3 id="snapshot-models-scd2">Snapshot models (SCD2)<a class="headerlink" href="#snapshot-models-scd2" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="n">snapshot</span><span class="p">,</span><span class="w"> </span><span class="n">unique_key</span><span class="o">=</span><span class="n">customer_id</span><span class="p">,</span><span class="w"> </span><span class="n">strategy</span><span class="o">=</span><span class="k">check</span>
+</code></pre></div>
+<p>A snapshot model keeps the history of a source table instead of its current state. Every run compares what the query returns now against what the history table already holds, and writes a new row version for anything that changed. Rows are never updated in place except to close them, so yesterday's answer to "what tier was this customer on?" stays answerable forever.</p>
+<p><strong>Two features share the word "snapshot", and they are not the same thing.</strong> <em>Snapshot models</em> (this section) keep row-level history of one table inside the warehouse: a type 2 slowly changing dimension, built by <code>havn transform</code> like any other model. <code>havn snapshot</code> and <code>havn rewind</code> (see <code>docs/versioning.md</code>) are the other thing: whole-warehouse restore points that let you put the entire project back the way it was after a bad run. One is a modeling pattern, the other is an undo button.</p>
+<h4 id="what-the-table-looks-like">What the table looks like<a class="headerlink" href="#what-the-table-looks-like" title="Permanent link">&para;</a></h4>
+<p>The target holds the query's own columns plus four meta columns:</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>valid_from</code></td>
+<td><code>TIMESTAMP</code></td>
+<td>when this version became the truth</td>
+</tr>
+<tr>
+<td><code>valid_to</code></td>
+<td><code>TIMESTAMP</code></td>
+<td>when it stopped, <code>NULL</code> while it is current</td>
+</tr>
+<tr>
+<td><code>is_current</code></td>
+<td><code>BOOLEAN</code></td>
+<td>the one live version per key</td>
+</tr>
+<tr>
+<td><code>row_hash</code></td>
+<td><code>VARCHAR</code></td>
+<td>hash of the tracked columns, used for change detection</td>
+</tr>
+</tbody>
+</table>
+<p>With <code>hard_deletes=new_record</code> a fifth column, <code>is_deleted</code>, marks tombstone rows.</p>
+<p>Rename any of them project-wide in <code>project.yml</code>, which is what a project migrating from dbt wants:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">snapshots</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">meta_columns</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">valid_from</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt_valid_from</span>
+<span class="w">    </span><span class="nt">valid_to</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt_valid_to</span>
+<span class="w">    </span><span class="nt">is_current</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt_is_current</span>
+<span class="w">    </span><span class="nt">row_hash</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt_scd_id</span>
+<span class="w">    </span><span class="nt">is_deleted</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dbt_is_deleted</span>
+<span class="w">  </span><span class="nt">valid_to_current</span><span class="p">:</span><span class="w"> </span><span class="s">"'9999-12-31'::TIMESTAMP"</span>
+</code></pre></div>
+<p><code>valid_to_current</code> puts a sentinel date in the open row's <code>valid_to</code> instead of <code>NULL</code>. BI tools filter <code>valid_to &gt; today</code> more comfortably than they handle a three-valued comparison against <code>NULL</code>.</p>
+<h4 id="strategies">Strategies<a class="headerlink" href="#strategies" title="Permanent link">&para;</a></h4>
+<p><code>strategy=check</code> (the default) hashes the tracked columns and compares the hash. <code>check_cols</code> narrows what counts as a change:</p>
+<div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="n">snapshot</span><span class="p">,</span><span class="w"> </span><span class="n">unique_key</span><span class="o">=</span><span class="n">customer_id</span><span class="p">,</span><span class="w"> </span><span class="n">check_cols</span><span class="o">=</span><span class="n">tier</span><span class="p">,</span><span class="n">region</span>
+</code></pre></div>
+<p>Only <code>tier</code> and <code>region</code> are watched; a new <code>last_seen_at</code> on every run does not manufacture a version. The default, <code>check_cols=all</code>, hashes every non-key column.</p>
+<p><code>strategy=timestamp</code> trusts the source's own change clock:</p>
+<div class="highlight"><pre><span></span><code><span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="n">snapshot</span><span class="p">,</span><span class="w"> </span><span class="n">unique_key</span><span class="o">=</span><span class="n">order_id</span><span class="p">,</span><span class="w"> </span><span class="n">strategy</span><span class="o">=</span><span class="k">timestamp</span><span class="p">,</span><span class="w"> </span><span class="n">updated_at</span><span class="o">=</span><span class="n">modified_at</span>
+</code></pre></div>
+<p>A row is a new version when its <code>updated_at</code> is later than the stored <code>valid_from</code>, and the version is dated from <code>updated_at</code> rather than from the moment of the run. Replaying an old extract therefore lands the version where it belongs in history instead of at the top. <code>row_hash</code> is still written under this strategy, so the content of every version is on record even though the decision was made on the clock.</p>
+<h4 id="hard-deletes">Hard deletes<a class="headerlink" href="#hard-deletes" title="Permanent link">&para;</a></h4>
+<p><code>hard_deletes</code> decides what happens to a key that stopped appearing in the source:</p>
+<ul>
+<li><code>ignore</code> (default): the last version stays current. Absence is treated as "no news", which is the right reading when the query is filtered or the extract is partial.</li>
+<li><code>invalidate</code>: the current version is closed, with <code>valid_to</code> set to the run timestamp and <code>is_current</code> false. The key has no current row until it comes back.</li>
+<li><code>new_record</code>: the current version is closed and a tombstone row is appended with the same values, <code>is_deleted = true</code> and <code>is_current = true</code>. Downstream models can then see <em>that</em> a key was deleted and when, not merely that it stopped being current.</li>
+</ul>
+<p>A key that returns after a delete opens a fresh live version under every policy.</p>
+<h4 id="running-them">Running them<a class="headerlink" href="#running-them" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>transform<span class="w"> </span>silver.dim_customer
+</code></pre></div>
+<ul>
+<li><strong>Replaying is free.</strong> A run whose source has not changed writes nothing. A to B and back to A produces three versions, because coming back is a change like any other.</li>
+<li><strong>Duplicate keys are refused before any write.</strong> If the query returns a key more than once, the run fails, names the key, and leaves history exactly as it was. DuckDB's <code>UPDATE ... FROM</code> picks an arbitrary row when the source matches more than once, so the alternative is silently storing whichever version the scan reached first. The usual fix is a <code>QUALIFY row_number() OVER (PARTITION BY key ORDER BY ...) = 1</code> in the query.</li>
+<li><strong><code>--force</code> re-runs the merge; it never drops history.</strong> Forcing a rebuild must not be a way to lose years of versions by accident. If you really do want to start over, drop the table: <code>havn query "DROP TABLE silver.dim_customer"</code>, then run the model again.</li>
+<li><strong>New source columns are appended</strong>, <code>NULL</code> for every row already in history, exactly as an incremental model does it. A removed or retyped column is an error, because a snapshot cannot rewrite what it already wrote.</li>
+<li><strong><code>@assert</code>, <code>@grain</code> and profiling work</strong> the same as for a <code>table</code> model; they run against the history table after the merge, so an assertion can talk about <code>is_current</code> directly.</li>
+<li><strong><code>incremental_filter</code> and <code>@watermark</code> are rejected.</strong> A snapshot has to read the source's current state in full: filtering the read would look exactly like a hard delete of every filtered-out row.</li>
+<li><strong>All timestamps are the warehouse's <code>current_timestamp</code></strong> unless <code>strategy=timestamp</code> dates them from the source.</li>
+</ul>
+<h4 id="coming-from-dbt">Coming from dbt<a class="headerlink" href="#coming-from-dbt" title="Permanent link">&para;</a></h4>
+<p>The config names and values are the same ones dbt uses, so a migration is a search and replace rather than a translation table: <code>unique_key</code>, <code>strategy</code> (<code>check</code> / <code>timestamp</code>), <code>updated_at</code>, <code>check_cols</code>, <code>hard_deletes</code> (<code>ignore</code> / <code>invalidate</code> / <code>new_record</code>). Three differences worth knowing:</p>
+<ul>
+<li>Snapshots live in <code>transform/</code> with every other model rather than in their own <code>snapshots/</code> directory, and they are selected, tagged and scheduled like any model.</li>
+<li>The meta columns are called <code>valid_from</code>, <code>valid_to</code>, <code>is_current</code> and <code>row_hash</code> by default. <code>snapshots.meta_columns</code> in <code>project.yml</code> is the equivalent of dbt's <code>snapshot_meta_column_names</code>, and <code>valid_to_current</code> is the equivalent of <code>dbt_valid_to_current</code>.</li>
+<li>There is no <code>dbt_updated_at</code> column. Under <code>strategy=timestamp</code> the source's <code>updated_at</code> is <code>valid_from</code>, which is the value that column held anyway.</li>
+</ul>
 <h2 id="plain-sql-no-templating">Plain SQL -- No Templating<a class="headerlink" href="#plain-sql-no-templating" title="Permanent link">&para;</a></h2>
 <p>havn uses plain SQL with no Jinja, no macros, and no templating language. This means:</p>
 <ul>
@@ -2226,7 +3282,7 @@ bronze.orders ─────┘
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

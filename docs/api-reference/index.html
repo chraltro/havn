@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -29,7 +29,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -342,6 +342,25 @@
   
   
     <li class="md-tabs__item">
+      <a href="../unit-tests/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Unit Tests
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
       <a href="../contracts/" class="md-tabs__link">
         
   
@@ -368,6 +387,25 @@
     
   
   Macros
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../packages/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Packages
 
       </a>
     </li>
@@ -596,6 +634,25 @@
     
   
   MCP Server
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../limitations/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  What havn Supports
 
       </a>
     </li>
@@ -883,6 +940,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../unit-tests/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unit Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../contracts/" class="md-nav__link">
         
   
@@ -918,6 +1002,33 @@
     
   
     Macros
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../packages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packages
   
 
     
@@ -1261,6 +1372,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What havn Supports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../cli-reference/" class="md-nav__link">
         
   
@@ -1565,6 +1703,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#put-apifiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PUT /api/files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#delete-apifilespath" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1780,6 +1929,106 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#get-apimodelsworkbenchpathtransformsilverorderssql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/models/workbench?path=transform/silver/orders.sql
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#home" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Home
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Home">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apihome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/home
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deploy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deploy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deploy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apideploytargets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/deploy/targets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apideployplanenvprodrefmain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/deploy/plan?env=prod&amp;ref=main
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apideploys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/deploys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apideployspr_idlimit-and-get-apideploysid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/deploys?pr_id=&amp;limit= and GET /api/deploys/{id}
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1813,6 +2062,45 @@
     <span class="md-ellipsis">
       
         GET /api/dag/full
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#packages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Packages
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Packages">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apipackages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/packages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apipackagesinstall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/packages/install
       
     </span>
   </a>
@@ -1863,6 +2151,56 @@
     <span class="md-ellipsis">
       
         GET /api/impact/{model_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rename" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rename
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Rename">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apirenamereferences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/rename/references
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apirenameplan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/rename/plan
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apirenameapply" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/rename/apply
       
     </span>
   </a>
@@ -2272,6 +2610,28 @@
     <span class="md-ellipsis">
       
         GET /api/contracts/history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiunit-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/unit-tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiunit-testsrun" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/unit-tests/run
       
     </span>
   </a>
@@ -3057,6 +3417,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#put-apifiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PUT /api/files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#delete-apifilespath" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3272,6 +3643,106 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#get-apimodelsworkbenchpathtransformsilverorderssql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/models/workbench?path=transform/silver/orders.sql
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#home" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Home
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Home">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apihome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/home
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deploy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deploy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deploy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apideploytargets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/deploy/targets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apideployplanenvprodrefmain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/deploy/plan?env=prod&amp;ref=main
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apideploys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/deploys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apideployspr_idlimit-and-get-apideploysid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/deploys?pr_id=&amp;limit= and GET /api/deploys/{id}
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3305,6 +3776,45 @@
     <span class="md-ellipsis">
       
         GET /api/dag/full
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#packages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Packages
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Packages">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apipackages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/packages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apipackagesinstall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/packages/install
       
     </span>
   </a>
@@ -3355,6 +3865,56 @@
     <span class="md-ellipsis">
       
         GET /api/impact/{model_name}
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rename" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rename
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Rename">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apirenamereferences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/rename/references
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apirenameplan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/rename/plan
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apirenameapply" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/rename/apply
       
     </span>
   </a>
@@ -3764,6 +4324,28 @@
     <span class="md-ellipsis">
       
         GET /api/contracts/history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiunit-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/unit-tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiunit-testsrun" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/unit-tests/run
       
     </span>
   </a>
@@ -4322,7 +4904,7 @@
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
 <h3 id="post-apiauthlogin">POST /api/auth/login<a class="headerlink" href="#post-apiauthlogin" title="Permanent link">&para;</a></h3>
 <p>Authenticate and receive a token.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;username&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;admin&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;password&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;your-password&quot;</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"username"</span><span class="p">:</span><span class="w"> </span><span class="s2">"admin"</span><span class="p">,</span><span class="w"> </span><span class="nt">"password"</span><span class="p">:</span><span class="w"> </span><span class="s2">"your-password"</span><span class="p">}</span>
 </code></pre></div>
 <p>Returns: <code>{"token": "...", "username": "admin"}</code></p>
 <h3 id="get-apiauthme">GET /api/auth/me<a class="headerlink" href="#get-apiauthme" title="Permanent link">&para;</a></h3>
@@ -4332,7 +4914,7 @@
 <p>Returns: <code>{"auth_enabled": true, "needs_setup": false}</code></p>
 <h3 id="post-apiauthsetup">POST /api/auth/setup<a class="headerlink" href="#post-apiauthsetup" title="Permanent link">&para;</a></h3>
 <p>Create the first admin user. Only works when no users exist.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;username&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;admin&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;password&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;password&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;admin&quot;</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"username"</span><span class="p">:</span><span class="w"> </span><span class="s2">"admin"</span><span class="p">,</span><span class="w"> </span><span class="nt">"password"</span><span class="p">:</span><span class="w"> </span><span class="s2">"password"</span><span class="p">,</span><span class="w"> </span><span class="nt">"role"</span><span class="p">:</span><span class="w"> </span><span class="s2">"admin"</span><span class="p">}</span>
 </code></pre></div>
 <h2 id="user-management">User Management<a class="headerlink" href="#user-management" title="Permanent link">&para;</a></h2>
 <p>Requires <code>admin</code> role.</p>
@@ -4340,11 +4922,11 @@
 <p>List all users (no passwords returned).</p>
 <h3 id="post-apiusers">POST /api/users<a class="headerlink" href="#post-apiusers" title="Permanent link">&para;</a></h3>
 <p>Create a new user.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;username&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;analyst&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;password&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;pass&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;viewer&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;display_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Data Analyst&quot;</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"username"</span><span class="p">:</span><span class="w"> </span><span class="s2">"analyst"</span><span class="p">,</span><span class="w"> </span><span class="nt">"password"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pass"</span><span class="p">,</span><span class="w"> </span><span class="nt">"role"</span><span class="p">:</span><span class="w"> </span><span class="s2">"viewer"</span><span class="p">,</span><span class="w"> </span><span class="nt">"display_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Data Analyst"</span><span class="p">}</span>
 </code></pre></div>
 <h3 id="put-apiusersusername">PUT /api/users/{username}<a class="headerlink" href="#put-apiusersusername" title="Permanent link">&para;</a></h3>
 <p>Update user role, password, or display name.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;editor&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;display_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Senior Analyst&quot;</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"role"</span><span class="p">:</span><span class="w"> </span><span class="s2">"editor"</span><span class="p">,</span><span class="w"> </span><span class="nt">"display_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Senior Analyst"</span><span class="p">}</span>
 </code></pre></div>
 <h3 id="delete-apiusersusername">DELETE /api/users/{username}<a class="headerlink" href="#delete-apiusersusername" title="Permanent link">&para;</a></h3>
 <p>Delete a user and revoke all their tokens.</p>
@@ -4354,7 +4936,7 @@
 <p>List secrets (keys and masked values).</p>
 <h3 id="post-apisecrets">POST /api/secrets<a class="headerlink" href="#post-apisecrets" title="Permanent link">&para;</a></h3>
 <p>Set or update a secret.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;DB_PASSWORD&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;new_value&quot;</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"DB_PASSWORD"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"new_value"</span><span class="p">}</span>
 </code></pre></div>
 <h3 id="delete-apisecretskey">DELETE /api/secrets/{key}<a class="headerlink" href="#delete-apisecretskey" title="Permanent link">&para;</a></h3>
 <p>Delete a secret from <code>.env</code>.</p>
@@ -4365,14 +4947,21 @@
 <p>Read a file's content. Returns <code>{path, content, language}</code>.</p>
 <h3 id="put-apifilespath">PUT /api/files/{path}<a class="headerlink" href="#put-apifilespath" title="Permanent link">&para;</a></h3>
 <p>Save or create a file. Allowed extensions: <code>.sql</code>, <code>.py</code>, <code>.yml</code>, <code>.yaml</code>, <code>.dpnb</code>, <code>.sqlfluff</code>.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;content&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;SELECT 1&quot;</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"content"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SELECT 1"</span><span class="p">}</span>
+</code></pre></div>
+<h3 id="put-apifiles">PUT /api/files<a class="headerlink" href="#put-apifiles" title="Permanent link">&para;</a></h3>
+<p>Save several files as one unit: all of them land, or none do. Every file is
+hash-checked before any is written, and anything already written is restored
+if a later write fails. Returns <code>409</code> with <code>{conflict, stale, current_hashes}</code>
+when a file no longer matches its <code>expected_hash</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"files"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"transform/silver/customers.sql"</span><span class="p">,</span><span class="w"> </span><span class="nt">"content"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SELECT 1"</span><span class="p">,</span><span class="w"> </span><span class="nt">"expected_hash"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a1b2c3"</span><span class="p">}]}</span>
 </code></pre></div>
 <h3 id="delete-apifilespath">DELETE /api/files/{path}<a class="headerlink" href="#delete-apifilespath" title="Permanent link">&para;</a></h3>
 <p>Delete a file. Optional <code>?drop_object=true</code> to also drop the corresponding database object.</p>
 <h2 id="query">Query<a class="headerlink" href="#query" title="Permanent link">&para;</a></h2>
 <h3 id="post-apiquery">POST /api/query<a class="headerlink" href="#post-apiquery" title="Permanent link">&para;</a></h3>
 <p>Execute an ad-hoc SQL query with a role-based timeout (admin 300s, editor 120s, viewer 60s by default).</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;sql&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;SELECT * FROM gold.summary WHERE region = $region&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;params&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;region&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;US&quot;</span><span class="p">},</span><span class="w"> </span><span class="nt">&quot;limit&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1000</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;offset&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"sql"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SELECT * FROM gold.summary WHERE region = $region"</span><span class="p">,</span><span class="w"> </span><span class="nt">"params"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"region"</span><span class="p">:</span><span class="w"> </span><span class="s2">"US"</span><span class="p">},</span><span class="w"> </span><span class="nt">"limit"</span><span class="p">:</span><span class="w"> </span><span class="mi">1000</span><span class="p">,</span><span class="w"> </span><span class="nt">"offset"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">}</span>
 </code></pre></div>
 <p><code>params</code> binds named <code>$name</code> placeholders as DuckDB prepared-statement values (no string interpolation, so values cannot inject SQL). Numbers and booleans are bound typed; strings can be cast in SQL (<code>$day::DATE</code>).</p>
 <p>Returns: <code>{columns, column_types, rows, truncated, offset, limit}</code></p>
@@ -4398,29 +4987,112 @@
 <p>Get table and column names for query editor autocomplete.</p>
 <h2 id="models">Models<a class="headerlink" href="#models" title="Permanent link">&para;</a></h2>
 <h3 id="get-apimodels">GET /api/models<a class="headerlink" href="#get-apimodels" title="Permanent link">&para;</a></h3>
-<p>List all SQL transform models with metadata.</p>
-<p>Returns: <code>[{name, schema, full_name, materialized, depends_on, path, content_hash}]</code></p>
+<p>List SQL transform models with metadata.</p>
+<p>Query parameters:</p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>select</code></td>
+<td>Graph selector filtering the list, e.g. <code>tag:daily</code>, <code>+gold.orders</code>, <code>gold.fct_*</code>. Omit to list everything. <code>state:</code> is not available here: this endpoint is read-only and has no warehouse connection to compare hashes against.</td>
+</tr>
+</tbody>
+</table>
+<p>Returns: <code>[{name, schema, full_name, materialized, depends_on, path, content_hash, tags}]</code></p>
 <h3 id="post-apitransform">POST /api/transform<a class="headerlink" href="#post-apitransform" title="Permanent link">&para;</a></h3>
 <p>Run the SQL transformation pipeline.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;targets&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;force&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"targets"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"exclude"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"force"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">}</span>
+</code></pre></div>
+<p><code>targets</code> and <code>exclude</code> are graph selectors, the same grammar as
+<code>havn transform</code> (see <a href="transforms#selecting-models">Selecting models</a>). A plain
+<code>"gold.orders"</code> is an exact match, so a caller that sends one model name keeps
+working.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"targets"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"state:modified+"</span><span class="p">],</span><span class="w"> </span><span class="nt">"exclude"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"tag:expensive"</span><span class="p">]}</span>
+</code></pre></div>
+<p>A selector that matches nothing is a 400 naming it, not an empty success: a
+typo would otherwise be indistinguishable from "everything was already up to
+date". When some selectors matched and others did not, the run goes ahead and
+the response carries the rest:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"results"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"gold.orders"</span><span class="p">:</span><span class="w"> </span><span class="s2">"built"</span><span class="p">},</span><span class="w"> </span><span class="nt">"warnings"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"Unknown selector method 'taggg'."</span><span class="p">]}</span>
 </code></pre></div>
 <h3 id="post-apimodelscreate">POST /api/models/create<a class="headerlink" href="#post-apimodelscreate" title="Permanent link">&para;</a></h3>
 <p>Create a new SQL model file.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my_model&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;schema_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;silver&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;materialized&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;table&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;sql&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;SELECT 1&quot;</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"my_model"</span><span class="p">,</span><span class="w"> </span><span class="nt">"schema_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"silver"</span><span class="p">,</span><span class="w"> </span><span class="nt">"materialized"</span><span class="p">:</span><span class="w"> </span><span class="s2">"table"</span><span class="p">,</span><span class="w"> </span><span class="nt">"sql"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SELECT 1"</span><span class="p">}</span>
 </code></pre></div>
 <h3 id="post-apicheck">POST /api/check<a class="headerlink" href="#post-apicheck" title="Permanent link">&para;</a></h3>
 <p>Validate models, run assertions, and run contracts.</p>
 <h3 id="post-apidiff">POST /api/diff<a class="headerlink" href="#post-apidiff" title="Permanent link">&para;</a></h3>
 <p>Compare SQL output against materialized tables.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;targets&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;target_schema&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;full&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"targets"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"target_schema"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"full"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">}</span>
 </code></pre></div>
 <h3 id="get-apimodelsmodel_namenotebook-view">GET /api/models/{model_name}/notebook-view<a class="headerlink" href="#get-apimodelsmodel_namenotebook-view" title="Permanent link">&para;</a></h3>
 <p>Get a notebook-style view combining SQL source, sample data, lineage, and dependencies.</p>
+<h3 id="get-apimodelsworkbenchpathtransformsilverorderssql">GET /api/models/workbench?path=transform/silver/orders.sql<a class="headerlink" href="#get-apimodelsworkbenchpathtransformsilverorderssql" title="Permanent link">&para;</a></h3>
+<p>Everything the editor workbench shows for the model defined in <code>path</code> (a
+project-relative file path; 404 if no model is defined there): <code>model</code>,
+<code>materialized</code>, <code>description</code>, <code>upstream</code> / <code>downstream</code> (direct, each with
+its file <code>path</code>), <code>downstream_all</code> (transitive, nearest first), <code>columns</code>
+(name, type from the last build, <code>@col</code> description), <code>checks</code> (every
+<code>@assert</code> and <code>@grain</code> with its latest <code>passed</code> / <code>detail</code> / <code>checked_at</code>, plus
+<code>failing_sql</code>, a query returning the violating rows, or <code>null</code> for
+<code>row_count</code> checks), the last 10 transform <code>runs</code>, and <code>state</code> (<code>built</code>,
+<code>last_run_at</code>, <code>row_count</code>, <code>changed_since_build</code>).</p>
+<h2 id="home">Home<a class="headerlink" href="#home" title="Permanent link">&para;</a></h2>
+<h3 id="get-apihome">GET /api/home<a class="headerlink" href="#get-apihome" title="Permanent link">&para;</a></h3>
+<p>The Home page in one call:</p>
+<ul>
+<li><code>project_name</code>, <code>is_sample</code>, <code>has_data</code>.</li>
+<li><code>tiles.models</code>: <code>total</code>, <code>changed</code>, <code>never_built</code>, <code>up_to_date</code>.</li>
+<li><code>tiles.checks</code>: <code>passed</code>, <code>failed</code>, <code>warned</code>, <code>contracts_failed</code>, from the
+  latest result of each check still declared in its model.</li>
+<li><code>tiles.last_run</code>: the latest pipeline run.</li>
+<li><code>tiles.warehouse</code>: <code>size_bytes</code> and <code>last_backup</code>.</li>
+<li><code>attention</code>: up to 25 items <code>{kind, severity, title, subject, detail, at,
+  path, sql}</code>, errors first. <code>kind</code> is <code>build</code>, <code>assertion</code>, <code>contract</code>,
+  <code>freshness</code> or <code>anomaly</code>. <code>sql</code> returns a failed check's violating rows.</li>
+<li><code>attention_total</code>: the count before the 25-item cap.</li>
+<li><code>runs</code>: pipeline runs from the last 24 hours, oldest first.</li>
+<li><code>layers</code>: <code>[{schema, models: [{name, full_name, path, status, ...}]}]</code>.
+  <code>status</code> is <code>failing</code>, <code>blocked</code>, <code>changed</code>, <code>never_built</code>, <code>fresh</code> or
+  <code>source</code>.</li>
+</ul>
+<h2 id="deploy">Deploy<a class="headerlink" href="#deploy" title="Permanent link">&para;</a></h2>
+<h3 id="get-apideploytargets">GET /api/deploy/targets<a class="headerlink" href="#get-apideploytargets" title="Permanent link">&para;</a></h3>
+<p><code>{environments: [{name, active, production, database, exists}], default_ref}</code>.
+With no <code>environments:</code> in project.yml, the one warehouse is <code>default</code>.</p>
+<h3 id="get-apideployplanenvprodrefmain">GET /api/deploy/plan?env=prod&amp;ref=main<a class="headerlink" href="#get-apideployplanenvprodrefmain" title="Permanent link">&para;</a></h3>
+<p>The models deploying <code>ref</code> to <code>env</code> would rebuild, in build order: <code>{env, ref,
+commit, models}</code>. Changes nothing.</p>
+<h3 id="post-apideploys">POST /api/deploys<a class="headerlink" href="#post-apideploys" title="Permanent link">&para;</a></h3>
+<p>Body <code>{env, ref, pr_id?}</code>, execute permission. Starts the deploy in the
+background and returns its record with <code>status: "running"</code>.</p>
+<h3 id="get-apideployspr_idlimit-and-get-apideploysid">GET /api/deploys?pr_id=&amp;limit= and GET /api/deploys/{id}<a class="headerlink" href="#get-apideployspr_idlimit-and-get-apideploysid" title="Permanent link">&para;</a></h3>
+<p>Deploy records: <code>{id, env, ref, commit, pr_id, deployed_by, status, started_at,
+finished_at, duration_ms, models, results, failed, version_id, restored,
+error}</code>. <code>status</code> is <code>running</code>, <code>success</code>, <code>up_to_date</code>, <code>rolled_back</code> or
+<code>error</code>. <code>failed</code> maps each model that did not build to <code>{status, error}</code>.</p>
 <h2 id="dag">DAG<a class="headerlink" href="#dag" title="Permanent link">&para;</a></h2>
 <h3 id="get-apidag">GET /api/dag<a class="headerlink" href="#get-apidag" title="Permanent link">&para;</a></h3>
 <p>Get the model dependency DAG (nodes and edges).</p>
 <h3 id="get-apidagfull">GET /api/dag/full<a class="headerlink" href="#get-apidagfull" title="Permanent link">&para;</a></h3>
 <p>Get the full DAG including seeds, sources, ingest scripts, and exposures.</p>
+<p>Each model node carries <code>package</code>: <code>null</code> for the project's own models, the
+package name for models that came from <code>havn_packages/</code>.</p>
+<h2 id="packages">Packages<a class="headerlink" href="#packages" title="Permanent link">&para;</a></h2>
+<h3 id="get-apipackages">GET /api/packages<a class="headerlink" href="#get-apipackages" title="Permanent link">&para;</a></h3>
+<p>Installed packages with their source, rev, resolved commit, manifest version
+and model/macro counts, plus <code>declared</code> (the <code>packages:</code> block) and <code>missing</code>
+(declared but not installed).</p>
+<h3 id="post-apipackagesinstall">POST /api/packages/install<a class="headerlink" href="#post-apipackagesinstall" title="Permanent link">&para;</a></h3>
+<p>Install every declared package and rewrite <code>havn_packages.lock</code>. Body:
+<code>{"upgrade": false}</code>. Requires execute permission. Returns one result per
+package (<code>status</code> is <code>installed</code>, <code>unchanged</code> or <code>error</code>) plus the refreshed
+listing.</p>
 <h2 id="lineage">Lineage<a class="headerlink" href="#lineage" title="Permanent link">&para;</a></h2>
 <h3 id="get-apilineagemodel_name">GET /api/lineage/{model_name}<a class="headerlink" href="#get-apilineagemodel_name" title="Permanent link">&para;</a></h3>
 <p>Get column-level lineage for a model. Returns <code>{model, columns, depends_on}</code>.</p>
@@ -4428,10 +5100,33 @@
 <p>Get column-level lineage for all models.</p>
 <h3 id="get-apiimpactmodel_name">GET /api/impact/{model_name}<a class="headerlink" href="#get-apiimpactmodel_name" title="Permanent link">&para;</a></h3>
 <p>Analyze downstream impact. Optional <code>?column=name</code> for column-level analysis.</p>
+<h2 id="rename">Rename<a class="headerlink" href="#rename" title="Permanent link">&para;</a></h2>
+<p>See <a href="../refactoring/">Refactoring</a> for what the blockers mean.</p>
+<h3 id="get-apirenamereferences">GET /api/rename/references<a class="headerlink" href="#get-apirenamereferences" title="Permanent link">&para;</a></h3>
+<p><code>?model=silver.customers&amp;column=customer_id</code>. Every place the column is
+written, with a character range per site, plus the places the index could not
+see through. Read permission.</p>
+<p>Returns <code>{model, column, sites, blocked, models}</code>.</p>
+<h3 id="post-apirenameplan">POST /api/rename/plan<a class="headerlink" href="#post-apirenameplan" title="Permanent link">&para;</a></h3>
+<p>The splices a rename would make and the file contents they produce. Writes
+nothing. Read permission. A refusal comes back as <code>{error}</code> with an empty
+<code>edits</code>, not as an HTTP error.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"silver.customers"</span><span class="p">,</span><span class="w"> </span><span class="nt">"column"</span><span class="p">:</span><span class="w"> </span><span class="s2">"customer_id"</span><span class="p">,</span><span class="w"> </span><span class="nt">"new_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cust_id"</span><span class="p">,</span><span class="w"> </span><span class="nt">"force"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">}</span>
+</code></pre></div>
+<p>Returns <code>{model, column, new_name, sites, blocked, edits, files}</code>. Each entry
+in <code>files</code> carries the new <code>content</code> and the <code>file_hash</code> of what is on disk
+now, to hand back to <code>/apply</code>.</p>
+<h3 id="post-apirenameapply">POST /api/rename/apply<a class="headerlink" href="#post-apirenameapply" title="Permanent link">&para;</a></h3>
+<p>Apply the rename to every file it touches, or to none of them. Write
+permission. <code>409</code> when a file changed since the plan was made, <code>400</code> when the
+rename is refused.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"silver.customers"</span><span class="p">,</span><span class="w"> </span><span class="nt">"column"</span><span class="p">:</span><span class="w"> </span><span class="s2">"customer_id"</span><span class="p">,</span><span class="w"> </span><span class="nt">"new_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cust_id"</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"hashes"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"transform/silver/customers.sql"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a1b2c3"</span><span class="p">}}</span>
+</code></pre></div>
 <h2 id="pipeline">Pipeline<a class="headerlink" href="#pipeline" title="Permanent link">&para;</a></h2>
 <h3 id="post-apirun">POST /api/run<a class="headerlink" href="#post-apirun" title="Permanent link">&para;</a></h3>
 <p>Run an ingest or export script.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;script_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ingest/customers.py&quot;</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"script_path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ingest/customers.py"</span><span class="p">}</span>
 </code></pre></div>
 <h3 id="post-apistreamstream_namestart">POST /api/stream/{stream_name}/start<a class="headerlink" href="#post-apistreamstream_namestart" title="Permanent link">&para;</a></h3>
 <p>Start a pipeline in a background thread. Returns immediately with
@@ -4464,21 +5159,21 @@ flag between steps; in-flight queries are not interrupted by default.</p>
 <p>List connectors configured in the project.</p>
 <h3 id="post-apiconnectorstest">POST /api/connectors/test<a class="headerlink" href="#post-apiconnectorstest" title="Permanent link">&para;</a></h3>
 <p>Test a connector without setup.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;connector_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;postgres&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;config&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;host&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;database&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">}}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"connector_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"postgres"</span><span class="p">,</span><span class="w"> </span><span class="nt">"config"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"host"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"database"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">}}</span>
 </code></pre></div>
 <h3 id="post-apiconnectorsdiscover">POST /api/connectors/discover<a class="headerlink" href="#post-apiconnectorsdiscover" title="Permanent link">&para;</a></h3>
 <p>Discover available resources for a connector.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;connector_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;postgres&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;config&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;host&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">}}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"connector_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"postgres"</span><span class="p">,</span><span class="w"> </span><span class="nt">"config"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"host"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">}}</span>
 </code></pre></div>
 <h3 id="post-apiconnectorssetup">POST /api/connectors/setup<a class="headerlink" href="#post-apiconnectorssetup" title="Permanent link">&para;</a></h3>
 <p>Full connector setup: test, generate script, update config.</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;connector_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;postgres&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;connection_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod_db&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;config&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;host&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;database&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">},</span>
-<span class="w">  </span><span class="nt">&quot;tables&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;users&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;orders&quot;</span><span class="p">],</span>
-<span class="w">  </span><span class="nt">&quot;target_schema&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;landing&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;schedule&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0 6 * * *&quot;</span>
+<span class="w">  </span><span class="nt">"connector_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"postgres"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"connection_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"prod_db"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"config"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"host"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"database"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"tables"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"users"</span><span class="p">,</span><span class="w"> </span><span class="s2">"orders"</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"target_schema"</span><span class="p">:</span><span class="w"> </span><span class="s2">"landing"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"schedule"</span><span class="p">:</span><span class="w"> </span><span class="s2">"0 6 * * *"</span>
 <span class="p">}</span>
 </code></pre></div>
 <h3 id="post-apiconnectorsregenerateconnection_name">POST /api/connectors/regenerate/{connection_name}<a class="headerlink" href="#post-apiconnectorsregenerateconnection_name" title="Permanent link">&para;</a></h3>
@@ -4517,7 +5212,7 @@ development set <code>HAVN_WEBHOOK_OPEN=true</code>. Payloads are capped at 5 MB
 <p>Get alert history. Optional <code>?limit=50</code>.</p>
 <h3 id="post-apialertstest">POST /api/alerts/test<a class="headerlink" href="#post-apialertstest" title="Permanent link">&para;</a></h3>
 <p>Send a test alert.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;channel&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;slack&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;slack_webhook_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://hooks.slack.com/...&quot;</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"channel"</span><span class="p">:</span><span class="w"> </span><span class="s2">"slack"</span><span class="p">,</span><span class="w"> </span><span class="nt">"slack_webhook_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://hooks.slack.com/..."</span><span class="p">}</span>
 </code></pre></div>
 <h3 id="get-apicontracts">GET /api/contracts<a class="headerlink" href="#get-apicontracts" title="Permanent link">&para;</a></h3>
 <p>List all discovered contracts.</p>
@@ -4525,17 +5220,24 @@ development set <code>HAVN_WEBHOOK_OPEN=true</code>. Payloads are capped at 5 MB
 <p>Run all data contracts.</p>
 <h3 id="get-apicontractshistory">GET /api/contracts/history<a class="headerlink" href="#get-apicontractshistory" title="Permanent link">&para;</a></h3>
 <p>Get contract evaluation history.</p>
+<h3 id="get-apiunit-tests">GET /api/unit-tests<a class="headerlink" href="#get-apiunit-tests" title="Permanent link">&para;</a></h3>
+<p>List the model unit tests declared in <code>tests/unit/*.yml</code>, plus any load errors.</p>
+<h3 id="post-apiunit-testsrun">POST /api/unit-tests/run<a class="headerlink" href="#post-apiunit-testsrun" title="Permanent link">&para;</a></h3>
+<p>Run the unit tests, optionally filtered to one model. Requires <code>execute</code>
+permission; the tests themselves run in memory and never touch the warehouse.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"silver.customers"</span><span class="p">}</span>
+</code></pre></div>
 <h2 id="masking">Masking<a class="headerlink" href="#masking" title="Permanent link">&para;</a></h2>
 <h3 id="get-apimaskingpolicies">GET /api/masking/policies<a class="headerlink" href="#get-apimaskingpolicies" title="Permanent link">&para;</a></h3>
 <p>List all masking policies.</p>
 <h3 id="post-apimaskingpolicies">POST /api/masking/policies<a class="headerlink" href="#post-apimaskingpolicies" title="Permanent link">&para;</a></h3>
 <p>Create a new masking policy.</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;schema_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gold&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;table_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;customers&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;column_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;email&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;method&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;hash&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;exempted_roles&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;admin&quot;</span><span class="p">]</span>
+<span class="w">  </span><span class="nt">"schema_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"gold"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"table_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"customers"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"column_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"email"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"hash"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"exempted_roles"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"admin"</span><span class="p">]</span>
 <span class="p">}</span>
 </code></pre></div>
 <h3 id="get-apimaskingpoliciespolicy_id">GET /api/masking/policies/{policy_id}<a class="headerlink" href="#get-apimaskingpoliciespolicy_id" title="Permanent link">&para;</a></h3>
@@ -4547,22 +5249,22 @@ development set <code>HAVN_WEBHOOK_OPEN=true</code>. Payloads are capped at 5 MB
 <h2 id="backup">Backup<a class="headerlink" href="#backup" title="Permanent link">&para;</a></h2>
 <h3 id="post-apibackup">POST /api/backup<a class="headerlink" href="#post-apibackup" title="Permanent link">&para;</a></h3>
 <p>Create a verified backup with SHA-256 checksum. Optional body:</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;no_verify&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;note&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;before deploy&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;keep&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"no_verify"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nt">"note"</span><span class="p">:</span><span class="w"> </span><span class="s2">"before deploy"</span><span class="p">,</span><span class="w"> </span><span class="nt">"keep"</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">}</span>
 </code></pre></div>
 <p>Returns: <code>{path, size_bytes, sha256, timestamp}</code></p>
 <h3 id="get-apibackups">GET /api/backups<a class="headerlink" href="#get-apibackups" title="Permanent link">&para;</a></h3>
 <p>List all tracked backups from the manifest.</p>
 <h3 id="post-apibackupverify">POST /api/backup/verify<a class="headerlink" href="#post-apibackupverify" title="Permanent link">&para;</a></h3>
 <p>Verify a backup file's integrity against its stored checksum.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;_backups/warehouse_20260407_120000.duckdb&quot;</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"_backups/warehouse_20260407_120000.duckdb"</span><span class="p">}</span>
 </code></pre></div>
 <h3 id="post-apibackuprestore">POST /api/backup/restore<a class="headerlink" href="#post-apibackuprestore" title="Permanent link">&para;</a></h3>
 <p>Restore the warehouse from a backup.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;_backups/warehouse_20260407_120000.duckdb&quot;</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"_backups/warehouse_20260407_120000.duckdb"</span><span class="p">}</span>
 </code></pre></div>
 <h3 id="post-apibackupcleanup">POST /api/backup/cleanup<a class="headerlink" href="#post-apibackupcleanup" title="Permanent link">&para;</a></h3>
 <p>Remove old backups, keeping the most recent N.</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;keep&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"keep"</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">}</span>
 </code></pre></div>
 <h2 id="catalog">Catalog<a class="headerlink" href="#catalog" title="Permanent link">&para;</a></h2>
 <h3 id="get-apiseeds">GET /api/seeds<a class="headerlink" href="#get-apiseeds" title="Permanent link">&para;</a></h3>
@@ -4668,7 +5370,7 @@ development set <code>HAVN_WEBHOOK_OPEN=true</code>. Payloads are capped at 5 MB
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

@@ -10,13 +10,9 @@
       
       
       
-        <link rel="canonical" href="https://chraltro.github.io/db/mcp/">
+        <link rel="canonical" href="https://chraltro.github.io/db/refactoring/">
       
       
-        <link rel="prev" href="../auth/">
-      
-      
-        <link rel="next" href="../limitations/">
       
       
         
@@ -27,7 +23,7 @@
     
     
       
-        <title>MCP Server - havn</title>
+        <title>Refactoring - havn</title>
       
     
     
@@ -78,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#mcp-server" class="md-skip">
+        <a href="#refactoring" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              MCP Server
+              Refactoring
             
           </span>
         </div>
@@ -627,11 +623,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../mcp/" class="md-tabs__link">
         
   
   
@@ -1344,37 +1338,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    MCP Server
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
         
   
   
@@ -1390,70 +1357,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Setup
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#tools" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Tools
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#how-it-coexists-with-havn-serve" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        How it coexists with havn serve
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#safety-model" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Safety model
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1566,10 +1469,66 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
+  <a href="#find-column-references" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Setup
+        Find column references
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Find column references">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-kinds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The kinds
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rename" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rename
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Rename">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#writing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-refuses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it refuses
       
     </span>
   </a>
@@ -1577,10 +1536,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tools" class="md-nav__link">
+  <a href="#after-a-rename" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Tools
+        After a rename
       
     </span>
   </a>
@@ -1588,10 +1547,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-it-coexists-with-havn-serve" class="md-nav__link">
+  <a href="#api" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How it coexists with havn serve
+        API
       
     </span>
   </a>
@@ -1599,10 +1558,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#safety-model" class="md-nav__link">
+  <a href="#related-pages" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Safety model
+        Related Pages
       
     </span>
   </a>
@@ -1629,117 +1588,198 @@
   
 
 
-<h1 id="mcp-server">MCP Server<a class="headerlink" href="#mcp-server" title="Permanent link">&para;</a></h1>
-<p><code>havn mcp</code> starts a <a href="https://modelcontextprotocol.io">Model Context Protocol</a>
-server over stdio, exposing your warehouse to AI agents — Claude Code,
-Codex CLI, or any other MCP client. The agent can explore tables, run
-read-only queries, inspect the transform DAG and lineage, query
-semantic-layer metrics, and (optionally) build models.</p>
-<p>No extra dependencies: the protocol implementation ships with havn.</p>
-<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># Claude Code</span>
-claude<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span>havn<span class="w"> </span>--<span class="w"> </span>havn<span class="w"> </span>mcp<span class="w"> </span>-p<span class="w"> </span>/path/to/your/project
-
-<span class="c1"># Any other MCP client: configure a stdio server with</span>
-<span class="c1">#   command: havn</span>
-<span class="c1">#   args: ["mcp", "-p", "/path/to/your/project"]</span>
+<h1 id="refactoring">Refactoring<a class="headerlink" href="#refactoring" title="Permanent link">&para;</a></h1>
+<p>Renaming a column is not a find-and-replace. The same word names different
+things in different models, a downstream model can filter or join on a column
+it never projects, and a model that re-exports the column under the same name
+passes the rename on to its own children. havn indexes every place the column
+is actually written, rewrites exactly those, and reports the places it cannot
+see through instead of guessing at them.</p>
+<h2 id="find-column-references">Find column references<a class="headerlink" href="#find-column-references" title="Permanent link">&para;</a></h2>
+<p>The index on its own, with nothing written:</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>rename-column<span class="w"> </span>silver.customers<span class="w"> </span>customer_id<span class="w"> </span>cust_id<span class="w"> </span>--dry-run
 </code></pre></div>
-<p>Options:</p>
+<div class="highlight"><pre><span></span><code>                  silver.customers.customer_id
+ file                              line  kind        clause
+ transform/silver/customers.sql       5  definition  select
+ transform/gold/customer_report.sql   3  reference   select
+ transform/gold/customer_report.sql   5  reference   where
+ transform/gold/orders.sql            9  reference   join
+ transform/gold/orders.sql           12  reference   group
+
+5 edits in 3 files: customer_id to cust_id
+--dry-run: nothing written.
+</code></pre></div>
+<p>In the web editor, right-click a column and choose <strong>Find column references</strong>.
+The sites appear in a panel under the editor; clicking one opens that file at
+that line.</p>
+<p>The <code>clause</code> column is the point of the exercise. A <code>where</code>, <code>join</code> or <code>group</code>
+row is a model that reads the column without projecting it, which column
+lineage alone does not report and a text search cannot tell apart from an
+unrelated column of the same name.</p>
+<h3 id="the-kinds">The kinds<a class="headerlink" href="#the-kinds" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
-<th>Flag</th>
+<th>Kind</th>
 <th>Meaning</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>-p, --project</code></td>
-<td>Project directory (default: current dir)</td>
+<td><code>definition</code></td>
+<td>The identifier that gives the model its output column: the alias when the projection is aliased, the column itself when it is not.</td>
 </tr>
 <tr>
-<td><code>-e, --env</code></td>
-<td>Environment to use (<code>dev</code>, <code>prod</code>, ...)</td>
+<td><code>reference</code></td>
+<td>A downstream model reads the column, anywhere in the query.</td>
 </tr>
 <tr>
-<td><code>--read-only</code></td>
-<td>Disable the <code>run_transform</code> tool entirely</td>
+<td><code>alias</code></td>
+<td>A downstream model re-exports the column under a different name. The rename stops there; that model's own children keep the new name, so they are not touched. Reported, never edited.</td>
+</tr>
+<tr>
+<td><code>yaml</code></td>
+<td>A metrics or contracts YAML file names the column in plain text.</td>
 </tr>
 </tbody>
 </table>
-<h2 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h2>
+<h2 id="rename">Rename<a class="headerlink" href="#rename" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>rename-column<span class="w"> </span>silver.customers<span class="w"> </span>customer_id<span class="w"> </span>cust_id
+</code></pre></div>
+<p>It prints the same table, then asks before writing. In the editor, press <code>F2</code>
+on the column.</p>
+<p>The rename follows the column downstream only where it keeps its name. Given</p>
+<div class="highlight"><pre><span></span><code><span class="c1">-- transform/silver/customers.sql</span>
+<span class="k">SELECT</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">customer_id</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="n">o</span><span class="p">.</span><span class="n">order_id</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">order_count</span>
+<span class="k">FROM</span><span class="w"> </span><span class="n">bronze</span><span class="p">.</span><span class="n">customers</span><span class="w"> </span><span class="k">c</span>
+<span class="k">LEFT</span><span class="w"> </span><span class="k">JOIN</span><span class="w"> </span><span class="n">bronze</span><span class="p">.</span><span class="n">orders</span><span class="w"> </span><span class="n">o</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">customer_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">o</span><span class="p">.</span><span class="n">customer_ref</span>
+<span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">customer_id</span>
+</code></pre></div>
+<p>renaming <code>bronze.customers.customer_id</code> rewrites all three mentions here, and
+because <code>silver.customers</code> re-exports <code>customer_id</code> under its own name, it
+carries on into everything that reads <code>silver.customers</code>. A model that writes
+<code>SELECT customer_id AS account_id</code> ends the chain: its output is still
+<code>account_id</code>, and its own consumers are left alone.</p>
+<p>CTEs inside a model are followed the same way, one definition at a time.</p>
+<h3 id="writing">Writing<a class="headerlink" href="#writing" title="Permanent link">&para;</a></h3>
+<p>Every file is written or none of them is:</p>
+<ol>
+<li>Every edit is re-read from the file and checked against the identifier it
+   claims to replace. One mismatch and nothing is written.</li>
+<li>Each file goes to a temporary neighbour and is renamed into place.</li>
+<li>If a write fails part way through, the files already written are put back.</li>
+</ol>
+<p>A read-only file is refused rather than replaced.</p>
+<h2 id="what-it-refuses">What it refuses<a class="headerlink" href="#what-it-refuses" title="Permanent link">&para;</a></h2>
+<p>These come back as blockers, with the file and the reason. <code>--force</code> renames
+everything else and leaves them alone, which is the honest outcome: the places
+below need a person.</p>
 <table>
 <thead>
 <tr>
-<th>Tool</th>
-<th>Description</th>
+<th>Blocker</th>
+<th>Why</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>query</code></td>
-<td>Read-only SQL (mutations and file-access functions are rejected)</td>
+<td><code>select_star</code></td>
+<td>A model expands <code>SELECT *</code> over a relation that carries the column, with or without <code>EXCLUDE</code> or <code>REPLACE</code>. A star yields no identifier, so there is nothing to rewrite, and the model's output column silently changes name when its upstream is renamed.</td>
 </tr>
 <tr>
-<td><code>list_tables</code></td>
-<td>Tables and views, optionally filtered by schema</td>
+<td><code>columns_expression</code></td>
+<td><code>COLUMNS(...)</code> expands to columns that are never written out.</td>
 </tr>
 <tr>
-<td><code>describe_table</code></td>
-<td>Columns, types, and row count</td>
+<td><code>union_by_name</code></td>
+<td><code>UNION BY NAME</code> matches columns by name at run time, so renaming one branch changes what the query means.</td>
 </tr>
 <tr>
-<td><code>list_models</code></td>
-<td>Transform models with materialization, tags and dependencies; takes a <code>select</code> graph selector</td>
+<td><code>opaque_relation</code></td>
+<td>The model reads from a function rather than a table (a table macro, <code>read_csv</code>), whose columns are not visible.</td>
 </tr>
 <tr>
-<td><code>get_model</code></td>
-<td>A model's SQL source, config, and dependencies</td>
+<td><code>unresolved_reference</code></td>
+<td>An unqualified column that could belong to more than one relation in scope, with no schema to settle it. Build the project, or qualify the reference.</td>
 </tr>
 <tr>
-<td><code>model_lineage</code></td>
-<td>Direct + transitive upstreams and downstreams</td>
+<td><code>yaml_mention</code></td>
+<td>A <code>metrics/*.yml</code> or <code>contracts/*.yml</code> file names the column. YAML is matched as plain text, which is precise enough to edit but too weak to apply unattended.</td>
 </tr>
 <tr>
-<td><code>run_history</code></td>
-<td>Recent pipeline runs from <code>_havn.run_log</code></td>
-</tr>
-<tr>
-<td><code>list_metrics</code></td>
-<td>Semantic-layer metrics from <code>metrics/*.yml</code></td>
-</tr>
-<tr>
-<td><code>query_metric</code></td>
-<td>Query a metric by dimensions / grain / time range</td>
-</tr>
-<tr>
-<td><code>run_transform</code></td>
-<td>Build models; <code>select</code> and <code>exclude</code> take graph selectors (omitted with <code>--read-only</code>)</td>
+<td><code>no_definition</code></td>
+<td>The model has no output column by that name.</td>
 </tr>
 </tbody>
 </table>
-<p><code>select</code> and <code>exclude</code> take the same grammar as <code>havn transform</code>: <code>+x</code>, <code>x+</code>,
-<code>@x</code>, <code>gold.fct_*</code>, <code>tag:daily</code>, <code>path:transform/gold/</code>,
-<code>config.materialized:incremental</code>, <code>state:modified+</code>, and a comma to
-intersect. See <a href="transforms#selecting-models">Selecting models</a>.</p>
-<h2 id="how-it-coexists-with-havn-serve">How it coexists with <code>havn serve</code><a class="headerlink" href="#how-it-coexists-with-havn-serve" title="Permanent link">&para;</a></h2>
-<p>DuckDB allows one writing process at a time. When <code>havn serve</code> is running,
-it holds the warehouse lock — the MCP server detects this and routes read
-queries through the server's HTTP API instead of opening the file directly
-(the same strategy the CLI uses). <code>run_transform</code> refuses to run while the
-lock is held and tells the agent why.</p>
-<h2 id="safety-model">Safety model<a class="headerlink" href="#safety-model" title="Permanent link">&para;</a></h2>
-<p>The MCP server has the same trust level as your local CLI:</p>
+<p>In the editor a rename with blockers shows them in a dialog first, and does
+nothing unless you confirm.</p>
+<h2 id="after-a-rename">After a rename<a class="headerlink" href="#after-a-rename" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>validate
+</code></pre></div>
+<p>The bind pass resolves every model through the DuckDB binder, which is what
+catches a column the rename could not reach. Then rebuild:</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>transform<span class="w"> </span>state:modified+
+</code></pre></div>
+<h2 id="api">API<a class="headerlink" href="#api" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Permission</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /api/rename/references?model=&amp;column=</code></td>
+<td>read</td>
+<td>The sites and the blockers.</td>
+</tr>
+<tr>
+<td><code>POST /api/rename/plan</code></td>
+<td>read</td>
+<td>The edits and the file contents they produce. Writes nothing.</td>
+</tr>
+<tr>
+<td><code>POST /api/rename/apply</code></td>
+<td>write</td>
+<td>Applies them. <code>409</code> when a file changed since the plan.</td>
+</tr>
+<tr>
+<td><code>PUT /api/files</code></td>
+<td>write</td>
+<td>Write several files as one unit, with a per-file hash check.</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span><span class="s2">"http://localhost:3000/api/rename/references?model=silver.customers&amp;column=customer_id"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"silver.customers"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"column"</span><span class="p">:</span><span class="w"> </span><span class="s2">"customer_id"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"sites"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"silver.customers"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"transform/silver/customers.sql"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"line"</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="nt">"col"</span><span class="p">:</span><span class="w"> </span><span class="mi">18</span><span class="p">,</span><span class="w"> </span><span class="nt">"start"</span><span class="p">:</span><span class="w"> </span><span class="mi">61</span><span class="p">,</span><span class="w"> </span><span class="nt">"end"</span><span class="p">:</span><span class="w"> </span><span class="mi">72</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"clause"</span><span class="p">:</span><span class="w"> </span><span class="s2">"select"</span><span class="p">,</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"definition"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"resolved"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"text"</span><span class="p">:</span><span class="w"> </span><span class="s2">"customer_id"</span><span class="p">,</span><span class="w"> </span><span class="nt">"needs_alias"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"blocked"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<span class="w">  </span><span class="nt">"models"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"silver.customers"</span><span class="p">,</span><span class="w"> </span><span class="s2">"gold.customer_report"</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><code>start</code> and <code>end</code> are character offsets into the file, <code>end</code> exclusive, so
+<code>content[start:end]</code> is the identifier.</p>
+<h2 id="related-pages">Related Pages<a class="headerlink" href="#related-pages" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Every <code>query</code> / <code>query_metric</code> / introspection call goes through the same
-  read-only SQL validation as the web API: single statement, no mutation
-  verbs, no <code>read_csv</code> / <code>read_parquet</code> / HTTP functions.</li>
-<li>Reads use a read-only DuckDB connection — even a validator bypass could
-  not write.</li>
-<li><code>run_transform</code> is the only mutating tool. It builds your own transform
-  models (with Pipeline Rewind snapshots when enabled, so agent-triggered
-  builds can be rolled back like any other run). Start with <code>--read-only</code>
-  if the agent shouldn't build at all.</li>
+<li><a href="../lineage/">Lineage</a> -- column lineage and impact analysis</li>
+<li><a href="../transforms/">Transforms</a> -- the SQL model format</li>
+<li><a href="../cli-reference/">CLI Reference</a> -- <code>havn rename-column</code></li>
+<li><a href="../limitations/">Limitations</a> -- what the editor does and does not do</li>
 </ul>
 
 

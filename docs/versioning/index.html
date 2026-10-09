@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -344,6 +344,25 @@
   
   
     <li class="md-tabs__item">
+      <a href="../unit-tests/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Unit Tests
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
       <a href="../contracts/" class="md-tabs__link">
         
   
@@ -370,6 +389,25 @@
     
   
   Macros
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../packages/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Packages
 
       </a>
     </li>
@@ -600,6 +638,25 @@
     
   
   MCP Server
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../limitations/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  What havn Supports
 
       </a>
     </li>
@@ -885,6 +942,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../unit-tests/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unit Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../contracts/" class="md-nav__link">
         
   
@@ -920,6 +1004,33 @@
     
   
     Macros
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../packages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packages
   
 
     
@@ -1565,6 +1676,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What havn Supports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../cli-reference/" class="md-nav__link">
         
   
@@ -1915,6 +2053,7 @@
 
 <h1 id="versioning-and-time-travel">Versioning and Time Travel<a class="headerlink" href="#versioning-and-time-travel" title="Permanent link">&para;</a></h1>
 <p>havn provides two versioning systems: <strong>snapshots</strong> for lightweight project state comparison, and <strong>versions</strong> for full data time travel with Parquet-backed table recovery.</p>
+<p>Both are about the warehouse as a whole. They are unrelated to <strong>snapshot models</strong> (<code>@config materialized=snapshot</code>), which keep row-level SCD2 history of a single table inside the warehouse and are documented in <a href="../transforms/#snapshot-models-scd2">transforms.md</a>. This page is the undo button; a snapshot model is a modeling pattern.</p>
 <h2 id="snapshots">Snapshots<a class="headerlink" href="#snapshots" title="Permanent link">&para;</a></h2>
 <p>Snapshots capture a fingerprint of the current project and data state. They are fast to create and useful for comparing changes over time.</p>
 <h3 id="creating-snapshots">Creating Snapshots<a class="headerlink" href="#creating-snapshots" title="Permanent link">&para;</a></h3>
@@ -1925,8 +2064,8 @@
 </code></pre></div>
 <p>Via API:</p>
 <div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:3000/api/snapshot<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;: &quot;before-refactor&quot;}&#39;</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"name": "before-refactor"}'</span>
 </code></pre></div>
 <h3 id="what-snapshots-capture">What Snapshots Capture<a class="headerlink" href="#what-snapshots-capture" title="Permanent link">&para;</a></h3>
 <ul>
@@ -1966,7 +2105,7 @@ curl<span class="w"> </span>-X<span class="w"> </span>DELETE<span class="w"> </s
 <h3 id="creating-versions">Creating Versions<a class="headerlink" href="#creating-versions" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># Via API</span>
 curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:3000/api/versions<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span>
 </code></pre></div>
 <p>Versions are stored in the <code>_snapshots/</code> directory:</p>
 <div class="highlight"><pre><span></span><code>_snapshots/
@@ -1991,12 +2130,12 @@ curl<span class="w"> </span>http://localhost:3000/api/versions
 <p>Returns:</p>
 <div class="highlight"><pre><span></span><code><span class="p">[</span>
 <span class="w">  </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;version_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;v2-20250116-060000&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;created_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2025-01-16 06:00:00&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;trigger&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;manual&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;table_count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;total_rows&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">45678</span>
+<span class="w">    </span><span class="nt">"version_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"v2-20250116-060000"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"created_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2025-01-16 06:00:00"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"trigger"</span><span class="p">:</span><span class="w"> </span><span class="s2">"manual"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"table_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"total_rows"</span><span class="p">:</span><span class="w"> </span><span class="mi">45678</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">]</span>
 </code></pre></div>
@@ -2007,33 +2146,33 @@ curl<span class="w"> </span>http://localhost:3000/api/versions
 <h2 id="diff-between-versions">Diff Between Versions<a class="headerlink" href="#diff-between-versions" title="Permanent link">&para;</a></h2>
 <p>Compare two versions or a version against current state:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Compare two versions</span>
-curl<span class="w"> </span><span class="s2">&quot;http://localhost:3000/api/versions/v1-20250115-060000/diff?to_version=v2-20250116-060000&quot;</span>
+curl<span class="w"> </span><span class="s2">"http://localhost:3000/api/versions/v1-20250115-060000/diff?to_version=v2-20250116-060000"</span>
 
 <span class="c1"># Compare a version against current state</span>
 curl<span class="w"> </span>http://localhost:3000/api/versions/v1-20250115-060000/diff
 </code></pre></div>
 <p>Returns:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;from_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;v1-20250115-060000&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;to_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;current&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;tables_compared&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;changes&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">  </span><span class="nt">"from_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"v1-20250115-060000"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"to_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"current"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"tables_compared"</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"changes"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">    </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">&quot;table&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gold.customers&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;change&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;modified&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;rows_before&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5000</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;rows_after&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5432</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;row_diff&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">432</span>
+<span class="w">      </span><span class="nt">"table"</span><span class="p">:</span><span class="w"> </span><span class="s2">"gold.customers"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"change"</span><span class="p">:</span><span class="w"> </span><span class="s2">"modified"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"rows_before"</span><span class="p">:</span><span class="w"> </span><span class="mi">5000</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"rows_after"</span><span class="p">:</span><span class="w"> </span><span class="mi">5432</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"row_diff"</span><span class="p">:</span><span class="w"> </span><span class="mi">432</span>
 <span class="w">    </span><span class="p">},</span>
 <span class="w">    </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">&quot;table&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gold.new_report&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;change&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;added&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;rows&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1234</span>
+<span class="w">      </span><span class="nt">"table"</span><span class="p">:</span><span class="w"> </span><span class="s2">"gold.new_report"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"change"</span><span class="p">:</span><span class="w"> </span><span class="s2">"added"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"rows"</span><span class="p">:</span><span class="w"> </span><span class="mi">1234</span>
 <span class="w">    </span><span class="p">},</span>
 <span class="w">    </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">&quot;table&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gold.deprecated&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;change&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;removed&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;rows_before&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">100</span>
+<span class="w">      </span><span class="nt">"table"</span><span class="p">:</span><span class="w"> </span><span class="s2">"gold.deprecated"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"change"</span><span class="p">:</span><span class="w"> </span><span class="s2">"removed"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"rows_before"</span><span class="p">:</span><span class="w"> </span><span class="mi">100</span>
 <span class="w">    </span><span class="p">}</span>
 <span class="w">  </span><span class="p">]</span>
 <span class="p">}</span>
@@ -2065,19 +2204,19 @@ curl<span class="w"> </span>http://localhost:3000/api/versions/v1-20250115-06000
 <p>Returns:</p>
 <div class="highlight"><pre><span></span><code><span class="p">[</span>
 <span class="w">  </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;version_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;v3-20250117-060000&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;created_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2025-01-17 06:00:00&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;row_count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5500</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;columns&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<span class="w">      </span><span class="p">{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;customer_id&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;INTEGER&quot;</span><span class="p">},</span>
-<span class="w">      </span><span class="p">{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;name&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;VARCHAR&quot;</span><span class="p">}</span>
+<span class="w">    </span><span class="nt">"version_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"v3-20250117-060000"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"created_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2025-01-17 06:00:00"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"row_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">5500</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"columns"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"customer_id"</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"INTEGER"</span><span class="p">},</span>
+<span class="w">      </span><span class="p">{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"name"</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"VARCHAR"</span><span class="p">}</span>
 <span class="w">    </span><span class="p">]</span>
 <span class="w">  </span><span class="p">},</span>
 <span class="w">  </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;version_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;v2-20250116-060000&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;created_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2025-01-16 06:00:00&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;row_count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5432</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;columns&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">]</span>
+<span class="w">    </span><span class="nt">"version_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"v2-20250116-060000"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"created_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2025-01-16 06:00:00"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"row_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">5432</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"columns"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">]</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">]</span>
 </code></pre></div>
@@ -2172,7 +2311,7 @@ havn<span class="w"> </span>backup-restore<span class="w"> </span>warehouse.duck
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
