@@ -97,6 +97,13 @@ All notable changes to havn are documented in this file.
   with a column list or `BY NAME`, not positional `VALUES`.
 - `havn serve --auth` never follows git branches: users, tokens and policies
   live in the base warehouse.
+- **`havn mcp` without a running server reads governed** as the role in
+  `HAVN_MCP_ROLE` (default `editor`): masking, row policies and the `_havn`
+  block apply. Set `HAVN_MCP_ROLE=admin` for the old behaviour.
+- Editing a dashboard whose public link or scheduled report runs as a more
+  privileged identity needs that privilege.
+- Performance plans and build errors (`/api/perf/models`, `builds`, `diff`,
+  `runs`) need editor access: they can carry literal values.
 
 ### Fixed
 
