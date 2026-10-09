@@ -1597,12 +1597,24 @@ def execute_model(
         else:
             conn.execute(f"CREATE SCHEMA IF NOT EXISTS {model.schema}")
             start = time.perf_counter()
-            _drop_conflicting(conn, model.schema, model.name, model.materialized)
             query = resolve_query(model, model_map, query_rewriter)
+            kind = model.materialized
+            if kind == "view" and query_rewriter is not None and query != resolve_query(model, model_map):
+                # A deferred view reads from the defer target's attach alias,
+                # which exists only for the length of the run. Stored as a
+                # view it would fail on every later query ("Catalog
+                # havn_defer_... does not exist"), so a view that defer
+                # redirected is materialized as a table instead: the rows it
+                # would have shown, read while the target was attached.
+                kind = "table"
+                logger.info(
+                    "defer: %s reads the defer target, so it is built as a table", model.full_name
+                )
+            _drop_conflicting(conn, model.schema, model.name, kind)
 
-            if model.materialized == "view":
+            if kind == "view":
                 ddl = f"CREATE OR REPLACE VIEW {model.full_name} AS\n{query}"
-            elif model.materialized == "table":
+            elif kind == "table":
                 ddl = f"CREATE OR REPLACE TABLE {model.full_name} AS\n{query}"
             else:
                 raise ValueError(f"Unknown materialization: {model.materialized}")
@@ -1611,7 +1623,7 @@ def execute_model(
             duration_ms = int((time.perf_counter() - start) * 1000)
 
             row_count = 0
-            if model.materialized == "table":
+            if kind == "table":
                 result = conn.execute(f"SELECT count(*) FROM {model.full_name}").fetchone()
                 row_count = result[0] if result else 0
 

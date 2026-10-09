@@ -26,6 +26,10 @@ class DuckDBBackend:
     def connect(self, read_only: bool = False) -> duckdb.DuckDBPyConnection:
         from havn.engine.database import _progress_bar_enabled, _resolve_memory_limit
 
+        if not read_only and not self._db_path.parent.exists():
+            # A branch warehouse lives under .havn/branches/, which does not
+            # exist until the first branch is opened.
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = duckdb.connect(str(self._db_path), read_only=read_only)
         progress = "true" if _progress_bar_enabled() else "false"
         conn.execute(f"SET enable_progress_bar = {progress}")

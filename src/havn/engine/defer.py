@@ -129,6 +129,27 @@ def resolve_defer(
     if enabled is False:
         return None
 
+    # A branch warehouse always defers to its base: that is what makes it
+    # cheap. The base is whatever engine/branches.py resolved (an
+    # environment's warehouse, the top-level one, or a --base file).
+    branch = getattr(config, "branch", None)
+    if branch is not None and getattr(branch, "active", False):
+        from havn.engine.branches import base_warehouse_path
+
+        path = base_warehouse_path(config)
+        if not path.exists():
+            raise DeferError(
+                f"This branch defers to '{branch.base_label}', which has no warehouse "
+                f"at {path}. Build the base first, or run with --no-defer."
+            )
+        return DeferSpec(
+            target=branch.base_label,
+            path=path,
+            snapshot=snapshot,
+            verbose=verbose,
+            project_dir=project_dir,
+        )
+
     env_name = getattr(config, "active_environment", None)
     environments = getattr(config, "environments", {}) or {}
     env_cfg = environments.get(env_name) if env_name else None
