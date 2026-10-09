@@ -303,8 +303,12 @@ def get_job_plan(name: str, request: Request, conn: DbConnReadOnly):
 
 @router.post("/api/jobs/{name}/run")
 def run_job(name: str, request: Request, conn: DbConn, force: bool = False):
-    """Start a job. Unchanged models are skipped unless ``force``."""
-    _require_permission(request, "execute")
+    """Start a job. Unchanged models are skipped unless ``force``.
+
+    The job's script steps run for the requesting user (governed if masking
+    or row policies apply to them).
+    """
+    user = _require_permission(request, "execute")
     from havn.engine.orchestration import (
         _find_job,
         ensure_job_runs_table,
@@ -334,7 +338,8 @@ def run_job(name: str, request: Request, conn: DbConn, force: bool = False):
             cursor = None
             try:
                 cursor = cursor_for(_get_shared_conn())
-                execute_job(job, plan, cursor, project_dir, trigger="manual", emit=_emit, force=force)
+                execute_job(job, plan, cursor, project_dir, trigger="manual", emit=_emit, force=force,
+                            run_as=user)
             except Exception as e:
                 logger.error("Job '%s' failed: %s", name, e)
             finally:
@@ -348,15 +353,15 @@ def run_job(name: str, request: Request, conn: DbConn, force: bool = False):
         result = _start_operation("job", f"Job: {name}", _run_with_sse, ())
         if result.get("status") == "already_running":
             # Pipeline is busy — fall back to background thread without SSE
-            _run_job_background(job, plan, project_dir, name, force)
+            _run_job_background(job, plan, project_dir, name, force, user)
         return {"status": "started", "job": name, "steps": len(plan.steps)}
     except ImportError:
         # Pipeline routes not available — fall back
-        _run_job_background(job, plan, project_dir, name, force)
+        _run_job_background(job, plan, project_dir, name, force, user)
         return {"status": "started", "job": name, "steps": len(plan.steps)}
 
 
-def _run_job_background(job, plan, project_dir, name, force=False):
+def _run_job_background(job, plan, project_dir, name, force=False, user=None):
     """Run a job on a background thread without SSE (fallback)."""
     from havn.engine.orchestration import execute_job
 
@@ -366,7 +371,7 @@ def _run_job_background(job, plan, project_dir, name, force=False):
         cursor = None
         try:
             cursor = cursor_for(_get_shared_conn())
-            execute_job(job, plan, cursor, project_dir, trigger="manual", force=force)
+            execute_job(job, plan, cursor, project_dir, trigger="manual", force=force, run_as=user)
         except Exception as e:
             logger.error("Job '%s' failed: %s", name, e)
         finally:
@@ -519,8 +524,7 @@ def get_step_preview(
     user = _require_permission(request, "read")
     import re
 
-    from havn.engine.masking import apply_masking
-    from havn.engine.masking_rewriter import rewrite_query_with_masking
+    from havn.server.deps import _govern
 
     # Validate identifiers to prevent injection
     ident_re = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
@@ -528,27 +532,12 @@ def get_step_preview(
         raise HTTPException(400, "Invalid schema or table name")
     limit = min(max(limit, 1), 50)
     fqn = f"{schema_name}.{table_name}"
+    governed = _govern(f"SELECT * FROM {fqn} LIMIT {limit}", user, conn)
     try:
-        preview_sql = f"SELECT * FROM {fqn} LIMIT {limit}"
-        role = user.get("role", "viewer")
-        rewritten, rw_ok, rw_handled = rewrite_query_with_masking(
-            preview_sql, role, conn,
-        )
-        result = conn.execute(rewritten if rw_ok else preview_sql)
+        result = conn.execute(governed.sql)
         columns = [desc[0] for desc in result.description]
         rows = [[_serialize_cell(v) for v in row] for row in result.fetchall()]
-        # Post-query masking for unhandled policies
-        if not rw_ok:
-            rows = apply_masking(
-                columns, rows, role, conn,
-                schema=schema_name, table=table_name,
-            )
-        elif rw_handled:
-            rows = apply_masking(
-                columns, rows, role, conn,
-                schema=schema_name, table=table_name,
-                skip_policy_ids=rw_handled,
-            )
+        rows = governed.post_mask(columns, rows, conn)
         return {"columns": columns, "rows": rows, "table": fqn}
     except Exception as e:
         raise HTTPException(404, f"Table not found: {fqn} ({e})")

@@ -32,7 +32,23 @@ async def export_as_duckdb(request: Request) -> StreamingResponse:
     # "execute" so read-only viewers — who are meant to see only masked values —
     # can't exfiltrate unmasked PII by downloading the file. Editors and admins,
     # who can already run arbitrary transforms, keep the data-portability path.
-    _require_permission(request, "execute")
+    user = _require_permission(request, "execute")
+    # The dump is raw: no masking, no row policies. A user they apply to is
+    # refused (they can still query, which is governed).
+    # Admins manage the policies and can lift any of them, so they are not
+    # checked (which would also open the warehouse just to stream it).
+    from havn.server.deps import _get_read_pool, _is_governed, _require_db
+
+    if user.get("role") != "admin":
+        _require_db(_get_backend())
+        with _get_read_pool().connection() as cur:
+            governed = _is_governed(user, cur)
+        if governed:
+            raise HTTPException(
+                403,
+                "Masking or row policies apply to you, so the raw warehouse cannot be "
+                "exported for you. Query the data instead, or ask an admin.",
+            )
     backend = _get_backend()
     manager = get_resource_manager()
 

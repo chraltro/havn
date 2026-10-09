@@ -457,6 +457,23 @@ def validate(
                 f"[green]bind[/green] {len(models)} models resolved against the warehouse"
             )
 
+    # 5c. Governance: PII reaching gold/exported tables unmasked, models whose
+    # readers an inherited row policy shows nothing, untraceable lineage.
+    if warehouse_ready:
+        from havn.engine.database import open_warehouse
+        from havn.engine.governance.report import governance_warnings
+
+        try:
+            gconn = open_warehouse(config, project_dir, read_only=True)
+        except Exception:
+            gconn = None
+        if gconn is not None:
+            try:
+                for w in governance_warnings(gconn, project_dir, config, models):
+                    warnings.append(f"{w.model}: {w.message}")
+            finally:
+                gconn.close()
+
     # 6. Check .env variables referenced in config
     import re
     config_lines = (project_dir / "project.yml").read_text(encoding="utf-8").splitlines() if (project_dir / "project.yml").exists() else []

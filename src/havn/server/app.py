@@ -189,6 +189,7 @@ from havn.server.routes.collaboration import (  # noqa: E402
 )
 from havn.server.routes.lint import router as lint_router  # noqa: E402
 from havn.server.routes.masking import router as masking_router  # noqa: E402
+from havn.server.routes.governance import router as governance_router  # noqa: E402
 from havn.server.routes.wiki import router as wiki_router  # noqa: E402
 from havn.server.routes.rewind import router as rewind_router  # noqa: E402
 from havn.server.routes.sentinel import router as sentinel_router  # noqa: E402
@@ -233,6 +234,7 @@ app.include_router(deploy_router)
 app.include_router(collaboration_router)
 app.include_router(lint_router)
 app.include_router(masking_router)
+app.include_router(governance_router)
 app.include_router(wiki_router)
 app.include_router(rewind_router)
 app.include_router(sentinel_router)

@@ -289,7 +289,7 @@ class GovernedSession:
             return StatementResult()
         columns = [d[0] for d in desc]
         types = [str(d[1]) for d in desc]
-        table = cur.fetch_arrow_table() if hasattr(cur, "fetch_arrow_table") else cur.arrow()
+        table = cur.to_arrow_table() if hasattr(cur, "to_arrow_table") else cur.fetch_arrow_table()
         if gq is not None and gq.needs_post_mask and table.num_rows:
             table = _post_mask_arrow(gq, table, self.cursor)
         return StatementResult(columns=columns, types=types, table=table, rowcount=table.num_rows)

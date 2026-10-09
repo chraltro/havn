@@ -134,6 +134,28 @@ def _cache_key(
     return hashlib.sha256(payload.encode()).hexdigest()[:32]
 
 
+def _cache_scope(user: dict, conn) -> str:
+    """Who a cached widget result is valid for.
+
+    Masking depends on the role, so results are cached per role; row
+    policies can depend on the user and their attributes, so a user they
+    apply to gets results of their own.
+    """
+    from havn.server.deps import _get_project_dir
+
+    role = user.get("role", "admin")
+    try:
+        from havn.engine.governance import viewer_from_user, viewer_policies
+
+        viewer = viewer_from_user(user)
+        if viewer_policies(conn, viewer, _get_project_dir()).rows:
+            return json.dumps(viewer.cache_key(), default=str)
+    except Exception:
+        # Unknown: never share across users.
+        return json.dumps([user.get("username"), role, user.get("attributes")], default=str)
+    return role
+
+
 def _store_cache(cache_key: str, result: dict, cache_ttl: int) -> None:
     """Write a widget result to _havn.dashboard_cache.
 
@@ -170,34 +192,26 @@ def _execute_widget_query(
     filters: dict,
     parameters: dict,
     timeout: int | None = None,
-    user_role: str = "admin",
+    user: dict | None = None,
 ) -> dict:
     """Execute a widget SQL query with filter injection and parameter substitution.
 
+    The finished query (filters and parameters in) is governed for ``user``:
+    masking and row policies, the same way /api/query applies them. Widgets
+    are a full SQL surface, so without this a viewer could read raw PII or
+    rows a row policy hides simply by putting them in a widget. Filtering on
+    a masked column is refused, like a WHERE on one.
+
     Returns {columns, rows, row_count}.
     """
+    if user is None:
+        user = {"username": "local", "role": "admin"}
     if not sql_query or not sql_query.strip():
         return {"columns": [], "rows": [], "row_count": 0}
 
     # Validate the SQL is a safe read-only query
     from havn.server.routes.query import _validate_query_sql
     _validate_query_sql(sql_query)
-
-    # Apply column masking for the viewer's role, the same way /api/query does.
-    # Widgets are a full SQL surface, so without this a viewer could read raw
-    # PII from any masked column simply by putting it in a widget.
-    from havn.engine.masking_rewriter import (
-        MaskedColumnAccessError,
-        rewrite_query_with_masking,
-    )
-    try:
-        rewritten_sql, rewrite_ok, handled_ids = rewrite_query_with_masking(
-            sql_query, user_role, conn,
-        )
-    except MaskedColumnAccessError as e:
-        raise HTTPException(403, str(e))
-    if rewrite_ok:
-        sql_query = rewritten_sql
 
     # Build parameterized filter injection
     base_sql = sql_query.strip().rstrip(";")
@@ -269,9 +283,12 @@ def _execute_widget_query(
     # the limit for real via conn.interrupt(), the same way /api/query does.
     from havn.engine.query_governor import QueryTimeoutError, execute_governed
 
+    from havn.server.deps import _govern
+
+    governed = _govern(sql, user, conn, params=params or None)
     effective_timeout = timeout if timeout is not None else _QUERY_TIMEOUT_SECONDS
     try:
-        result, _duration_ms = execute_governed(conn, sql, effective_timeout, params)
+        result, _duration_ms = execute_governed(conn, governed.sql, effective_timeout, params)
         columns = [desc[0] for desc in result.description] if result.description else []
         rows = result.fetchall()
         serialized = [[_serialize(v) for v in row] for row in rows]
@@ -282,15 +299,8 @@ def _execute_widget_query(
     except Exception as e:
         raise HTTPException(400, f"Widget query error: {e}")
 
-    # Post-query masking for policies the rewriter couldn't handle (conditional
-    # policies, unsupported methods) — mirrors /api/query.
-    from havn.engine.masking import apply_masking
-    if not rewrite_ok:
-        serialized = apply_masking(columns, serialized, user_role, conn)
-    elif handled_ids:
-        serialized = apply_masking(
-            columns, serialized, user_role, conn, skip_policy_ids=handled_ids,
-        )
+    # Post-query masking for what the rewrite left (by result column name).
+    serialized = governed.post_mask(columns, serialized, conn)
 
     return {
         "columns": columns,
@@ -899,7 +909,7 @@ def query_widget(
 ) -> dict:
     """Execute a widget's SQL query with filter injection."""
     user = _require_permission(request, "read")
-    role = user.get("role", "admin")
+    role = _cache_scope(user, conn)
 
     widget = conn.execute(
         """
@@ -934,7 +944,7 @@ def query_widget(
     # Execute query (pass per-widget timeout if provided)
     result = _execute_widget_query(
         conn, sql_query, req.filters, req.parameters,
-        timeout=req.timeout, user_role=role,
+        timeout=req.timeout, user=user,
     )
 
     # Store in cache
@@ -956,7 +966,7 @@ def query_batch(
 ) -> dict:
     """Execute all widget queries for a dashboard in one call."""
     user = _require_permission(request, "read")
-    role = user.get("role", "admin")
+    role = _cache_scope(user, conn)
 
     widgets = conn.execute(
         """
@@ -990,7 +1000,7 @@ def query_batch(
 
         try:
             result = _execute_widget_query(
-                conn, sql_query, req.filters, req.parameters, user_role=role,
+                conn, sql_query, req.filters, req.parameters, user=user,
             )
             results[w_id] = result
 
