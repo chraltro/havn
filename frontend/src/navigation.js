@@ -11,7 +11,7 @@ export const SECTIONS = [
   { id: "Overview", label: "Home", slug: "", icon: "home", tabs: [] },
   { id: "Build", label: "Build", slug: "build", aliases: ["develop"], icon: "code", tabs: ["Editor", "Orchestration", "Git"] },
   { id: "Data", label: "Data", slug: "data", aliases: ["explore"], icon: "data", tabs: ["Query", "Tables", "DAG", "Dashboards", "Data Sources"] },
-  { id: "Observe", label: "Observe", slug: "observe", icon: "pulse", tabs: ["Quality", "Unit Tests", "Sentinel", "Diff", "Runs"] },
+  { id: "Observe", label: "Observe", slug: "observe", icon: "pulse", tabs: ["Quality", "Performance", "Unit Tests", "Sentinel", "Diff", "Runs"] },
   { id: "Ship", label: "Ship", slug: "ship", icon: "ship", tabs: [] },
   { id: "Configure", label: "Settings", slug: "settings", aliases: ["configure"], icon: "gear", secondary: true, tabs: ["Settings", "Masking", "Wiki", "Docs"] },
 ];

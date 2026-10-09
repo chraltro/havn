@@ -255,6 +255,131 @@ class PackageConfig(BaseModel):
         return self
 
 
+class PerfAdviceConfig(BaseModel):
+    """Thresholds for the performance advisor's rules (``performance.advice``).
+
+    Every rule stays quiet below these, so a small project gets no advice
+    about problems it does not have.
+    """
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = True
+    big_table_rows: int = 1_000_000      # "huge" for full-refresh / DISTINCT / scan rules
+    min_duration_ms: int = 1_000         # a build faster than this is never worth advice
+    fanout_ratio: float = 10.0           # join output / largest input
+    fanout_min_rows: int = 100_000       # ...and at least this many output rows
+    scan_selectivity: float = 0.05       # rows kept / rows scanned below this = small slice
+    view_consumers: int = 3              # a view read by this many models
+    unused_days: int = 14                # no reads for this long = unused table
+    udf_rows: int = 100_000              # rows through a Python UDF before it counts as hot
+    append_growth: float = 0.10          # per-run growth at or below this = append-only
+
+
+class PerformanceConfig(BaseModel):
+    """``performance:`` in project.yml: what the advisor records and keeps.
+
+    ``capture_plans`` is ``true`` (profile every build), ``sampled`` (a
+    ``sample_rate`` share of builds, plus any model with too few plans) or
+    ``false`` (durations and row counts only). Plans come from DuckDB's own
+    profiler on the build statement, so the query is never run twice.
+    """
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = True
+    capture_plans: str = "true"
+    sample_rate: float = 0.25
+    retention_days: int = 90
+    plan_retention: int = 20             # newest builds per model that keep their plan
+    regression_lookback: int = 20        # builds of history a run is compared with
+    regression_min_history: int = 5
+    regression_threshold: float = 3.5    # robust z-score (median / MAD)
+    regression_min_ratio: float = 1.5    # and at least this much slower than the median
+    regression_min_delta_ms: int = 500   # and at least this many ms slower
+    alert_on_regression: bool = True
+    advice: PerfAdviceConfig = Field(default_factory=PerfAdviceConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_capture(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "capture_plans" in data:
+            raw = data["capture_plans"]
+            if isinstance(raw, bool) or raw is None:
+                value = "true" if raw else "false"
+            else:
+                value = str(raw).strip().lower()
+                value = {"yes": "true", "on": "true", "always": "true",
+                         "no": "false", "off": "false", "never": "false"}.get(value, value)
+            if value not in ("true", "false", "sampled"):
+                raise ValueError(
+                    f"performance.capture_plans must be true, false or sampled, not {raw!r}"
+                )
+            data = {**data, "capture_plans": value}
+        return data
+
+
+class PrometheusConfig(BaseModel):
+    """``telemetry.prometheus``: the ``GET /metrics`` scrape endpoint."""
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    # Bearer token a scraper may present instead of a user token. Usually
+    # ``${HAVN_METRICS_TOKEN}`` so the secret lives in .env.
+    token: str | None = None
+    # ``false`` (always authenticate when auth is on), ``localhost`` (a scraper
+    # on 127.0.0.1 / ::1 needs no token) or ``true`` (anyone may scrape).
+    allow_unauthenticated: str = "false"
+    include_models: bool = True          # per-model series (one label per model)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_allow(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "allow_unauthenticated" in data:
+            raw = data["allow_unauthenticated"]
+            value = ("true" if raw else "false") if isinstance(raw, bool) else str(raw).strip().lower()
+            if value not in ("true", "false", "localhost"):
+                raise ValueError(
+                    "telemetry.prometheus.allow_unauthenticated must be true, false or localhost"
+                )
+            data = {**data, "allow_unauthenticated": value}
+        return data
+
+
+class OtelConfig(BaseModel):
+    """``telemetry.opentelemetry``: OTLP/HTTP traces of runs, models and API requests."""
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    endpoint: str = "http://localhost:4318/v1/traces"
+    headers: dict[str, str] = Field(default_factory=dict)
+    service_name: str = "havn"
+    trace_api: bool = True               # one span per API request
+
+
+class OpenLineageConfig(BaseModel):
+    """``telemetry.openlineage``: RunEvents per model build, to HTTP or a file."""
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    transport: Literal["http", "file"] = "http"
+    url: str = "http://localhost:5000"   # Marquez default; /api/v1/lineage is appended
+    endpoint: str = "api/v1/lineage"
+    api_key: str | None = None
+    path: str = "openlineage.jsonl"      # file transport, relative to the project
+    namespace: str | None = None         # job namespace; default havn://<project name>
+    dataset_namespace: str | None = None  # default duckdb://<warehouse file>
+    column_lineage: bool = True
+    timeout_s: float = 5.0
+
+
+class TelemetryConfig(BaseModel):
+    """``telemetry:`` in project.yml. Every exporter is off until enabled."""
+    model_config = ConfigDict(extra="ignore")
+
+    prometheus: PrometheusConfig = Field(default_factory=PrometheusConfig)
+    opentelemetry: OtelConfig = Field(default_factory=OtelConfig)
+    openlineage: OpenLineageConfig = Field(default_factory=OpenLineageConfig)
+
+
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(extra="ignore", arbitrary_types_allowed=True)
 
@@ -279,6 +404,8 @@ class ProjectConfig(BaseModel):
     packages: list[PackageConfig] = Field(default_factory=list)
     resources: dict[str, dict[str, Any]] = Field(default_factory=dict)
     streaming: dict[str, Any] = Field(default_factory=dict)
+    performance: PerformanceConfig = Field(default_factory=PerformanceConfig)
+    telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     project_dir: Path = Field(default_factory=Path.cwd)
     _raw: dict[str, Any] = PrivateAttr(default_factory=dict)
 
@@ -648,6 +775,8 @@ def load_project(
         sources=sources,
         exposures=exposures,
         packages=packages,
+        performance=PerformanceConfig(**(raw.get("performance") or {})),
+        telemetry=TelemetryConfig(**(raw.get("telemetry") or {})),
         project_dir=project_dir,
     )
     config._raw = raw

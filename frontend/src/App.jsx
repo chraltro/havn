@@ -23,6 +23,7 @@ import SettingsPanel from "./SettingsPanel";
 import MaskingPanel from "./MaskingPanel";
 import QualityPanel from "./QualityPanel";
 import UnitTestsPanel from "./UnitTestsPanel";
+import PerformancePanel from "./PerformancePanel";
 import WikiPanel from "./WikiPanel";
 import LoginPage from "./LoginPage";
 import ResizeHandle from "./ResizeHandle";
@@ -1484,6 +1485,7 @@ function AppContent() {
             {activeTab === "Docs" && <ErrorBoundary name="Docs"><DocsPanel /></ErrorBoundary>}
             {activeTab === "Quality" && <ErrorBoundary name="Quality"><QualityPanel addOutput={addOutput} /></ErrorBoundary>}
             {activeTab === "Unit Tests" && <ErrorBoundary name="Unit Tests"><UnitTestsPanel /></ErrorBoundary>}
+            {activeTab === "Performance" && <ErrorBoundary name="Performance"><PerformancePanel /></ErrorBoundary>}
             {activeTab === "Masking" && <ErrorBoundary name="Masking"><MaskingPanel showConfirm={showConfirm} /></ErrorBoundary>}
             {activeTab === "Wiki" && <ErrorBoundary name="Wiki"><WikiPanel /></ErrorBoundary>}
             {activeTab === "Runs" && <ErrorBoundary name="Runs"><HistoryPanel onOpenFile={openFile} /></ErrorBoundary>}

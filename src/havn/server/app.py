@@ -139,6 +139,19 @@ async def security_headers(request, call_next):
     return response
 
 # ---------------------------------------------------------------------------
+# OpenTelemetry: one span per API request, when telemetry.opentelemetry is on
+# ---------------------------------------------------------------------------
+
+@app.middleware("http")
+async def otel_request_spans(request, call_next):
+    from havn.server.tracing import request_tracer, traced_request
+
+    tracer = request_tracer()
+    if tracer is None:
+        return await call_next(request)
+    return await traced_request(tracer, request, call_next)
+
+# ---------------------------------------------------------------------------
 # Memory management: periodic checkpoint to release DuckDB buffers
 # ---------------------------------------------------------------------------
 
@@ -215,6 +228,7 @@ from havn.server.routes.streaming import router as streaming_router  # noqa: E40
 from havn.server.routes.unit_tests import router as unit_tests_router  # noqa: E402
 from havn.server.routes.bind import router as bind_router  # noqa: E402
 from havn.server.routes.rename import router as rename_router  # noqa: E402
+from havn.server.routes.perf import router as perf_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(files_router)
@@ -254,6 +268,7 @@ app.include_router(sql_api_router)
 app.include_router(export_router)
 app.include_router(streaming_router)
 app.include_router(unit_tests_router)
+app.include_router(perf_router)
 
 # Register WebSocket endpoints (can't use APIRouter for WebSocket)
 register_websocket(app)
