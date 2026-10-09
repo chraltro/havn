@@ -1,127 +1,127 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
-         <loc>https://chraltro.github.io/db/</loc>
+         <loc>https://chraltro.github.io/havn/docs/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/api-reference/</loc>
+         <loc>https://chraltro.github.io/havn/docs/api-reference/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/auth/</loc>
+         <loc>https://chraltro.github.io/havn/docs/auth/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/cdc/</loc>
+         <loc>https://chraltro.github.io/havn/docs/cdc/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/cli-reference/</loc>
+         <loc>https://chraltro.github.io/havn/docs/cli-reference/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/configuration/</loc>
+         <loc>https://chraltro.github.io/havn/docs/configuration/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/connectors/</loc>
+         <loc>https://chraltro.github.io/havn/docs/connectors/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/contracts/</loc>
+         <loc>https://chraltro.github.io/havn/docs/contracts/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/environments/</loc>
+         <loc>https://chraltro.github.io/havn/docs/environments/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/getting-started/</loc>
+         <loc>https://chraltro.github.io/havn/docs/getting-started/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/limitations/</loc>
+         <loc>https://chraltro.github.io/havn/docs/limitations/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/lineage/</loc>
+         <loc>https://chraltro.github.io/havn/docs/lineage/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/macros/</loc>
+         <loc>https://chraltro.github.io/havn/docs/macros/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/masking/</loc>
+         <loc>https://chraltro.github.io/havn/docs/masking/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/mcp/</loc>
+         <loc>https://chraltro.github.io/havn/docs/mcp/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/notebooks/</loc>
+         <loc>https://chraltro.github.io/havn/docs/notebooks/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/packages/</loc>
+         <loc>https://chraltro.github.io/havn/docs/packages/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/pipelines/</loc>
+         <loc>https://chraltro.github.io/havn/docs/pipelines/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/quality/</loc>
+         <loc>https://chraltro.github.io/havn/docs/quality/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/refactoring/</loc>
+         <loc>https://chraltro.github.io/havn/docs/refactoring/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/scheduler/</loc>
+         <loc>https://chraltro.github.io/havn/docs/scheduler/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/seeds/</loc>
+         <loc>https://chraltro.github.io/havn/docs/seeds/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/semantic-layer/</loc>
+         <loc>https://chraltro.github.io/havn/docs/semantic-layer/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/sources/</loc>
+         <loc>https://chraltro.github.io/havn/docs/sources/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/transforms/</loc>
+         <loc>https://chraltro.github.io/havn/docs/transforms/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/unit-tests/</loc>
+         <loc>https://chraltro.github.io/havn/docs/unit-tests/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/versioning/</loc>
+         <loc>https://chraltro.github.io/havn/docs/versioning/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/internal/dbt-v2-gap-plan/</loc>
+         <loc>https://chraltro.github.io/havn/docs/internal/dbt-v2-gap-plan/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/internal/ideas-catalog/</loc>
+         <loc>https://chraltro.github.io/havn/docs/internal/ideas-catalog/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/internal/to-do/</loc>
+         <loc>https://chraltro.github.io/havn/docs/internal/to-do/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
-         <loc>https://chraltro.github.io/db/mockups/</loc>
+         <loc>https://chraltro.github.io/havn/docs/mockups/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
 </urlset>
