@@ -108,6 +108,54 @@ class EnvironmentConfig(BaseModel):
     defer: str | None = None
 
 
+DEFAULT_BRANCH_PATH = ".havn/branches/{branch}.duckdb"
+
+
+class BranchesConfig(BaseModel):
+    """``branches:`` in project.yml: a warehouse per git branch.
+
+    Off unless ``enabled``. When it is on and the checked-out git branch is
+    not one of ``main``, the warehouse resolves to ``path`` with ``{branch}``
+    replaced by a filename-safe form of the branch name, and every model that
+    warehouse has not built is read from ``base`` (see engine/branches.py).
+    """
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    # Environment whose warehouse is the base. None means the top-level
+    # ``database.path`` (a project without environments).
+    base: str | None = None
+    # Git branches that use the ordinary resolution, never a branch
+    # warehouse. Empty means "main, or master when there is no main".
+    main: list[str] = Field(default_factory=list)
+    path: str = DEFAULT_BRANCH_PATH
+
+
+class BranchState(BaseModel):
+    """How the warehouse was resolved with respect to git branches.
+
+    Always present on a loaded config. ``active`` says whether the warehouse
+    was redirected to a branch file; when it was not, ``reason`` says why
+    (branches off, on the main branch, detached HEAD, ``--env`` given, ...),
+    which is what ``havn branch status`` and ``havn env show`` print.
+    """
+    model_config = ConfigDict(extra="ignore")
+
+    active: bool = False
+    reason: str = ""
+    git_branch: str | None = None      # what git (or HAVN_BRANCH / --branch) says
+    source: str = "git"                # "git", "HAVN_BRANCH", "--branch", "none"
+    detached: bool = False
+    in_repo: bool = False
+    main_branches: list[str] = Field(default_factory=list)
+    slug: str | None = None            # filename-safe branch name
+    path: str | None = None            # branch warehouse, as configured (relative ok)
+    base: str | None = None            # base environment name, None = top-level db
+    base_label: str = "main"           # how the base is named in messages
+    base_path: str | None = None       # base warehouse path (relative ok)
+    base_overridden: bool = False      # --base PATH replaced the configured base
+
+
 class SourceColumn(BaseModel):
     """A column in a source table."""
     model_config = ConfigDict(extra="ignore")
@@ -399,6 +447,8 @@ class ProjectConfig(BaseModel):
     snapshots: SnapshotsConfig = Field(default_factory=SnapshotsConfig)
     environments: dict[str, EnvironmentConfig] = Field(default_factory=dict)
     active_environment: str | None = None
+    branches: BranchesConfig = Field(default_factory=BranchesConfig)
+    branch: BranchState = Field(default_factory=BranchState)
     sources: list[SourceConfig] = Field(default_factory=list)
     exposures: list[ExposureConfig] = Field(default_factory=list)
     packages: list[PackageConfig] = Field(default_factory=list)
@@ -570,10 +620,50 @@ def resolve_active_environment(
     return None, "none"
 
 
+def _parse_branches(raw: dict[str, Any], environments: dict[str, EnvironmentConfig]) -> BranchesConfig:
+    """Parse and validate ``branches:``. Mistakes fail the load, like ``defer:``."""
+    block = raw.get("branches")
+    if block is None or block is False:
+        return BranchesConfig()
+    if block is True:
+        return BranchesConfig(enabled=True)
+    if not isinstance(block, dict):
+        raise ValueError("'branches' must be a mapping, e.g. branches: {enabled: true, base: prod}")
+    main = block.get("main") or []
+    if isinstance(main, str):
+        main = [main]
+    if not isinstance(main, list):
+        raise ValueError("branches.main must be a branch name or a list of them")
+    cfg = BranchesConfig(
+        enabled=bool(block.get("enabled", False)),
+        base=str(block["base"]) if block.get("base") else None,
+        main=[str(m) for m in main],
+        path=str(block.get("path") or DEFAULT_BRANCH_PATH),
+    )
+    if "{branch}" not in cfg.path:
+        raise ValueError(
+            f"branches.path must contain '{{branch}}' so every branch gets its own file "
+            f"(got '{cfg.path}')"
+        )
+    if cfg.base and cfg.base not in environments:
+        known = ", ".join(sorted(environments))
+        raise ValueError(
+            f"branches.base: unknown environment '{cfg.base}'."
+            + (f" Defined environments: {known}" if known else " No environments are defined; "
+               "leave base out to use the top-level database.")
+        )
+    return cfg
+
+
 def load_project(
     project_dir: Path | None = None,
     env: str | None = None,
     strict_env_file: bool = False,
+    *,
+    branch: str | None = None,
+    branch_base: str | None = None,
+    use_branches: bool = True,
+    git_head: Any = None,
 ) -> ProjectConfig:
     """Load project.yml from the given directory (or cwd).
 
@@ -581,6 +671,16 @@ def load_project(
         project_dir: Path to the project directory.
         env: Environment name to activate (e.g. "dev", "prod").
              If environments are defined and env is None, defaults to "dev".
+        branch: Use this git branch's warehouse whatever is checked out
+            (``havn branch ... --name``; CI on a detached checkout).
+        branch_base: A warehouse file to use as the branch's base instead of
+            the configured one (``--base``: a CI artifact, a backup).
+        use_branches: False never resolves to a branch warehouse
+            (``havn deploy``: branch warehouses are never deploy targets).
+        git_head: A :class:`havn.engine.branches.GitHead` to resolve against
+            instead of reading ``.git/HEAD``. ``havn serve`` pins the head it
+            has switched to, so a checkout mid-request cannot move the
+            warehouse under a running build.
     """
     from havn.engine.secrets import load_env
 
@@ -733,11 +833,36 @@ def load_project(
                 f"'{target}'." + (f" Defined environments: {known}" if known else "")
             )
 
+    branches = _parse_branches(raw, environments)
+
     # Apply environment overrides
-    active_env, _source = resolve_active_environment(
+    active_env, env_source = resolve_active_environment(
         project_dir, environments, env, strict_env_file=strict_env_file
     )
-    if active_env and active_env in environments:
+
+    # A branch warehouse replaces the environment resolution when one applies
+    # (see engine/branches.py for the order). The branch file takes the
+    # top-level database settings with its own path; the base is reached
+    # through defer, never opened for writing.
+    from havn.engine.branches import resolve_branch
+
+    branch_state = resolve_branch(
+        project_dir,
+        branches,
+        environments=environments,
+        db_raw=db_raw,
+        backend=database.backend,
+        env_source=env_source,
+        active_env=active_env,
+        forced_branch=branch,
+        base_override=branch_base,
+        use_branches=use_branches,
+        git_head=git_head,
+    )
+    if branch_state.active:
+        database = DatabaseConfig(**{**db_raw, "path": branch_state.path})
+        active_env = None
+    elif active_env and active_env in environments:
         env_cfg = environments[active_env]
         if env_cfg.database:
             database = DatabaseConfig(**{**db_raw, **env_cfg.database})
@@ -774,6 +899,8 @@ def load_project(
         snapshots=snapshots,
         environments=environments,
         active_environment=active_env if active_env and active_env in environments else None,
+        branches=branches,
+        branch=branch_state,
         sources=sources,
         exposures=exposures,
         packages=packages,

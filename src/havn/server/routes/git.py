@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from havn.server.deps import _get_project_dir, _require_permission
 
 router = APIRouter()
+logger = logging.getLogger("havn.server")
 
 
 # --- Pydantic models ---
@@ -248,7 +251,10 @@ def post_git_create_branch(request: Request, req: CreateBranchRequest) -> dict:
     success = git_create_branch(project_dir, req.name, checkout=req.checkout)
     if not success:
         raise HTTPException(400, f"Failed to create branch: {req.name}")
-    return {"status": "created", "name": req.name, "checked_out": req.checkout}
+    out = {"status": "created", "name": req.name, "checked_out": req.checkout}
+    if req.checkout:
+        out["warehouse"] = _follow_checkout()
+    return out
 
 
 @router.post("/api/git/checkout")
@@ -263,7 +269,23 @@ def post_git_checkout(request: Request, req: CheckoutRequest) -> dict:
     result = git_checkout_branch(project_dir, req.branch)
     if not result["success"]:
         raise HTTPException(400, result.get("error", "Failed to checkout branch"))
-    return {"status": "checked_out", "branch": req.branch}
+    return {"status": "checked_out", "branch": req.branch, "warehouse": _follow_checkout()}
+
+
+def _follow_checkout() -> dict:
+    """Move onto the new branch's warehouse now rather than on the next poll.
+
+    With branch warehouses off this changes nothing. When something else is
+    using the connection the switch is reported as pending and happens on a
+    later request (see deps.sync_branch_warehouse).
+    """
+    from havn.server.deps import sync_branch_warehouse
+
+    try:
+        return sync_branch_warehouse(force=True)
+    except Exception as e:
+        logger.warning("Could not follow the checkout to its warehouse: %s", e)
+        return {"error": str(e)}
 
 
 @router.delete("/api/git/branch")

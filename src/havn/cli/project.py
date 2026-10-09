@@ -270,6 +270,8 @@ def init(
         "__pycache__/\n*.pyc\n.venv/\n.env\noutput/\n_snapshots/\n"
         ".havn/pr-build/\n"
         ".havn/deploy/\n"
+        # One warehouse per git branch (branches: in project.yml).
+        ".havn/branches/\n"
         # The `havn serve` lockfile: runtime state, never shared.
         ".havn/serve.json\n"
         # Installed package sources are reproducible from havn_packages.lock,

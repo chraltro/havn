@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { api } from "./api";
+import { GIT_CHECKOUT_EVENT } from "./EnvironmentSwitcher";
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -154,6 +155,9 @@ export default function GitPanel() {
     setBranchDropdown(false);
     try {
       await api.gitCheckout(branch);
+      // With branch warehouses the checkout also switched the data; the top
+      // bar listens for this and reloads tables and files.
+      window.dispatchEvent(new Event(GIT_CHECKOUT_EVENT));
       await refresh();
     } catch (e) { setActionError(e.message); }
   }
@@ -164,6 +168,7 @@ export default function GitPanel() {
     setActionError(null);
     try {
       await api.gitCreateBranch(newBranchName.trim(), true);
+      window.dispatchEvent(new Event(GIT_CHECKOUT_EVENT));
       setNewBranchName("");
       setBranchDropdown(false);
       await refresh();

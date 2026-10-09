@@ -48,6 +48,8 @@ const STATUS = {
   changed: { color: "var(--havn-yellow)", label: "changed" },
   never_built: { color: "var(--havn-text-dim)", label: "not built" },
   fresh: { color: "var(--havn-green)", label: "fresh" },
+  // Branch warehouses: not built on this branch, read from the base.
+  deferred: { color: "var(--havn-text-dim)", label: "from base" },
   source: { color: "var(--havn-accent)", label: "source" },
 };
 
@@ -149,6 +151,7 @@ export default function HomePanel({
             : [
                 t.models.changed ? <span key="c" style={s.warn}>{t.models.changed} changed</span> : null,
                 t.models.never_built ? <span key="n">{t.models.never_built} not built</span> : null,
+                t.models.deferred ? <span key="d">{t.models.deferred} from {data.branch?.base || "base"}</span> : null,
                 <span key="u">{t.models.up_to_date} up to date</span>,
               ].filter(Boolean).reduce((acc, el, i) => (i ? [...acc, " · ", el] : [el]), [])}
           onClick={() => onNavigate("DAG")}

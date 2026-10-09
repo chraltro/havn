@@ -1184,6 +1184,15 @@ export const api = {
   switchEnvironment: (envName: string) =>
     request(`/environment/${envName}`, { method: "PUT" }),
 
+  // Branch warehouses (a warehouse per git branch)
+  getBranch: () => request("/branch"),
+  getBranchStatus: () => request("/branch/status"),
+  buildBranch: (opts: { force?: boolean; prune?: boolean; plan?: boolean } = {}) =>
+    request("/branch/build", { method: "POST", body: JSON.stringify(opts) }),
+  diffBranch: (opts: { models?: string[]; full?: boolean } = {}) =>
+    request("/branch/diff", { method: "POST", body: JSON.stringify(opts) }),
+  listBranchWarehouses: () => request("/branch/list"),
+
   // Seeds
   listSeeds: () => request("/seeds"),
   runSeeds: (force: boolean = false, schema_name: string = "seeds") =>

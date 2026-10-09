@@ -87,6 +87,12 @@ def get_home(request: Request, conn: DbConnReadOnlyOptional = None) -> dict:
         "layers": [],
     }
     tiles = result["tiles"]
+    # On a branch warehouse a model the branch has not built is not missing:
+    # it is read from the base. Say so instead of "not built".
+    unbuilt = "deferred" if config.branch.active else "never_built"
+    if config.branch.active:
+        result["branch"] = {"name": config.branch.git_branch, "base": config.branch.base_label}
+        tiles["models"]["deferred"] = 0
 
     try:
         db_path = _get_db_path()
@@ -107,8 +113,8 @@ def get_home(request: Request, conn: DbConnReadOnlyOptional = None) -> dict:
 
     if conn is None:
         # No warehouse yet: every model is unbuilt, nothing else to report.
-        tiles["models"]["never_built"] = len(models)
-        result["layers"] = _layers(models, {}, {}, set(), rel)
+        tiles["models"][unbuilt] = len(models)
+        result["layers"] = _layers(models, {}, {}, set(), rel, unbuilt=unbuilt)
         return result
 
     ensure_meta_table(conn)
@@ -133,7 +139,7 @@ def get_home(request: Request, conn: DbConnReadOnlyOptional = None) -> dict:
         changed = {}
     for m in models:
         if m.full_name not in state:
-            tiles["models"]["never_built"] += 1
+            tiles["models"][unbuilt] += 1
         elif changed.get(m.full_name):
             tiles["models"]["changed"] += 1
         else:
@@ -384,12 +390,12 @@ def get_home(request: Request, conn: DbConnReadOnlyOptional = None) -> dict:
             "ORDER BY table_name",
         )
     ]
-    result["layers"] = _layers(models, state, changed, failing_models, rel, landing, blocked)
+    result["layers"] = _layers(models, state, changed, failing_models, rel, landing, blocked, unbuilt=unbuilt)
     return result
 
 
 def _layers(models, state, changed, failing, rel, landing: list[str] | None = None,
-            blocked: set[str] | None = None) -> list[dict]:
+            blocked: set[str] | None = None, unbuilt: str = "never_built") -> list[dict]:
     layers: dict[str, list[dict]] = {}
     if landing:
         layers["landing"] = [
@@ -404,7 +410,7 @@ def _layers(models, state, changed, failing, rel, landing: list[str] | None = No
         elif blocked and m.full_name in blocked:
             status = "blocked"
         elif st is None:
-            status = "never_built"
+            status = unbuilt
         elif changed.get(m.full_name):
             status = "changed"
         else:
@@ -419,7 +425,7 @@ def _layers(models, state, changed, failing, rel, landing: list[str] | None = No
             "last_run_at": st["last_run_at"] if st else None,
             "row_count": st["row_count"] if st else None,
         })
-    rank = {"failing": 0, "blocked": 1, "changed": 2, "never_built": 3, "fresh": 4, "source": 5}
+    rank = {"failing": 0, "blocked": 1, "changed": 2, "never_built": 3, "fresh": 4, "deferred": 5, "source": 6}
     return [
         {"schema": schema, "models": sorted(items, key=lambda i: (rank[i["status"]], i["name"]))}
         for schema, items in sorted(

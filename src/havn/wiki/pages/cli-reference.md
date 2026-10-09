@@ -577,9 +577,29 @@ Roles: `admin`, `editor`, `viewer`
 Generate CI/CD configuration.
 
 ```bash
-havn ci generate [--project PATH]    # Generate GitHub Actions workflow
+havn ci generate [--project PATH]    # Generate havn-ci.yml (PR data diff) and havn-base.yml (base artifact)
+havn ci comment [--markdown FILE]    # Post (or update) the data-diff comment on the PR
 havn ci diff-comment [--project PATH] # Post formatted diff to PR
 ```
+
+## Branch Warehouses
+
+### havn branch
+
+A warehouse per git branch (`branches.enabled` in project.yml). See [Branch warehouses](branches).
+
+```bash
+havn branch status [--json]                    # branch, warehouse, local vs deferred, stale
+havn branch build [--plan] [--force] [--no-prune] [--defer-snapshot]
+havn branch diff [MODELS...] [--markdown] [--json] [--output FILE] [--full] [--exit-nonzero-on-change]
+havn branch list                               # branch warehouses on disk
+havn branch reset [--yes]                      # delete this branch's warehouse
+havn branch clean [--dry-run]                  # delete warehouses of merged or deleted branches
+```
+
+`status`, `build` and `diff` take `--name BRANCH` (act for a branch that is not
+checked out, e.g. in CI) and `--base PATH` (diff against a base file instead of
+the configured base).
 
 ## Server
 

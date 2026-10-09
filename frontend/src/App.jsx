@@ -413,6 +413,19 @@ function AppContent() {
   const { tables, files, streams, loadFiles, refreshAll } = useWarehouse();
   const { running, output, runSummary, progress, addOutput, clearOutput, setRunSummary, runTransformAll, runStream, cancelPipeline, runLint, runCurrentScript, runSingleModel, runSelection, runContracts, runPipeline } = usePipeline();
 
+  // A git checkout moved the server onto another warehouse (branch
+  // warehouses): reload what the sidebar shows and say where the data is now.
+  const handleBranchChange = useCallback((b) => {
+    refreshAll();
+    const name = b?.branch || "a detached HEAD";
+    addOutput(
+      "info",
+      b?.active
+        ? `Now on ${name}: showing its branch warehouse (${b.warehouse?.path}); unbuilt models are read from ${b.base?.label}.`
+        : `Now on ${name}: showing the base warehouse.`,
+    );
+  }, [refreshAll, addOutput]);
+
   // Editor state
   const [activeFile, setActiveFile] = useState(null);
   const [sidebarFilter, setSidebarFilter] = useState("");
@@ -1204,7 +1217,7 @@ function AppContent() {
             onContracts={runContracts}
             onCancel={cancelPipeline}
           />
-          <EnvironmentSwitcher showConfirm={showConfirm} />
+          <EnvironmentSwitcher showConfirm={showConfirm} onBranchChange={handleBranchChange} />
           {currentUser && (
             <div className="havn-userinfo" style={styles.userInfo}>
               <span style={styles.userName}>{currentUser.display_name || currentUser.username}</span>

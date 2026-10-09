@@ -32,6 +32,7 @@ def _extract_category(slug: str) -> str:
         "pipelines": "Core Concepts",
         "configuration": "Core Concepts",
         "environments": "Core Concepts",
+        "branches": "Core Concepts",
         "connectors": "Data Integration",
         "cdc": "Data Integration",
         "seeds": "Data Integration",

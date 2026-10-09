@@ -1,20 +1,75 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "./api";
+
+/** How often the top bar asks which git branch is checked out. */
+export const BRANCH_POLL_MS = 5000;
+
+/** The event GitPanel fires after a checkout, so the bar follows at once. */
+export const GIT_CHECKOUT_EVENT = "havn:git-checkout";
 
 /**
  * Environment indicator and switcher.
  * Shows the current environment and lets users switch between configured environments.
+ *
+ * With branch warehouses on (`branches.enabled` in project.yml) it also shows
+ * the checked-out git branch, because the branch decides which warehouse the
+ * UI is showing. The server follows a checkout by itself; this component
+ * polls `/api/branch` so the bar, and through `onBranchChange` the tables and
+ * files, follow it too.
  */
-export default function EnvironmentSwitcher({ showConfirm }) {
+export default function EnvironmentSwitcher({ showConfirm, onBranchChange }) {
   const [env, setEnv] = useState(null);
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState(false);
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
+  const headRef = useRef(null);
 
   useEffect(() => {
-    api.getEnvironment().then(setEnv).catch(() => {}).finally(() => setLoading(false));
+    api.getEnvironment()
+      .then((e) => { headRef.current = e?.branch?.server?.head ?? null; setEnv(e); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
+
+  const branchesOn = !!env?.branch?.enabled;
+
+  const checkBranch = useCallback(async () => {
+    let b;
+    try {
+      b = await api.getBranch();
+    } catch {
+      return;
+    }
+    const head = b?.server?.head ?? null;
+    const moved = headRef.current !== null && head !== headRef.current;
+    headRef.current = head;
+    if (!moved) {
+      setEnv((cur) => (cur ? { ...cur, branch: b } : cur));
+      return;
+    }
+    // The server switched warehouses: re-read the environment (database
+    // path, defer target) and let the app reload tables and files.
+    try {
+      const fresh = await api.getEnvironment();
+      setEnv(fresh);
+    } catch {
+      setEnv((cur) => (cur ? { ...cur, branch: b } : cur));
+    }
+    onBranchChange?.(b);
+  }, [onBranchChange]);
+
+  useEffect(() => {
+    if (!branchesOn) return undefined;
+    const t = setInterval(checkBranch, BRANCH_POLL_MS);
+    window.addEventListener("focus", checkBranch);
+    window.addEventListener(GIT_CHECKOUT_EVENT, checkBranch);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("focus", checkBranch);
+      window.removeEventListener(GIT_CHECKOUT_EVENT, checkBranch);
+    };
+  }, [branchesOn, checkBranch]);
 
   // Close on outside click
   useEffect(() => {
@@ -26,12 +81,17 @@ export default function EnvironmentSwitcher({ showConfirm }) {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  if (loading || !env || env.available.length === 0) return null;
+  if (loading || !env) return null;
+  const branch = env.branch?.enabled ? env.branch : null;
+  if (env.available.length === 0 && !branch) return null;
 
   const handleSwitch = async (envName) => {
     if (envName === env.active) { setOpen(false); return; }
     setOpen(false);
-    const confirmed = await showConfirm("Switch Environment", `Switch to environment "${envName}"? This will reload the page and any unsaved changes will be lost.`, "Switch", true);
+    const note = branch?.active
+      ? " An explicit environment replaces the branch warehouse until you switch back."
+      : "";
+    const confirmed = await showConfirm("Switch Environment", `Switch to environment "${envName}"? This will reload the page and any unsaved changes will be lost.${note}`, "Switch", true);
     if (!confirmed) return;
     setSwitching(true);
     try {
@@ -45,6 +105,43 @@ export default function EnvironmentSwitcher({ showConfirm }) {
     }
   };
 
+  // On a branch warehouse there is no active environment: the branch is
+  // what the bar names, and the defer badge names its base.
+  if (branch && (branch.active || env.available.length === 0)) {
+    return (
+      <div style={st.row}>
+        <BranchBadge branch={branch} databasePath={env.database_path} />
+        {branch.active && <DeferBadge defer={env.defer} />}
+        {env.available.length > 0 && (
+          <div ref={ref} style={{ position: "relative" }}>
+            <button
+              onClick={() => setOpen(!open)}
+              disabled={switching}
+              style={st.trigger}
+              aria-label="Use an environment instead of the branch warehouse"
+              aria-expanded={open}
+              title="Use an environment instead of the branch warehouse"
+            >
+              env
+              <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginLeft: 2 }}>
+                <path d="M1.5 3L4 5.5L6.5 3" />
+              </svg>
+            </button>
+            {open && (
+              <div style={st.dropdown}>
+                {env.available.map((e) => (
+                  <button key={e} onClick={() => handleSwitch(e)} style={st.item}>
+                    <span>{e}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const prod = isProductionEnv(env.active);
   const pill = prod ? st.prodPill : null;
   const dot = { ...st.dot, background: prod ? "var(--havn-red)" : "var(--havn-green)" };
@@ -56,6 +153,7 @@ export default function EnvironmentSwitcher({ showConfirm }) {
   if (env.available.length === 1) {
     return (
       <div style={st.row}>
+        {branch && <BranchBadge branch={branch} databasePath={env.database_path} />}
         <div style={{ ...st.badge, ...pill }} title={envTitle} data-env-kind={prod ? "prod" : "other"}>
           <span style={dot} />
           {env.active}
@@ -67,6 +165,7 @@ export default function EnvironmentSwitcher({ showConfirm }) {
 
   return (
     <div style={st.row}>
+      {branch && <BranchBadge branch={branch} databasePath={env.database_path} />}
       <div ref={ref} style={{ position: "relative" }}>
         <button
           onClick={() => setOpen(!open)}
@@ -99,6 +198,45 @@ export default function EnvironmentSwitcher({ showConfirm }) {
         )}
       </div>
       <DeferBadge defer={env.defer} />
+    </div>
+  );
+}
+
+/**
+ * The checked-out git branch and whether it has its own warehouse.
+ *
+ * Accent when the UI shows a branch warehouse, plain on a main branch (or
+ * when the branch warehouse is off for another reason, which the tooltip
+ * gives). Amber while the server waits to switch: it does not move the
+ * warehouse while a build or another request is using it.
+ */
+export function BranchBadge({ branch, databasePath }) {
+  if (!branch) return null;
+  const name = branch.branch || (branch.detached ? "detached" : "no branch");
+  const pending = branch.server?.pending;
+  const base = branch.base?.label || "base";
+  let title;
+  if (pending) {
+    title = `Checked out ${pending.branch || "another branch"}; its warehouse opens when nothing is using the current one (${pending.reason}).`;
+  } else if (branch.active) {
+    title = `Branch warehouse ${databasePath || branch.warehouse?.path || ""}. Models this branch has not built are read from ${base} (${branch.base?.path || ""}), read-only.`;
+  } else {
+    title = `Git branch ${name}: ${branch.reason}.`;
+  }
+  const kind = pending ? "pending" : branch.active ? "branch" : "main";
+  return (
+    <div
+      style={{ ...st.badge, ...(branch.active && !pending ? st.branchPill : null), ...(pending ? st.pendingPill : null) }}
+      title={title}
+      data-testid="branch-badge"
+      data-kind={kind}
+    >
+      <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+        <circle cx="4" cy="3.5" r="1.8" /><circle cx="4" cy="12.5" r="1.8" /><circle cx="12" cy="5.5" r="1.8" />
+        <path d="M4 5.3v5.4M12 7.3c0 2.5-2.5 3-6.4 4" />
+      </svg>
+      <span style={st.branchName}>{name}</span>
+      {pending && <span style={st.pendingText}>switching…</span>}
     </div>
   );
 }
@@ -156,6 +294,22 @@ const st = {
     borderColor: "var(--havn-red)",
     fontWeight: 600,
   },
+  // A branch warehouse is the accent colour: the data on screen is the
+  // branch's, not the base's.
+  branchPill: {
+    color: "var(--havn-accent)",
+    borderColor: "var(--havn-accent)",
+    fontWeight: 600,
+  },
+  pendingPill: {
+    color: "var(--havn-yellow)",
+    borderColor: "var(--havn-yellow)",
+  },
+  branchName: {
+    maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+    fontFamily: "var(--havn-font-mono)",
+  },
+  pendingText: { fontWeight: 400, opacity: 0.85 },
   dot: {
     width: 6, height: 6, borderRadius: "50%",
     background: "var(--havn-green)",
