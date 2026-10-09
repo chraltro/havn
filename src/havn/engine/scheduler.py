@@ -11,7 +11,7 @@ import threading
 import time
 from pathlib import Path
 
-from huey import SqliteHuey, crontab
+from huey import SqliteHuey
 from rich.console import Console
 
 console = Console()
@@ -94,66 +94,20 @@ def _run_stream_task(project_dir_str: str, stream_name: str) -> dict:
         conn.close()
 
 
-def _parse_cron(cron_expr: str) -> dict:
-    """Parse a cron expression '* * * * *' into Huey crontab kwargs.
-
-    Format: minute hour day month day_of_week
-    """
-    parts = cron_expr.strip().split()
-    if len(parts) != 5:
-        raise ValueError(f"Invalid cron expression: '{cron_expr}' (expected 5 fields)")
-
-    kwargs = {}
-    fields = ["minute", "hour", "day", "month", "day_of_week"]
-    for field_name, value in zip(fields, parts):
-        if value != "*":
-            kwargs[field_name] = value
-    return kwargs
-
-
-def _cron_field_matches(pattern: str, current: int) -> bool:
+def _cron_field_matches(pattern: str, current: int, low: int = 0, high: int = 59) -> bool:
     """Return True if `current` matches a single cron field `pattern`.
 
-    Supports lists (1,5,30), ranges (1-5), steps (*/5, 0-29/5), and the
-    star wildcard. Each comma-separated alternative is evaluated independently
-    and the result is the logical OR.
+    Kept for callers that test one field; the scheduler itself matches whole
+    expressions through ``engine.cron``. Steps anchor at ``low`` (pass the
+    field's range: day-of-month is 1-31, so ``*/2`` there is 1,3,5,...).
+    Malformed patterns never match.
     """
-    if pattern == "*":
-        return True
+    from havn.engine.cron import CronError, parse_field
+
     try:
-        for token in pattern.split(","):
-            token = token.strip()
-            if not token:
-                continue
-            step = 1
-            if "/" in token:
-                head, step_str = token.split("/", 1)
-                step = int(step_str)
-                if step <= 0:
-                    continue
-            else:
-                head = token
-            if head == "*" or head == "":
-                lo, hi = None, None
-            elif "-" in head:
-                lo_s, hi_s = head.split("-", 1)
-                lo, hi = int(lo_s), int(hi_s)
-            else:
-                value = int(head)
-                if step == 1:
-                    if current == value:
-                        return True
-                    continue
-                lo, hi = value, value
-            if lo is None:
-                if current % step == 0:
-                    return True
-                continue
-            if lo <= current <= hi and (current - lo) % step == 0:
-                return True
-    except (ValueError, ZeroDivisionError):
+        return current in parse_field(pattern, "field", low, high)
+    except CronError:
         return False
-    return False
 
 
 def get_scheduled_streams(project_dir: Path) -> list[dict]:
@@ -186,31 +140,19 @@ class SchedulerThread(threading.Thread):
     def stop(self) -> None:
         self._stop_event.set()
 
-    def _should_run(self, name: str, cron_expr: str) -> bool:
+    def _should_run(self, name: str, cron_expr: str, now=None) -> bool:
         """Check if a cron expression matches the current minute.
 
         Uses POSIX cron weekday convention: 0=Sunday, 1=Monday, ..., 6=Saturday.
+        ``now`` is injectable for tests.
         """
         import datetime
 
-        now = datetime.datetime.now()
-        parts = cron_expr.strip().split()
-        if len(parts) != 5:
+        from havn.engine.cron import cron_matches
+
+        now = now or datetime.datetime.now()
+        if not cron_matches(cron_expr, now):
             return False
-
-        # POSIX cron weekday: 0=Sun..6=Sat. Python's weekday(): 0=Mon..6=Sun.
-        posix_weekday = (now.weekday() + 1) % 7
-        checks = [
-            (parts[0], now.minute),
-            (parts[1], now.hour),
-            (parts[2], now.day),
-            (parts[3], now.month),
-            (parts[4], posix_weekday),
-        ]
-
-        for pattern, current in checks:
-            if not _cron_field_matches(pattern, current):
-                return False
 
         # Don't run more than once per minute
         last = self._last_run.get(name, 0)

@@ -176,6 +176,12 @@ async def upload_file(request: Request) -> dict:
     file_path = data_dir / safe_name
     if not file_path.resolve().is_relative_to(data_dir.resolve()):
         raise HTTPException(400, "Invalid filename")
+    from havn.server.routes.files import _is_database_file
+
+    # An environment's warehouse may live under data/; an upload must not be
+    # able to replace it (or plant one under a database name).
+    if _is_database_file(_get_project_dir(), file_path.resolve()):
+        raise HTTPException(403, "Uploads cannot create or replace database files.")
 
     content = await file.read()
     file_path.write_bytes(content)

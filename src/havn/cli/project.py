@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 import typer
 
 from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, console
+from havn.textio import read_project_text
 
 
 def _resolve_template_url(ref: str) -> str:
@@ -146,6 +147,7 @@ def init(
     empty: Annotated[bool, typer.Option("--empty", help="Create empty project without sample data")] = False,
     backend: Annotated[str, typer.Option("--backend", help="Warehouse backend: duckdb (default) or ducklake")] = "duckdb",
     from_url: Annotated[Optional[str], typer.Option("--from", help="Fetch a remote template (.zip or .tar.gz URL, or owner/repo for GitHub)")] = None,
+    force: Annotated[bool, typer.Option("--force", help="Scaffold into a non-empty directory, adding only the files that are missing (existing files are never overwritten)")] = False,
 ) -> None:
     """Scaffold a new data platform project.
 
@@ -191,7 +193,28 @@ def init(
     from havn.engine.secrets import ENV_TEMPLATE
 
     target = directory or Path.cwd() / name
+    # A non-empty target is most likely an existing project: scaffolding over
+    # it would replace project.yml, the sample models and, worst of all, .env
+    # (secrets). A bare `.git` is fine (git init, then havn init .).
+    if target.exists() and not target.is_dir():
+        console.print(f"[red]Target {target} exists and is not a directory.[/red]")
+        raise typer.Exit(code=1)
+    if target.exists() and not force and any(
+        p.name != ".git" for p in target.iterdir()
+    ):
+        console.print(f"[red]Target {target} is not empty. Refusing to overwrite.[/red]")
+        console.print("[dim]Pass --force to add only the missing scaffold files.[/dim]")
+        raise typer.Exit(code=1)
     target.mkdir(parents=True, exist_ok=True)
+
+    skipped: list[str] = []
+
+    def _write(path: Path, text: str, encoding: str = "utf-8") -> None:
+        # Never overwrite: with --force the target may hold real work.
+        if path.exists():
+            skipped.append(path.relative_to(target).as_posix())
+            return
+        path.write_text(text, encoding=encoding)
 
     dirs = [
         "ingest", "transform/bronze", "transform/silver", "transform/gold",
@@ -203,7 +226,8 @@ def init(
 
     # Write project.yml based on backend + empty flags
     if backend == "ducklake":
-        (target / "project.yml").write_text(
+        _write(
+            target / "project.yml",
             PROJECT_YML_DUCKLAKE_TEMPLATE.format(
                 name=_yaml_dq(name), sample="false" if empty else "true"
             ),
@@ -212,32 +236,32 @@ def init(
         (target / ".havn").mkdir(exist_ok=True)
         (target / ".havn" / "data").mkdir(exist_ok=True)
     elif empty:
-        (target / "project.yml").write_text(PROJECT_YML_EMPTY_TEMPLATE.format(name=_yaml_dq(name)), encoding="utf-8")
+        _write(target / "project.yml", PROJECT_YML_EMPTY_TEMPLATE.format(name=_yaml_dq(name)), encoding="utf-8")
     else:
-        (target / "project.yml").write_text(PROJECT_YML_TEMPLATE.format(name=_yaml_dq(name)), encoding="utf-8")
+        _write(target / "project.yml", PROJECT_YML_TEMPLATE.format(name=_yaml_dq(name)), encoding="utf-8")
 
     # Sample data scaffolding (skipped for --empty, regardless of backend)
     if not empty:
-        (target / "ingest" / "earthquakes.dpnb").write_text(SAMPLE_INGEST_NOTEBOOK, encoding="utf-8")
-        (target / "transform" / "bronze" / "earthquakes.sql").write_text(SAMPLE_BRONZE_SQL, encoding="utf-8")
-        (target / "transform" / "silver" / "earthquake_events.sql").write_text(SAMPLE_SILVER_EVENTS_SQL, encoding="utf-8")
-        (target / "transform" / "silver" / "earthquake_daily.sql").write_text(SAMPLE_SILVER_DAILY_SQL, encoding="utf-8")
-        (target / "transform" / "gold" / "earthquake_summary.sql").write_text(SAMPLE_GOLD_SUMMARY_SQL, encoding="utf-8")
-        (target / "transform" / "gold" / "top_earthquakes.sql").write_text(SAMPLE_GOLD_TOP_SQL, encoding="utf-8")
-        (target / "transform" / "gold" / "region_risk.sql").write_text(SAMPLE_GOLD_REGIONS_SQL, encoding="utf-8")
-        (target / "export" / "earthquake_report.py").write_text(SAMPLE_EXPORT_SCRIPT, encoding="utf-8")
-        (target / "macros" / "geo.py").write_text(SAMPLE_MACRO_GEO, encoding="utf-8")
-        (target / "seeds" / "magnitude_scale.csv").write_text(SAMPLE_SEED_CSV, encoding="utf-8")
-        (target / "contracts" / "quality.yml").write_text(SAMPLE_CONTRACTS_YML, encoding="utf-8")
-        (target / "tests" / "unit" / "top_earthquakes.yml").write_text(SAMPLE_UNIT_TEST_YML, encoding="utf-8")
-        (target / "notebooks" / "explore.dpnb").write_text(SAMPLE_EXPLORE_NOTEBOOK, encoding="utf-8")
+        _write(target / "ingest" / "earthquakes.dpnb", SAMPLE_INGEST_NOTEBOOK, encoding="utf-8")
+        _write(target / "transform" / "bronze" / "earthquakes.sql", SAMPLE_BRONZE_SQL, encoding="utf-8")
+        _write(target / "transform" / "silver" / "earthquake_events.sql", SAMPLE_SILVER_EVENTS_SQL, encoding="utf-8")
+        _write(target / "transform" / "silver" / "earthquake_daily.sql", SAMPLE_SILVER_DAILY_SQL, encoding="utf-8")
+        _write(target / "transform" / "gold" / "earthquake_summary.sql", SAMPLE_GOLD_SUMMARY_SQL, encoding="utf-8")
+        _write(target / "transform" / "gold" / "top_earthquakes.sql", SAMPLE_GOLD_TOP_SQL, encoding="utf-8")
+        _write(target / "transform" / "gold" / "region_risk.sql", SAMPLE_GOLD_REGIONS_SQL, encoding="utf-8")
+        _write(target / "export" / "earthquake_report.py", SAMPLE_EXPORT_SCRIPT, encoding="utf-8")
+        _write(target / "macros" / "geo.py", SAMPLE_MACRO_GEO, encoding="utf-8")
+        _write(target / "seeds" / "magnitude_scale.csv", SAMPLE_SEED_CSV, encoding="utf-8")
+        _write(target / "contracts" / "quality.yml", SAMPLE_CONTRACTS_YML, encoding="utf-8")
+        _write(target / "tests" / "unit" / "top_earthquakes.yml", SAMPLE_UNIT_TEST_YML, encoding="utf-8")
+        _write(target / "notebooks" / "explore.dpnb", SAMPLE_EXPLORE_NOTEBOOK, encoding="utf-8")
         # Starter orchestration jobs
-        (target / "orchestration" / "full-refresh.yml").write_text(SAMPLE_FULL_REFRESH_JOB, encoding="utf-8")
-        (target / "orchestration" / "incremental.yml").write_text(SAMPLE_INCREMENTAL_JOB, encoding="utf-8")
+        _write(target / "orchestration" / "full-refresh.yml", SAMPLE_FULL_REFRESH_JOB, encoding="utf-8")
+        _write(target / "orchestration" / "incremental.yml", SAMPLE_INCREMENTAL_JOB, encoding="utf-8")
 
     # Config files (both empty and sample projects)
-    (target / ".env").write_text(ENV_TEMPLATE, encoding="utf-8")
-    (target / ".gitignore").write_text(
+    _write(target / ".env", ENV_TEMPLATE, encoding="utf-8")
+    gitignore_text = (
         # Every environment's warehouse (warehouse.duckdb, prod.duckdb, ...).
         "*.duckdb\n*.duckdb.wal\n"
         ".havn/catalog.ducklake\n.havn/catalog.ducklake.wal\n.havn/data/\n"
@@ -248,15 +272,30 @@ def init(
         ".havn/serve.json\n"
         # Installed package sources are reproducible from havn_packages.lock,
         # which IS committed. Only the checkout is ignored.
-        "havn_packages/\n",
-        encoding="utf-8",
+        "havn_packages/\n"
     )
+    gitignore = target / ".gitignore"
+    if gitignore.exists():
+        # Kept, not overwritten (--force) -- but an existing .gitignore that
+        # lacks .env or *.duckdb would let secrets and the warehouse be
+        # committed, so the havn lines it is missing are appended.
+        existing_text = read_project_text(gitignore)
+        present = {line.strip() for line in existing_text.splitlines()}
+        missing = [line for line in gitignore_text.splitlines() if line not in present]
+        if missing:
+            sep = "\n" if existing_text and not existing_text.endswith("\n") else ""
+            with open(gitignore, "a", encoding="utf-8", newline="\n") as f:
+                f.write(sep + "# Added by havn init\n" + "\n".join(missing) + "\n")
+            console.print(f"[yellow]Added {len(missing)} havn line(s) to the existing .gitignore[/yellow]")
+    else:
+        _write(gitignore, gitignore_text, encoding="utf-8")
     # .havn/ holds shareable PR state. .havn/prs/ travels with the repo (commit
     # the JSON files there to share PRs with collaborators); .havn/pr-build/ is
     # a transient worktree directory and is gitignored above.
     havn_dir = target / ".havn"
     havn_dir.mkdir(parents=True, exist_ok=True)
-    (havn_dir / "README.md").write_text(
+    _write(
+        havn_dir / "README.md",
         "# .havn/\n\n"
         "This directory holds havn state that is shared via git.\n\n"
         "- `prs/` — Pull request definitions (JSON). Commit and push these to\n"
@@ -267,17 +306,19 @@ def init(
         encoding="utf-8",
     )
     (havn_dir / "prs").mkdir(exist_ok=True)
-    (havn_dir / "prs" / ".gitkeep").write_text("", encoding="utf-8")
-    (target / "CLAUDE.md").write_text(CLAUDE_MD_TEMPLATE.format(name=name), encoding="utf-8")
-    (target / ".cursorrules").write_text(CURSORRULES_TEMPLATE, encoding="utf-8")
+    _write(havn_dir / "prs" / ".gitkeep", "", encoding="utf-8")
+    _write(target / "CLAUDE.md", CLAUDE_MD_TEMPLATE.format(name=name), encoding="utf-8")
+    _write(target / ".cursorrules", CURSORRULES_TEMPLATE, encoding="utf-8")
     # Seed a relaxed sqlfluff config so `havn lint` doesn't bury new
     # projects under RF03/AM05 violations on idiomatic SQL. The linter
     # auto-detects this file at lint time.
-    (target / ".sqlfluff").write_text(SQLFLUFF_TEMPLATE, encoding="utf-8")
+    _write(target / ".sqlfluff", SQLFLUFF_TEMPLATE, encoding="utf-8")
     (target / ".github").mkdir(parents=True, exist_ok=True)
-    (target / ".github" / "copilot-instructions.md").write_text(COPILOT_INSTRUCTIONS_TEMPLATE, encoding="utf-8")
+    _write(target / ".github" / "copilot-instructions.md", COPILOT_INSTRUCTIONS_TEMPLATE, encoding="utf-8")
 
     console.print(f"[green]Project '{name}' created at {target}[/green]")
+    if skipped:
+        console.print(f"[yellow]Kept {len(skipped)} existing file(s):[/yellow] " + ", ".join(skipped))
     console.print()
     console.print("Structure:")
     for d in dirs:
@@ -792,7 +833,7 @@ def backup(
     output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Backup file path (default: _backups/)")] = None,
     no_verify: Annotated[bool, typer.Option("--no-verify", help="Skip integrity verification")] = False,
     note: Annotated[str, typer.Option("--note", "-n", help="Note to attach to this backup")] = "",
-    keep: Annotated[Optional[int], typer.Option("--keep", help="Keep only the N most recent backups")] = None,
+    keep: Annotated[Optional[int], typer.Option("--keep", min=1, help="Keep only the N most recent backups (at least 1)")] = None,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
     """Create a verified backup of the warehouse database.
@@ -907,7 +948,12 @@ def backup_list(
 
     for i, entry in enumerate(reversed(entries), 1):
         size_mb = entry.get("size_bytes", 0) / (1024 * 1024)
-        verified = "[green]yes[/green]" if entry.get("verified") else "[yellow]no[/yellow]"
+        if entry.get("checksum_match") is False:
+            verified = "[red]checksum mismatch[/red]"
+        elif entry.get("verified"):
+            verified = "[green]yes[/green]"
+        else:
+            verified = "[yellow]no[/yellow]"
         exists = "[green]yes[/green]" if entry.get("exists") else "[red]missing[/red]"
         ts = entry.get("timestamp", "")[:19]
         table.add_row(
@@ -922,17 +968,35 @@ def backup_list(
 @app.command(name="backup-verify")
 def backup_verify(
     backup_path: Annotated[Path, typer.Argument(help="Path to the backup file to verify")],
+    project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory whose manifest records the backup's checksum")] = None,
 ) -> None:
-    """Verify a backup file's integrity and show its contents."""
-    from havn.engine.backup import verify_backup
+    """Verify a backup file's integrity and show its contents.
 
-    result = verify_backup(backup_path)
+    A backup recorded in the manifest must also still match its SHA-256.
+    """
+    from havn.engine.backup import BackupError, verify_backup
+
+    if project_dir is None:
+        # Best effort: the project around the cwd holds the manifest, but a
+        # loose backup file can be verified from anywhere.
+        cwd = Path.cwd()
+        for candidate in (cwd, *cwd.parents):
+            if (candidate / "project.yml").exists():
+                project_dir = candidate
+                break
+    try:
+        result = verify_backup(backup_path, project_dir=project_dir)
+    except BackupError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
 
     if result.get("valid"):
         console.print(f"[green]Backup is valid:[/green] {backup_path}")
         size_mb = result.get("size_bytes", 0) / (1024 * 1024)
         console.print(f"  Size: {size_mb:.1f} MB")
-        console.print(f"  SHA-256: {result['sha256'][:16]}...")
+        match = result.get("checksum_match")
+        note = " (matches manifest)" if match else " (not in manifest)" if match is None else ""
+        console.print(f"  SHA-256: {result['sha256'][:16]}...{note}")
         console.print(f"  Schemas: {', '.join(result.get('schemas', []))}")
         console.print(f"  Tables: {result.get('table_count', 0)}")
     else:

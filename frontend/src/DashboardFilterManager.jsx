@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { api } from "./api";
 import { useDashboard } from "./DashboardContext";
+import FocusTrap from "./FocusTrap";
 
 /**
  * Filter management modal — add, edit, remove dashboard-level filters.
@@ -80,11 +81,16 @@ export default function DashboardFilterManager({ onClose }) {
   }
 
   return (
-    <div style={st.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <FocusTrap
+      labelledBy="havn-filter-manager-title"
+      style={st.overlay}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onEscape={onClose}
+    >
       <div style={st.panel}>
         <div style={st.header}>
-          <h3 style={st.heading}>Manage Filters</h3>
-          <button style={st.closeBtn} onClick={onClose}>×</button>
+          <h3 id="havn-filter-manager-title" style={st.heading}>Manage Filters</h3>
+          <button style={st.closeBtn} onClick={onClose} aria-label="Close">×</button>
         </div>
 
         <div style={st.body}>
@@ -176,7 +182,7 @@ export default function DashboardFilterManager({ onClose }) {
           <button style={st.saveBtn} onClick={handleSave}>Save Filters</button>
         </div>
       </div>
-    </div>
+    </FocusTrap>
   );
 }
 

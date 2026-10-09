@@ -287,7 +287,7 @@ def lineage(
     models = discover_all_models(project_dir, config)
     model_map = {m.full_name: m for m in models}
 
-    target = model_map.get(model)
+    target = model_map.get(model.lower())  # model names are lowercase
     if not target:
         # Try matching by short name
         matches = [m for m in models if m.name == model]
@@ -361,7 +361,7 @@ def explain(
 
     models = discover_all_models(project_dir, config)
 
-    target = next((m for m in models if m.full_name == model), None) or next(
+    target = next((m for m in models if m.full_name == model.lower()), None) or next(
         (m for m in models if m.name == model), None
     )
     if target is None:

@@ -19,9 +19,34 @@ class _Unparsed:
 _UNPARSED = _Unparsed()
 
 
+# A comment, a quoted span (string literal or quoted identifier), or a run of
+# whitespace. Comments come first so an apostrophe in `-- customer's` does not
+# open a "string" that runs on to the next quote.
+_HASH_TOKEN_RE = re.compile(
+    r"""(--[^\n]*|/\*.*?\*/)|('(?:[^']|'')*'?|"(?:[^"]|"")*"?)|(\s+)""",
+    re.DOTALL,
+)
+
+
+def _normalize_ws(match: re.Match[str]) -> str:
+    comment, quoted, _ws = match.groups()
+    if quoted is not None:
+        return quoted
+    if comment is not None:
+        return re.sub(r"\s+", " ", comment)
+    return " "
+
+
 def _hash_content(content: str) -> str:
-    """Hash SQL content for change detection. Normalizes whitespace."""
-    normalized = re.sub(r"\s+", " ", content.strip())
+    """Hash SQL content for change detection.
+
+    Whitespace is collapsed everywhere except inside quoted spans:
+    ``'a  b'`` and ``'a b'`` are different values, and collapsing them made
+    that edit invisible. For any query whose literals hold no run of
+    whitespace (nor a tab or newline) the result is byte-identical to the old
+    collapse-everything rule, so existing stored hashes stay valid.
+    """
+    normalized = _HASH_TOKEN_RE.sub(_normalize_ws, content.strip())
     return hashlib.sha256(normalized.encode()).hexdigest()[:16]
 
 
@@ -118,8 +143,24 @@ class SQLModel:
     # model. Set by package discovery, never by a @config directive, and
     # deliberately out of content_hash: it is provenance, not build semantics.
     package: str | None = None
+    # Fingerprint of the macro files defining a function this model calls, or
+    # "" when it calls none. Set by ``discover_all_models`` (which knows the
+    # project's macros/), then folded into content_hash by
+    # :meth:`refresh_content_hash` (but not into ``definition_hash``, which is
+    # what descendants see): editing a macro has to rebuild the models
+    # that call it, and only those, so every other model keeps its hash.
+    macro_hash: str = ""
 
     def __post_init__(self) -> None:
+        self.refresh_content_hash()
+
+        # Plain attributes, deliberately not dataclass fields: the AST must
+        # stay out of __eq__/__repr__ and out of the content hash above.
+        self._ast_cache: object = _UNPARSED
+        self._parse_error: str = ""
+
+    def refresh_content_hash(self) -> None:
+        """Recompute ``content_hash`` from the model's current fields."""
         # Hash everything that changes build semantics — not just the query —
         # so editing e.g. @config unique_key or incremental_strategy triggers
         # a rebuild. Only non-default values are appended, keeping hashes of
@@ -171,12 +212,17 @@ class SQLModel:
             parts.append("assert=" + ";".join(self.assertions))
         if self.grain:
             parts.append("grain=" + ",".join(self.grain))
-        self.content_hash = _hash_content("|".join(parts))
-
-        # Plain attributes, deliberately not dataclass fields: the AST must
-        # stay out of __eq__/__repr__ and out of the content hash above.
-        self._ast_cache: object = _UNPARSED
-        self._parse_error: str = ""
+        # The definition alone, without macros: this is what descendants fold
+        # into their upstream hash. A macro edit rebuilds its callers (their
+        # content_hash moves), and their descendants follow in the same run
+        # through _parent_built; folding the fingerprint in transitively made
+        # every model downstream of any caller look modified on its own.
+        self.definition_hash = _hash_content("|".join(parts))
+        if self.macro_hash:
+            parts.append(f"macros={self.macro_hash}")
+            self.content_hash = _hash_content("|".join(parts))
+        else:
+            self.content_hash = self.definition_hash
 
     @property
     def ast(self) -> exp.Expression | None:

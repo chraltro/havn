@@ -159,11 +159,17 @@ def _with_arg(tree: exp.Expression) -> str | None:
 def _build_ctes(
     ephemerals: list[SQLModel],
     table_map: dict[str, str],
-) -> list[exp.Expression]:
-    """Turn each ephemeral into one or more CTEs, dependencies first."""
+) -> tuple[list[exp.Expression], bool]:
+    """Turn each ephemeral into one or more CTEs, dependencies first.
+
+    Also returns whether any hoisted WITH was ``RECURSIVE``: the flag lives
+    on the WITH clause, not on the CTE, so the consumer's WITH has to carry
+    it or the recursive CTE no longer resolves its own name.
+    """
     from sqlglot import exp as _exp
 
     ctes: list[exp.Expression] = []
+    recursive = False
     for eph in ephemerals:
         _check_inlinable(eph)
         name = cte_name_for(eph.full_name)
@@ -176,16 +182,23 @@ def _build_ctes(
         with_key = _with_arg(tree)
         if with_key:
             own_with = tree.args[with_key]
+            recursive = recursive or bool(own_with.args.get("recursive"))
             for cte in own_with.expressions:
                 alias = cte.alias or ""
                 if not alias:
                     continue
                 renamed = f"{name}__{alias}"
                 cte_map[alias.lower()] = renamed
-                cte.set(
-                    "alias",
-                    _exp.TableAlias(this=_exp.to_identifier(renamed)),
-                )
+                # Rename in place: replacing the TableAlias dropped a column
+                # list, so `r(n) AS (...)` lost `n`.
+                alias_node = cte.args.get("alias")
+                if isinstance(alias_node, _exp.TableAlias):
+                    alias_node.set("this", _exp.to_identifier(renamed))
+                else:
+                    cte.set(
+                        "alias",
+                        _exp.TableAlias(this=_exp.to_identifier(renamed)),
+                    )
                 hoisted.append(cte)
             tree.set(with_key, None)
 
@@ -201,7 +214,7 @@ def _build_ctes(
             )
         )
         table_map[eph.full_name.lower()] = name
-    return ctes
+    return ctes, recursive
 
 
 def inline_ephemeral(
@@ -225,7 +238,7 @@ def inline_ephemeral(
         _check_inlinable(model)
 
     table_map: dict[str, str] = {}
-    ctes = _build_ctes(ephemerals, table_map)
+    ctes, recursive = _build_ctes(ephemerals, table_map)
 
     tree = _parse(model, "Model")
     _rewrite_refs(tree, table_map, {})
@@ -236,7 +249,9 @@ def inline_ephemeral(
         # Ahead of the consumer's own CTEs: a non-recursive CTE may only
         # reference the ones declared before it.
         own_with.set("expressions", ctes + list(own_with.expressions))
+        if recursive:
+            own_with.set("recursive", True)
     else:
-        tree.set("with_", _exp.With(expressions=ctes))
+        tree.set("with_", _exp.With(expressions=ctes, recursive=recursive or None))
 
     return unmask_placeholders(tree.sql(dialect="duckdb", pretty=True))

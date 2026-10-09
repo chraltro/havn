@@ -9,6 +9,14 @@ from havn.server.deps import DbConn, _require_permission, _get_user
 
 router = APIRouter()
 
+# Changing a policy changes what every non-exempt user sees, so it is an
+# access-control decision like managing users. Making it admin-only keeps an
+# editor from switching masking off for viewers through these endpoints. It
+# does not make masking a boundary against editors themselves: an editor can
+# still read raw data by other means (running Python scripts and notebooks,
+# exporting the warehouse via /v1/export/duckdb). Masking protects viewers.
+MANAGE_MASKING_PERMISSION = "manage_users"
+
 
 # --- Pydantic models ---
 
@@ -73,7 +81,7 @@ def create_policy(request: Request, req: PolicyCreate, conn: DbConn) -> dict:
     provided AND auth is disabled, default to ``[]`` so the policy actually
     masks for the caller.
     """
-    user = _require_permission(request, "write")
+    user = _require_permission(request, MANAGE_MASKING_PERMISSION)
     from havn.engine.masking import create_policy as _create
     from havn.server import app as _server_app
 
@@ -127,7 +135,7 @@ def get_policy(request: Request, policy_id: str, conn: DbConn) -> dict:
 @router.put("/api/masking/policies/{policy_id}")
 def update_policy(request: Request, policy_id: str, req: PolicyUpdate, conn: DbConn) -> dict:
     """Update a masking policy."""
-    user = _require_permission(request, "write")
+    user = _require_permission(request, MANAGE_MASKING_PERMISSION)
     from havn.engine.masking import update_policy as _update
 
     updates = req.model_dump(exclude_none=True)
@@ -159,7 +167,7 @@ def update_policy(request: Request, policy_id: str, req: PolicyUpdate, conn: DbC
 @router.delete("/api/masking/policies/{policy_id}")
 def delete_policy(request: Request, policy_id: str, conn: DbConn) -> dict:
     """Delete a masking policy."""
-    user = _require_permission(request, "write")
+    user = _require_permission(request, MANAGE_MASKING_PERMISSION)
     from havn.engine.masking import delete_policy as _delete
 
     if not _delete(conn, policy_id):

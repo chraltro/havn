@@ -487,3 +487,142 @@ def test_docs_include_exposures(tmp_path):
     assert "## Exposures" in md
     assert "revenue_dashboard" in md
     assert "analytics" in md
+
+
+# --- Environment resolution (audit regressions) ---
+
+_TWO_ENVS = """
+name: test
+database:
+  path: warehouse.duckdb
+environments:
+  dev:
+    database:
+      path: dev.duckdb
+  prod:
+    database:
+      path: prod.duckdb
+"""
+
+
+def test_unknown_env_flag_is_an_error(tmp_path):
+    from havn.config import UnknownEnvironmentError
+
+    (tmp_path / "project.yml").write_text(_TWO_ENVS)
+    with pytest.raises(UnknownEnvironmentError, match="'prdo'.*dev, prod"):
+        load_project(tmp_path, env="prdo")
+
+
+def test_unknown_env_in_havn_env_file_is_an_error(tmp_path):
+    from havn.config import UnknownEnvironmentError
+
+    (tmp_path / "project.yml").write_text(_TWO_ENVS)
+    (tmp_path / ".havn-env").write_text("prdo\n")
+    with pytest.raises(UnknownEnvironmentError, match=r"\.havn-env"):
+        load_project(tmp_path, strict_env_file=True)
+
+
+def test_bare_environment_means_no_overrides(tmp_path):
+    (tmp_path / "project.yml").write_text(
+        "name: test\ndatabase:\n  path: warehouse.duckdb\nenvironments:\n  dev:\n  prod:\n"
+    )
+    config = load_project(tmp_path)
+    assert config.active_environment == "dev"
+    assert config.database.path == "warehouse.duckdb"
+    assert load_project(tmp_path, env="prod").active_environment == "prod"
+
+
+def test_empty_environments_block(tmp_path):
+    (tmp_path / "project.yml").write_text("name: test\nenvironments:\n")
+    config = load_project(tmp_path)
+    assert config.environments == {}
+    assert config.active_environment is None
+
+
+def test_env_show_agrees_with_load_project(tmp_path):
+    from typer.testing import CliRunner
+
+    from havn.cli import app
+
+    (tmp_path / "project.yml").write_text(_TWO_ENVS)
+    runner = CliRunner()
+
+    # No .havn-env: builds go to dev.duckdb, so show must say dev, not "default".
+    result = runner.invoke(app, ["env", "show", "-p", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert load_project(tmp_path).database.path == "dev.duckdb"
+    assert "Active environment: dev" in result.output
+    assert "dev.duckdb" in result.output
+
+    (tmp_path / ".havn-env").write_text("prod\n")
+    result = runner.invoke(app, ["env", "show", "-p", str(tmp_path)])
+    assert "Active environment: prod" in result.output
+    assert "prod.duckdb" in result.output
+
+    (tmp_path / ".havn-env").write_text("prdo\n")
+    result = runner.invoke(app, ["env", "show", "-p", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "Unknown environment 'prdo'" in result.output
+
+
+def test_cli_unknown_env_is_a_clean_error(tmp_path):
+    from typer.testing import CliRunner
+
+    from havn.cli import app
+
+    (tmp_path / "project.yml").write_text(_TWO_ENVS)
+    result = CliRunner().invoke(app, ["tables", "--env", "prdo", "-p", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "Unknown environment 'prdo'" in result.output
+    assert not (tmp_path / "dev.duckdb").exists()
+
+
+# --- Stale .havn-env: strict in the CLI, tolerated by long-running callers ---
+
+
+def test_stale_havn_env_falls_back_for_non_cli_callers(tmp_path, caplog):
+    (tmp_path / "project.yml").write_text(_TWO_ENVS)
+    (tmp_path / ".havn-env").write_text("staging\n")
+    with caplog.at_level("WARNING", logger="havn.config"):
+        config = load_project(tmp_path)
+    assert config.active_environment == "dev"
+    assert "staging" in caplog.text
+
+
+def test_stale_havn_env_is_strict_in_the_cli(tmp_path):
+    from typer.testing import CliRunner
+
+    from havn.cli import app
+
+    (tmp_path / "project.yml").write_text(_TWO_ENVS)
+    (tmp_path / ".havn-env").write_text("staging\n")
+    result = CliRunner().invoke(app, ["tables", "-p", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "Unknown environment 'staging' in .havn-env" in result.output
+
+
+def test_server_environment_endpoints_survive_stale_havn_env(tmp_path):
+    from fastapi.testclient import TestClient
+
+    import havn.server.app as server_app
+    from havn.server.deps import _clear_config_cache, reset_shared_conn
+
+    (tmp_path / "project.yml").write_text(_TWO_ENVS)
+    (tmp_path / ".havn-env").write_text("staging\n")
+    old_dir, old_env = server_app.PROJECT_DIR, server_app.ACTIVE_ENV
+    server_app.PROJECT_DIR, server_app.ACTIVE_ENV = tmp_path, None
+    _clear_config_cache()
+    reset_shared_conn()
+    try:
+        client = TestClient(server_app.app)
+        r = client.get("/api/environment")
+        assert r.status_code == 200, r.text
+        assert r.json()["active"] == "dev"
+        r = client.put("/api/environment/prod")
+        assert r.status_code == 200, r.text
+        assert r.json()["active"] == "prod"
+        assert r.json()["database_path"] == "prod.duckdb"
+    finally:
+        server_app.PROJECT_DIR, server_app.ACTIVE_ENV = old_dir, old_env
+        _clear_config_cache()
+        reset_shared_conn()

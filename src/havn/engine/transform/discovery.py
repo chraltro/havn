@@ -6,6 +6,7 @@ from havn.textio import read_project_text
 
 import hashlib
 import logging
+import re
 from dataclasses import replace
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
@@ -84,8 +85,8 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         # parsing the same SQL again.
         ast = parse_sql(query)
         folder_schema_tmp = sql_file.relative_to(transform_dir).parent.name or "public"
-        own_schema_tmp = config.get("schema", folder_schema_tmp)
-        own_name_tmp = sql_file.stem
+        own_schema_tmp = config.get("schema", folder_schema_tmp).lower()
+        own_name_tmp = sql_file.stem.lower()
         auto_refs = extract_table_refs(
             query, exclude=f"{own_schema_tmp}.{own_name_tmp}", ast=ast
         )
@@ -103,8 +104,13 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         # Schema from folder name (convention) or config override
         rel = sql_file.relative_to(transform_dir)
         folder_schema = rel.parent.name if rel.parent.name else "public"
-        schema = config.get("schema", folder_schema)
-        name = sql_file.stem
+        # Lowercased, because DuckDB identifiers are case-insensitive and every
+        # reference is compared lowercased (extract_table_refs, parse_depends):
+        # ``transform/silver/Customers.sql`` read as ``silver.Customers`` while
+        # ``FROM silver.Customers`` was recorded as ``silver.customers``, so
+        # the edge between them was lost and the order came out wrong.
+        schema = config.get("schema", folder_schema).lower()
+        name = sql_file.stem.lower()
         # Validate identifiers at discovery time to prevent SQL injection downstream
         validate_identifier(schema, f"schema for {sql_file.name}")
         validate_identifier(name, f"model name for {sql_file.name}")
@@ -212,7 +218,8 @@ def discover_package_models(root: PackageRoot) -> list[SQLModel]:
 
     mapping: dict[str, str] = {}
     for m in raw:
-        target_schema = root.schema_for(m.schema)
+        # Lowercased like every other model name (see discover_models).
+        target_schema = root.schema_for(m.schema).lower()
         validate_identifier(target_schema, f"schema for package '{root.name}'")
         mapping[f"{m.schema}.{m.name}".lower()] = f"{target_schema}.{m.name}"
 
@@ -235,7 +242,7 @@ def discover_package_models(root: PackageRoot) -> list[SQLModel]:
                     f"{m.path}: {exc}"
                 ) from exc
 
-        target_schema = root.schema_for(m.schema)
+        target_schema = root.schema_for(m.schema).lower()
         models.append(
             replace(
                 m,
@@ -260,7 +267,9 @@ def discover_all_models(
     it, for callers that genuinely mean one directory.
 
     Packages come from ``havn_packages.lock``, so a project without one pays
-    a single ``stat`` and gets byte-identical output to ``discover_models``.
+    a single ``stat`` and gets the output of ``discover_models``, except that
+    models calling a macro from ``macros/`` carry its fingerprint in their
+    content hash (see :func:`_apply_macro_hashes`).
 
     Raises:
         DuplicateModelError: a package model lands on a name the project (or
@@ -275,6 +284,169 @@ def discover_all_models(
     models = discover_models(project_dir / "transform")
 
     roots = package_roots(project_dir)
+    models = _add_package_models(config, models, roots)
+    _apply_macro_hashes(models, [project_dir / "macros", *(r.macros_dir for r in roots)])
+    return models
+
+
+_PY_DEF_RE = re.compile(r"^\s*def\s+(\w+)\s*\(", re.MULTILINE)
+_SQL_MACRO_RE = re.compile(
+    r"\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+)?MACRO\s+"
+    r"(?:IF\s+NOT\s+EXISTS\s+)?(?:\w+\.)?(\w+)",
+    re.IGNORECASE,
+)
+_CALL_RE = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
+
+
+def _closure_fingerprints(
+    units: dict[str, list[str]],
+    refs: dict[str, set[str]],
+    loose: str,
+) -> dict[str, str]:
+    """One fingerprint per name: its own source, the sources of every
+    top-level name it reaches in the same file, and the file's loose code."""
+    out: dict[str, str] = {}
+    for name in units:
+        seen: set[str] = set()
+        todo = [name]
+        while todo:
+            n = todo.pop()
+            if n in seen or n not in units:
+                continue
+            seen.add(n)
+            todo.extend(refs.get(n, ()))
+        body = "\x00".join(src for n in sorted(seen) for src in units[n])
+        out[name] = hashlib.sha256((body + "\x01" + loose).encode()).hexdigest()[:16]
+    return out
+
+
+def _python_macro_fingerprints(text: str) -> dict[str, str] | None:
+    """Per-function fingerprints for a macro ``.py`` file, or None if it does
+    not parse. Each function covers itself (decorators included), the
+    top-level helpers, constants and imports it references, transitively, and
+    any loose top-level code; editing one macro leaves the others' alone."""
+    import ast
+
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return None
+    units: dict[str, list[str]] = {}
+    refs: dict[str, set[str]] = {}
+    loose: list[str] = []
+
+    def segment(node: ast.AST) -> str:
+        parts = [ast.get_source_segment(text, d) or "" for d in getattr(node, "decorator_list", [])]
+        parts.append(ast.get_source_segment(text, node) or "")
+        return "\n".join(parts)
+
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound = [node.name]
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            bound = [n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)]
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            bound = [(a.asname or a.name).split(".")[0] for a in node.names]
+        else:
+            bound = []
+        if not bound:
+            loose.append(segment(node))
+            continue
+        used = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+        src = segment(node)
+        for name in bound:
+            units.setdefault(name, []).append(src)
+            refs.setdefault(name, set()).update(used)
+    fps = _closure_fingerprints(units, refs, "\n".join(loose))
+    # Only functions can be macros; helpers and constants were only needed
+    # to build the closures above.
+    return {
+        n.name: fps[n.name]
+        for n in tree.body
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+
+def _sql_macro_fingerprints(text: str) -> dict[str, str]:
+    """Per-macro fingerprints for a macro ``.sql`` file: each ``CREATE MACRO``
+    statement, plus the statements of other macros in the file it calls."""
+    matches = list(_SQL_MACRO_RE.finditer(text))
+    if not matches:
+        return {}
+    units: dict[str, list[str]] = {}
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        units.setdefault(m.group(1).lower(), []).append(text[m.start():end].strip())
+    refs = {
+        name: {c.lower() for src in srcs for c in _CALL_RE.findall(src)}
+        for name, srcs in units.items()
+    }
+    return _closure_fingerprints(units, refs, text[: matches[0].start()].strip())
+
+
+def _macro_definitions(macro_dirs: list[Path]) -> dict[str, list[str]]:
+    """Map each macro name defined in ``macro_dirs`` to its fingerprints.
+
+    Read statically (no import of user code): every top-level ``def`` in a
+    ``.py`` file and every ``CREATE MACRO`` in a ``.sql`` file, skipping
+    ``_``-prefixed files as macro registration does. Fingerprints are per
+    function (see :func:`_python_macro_fingerprints`), so a model is only
+    rebuilt when a function it calls, or something that function uses,
+    changed. A ``.py`` file that does not parse falls back to one hash of the
+    whole file for every ``def`` in it. A plain helper ``def`` that shares a
+    name with something a model calls only costs that model an extra rebuild.
+    """
+    defs: dict[str, list[str]] = {}
+    for macros_dir in macro_dirs:
+        if not macros_dir.is_dir():
+            continue
+        for path in sorted([*macros_dir.glob("*.py"), *macros_dir.glob("*.sql")]):
+            if path.name.startswith("_"):
+                continue
+            try:
+                text = read_project_text(path)
+            except OSError:
+                continue
+            if path.suffix == ".py":
+                fps = _python_macro_fingerprints(text)
+                if fps is None:
+                    digest = hashlib.sha256(text.encode()).hexdigest()[:16]
+                    fps = {name: digest for name in _PY_DEF_RE.findall(text)}
+            else:
+                fps = _sql_macro_fingerprints(text)
+            for name, fp in fps.items():
+                defs.setdefault(name.lower(), []).append(fp)
+    return defs
+
+
+def _apply_macro_hashes(models: list[SQLModel], macro_dirs: list[Path]) -> None:
+    """Fold the macros each model calls into its content hash.
+
+    A macro edit changes what a model computes without touching its SQL, so
+    change detection skipped it. Only models whose query calls a name some
+    macro file defines are affected; every other model's hash is unchanged
+    (``macro_hash`` stays "" and is not folded in), and the fingerprint only
+    moves when one of those files' contents does.
+    """
+    defs = _macro_definitions(macro_dirs)
+    if not defs:
+        return
+    for model in models:
+        called = {c.lower() for c in _CALL_RE.findall(model.query)}
+        digests = sorted({d for name in called & defs.keys() for d in defs[name]})
+        if not digests:
+            continue
+        model.macro_hash = hashlib.sha256("".join(digests).encode()).hexdigest()[:16]
+        model.refresh_content_hash()
+
+
+def _add_package_models(
+    config: ProjectConfig | None,
+    models: list[SQLModel],
+    roots: list[PackageRoot],
+) -> list[SQLModel]:
+    """Append each installed package's models to the project's own."""
     if config is not None:
         installed = {r.name for r in roots}
         for declared in getattr(config, "packages", []) or []:
@@ -345,18 +517,75 @@ def build_dag(models: list[SQLModel]) -> list[SQLModel]:
     return [model_map[name] for name in ordered if name in model_map]
 
 
-def build_dag_tiers(models: list[SQLModel]) -> list[list[SQLModel]]:
+def _selected_ancestors(
+    models: list[SQLModel],
+    all_models: list[SQLModel],
+) -> dict[str, list[str]]:
+    """For each model in ``models``, the nearest ancestors also in ``models``.
+
+    Walks the full DAG and passes through models that are not selected, so
+    ``bronze.a -> silver.b -> gold.d`` with only a and d selected still says
+    d depends on a. Without this, a subset run put a and d in one parallel
+    tier and d read b's view over the old a.
+    """
+    full = {m.full_name: m for m in all_models}
+    selected = {m.full_name for m in models}
+    # unselected model -> the selected models reachable upwards from it
+    through: dict[str, set[str]] = {}
+
+    def reach(name: str, visiting: set[str]) -> set[str]:
+        if name in through:
+            return through[name]
+        if name in visiting:  # a cycle; build_dag reports it elsewhere
+            return set()
+        visiting.add(name)
+        found: set[str] = set()
+        for dep in full[name].depends_on:
+            if dep in selected:
+                found.add(dep)
+            elif dep in full:
+                found |= reach(dep, visiting)
+        visiting.discard(name)
+        through[name] = found
+        return found
+
+    out: dict[str, list[str]] = {}
+    for m in models:
+        deps: set[str] = set()
+        for dep in m.depends_on:
+            if dep in selected:
+                deps.add(dep)
+            elif dep in full:
+                deps |= reach(dep, set())
+        deps.discard(m.full_name)
+        out[m.full_name] = sorted(deps)
+    return out
+
+
+def build_dag_tiers(
+    models: list[SQLModel],
+    all_models: list[SQLModel] | None = None,
+) -> list[list[SQLModel]]:
     """Build DAG and return models grouped by execution tier.
 
     Models within the same tier have no dependencies on each other
     and can execute in parallel.
+
+    ``all_models`` is the whole project when ``models`` is a selection from
+    it: two selected models connected only through unselected ones are then
+    still ordered (see :func:`_selected_ancestors`).
     """
     model_map = {m.full_name: m for m in models}
     sorter: TopologicalSorter[str] = TopologicalSorter()
 
+    if all_models is not None:
+        edges = _selected_ancestors(models, all_models)
+    else:
+        edges = {
+            m.full_name: [d for d in m.depends_on if d in model_map] for m in models
+        }
     for m in models:
-        known_deps = [d for d in m.depends_on if d in model_map]
-        sorter.add(m.full_name, *known_deps)
+        sorter.add(m.full_name, *edges[m.full_name])
 
     try:
         sorter.prepare()
@@ -389,7 +618,12 @@ def _compute_upstream_hash(model: SQLModel, model_map: dict[str, SQLModel]) -> s
     for dep in sorted(model.depends_on):
         if dep in model_map:
             dep_model = model_map[dep]
-            upstream_hashes.append(dep_model.content_hash)
+            # Without the macro fingerprint (see SQLModel.definition_hash).
+            # A model built by hand with content_hash set directly has no
+            # macro_hash, and its content_hash is used as is.
+            upstream_hashes.append(
+                dep_model.definition_hash if dep_model.macro_hash else dep_model.content_hash
+            )
             upstream_hashes.append(dep_model.upstream_hash)
     return hashlib.sha256("".join(upstream_hashes).encode()).hexdigest()[:16]
 
@@ -492,7 +726,8 @@ def _inputs_newer(conn: duckdb.DuckDBPyConnection, model: SQLModel) -> bool:
         hit = conn.execute(
             f"""
             SELECT 1 FROM _havn.run_log
-            WHERE status = 'success' AND run_type IN ({types}) AND started_at > ?
+            WHERE status = 'success' AND run_type IN ({types})
+              AND started_at + to_milliseconds(CAST(COALESCE(duration_ms, 0) AS BIGINT)) > ?
             LIMIT 1
             """,
             [*_SOURCE_LOAD_RUN_TYPES, built_at],

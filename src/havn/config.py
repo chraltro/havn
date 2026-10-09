@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from havn.textio import read_project_text
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -375,14 +376,76 @@ def _parse_exposures(project_dir: Path) -> list[ExposureConfig]:
             name=exp_raw.get("name", ""),
             description=exp_raw.get("description", ""),
             owner=exp_raw.get("owner", ""),
-            depends_on=exp_raw.get("depends_on", []),
+            # Lowercase, like model names, so `gold.Orders` names gold.orders.
+            depends_on=[str(d).strip().lower() for d in exp_raw.get("depends_on", []) or []],
             type=exp_raw.get("type", ""),
             url=exp_raw.get("url", ""),
         ))
     return exposures
 
 
-def load_project(project_dir: Path | None = None, env: str | None = None) -> ProjectConfig:
+class UnknownEnvironmentError(ValueError):
+    """An environment was requested (``--env`` or ``.havn-env``) that
+    project.yml does not define."""
+
+
+def resolve_active_environment(
+    project_dir: Path,
+    environments: dict[str, Any],
+    env: str | None = None,
+    strict_env_file: bool = False,
+) -> tuple[str | None, str]:
+    """Which environment is active, and why.
+
+    Returns ``(name, source)`` where source is ``"--env"``, ``".havn-env"``,
+    ``"default"`` (``dev`` exists and nothing else was asked for) or
+    ``"none"`` (no environment applies: the top-level database is used).
+    ``havn env show`` reports this, so it must stay the one resolution path.
+
+    An explicitly requested name that is not defined raises
+    UnknownEnvironmentError. Silently falling back would point a command at
+    a different warehouse than the one asked for (``--env prdo`` building
+    into dev). With no environments defined at all, ``--env`` stays a no-op.
+
+    An unknown name in ``.havn-env`` raises only with ``strict_env_file``
+    (the CLI, where the user can fix it on the spot). Long-running callers
+    (``havn serve``, the scheduler, MCP) log a warning and fall back to the
+    default resolution instead: raising there turned a stale file into a 500
+    on every request, including the one that switches environment.
+    """
+    if not environments:
+        return None, "none"
+    known = ", ".join(sorted(environments))
+    if env is not None:
+        if env not in environments:
+            raise UnknownEnvironmentError(
+                f"Unknown environment '{env}'. Defined environments: {known}"
+            )
+        return env, "--env"
+    havn_env_path = project_dir / ".havn-env"
+    if havn_env_path.exists():
+        file_env = read_project_text(havn_env_path).strip()
+        if file_env:
+            if file_env in environments:
+                return file_env, ".havn-env"
+            message = (
+                f"Unknown environment '{file_env}' in .havn-env. "
+                f"Defined environments: {known}. "
+                "Run `havn env use <name>` or `havn env reset`."
+            )
+            if strict_env_file:
+                raise UnknownEnvironmentError(message)
+            logging.getLogger("havn.config").warning("%s Using the default environment.", message)
+    if "dev" in environments:
+        return "dev", "default"
+    return None, "none"
+
+
+def load_project(
+    project_dir: Path | None = None,
+    env: str | None = None,
+    strict_env_file: bool = False,
+) -> ProjectConfig:
     """Load project.yml from the given directory (or cwd).
 
     Args:
@@ -507,12 +570,14 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
         freshness_hours=float(alerts_raw.get("freshness_hours", 24.0)),
     )
 
-    # Environments
+    # Environments. A bare `dev:` (or `environments:` with nothing under it)
+    # parses as None; both mean "no overrides", not a crash.
     environments: dict[str, EnvironmentConfig] = {}
-    for env_name, env_raw in raw.get("environments", {}).items():
-        environments[env_name] = EnvironmentConfig(
-            database=env_raw.get("database", {}),
-            connections=env_raw.get("connections", {}),
+    for env_name, env_raw in (raw.get("environments") or {}).items():
+        env_raw = env_raw or {}
+        environments[str(env_name)] = EnvironmentConfig(
+            database=env_raw.get("database") or {},
+            connections=env_raw.get("connections") or {},
             defer=env_raw.get("defer"),
         )
 
@@ -540,16 +605,9 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
             )
 
     # Apply environment overrides
-    active_env = env
-    if environments and active_env is None:
-        # Check .havn-env file for persisted environment selection
-        havn_env_path = project_dir / ".havn-env"
-        if havn_env_path.exists():
-            file_env = read_project_text(havn_env_path).strip()
-            if file_env and file_env in environments:
-                active_env = file_env
-        if active_env is None:
-            active_env = "dev" if "dev" in environments else None
+    active_env, _source = resolve_active_environment(
+        project_dir, environments, env, strict_env_file=strict_env_file
+    )
     if active_env and active_env in environments:
         env_cfg = environments[active_env]
         if env_cfg.database:

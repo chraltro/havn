@@ -14,6 +14,7 @@ Two entry points into the warehouse:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import duckdb
@@ -533,6 +534,61 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
         )
     """)
 
+    _lowercase_model_keys(conn)
+
+
+_KEYED_MODEL_TABLES = (
+    "model_state", "model_columns", "model_profiles", "model_blocked", "batch_state",
+)
+_HISTORY_MODEL_TABLES = (
+    ("assertion_results", "model_path"),
+    ("profile_history", "model_path"),
+    ("source_freshness", "model_path"),
+    ("anomaly_log", "model_name"),
+)
+
+
+def _lowercase_model_keys(conn: duckdb.DuckDBPyConnection) -> None:
+    """One-time migration: model names became lowercase.
+
+    Discovery used to keep a file name's case (``silver.Customers``), so
+    metadata recorded under it would no longer be found: the model would
+    rebuild as new and, worse, a microbatch model would reprocess from
+    ``begin``. Rows are renamed to the lowercase key unless a lowercase row
+    for that model already exists, in which case the mixed-case row is stale
+    and dropped. Cheap after the first time: one indexed probe of
+    ``model_state`` finds nothing to do.
+    """
+    try:
+        pending = conn.execute(
+            "SELECT 1 FROM _havn.model_state WHERE model_path <> lower(model_path) LIMIT 1"
+        ).fetchone()
+    except duckdb.Error:
+        return
+    if pending is None:
+        return
+    for table in _KEYED_MODEL_TABLES:
+        try:
+            conn.execute(
+                f"DELETE FROM _havn.{table} AS t WHERE t.model_path <> lower(t.model_path) "
+                f"AND EXISTS (SELECT 1 FROM _havn.{table} AS l "
+                f"WHERE l.model_path = lower(t.model_path))"
+            )
+            conn.execute(
+                f"UPDATE _havn.{table} SET model_path = lower(model_path) "
+                f"WHERE model_path <> lower(model_path)"
+            )
+        except duckdb.Error as e:
+            logging.getLogger(__name__).debug("Could not lowercase model keys in %s: %s", table, e)
+    for table, column in _HISTORY_MODEL_TABLES:
+        try:
+            conn.execute(
+                f"UPDATE _havn.{table} SET {column} = lower({column}) "
+                f"WHERE {column} <> lower({column})"
+            )
+        except duckdb.Error as e:
+            logging.getLogger(__name__).debug("Could not lowercase model keys in %s: %s", table, e)
+
 
 def ensure_circuit_state_table(conn: duckdb.DuckDBPyConnection) -> None:
     """Create the circuit breaker state table if it doesn't exist."""
@@ -566,12 +622,19 @@ def log_run(
     created before the DDL was relaxed (which had the function-call defaults
     stripped) still produce non-NULL timestamps and the History panel
     populates correctly.
+
+    The entry is written when the step finishes, so ``started_at`` is now
+    minus ``duration_ms``. Stamping it with now made a slow step look as if
+    it started after the steps that followed it, and a pipeline's span came
+    out wrong on Home.
     """
     conn.execute(
         """
         INSERT INTO _havn.run_log
             (run_id, started_at, run_type, target, status, duration_ms, rows_affected, error, log_output, pipeline_run_id)
-        VALUES (gen_random_uuid()::VARCHAR, current_timestamp, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (gen_random_uuid()::VARCHAR, current_timestamp - to_milliseconds(CAST(? AS BIGINT)),
+                ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [run_type, target, status, duration_ms, rows_affected, error, log_output, pipeline_run_id],
+        [max(int(duration_ms or 0), 0), run_type, target, status, duration_ms, rows_affected, error,
+         log_output, pipeline_run_id],
     )

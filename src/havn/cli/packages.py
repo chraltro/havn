@@ -32,20 +32,33 @@ def _counts(root) -> tuple[int, int]:
 
 
 @packages_app.callback(invoke_without_command=True)
-def list_packages(
+def packages_default(
     ctx: typer.Context,
     project_dir: Annotated[
         Optional[Path], typer.Option("--project", "-p", help="Project directory")
     ] = None,
 ) -> None:
-    """List installed packages."""
+    """List installed packages (same as `havn packages list`)."""
     if ctx.invoked_subcommand is not None:
         return
+    _print_packages(_resolve_project(project_dir))
+
+
+@packages_app.command("list")
+def list_packages(
+    project_dir: Annotated[
+        Optional[Path], typer.Option("--project", "-p", help="Project directory")
+    ] = None,
+) -> None:
+    """List installed packages: rev, commit, model and macro counts."""
+    _print_packages(_resolve_project(project_dir))
+
+
+def _print_packages(project_dir: Path) -> None:
     from rich.table import Table
 
     from havn.engine.packages import package_roots, read_lock
 
-    project_dir = _resolve_project(project_dir)
     lock = read_lock(project_dir)
     roots = package_roots(project_dir)
     if not roots:

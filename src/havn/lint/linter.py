@@ -78,8 +78,21 @@ def _lint_text(sql: str) -> str:
     numbers are the file's line numbers with no offset to add back, and a
     directive that sits below the SQL (a trailing ``@assert``, say) no longer
     shows up as an unparsable section.
+
+    Each blanked directive line is then filled with a bare ``--`` comment.
+    Left blank, a file that opens with ``@config`` starts with newlines and a
+    run of blank lines, which LT13/LT15 report as violations no one can fix
+    (every scaffolded model tripped them).
     """
-    return strip_config_comments(sql)
+    stripped = strip_config_comments(sql)
+    original_lines = sql.split("\n")
+    stripped_lines = stripped.split("\n")
+    if len(original_lines) != len(stripped_lines):
+        return stripped
+    return "\n".join(
+        "--" if new.strip() == "" and old.strip() != "" else new
+        for old, new in zip(original_lines, stripped_lines)
+    )
 
 # `havn lint` separates correctness from style.
 #

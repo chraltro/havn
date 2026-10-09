@@ -16,6 +16,9 @@ havn init [NAME] [--dir PATH]
 |---------------|---------|-------------|
 | `NAME` | `my-project` | Project name |
 | `--dir, -d` | `./<NAME>` | Target directory |
+| `--force` | false | Scaffold into a non-empty directory, adding only missing files |
+
+A target directory that already has files in it (other than `.git/`) is refused. With `--force`, only the scaffold files that do not exist yet are written; existing files, `.env` and `project.yml` included, are never overwritten.
 
 Creates project structure with sample earthquake data pipeline, seeds, contracts, and notebooks.
 
@@ -92,7 +95,7 @@ havn backup [--output PATH] [--no-verify] [--note TEXT] [--keep N] [--project PA
 | `--output, -o` | `_backups/` | Output path |
 | `--no-verify` | false | Skip post-backup integrity check |
 | `--note` | none | Attach a note to the backup manifest entry |
-| `--keep` | none | Retention: keep only the last N backups, remove older ones |
+| `--keep` | none | Retention: keep only the last N backups (N >= 1), remove older ones |
 
 Flushes the DuckDB WAL, copies the database file, computes a SHA-256 checksum, and tracks the backup in `_backups/manifest.json`.
 
@@ -103,6 +106,8 @@ List all tracked backups from the manifest.
 ```bash
 havn backup-list [--project PATH]
 ```
+
+Each file on disk is re-checked against its recorded SHA-256; one that has changed since it was taken shows `checksum mismatch` instead of `yes` under Verified.
 
 ### havn backup-verify
 
@@ -119,6 +124,8 @@ Restore the warehouse database from a backup.
 ```bash
 havn backup-restore BACKUP_PATH [--project PATH]
 ```
+
+The backup is verified first (including its manifest checksum), copied to a temporary file beside the warehouse and swapped in with an atomic rename, so a failure part-way leaves the original warehouse and its WAL untouched. A warehouse held open by another process (such as `havn serve`) is reported as such; stop that process and retry.
 
 ## Pipeline Execution
 
@@ -720,7 +727,8 @@ Shows all macros discovered from the `macros/` directory, from installed package
 Install and inspect shared model and macro packages. See [Packages](packages.md).
 
 ```bash
-havn packages                    # list installed packages (default action)
+havn packages list               # list installed packages: rev, commit, counts
+havn packages                    # same as `havn packages list`
 havn packages install            # install what project.yml declares
 havn packages install --upgrade  # re-resolve each rev instead of using the lock
 havn packages remove crm         # delete a checkout and its lock entry

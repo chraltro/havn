@@ -469,7 +469,8 @@ def _batch_resume_start(
 
     Only *closed* windows count: one whose end is still in the future has not
     finished happening, so however it was recorded it has to be processed
-    again. Among those, the first that is not ``done`` if there is one,
+    again. Among those, the first that is not ``done`` if there is one (a
+    window recorded ``open`` was processed before it closed, so it is not),
     otherwise the window after the last one recorded; then ``lookback``
     windows further back, so rows that arrived late for an already-processed
     window are picked up. Never earlier than ``begin``.
@@ -517,13 +518,22 @@ def _record_batch(
     A window that has not started yet is never recorded. Writing one would
     put the resume cursor past today, and the model would then sit idle until
     the wall clock reached it.
+
+    A window processed while still open is recorded as ``open`` rather than
+    ``done``: rows can still arrive for it, so once it has closed the next run
+    must process it again (``_batch_resume_start`` treats anything but
+    ``done`` as pending). Recording it ``done`` lost those rows whenever
+    ``lookback=0``.
     """
-    if window[0] > utc_now():
+    now = utc_now()
+    if window[0] > now:
         logger.debug(
             "%s: refusing to record batch window %s, which is in the future",
             model_path, window[0],
         )
         return
+    if status == "done" and window[1] > now:
+        status = "open"
     conn.execute(
         "DELETE FROM _havn.batch_state WHERE model_path = ? AND window_start = ?",
         [model_path, window[0]],

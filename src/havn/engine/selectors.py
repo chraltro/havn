@@ -36,7 +36,7 @@ import fnmatch
 import re
 from collections import deque
 from dataclasses import dataclass, field
-from graphlib import TopologicalSorter
+from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -233,9 +233,61 @@ def _rel_path(model: SQLModel, project_dir: Path | None) -> str:
     return path.as_posix()
 
 
+# SQLModel attributes a ``config.<key>:`` selector may read directly. Anything
+# else comes from the raw @config header, so a key like ``path`` or ``sql``
+# cannot accidentally match model internals.
+_MODEL_CONFIG_ATTRS = frozenset({
+    "materialized", "schema", "unique_key", "incremental_strategy",
+    "incremental_filter", "partition_by", "on_schema_change", "watermark",
+    "strategy", "updated_at", "check_cols", "hard_deletes", "event_time",
+    "batch_size", "begin", "lookback", "tags", "owner", "grain",
+    # Not a @config key, but `config.package:crm` matched it before this
+    # allowlist existed and is documented alongside `package:`.
+    "package",
+})
+
+
+def _normalize_path_value(value: str, project_dir: Path | None) -> str:
+    """A ``path:`` value as a project-relative posix path.
+
+    Users on Windows type backslashes (and shells complete absolute paths);
+    model paths are compared in posix form relative to the project, so the
+    value has to be brought into the same shape or nothing ever matches.
+    """
+    text = value.strip().replace("\\", "/")
+    if project_dir is not None:
+        candidate = Path(text)
+        if candidate.is_absolute():
+            try:
+                text = candidate.relative_to(Path(project_dir)).as_posix()
+            except ValueError:
+                # Path.relative_to is case-sensitive even on Windows; retry
+                # on resolved paths before giving up.
+                try:
+                    text = candidate.resolve().relative_to(
+                        Path(project_dir).resolve()
+                    ).as_posix()
+                except (ValueError, OSError):
+                    pass
+    if text.startswith("./"):
+        text = text[2:]
+    return text.rstrip("/")
+
+
 def _config_value(model: SQLModel, key: str) -> str | list[str] | None:
-    """Read a ``@config`` key off the model, normalized to text."""
-    value: Any = getattr(model, key, None)
+    """Read a ``@config`` key off the model, normalized to text.
+
+    Keys are case-insensitive. A key the model has no attribute for (a custom
+    one such as ``owner_team=finance``) is read from the raw ``@config``
+    header, since discovery only keeps the keys it understands.
+    """
+    key = key.lower()
+    value: Any = getattr(model, key, None) if key in _MODEL_CONFIG_ATTRS else None
+    if value is None:
+        from havn.engine.sql_analysis import parse_config
+
+        raw = {k.lower(): v for k, v in parse_config(getattr(model, "sql", "") or "").items()}
+        value = raw.get(key)
     if value is None:
         return None
     if isinstance(value, bool):
@@ -264,11 +316,14 @@ def _match_core(
         # A plain (possibly wildcard) model name. A dotted pattern is matched
         # against ``schema.name``; a bare one against either, so both
         # ``customers`` and ``bronze.customers`` find the same model.
+        # Model names are case-insensitive (discovery lowercases them, as
+        # DuckDB does), so ``silver.Customers`` finds ``silver.customers``.
+        pattern = core.lower()
         out = set()
-        dotted = "." in core
+        dotted = "." in pattern
         for m in models:
-            if fnmatch.fnmatchcase(m.full_name, core) or (
-                not dotted and fnmatch.fnmatchcase(m.name, core)
+            if fnmatch.fnmatchcase(m.full_name.lower(), pattern) or (
+                not dotted and fnmatch.fnmatchcase(m.name.lower(), pattern)
             ):
                 out.add(m.full_name)
         return (out, "")
@@ -286,11 +341,11 @@ def _match_core(
         )
 
     if method == "path":
-        prefix = value.strip().rstrip("/")
+        prefix = _normalize_path_value(value, project_dir)
         out = set()
         for m in models:
             rel = _rel_path(m, project_dir)
-            if rel == prefix or rel.startswith(prefix + "/") or fnmatch.fnmatchcase(rel, value):
+            if rel == prefix or rel.startswith(prefix + "/") or fnmatch.fnmatchcase(rel, prefix):
                 out.add(m.full_name)
         return (out, "")
 
@@ -313,7 +368,11 @@ def _match_core(
     if method in ("fqn", "name"):
         attr = "full_name" if method == "fqn" else "name"
         return (
-            {m.full_name for m in models if fnmatch.fnmatchcase(getattr(m, attr), value)},
+            {
+                m.full_name
+                for m in models
+                if fnmatch.fnmatchcase(getattr(m, attr).lower(), value.lower())
+            },
             "",
         )
 
@@ -321,15 +380,18 @@ def _match_core(
         _, _, key = method.partition(".")
         if not key:
             return (set(), "config: needs a key, e.g. config.materialized:table")
+        # Config values are matched case-insensitively, like the keys:
+        # ``config.materialized:TABLE`` means the same as ``:table``.
+        pattern = value.lower()
         out = set()
         for m in models:
             got = _config_value(m, key)
             if got is None:
                 continue
             if isinstance(got, list):
-                if any(fnmatch.fnmatchcase(g, value) for g in got):
+                if any(fnmatch.fnmatchcase(g.lower(), pattern) for g in got):
                     out.add(m.full_name)
-            elif fnmatch.fnmatchcase(got, value):
+            elif fnmatch.fnmatchcase(got.lower(), pattern):
                 out.add(m.full_name)
         return (out, "")
 
@@ -380,14 +442,27 @@ def _changed_models(conn: Any, models: list[SQLModel]) -> dict[str, bool]:
 
 
 def _topological(names: set[str], models: list[SQLModel]) -> list[str]:
-    """Order ``names`` so every model follows the dependencies it selects."""
+    """Order ``names`` so every model follows the selected models it depends on.
+
+    Sorted over the whole DAG and then filtered: keeping only edges with both
+    ends selected loses the ordering through an unselected model in between
+    (``a -> b -> d`` with ``b`` left out would let ``d`` come before ``a``).
+    """
     model_map = {m.full_name: m for m in models}
     sorter: TopologicalSorter[str] = TopologicalSorter()
-    for name in names:
-        if name in model_map:
-            deps = [d for d in (model_map[name].depends_on or []) if d in names]
-            sorter.add(name, *deps)
-    return [n for n in sorter.static_order() if n in names and n in model_map]
+    for m in models:
+        sorter.add(m.full_name, *[d for d in (m.depends_on or []) if d in model_map])
+    try:
+        order = list(sorter.static_order())
+    except CycleError:
+        # A cycle elsewhere in the project must not break selection; fall back
+        # to the selection-only graph, which may still be acyclic.
+        sub: TopologicalSorter[str] = TopologicalSorter()
+        for name in names:
+            if name in model_map:
+                sub.add(name, *[d for d in (model_map[name].depends_on or []) if d in names])
+        order = list(sub.static_order())
+    return [n for n in order if n in names and n in model_map]
 
 
 def _expand_atom(

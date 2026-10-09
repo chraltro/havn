@@ -57,6 +57,30 @@ def test_nothing_new_means_nothing_rebuilt(project):
     assert again == {"bronze.ids": "skipped", "gold.cnt": "skipped"}
 
 
+def test_a_long_load_that_finished_after_the_build_counts(project):
+    """run_log.started_at is when a step started; the load is judged by when
+    it finished, so one that overlapped the build still triggers a rebuild."""
+    conn, tdir, db = project
+    run_transform(conn, tdir, db_path=db)
+    log_run(conn, "ingest", "slow_load.py", "success", duration_ms=3_600_000)
+
+    assert run_transform(conn, tdir, db_path=db)["bronze.ids"] == "built"
+
+
+def test_run_log_started_at_is_when_the_step_started():
+    conn = duckdb.connect()
+    ensure_meta_table(conn)
+    log_run(conn, "ingest", "slow.py", "success", duration_ms=60_000)
+    log_run(conn, "transform", "bronze.ids", "success", duration_ms=5)
+    # Logged back to back, so the minute-long step began a minute earlier.
+    # Stamped with the time it was logged, Home's run span came out as the
+    # slow step's duration alone.
+    gap = conn.execute(
+        "SELECT epoch_ms(max(started_at)) - epoch_ms(min(started_at)) FROM _havn.run_log"
+    ).fetchone()[0]
+    assert gap >= 59_000
+
+
 def test_a_failed_or_unrelated_run_does_not_count(project):
     conn, tdir, db = project
     run_transform(conn, tdir, db_path=db)

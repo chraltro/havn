@@ -653,14 +653,21 @@ async function request<T = unknown>(path: string, options: RequestOptions = {}):
     const timeoutController = new AbortController();
     const existingSignal = fetchOptions.signal;
     const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+    let detachCallerAbort: (() => void) | null = null;
 
     try {
       // Combine existing signal (if any) with our timeout signal
       let signal = timeoutController.signal;
       if (existingSignal) {
         const combined = new AbortController();
-        existingSignal.addEventListener("abort", () => combined.abort());
-        timeoutController.signal.addEventListener("abort", () => combined.abort());
+        const onAbort = () => combined.abort();
+        if (existingSignal.aborted) combined.abort();
+        existingSignal.addEventListener("abort", onAbort);
+        timeoutController.signal.addEventListener("abort", onAbort);
+        detachCallerAbort = () => {
+          existingSignal.removeEventListener("abort", onAbort);
+          timeoutController.signal.removeEventListener("abort", onAbort);
+        };
         signal = combined.signal;
       }
 
@@ -695,6 +702,9 @@ async function request<T = unknown>(path: string, options: RequestOptions = {}):
       clearTimeout(timeoutId);
       const error = err as Error;
 
+      // The caller cancelled: not a timeout, and a retry would undo the cancel.
+      if (existingSignal?.aborted) throw error;
+
       // Don't retry auth errors or client errors
       if (error.message === "Authentication required" ||
           (error.message && error.message.startsWith("Validation error")) ||
@@ -719,6 +729,9 @@ async function request<T = unknown>(path: string, options: RequestOptions = {}):
 
       // Other errors — don't retry
       throw error;
+    } finally {
+      // A long-lived caller signal would otherwise collect a listener per request.
+      detachCallerAbort?.();
     }
   }
 
@@ -892,15 +905,19 @@ export const api = {
         if (!reader) return;
         const decoder = new TextDecoder();
         let buffer = "";
+        // Outside the read loop: a frame can be split across reads, and its
+        // "event:" line must survive until the "data:" line arrives.
+        let currentEvent = "";
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
-          let currentEvent = "";
           for (const line of lines) {
-            if (line.startsWith("event: ")) {
+            if (line === "" || line === "\r") {
+              currentEvent = ""; // a blank line ends the frame
+            } else if (line.startsWith("event: ")) {
               currentEvent = line.slice(7).trim();
             } else if (line.startsWith("data: ") && currentEvent) {
               try {
@@ -1493,6 +1510,12 @@ export const api = {
     request<any>(`/deploys/${encodeURIComponent(id)}/restore`, { method: "POST" }),
   listDeploys: (prId?: string) =>
     request<any[]>(`/deploys${prId ? `?pr_id=${encodeURIComponent(prId)}` : ""}`),
+
+  // DuckDB limits in project.yml. "" / 0 clear a setting; null leaves it as is.
+  getDatabaseConfig: () =>
+    request<{ memory_limit: string; threads: number | null }>("/config/database"),
+  updateDatabaseConfig: (body: { memory_limit?: string | null; threads?: number | null }) =>
+    request<{ status: string }>("/config/database", { method: "PUT", body: JSON.stringify(body) }),
 
   // Resources
   getResources: () => request<ResourceSnapshot>("/resources"),

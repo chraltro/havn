@@ -219,3 +219,19 @@ def test_mocking_two_same_named_tables_still_binds():
     )
     assert conn.execute(out).fetchall() == [(1,)]
     conn.close()
+
+
+
+def test_shared_table_name_gets_a_unique_alias():
+    """Mocking bronze.orders beside silver.orders must keep qualifiers distinct."""
+    conn = duckdb.connect()
+    conn.execute("CREATE SCHEMA silver")
+    conn.execute("CREATE TABLE silver.orders AS SELECT 1 AS id, 'x' AS tag")
+    conn.execute("CREATE TABLE mock_orders AS SELECT 1 AS id, 10 AS amt")
+    sql = (
+        "SELECT bronze.orders.amt, silver.orders.tag FROM bronze.orders "
+        "JOIN silver.orders ON bronze.orders.id = silver.orders.id"
+    )
+    out = rewrite_table_refs(sql, {"bronze.orders": "mock_orders"})
+    assert "bronze.orders" not in out
+    assert conn.execute(out).fetchall() == [(10, "x")]

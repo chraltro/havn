@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable
@@ -278,6 +279,278 @@ def _parent_built(model: SQLModel, results: dict[str, str]) -> bool:
     return any(results.get(dep) == "built" for dep in model.depends_on)
 
 
+
+@dataclass
+class ModelOutcome:
+    """What building one model came to, for callers that report per model."""
+
+    status: str  # a run_transform status: built, skipped, error, assertion_failed, ...
+    duration_ms: int = 0
+    row_count: int = 0
+    error: str | None = None
+
+
+def _source_freshness_gate(
+    conn: duckdb.DuckDBPyConnection,
+    model: SQLModel,
+    results: dict[str, str],
+    blocked: set[str],
+    pipeline_run_id: str | None,
+) -> ModelOutcome | None:
+    """The @source_freshness pre-check, shared by both runners.
+
+    Returns a ``source_stale`` outcome (and records it in ``results`` and
+    ``blocked``) when an error-severity source is stale; None when the model
+    may build. Stale warning-severity sources are printed and do not stop it.
+    """
+    if not model.source_freshness:
+        return None
+    from .quality import _save_source_freshness, check_source_freshness
+
+    sf_results = check_source_freshness(conn, model.source_freshness)
+    _save_source_freshness(conn, model, sf_results)
+    blocking = [
+        r for r in sf_results
+        if r["is_stale"] and r.get("severity", "error") == "error"
+    ]
+    for r in sf_results:
+        if r["is_stale"]:
+            age = (
+                f"{r['age_seconds']:.0f}s" if r.get("age_seconds") is not None else "n/a"
+            )
+            sev_color = "red" if r.get("severity", "error") == "error" else "yellow"
+            console.print(
+                f"         [{sev_color}]stale[/{sev_color}]  source: {r['table']} "
+                f"(age={age}, max={r['max_age_seconds']}s)"
+            )
+    if not blocking:
+        return None
+    error = f"source stale: {', '.join(b['table'] for b in blocking)}"
+    results[model.full_name] = "source_stale"
+    blocked.add(model.full_name)
+    try:
+        log_run(
+            conn, "transform", model.full_name, "skipped",
+            0, 0, error=error, pipeline_run_id=pipeline_run_id,
+        )
+    except Exception:
+        pass
+    return ModelOutcome("source_stale", error=error)
+
+
+def build_one_model(
+    conn: duckdb.DuckDBPyConnection,
+    model: SQLModel,
+    model_map: dict[str, SQLModel],
+    results: dict[str, str],
+    blocked: set[str],
+    *,
+    force: bool = False,
+    project_dir: Path | None = None,
+    rewind_config: object | None = None,
+    run_id: str | None = None,
+    pipeline_run_id: str | None = None,
+    batch_range: BatchRange | None = None,
+    query_rewriter: Callable[[str], str] | None = None,
+    run_profiles: dict[str, object] | None = None,
+) -> ModelOutcome:
+    """Build one model the way ``havn transform`` does.
+
+    Skips it when nothing changed (unless ``force`` or a parent was built in
+    this run), skips it behind a blocked parent, runs its assertions and
+    blocks it on a failed error assertion, profiles it, and records the run.
+    ``results`` and ``blocked`` belong to the caller's run and are updated
+    here; ``model_map`` must hold the whole project with upstream hashes set
+    (see ``_hash_full_dag``). Profiles go into ``run_profiles`` for
+    :func:`detect_run_anomalies` at the end of the run.
+
+    Shared by the sequential runner and job runs, which build step by step.
+    """
+    if model.full_name in results:
+        # Already handled (e.g. policy-denied before the run).
+        return ModelOutcome(results[model.full_name])
+    # A parent rebuilt in this run (new data in an incremental or
+    # snapshot, a block lifted) means this model's inputs moved even
+    # though its SQL did not, so it is rebuilt too: that is how new data
+    # reaches downstream tables.
+    changed = force or _parent_built(model, results) or _needs_build(conn, model)
+    label = f"[bold]{model.full_name}[/bold] ({model.materialized})"
+
+    # If any upstream is blocked (error / failed-error-assertion / stale
+    # source), skip this model with a clear reason.
+    upstream_blocked = [d for d in model.depends_on if d in blocked]
+    if upstream_blocked:
+        console.print(
+            f"  [yellow]skip[/yellow]  {label}: upstream blocked "
+            f"({', '.join(upstream_blocked)})"
+        )
+        results[model.full_name] = "skipped_upstream_blocked"
+        blocked.add(model.full_name)
+        try:
+            log_run(
+                conn, "transform", model.full_name, "skipped",
+                0, 0,
+                error=f"upstream blocked: {', '.join(upstream_blocked)}",
+                pipeline_run_id=pipeline_run_id,
+            )
+        except Exception:
+            pass
+        return ModelOutcome("skipped_upstream_blocked",
+                            error=f"upstream blocked: {', '.join(upstream_blocked)}")
+
+    # Ephemeral models are never built: every consumer carries their query
+    # as a CTE instead. Reported as "inlined" rather than "skipped", which
+    # would read as "unchanged, the table on disk is current".
+    if model.materialized == "ephemeral":
+        console.print(f"  [dim]inline[/dim]  {label}")
+        results[model.full_name] = _record_ephemeral(
+            conn, model, pipeline_run_id
+        ).status
+        return ModelOutcome(results[model.full_name])
+
+    if not changed:
+        console.print(f"  [dim]skip[/dim]  {label}")
+        results[model.full_name] = "skipped"
+        try:
+            log_run(conn, "transform", model.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
+        except Exception:
+            pass
+        return ModelOutcome("skipped")
+
+    stale = _source_freshness_gate(conn, model, results, blocked, pipeline_run_id)
+    if stale is not None:
+        return stale
+
+    try:
+        schema_changes: list[str] = []
+        duration_ms, row_count = execute_model(
+            conn, model, schema_changes, model_map,
+            snapshot_settings=(
+                snapshot_settings_for(project_dir)
+                if model.materialized == "snapshot"
+                else None
+            ),
+            batch_range=batch_range,
+            force=force,
+            run_id=pipeline_run_id,
+            query_rewriter=query_rewriter,
+        )
+        _update_state(conn, model, duration_ms, row_count)
+
+        suffix = f" ({row_count:,} rows, {duration_ms}ms)" if row_count else f" ({duration_ms}ms)"
+        console.print(f"  [green]done[/green]  {label}{suffix}")
+        for change in schema_changes:
+            console.print(f"         [cyan]schema[/cyan]  {change}")
+
+        # Capture snapshot for Pipeline Rewind
+        if project_dir and run_id:
+            try:
+                from havn.engine.snapshots import RewindConfig, capture_snapshot
+                rw_cfg = None
+                if rewind_config is not None:
+                    rw_cfg = RewindConfig(
+                        enabled=getattr(rewind_config, "enabled", True),
+                        retention=getattr(rewind_config, "retention", "7d"),
+                        max_storage=getattr(rewind_config, "max_storage", None),
+                        dedup=getattr(rewind_config, "dedup", True),
+                        exclude=getattr(rewind_config, "exclude", []),
+                    )
+                capture_snapshot(project_dir, conn, model.full_name, run_id, row_count, rw_cfg)
+            except Exception as snap_err:
+                logger.warning("Snapshot capture failed for %s: %s", model.full_name, snap_err)
+
+        # Run data quality assertions (and the synthesised @grain check
+        # if model.grain is set — both are evaluated by run_assertions).
+        assertion_results = []
+        if model.assertions or model.grain:
+            assertion_results = run_assertions(conn, model)
+            _save_assertions(conn, model, assertion_results)
+        _log_build(
+            conn, model, duration_ms, row_count, schema_changes,
+            assertion_results, pipeline_run_id,
+        )
+        if assertion_results:
+            for ar in assertion_results:
+                if ar.passed:
+                    console.print(f"         [green]pass[/green]  assert: {ar.expression}")
+                else:
+                    sev = ar.severity or "error"
+                    sev_color = "red" if sev == "error" else "yellow"
+                    sev_label = "FAIL" if sev == "error" else "WARN"
+                    console.print(
+                        f"         [{sev_color}]{sev_label}[/{sev_color}]  "
+                        f"assert: {ar.expression} ({ar.detail})"
+                    )
+
+            failed_error = [ar for ar in assertion_results if not ar.passed and (ar.severity or "error") == "error"]
+            if failed_error:
+                # Severity=error assertions halt this model AND its
+                # descendants — keeping bad data from cascading downstream.
+                results[model.full_name] = "assertion_failed"
+                blocked.add(model.full_name)
+                _invalidate_state(conn, model)
+                return ModelOutcome(
+                    "assertion_failed", duration_ms, row_count,
+                    error="; ".join(f"assert {ar.expression}: {ar.detail}" for ar in failed_error),
+                )
+        _clear_block(conn, model)
+
+        # Auto-profile for tables
+        if model.materialized in ("table", "incremental", "snapshot"):
+            profile = profile_model(conn, model)
+            _save_profile(conn, model, profile)
+            if run_profiles is not None:
+                run_profiles[model.full_name] = profile
+            null_alerts = [
+                col for col, pct in profile.null_percentages.items()
+                if pct > 50.0
+            ]
+            if null_alerts:
+                console.print(
+                    f"         [yellow]warn[/yellow]  high nulls: "
+                    f"{', '.join(f'{c}({profile.null_percentages[c]}%)' for c in null_alerts)}"
+                )
+
+        results[model.full_name] = "built"
+        return ModelOutcome("built", duration_ms, row_count)
+
+    except Exception as e:
+        log_run(conn, "transform", model.full_name, "error", error=str(e), pipeline_run_id=pipeline_run_id)
+        console.print(f"  [red]fail[/red]  {label}: {e}")
+        results[model.full_name] = "error"
+        blocked.add(model.full_name)
+        return ModelOutcome("error", error=str(e))
+
+
+def detect_run_anomalies(
+    conn: duckdb.DuckDBPyConnection,
+    run_profiles: dict[str, object],
+    project_dir: Path | None,
+) -> None:
+    """Compare this run's profiles with history; log and alert on anomalies."""
+    if not run_profiles:
+        return
+    try:
+        from havn.engine.anomaly import detect_all_anomalies, log_anomalies, alert_anomalies
+        anomalies = detect_all_anomalies(conn, run_profiles)
+        if anomalies:
+            log_anomalies(conn, anomalies)
+            for a in anomalies:
+                console.print(
+                    f"         [yellow]anomaly[/yellow]  {a.model}: {a.message} (z={a.z_score})"
+                )
+            # Send alerts if configured
+            try:
+                if project_dir:
+                    from havn.config import load_project
+                    cfg = load_project(project_dir)
+                    alert_anomalies(anomalies, cfg.alerts, conn)
+            except Exception as alert_err:
+                logger.debug("Anomaly alerting skipped: %s", alert_err)
+    except Exception as anom_err:
+        logger.debug("Anomaly detection skipped: %s", anom_err)
+
+
 def _run_transform_sequential(
     conn: duckdb.DuckDBPyConnection,
     models: list[SQLModel],
@@ -331,206 +604,14 @@ def _run_transform_sequential(
             pass
 
     for model in ordered:
-        if model.full_name in results:
-            # Already handled (e.g. policy-denied above).
-            continue
-        # A parent rebuilt in this run (new data in an incremental or
-        # snapshot, a block lifted) means this model's inputs moved even
-        # though its SQL did not, so it is rebuilt too: that is how new data
-        # reaches downstream tables.
-        changed = force or _parent_built(model, results) or _needs_build(conn, model)
-        label = f"[bold]{model.full_name}[/bold] ({model.materialized})"
+        build_one_model(
+            conn, model, model_map, results, blocked,
+            force=force, project_dir=project_dir, rewind_config=rewind_config,
+            run_id=run_id, pipeline_run_id=pipeline_run_id, batch_range=batch_range,
+            query_rewriter=query_rewriter, run_profiles=_run_profiles,
+        )
 
-        # If any upstream is blocked (error / failed-error-assertion / stale
-        # source), skip this model with a clear reason.
-        upstream_blocked = [d for d in model.depends_on if d in blocked]
-        if upstream_blocked:
-            console.print(
-                f"  [yellow]skip[/yellow]  {label}: upstream blocked "
-                f"({', '.join(upstream_blocked)})"
-            )
-            results[model.full_name] = "skipped_upstream_blocked"
-            blocked.add(model.full_name)
-            try:
-                log_run(
-                    conn, "transform", model.full_name, "skipped",
-                    0, 0,
-                    error=f"upstream blocked: {', '.join(upstream_blocked)}",
-                    pipeline_run_id=pipeline_run_id,
-                )
-            except Exception:
-                pass
-            continue
-
-        # Ephemeral models are never built: every consumer carries their query
-        # as a CTE instead. Reported as "inlined" rather than "skipped", which
-        # would read as "unchanged, the table on disk is current".
-        if model.materialized == "ephemeral":
-            console.print(f"  [dim]inline[/dim]  {label}")
-            results[model.full_name] = _record_ephemeral(
-                conn, model, pipeline_run_id
-            ).status
-            continue
-
-        if not changed:
-            console.print(f"  [dim]skip[/dim]  {label}")
-            results[model.full_name] = "skipped"
-            try:
-                log_run(conn, "transform", model.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
-            except Exception:
-                pass
-            continue
-
-        # @source_freshness pre-check: bail out early if any error-severity
-        # source spec is stale. Warnings still execute.
-        if model.source_freshness:
-            from .quality import _save_source_freshness, check_source_freshness
-
-            sf_results = check_source_freshness(conn, model.source_freshness)
-            _save_source_freshness(conn, model, sf_results)
-            blocking = [
-                r for r in sf_results
-                if r["is_stale"] and r.get("severity", "error") == "error"
-            ]
-            for r in sf_results:
-                if r["is_stale"]:
-                    age = (
-                        f"{r['age_seconds']:.0f}s" if r.get("age_seconds") is not None else "n/a"
-                    )
-                    sev_color = "red" if r.get("severity", "error") == "error" else "yellow"
-                    console.print(
-                        f"         [{sev_color}]stale[/{sev_color}]  source: {r['table']} "
-                        f"(age={age}, max={r['max_age_seconds']}s)"
-                    )
-            if blocking:
-                results[model.full_name] = "source_stale"
-                blocked.add(model.full_name)
-                try:
-                    log_run(
-                        conn, "transform", model.full_name, "skipped",
-                        0, 0,
-                        error=f"source stale: {', '.join(b['table'] for b in blocking)}",
-                        pipeline_run_id=pipeline_run_id,
-                    )
-                except Exception:
-                    pass
-                continue
-
-        try:
-            schema_changes: list[str] = []
-            duration_ms, row_count = execute_model(
-                conn, model, schema_changes, model_map,
-                snapshot_settings=(
-                    snapshot_settings_for(project_dir)
-                    if model.materialized == "snapshot"
-                    else None
-                ),
-                batch_range=batch_range,
-                force=force,
-                run_id=pipeline_run_id,
-                query_rewriter=query_rewriter,
-            )
-            _update_state(conn, model, duration_ms, row_count)
-
-            suffix = f" ({row_count:,} rows, {duration_ms}ms)" if row_count else f" ({duration_ms}ms)"
-            console.print(f"  [green]done[/green]  {label}{suffix}")
-            for change in schema_changes:
-                console.print(f"         [cyan]schema[/cyan]  {change}")
-
-            # Capture snapshot for Pipeline Rewind
-            if project_dir and run_id:
-                try:
-                    from havn.engine.snapshots import RewindConfig, capture_snapshot
-                    rw_cfg = None
-                    if rewind_config is not None:
-                        rw_cfg = RewindConfig(
-                            enabled=getattr(rewind_config, "enabled", True),
-                            retention=getattr(rewind_config, "retention", "7d"),
-                            max_storage=getattr(rewind_config, "max_storage", None),
-                            dedup=getattr(rewind_config, "dedup", True),
-                            exclude=getattr(rewind_config, "exclude", []),
-                        )
-                    capture_snapshot(project_dir, conn, model.full_name, run_id, row_count, rw_cfg)
-                except Exception as snap_err:
-                    logger.warning("Snapshot capture failed for %s: %s", model.full_name, snap_err)
-
-            # Run data quality assertions (and the synthesised @grain check
-            # if model.grain is set — both are evaluated by run_assertions).
-            assertion_results = []
-            if model.assertions or model.grain:
-                assertion_results = run_assertions(conn, model)
-                _save_assertions(conn, model, assertion_results)
-            _log_build(
-                conn, model, duration_ms, row_count, schema_changes,
-                assertion_results, pipeline_run_id,
-            )
-            if assertion_results:
-                for ar in assertion_results:
-                    if ar.passed:
-                        console.print(f"         [green]pass[/green]  assert: {ar.expression}")
-                    else:
-                        sev = ar.severity or "error"
-                        sev_color = "red" if sev == "error" else "yellow"
-                        sev_label = "FAIL" if sev == "error" else "WARN"
-                        console.print(
-                            f"         [{sev_color}]{sev_label}[/{sev_color}]  "
-                            f"assert: {ar.expression} ({ar.detail})"
-                        )
-
-                failed_error = [ar for ar in assertion_results if not ar.passed and (ar.severity or "error") == "error"]
-                if failed_error:
-                    # Severity=error assertions halt this model AND its
-                    # descendants — keeping bad data from cascading downstream.
-                    results[model.full_name] = "assertion_failed"
-                    blocked.add(model.full_name)
-                    _invalidate_state(conn, model)
-                    continue
-            _clear_block(conn, model)
-
-            # Auto-profile for tables
-            if model.materialized in ("table", "incremental", "snapshot"):
-                profile = profile_model(conn, model)
-                _save_profile(conn, model, profile)
-                _run_profiles[model.full_name] = profile
-                null_alerts = [
-                    col for col, pct in profile.null_percentages.items()
-                    if pct > 50.0
-                ]
-                if null_alerts:
-                    console.print(
-                        f"         [yellow]warn[/yellow]  high nulls: "
-                        f"{', '.join(f'{c}({profile.null_percentages[c]}%)' for c in null_alerts)}"
-                    )
-
-            results[model.full_name] = "built"
-
-        except Exception as e:
-            log_run(conn, "transform", model.full_name, "error", error=str(e), pipeline_run_id=pipeline_run_id)
-            console.print(f"  [red]fail[/red]  {label}: {e}")
-            results[model.full_name] = "error"
-            blocked.add(model.full_name)
-
-    # Run anomaly detection on collected profiles
-    if _run_profiles:
-        try:
-            from havn.engine.anomaly import detect_all_anomalies, log_anomalies, alert_anomalies
-            anomalies = detect_all_anomalies(conn, _run_profiles)
-            if anomalies:
-                log_anomalies(conn, anomalies)
-                for a in anomalies:
-                    console.print(
-                        f"         [yellow]anomaly[/yellow]  {a.model}: {a.message} (z={a.z_score})"
-                    )
-                # Send alerts if configured
-                try:
-                    if project_dir:
-                        from havn.config import load_project
-                        cfg = load_project(project_dir)
-                        alert_anomalies(anomalies, cfg.alerts, conn)
-                except Exception as alert_err:
-                    logger.debug("Anomaly alerting skipped: %s", alert_err)
-        except Exception as anom_err:
-            logger.debug("Anomaly detection skipped: %s", anom_err)
+    detect_run_anomalies(conn, _run_profiles, project_dir)
 
     return results
 
@@ -557,7 +638,7 @@ def _run_transform_parallel(
     Assertion failures in a tier block the next tier.
 
     ``all_models`` is the full project; ``models`` is the subset to execute.
-    Tiers are built from the subset, hashes from the full DAG.
+    Tiers hold only the subset but are ordered by the full DAG, as are hashes.
 
     ``query_rewriter`` is this run's defer rewriter, or None. Workers are
     threads within this run and receive it as an argument.
@@ -566,7 +647,9 @@ def _run_transform_parallel(
     # upstream hash from it, so a targeted run must not hand them a map that
     # is missing the upstreams.
     _ordered, model_map = _hash_full_dag(models, all_models)
-    tiers = build_dag_tiers(models)
+    # Ordered against the full DAG, so a dependency that runs through an
+    # unselected model still separates the two selected ones into tiers.
+    tiers = build_dag_tiers(models, all_models)
 
     # Pre-create every target schema on the main connection BEFORE any
     # parallel worker starts. Without this, two workers in the same tier
@@ -592,7 +675,7 @@ def _run_transform_parallel(
                 conn, models, force,
                 project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
                 pipeline_run_id=pipeline_run_id, all_models=all_models,
-                query_rewriter=query_rewriter,
+                batch_range=batch_range, query_rewriter=query_rewriter,
             )
 
     # Resolve database path explicitly (only used when db_config is None).
@@ -610,7 +693,7 @@ def _run_transform_parallel(
             conn, models, force,
             project_dir=project_dir, rewind_config=rewind_config, run_id=run_id,
             pipeline_run_id=pipeline_run_id, all_models=all_models,
-            query_rewriter=query_rewriter,
+            batch_range=batch_range, query_rewriter=query_rewriter,
         )
 
     results: dict[str, str] = {}
@@ -694,159 +777,93 @@ def _run_transform_parallel(
             console.print(f"  [dim]tier {tier_idx}/{total_tiers}[/dim] ({len(tier)} models in parallel)")
 
         if len(tier) == 1:
-            # Single model — run in the main connection
-            model = tier[0]
-            label = f"[bold]{model.full_name}[/bold] ({model.materialized})"
+            # Single model: run in the main connection, exactly as the
+            # sequential runner does (source freshness, assertions, profile,
+            # snapshot capture). ``failed_models`` is this run's blocked set.
+            build_one_model(
+                conn, tier[0], model_map, results, failed_models,
+                force=force, project_dir=project_dir, rewind_config=rewind_config,
+                run_id=run_id, pipeline_run_id=pipeline_run_id, batch_range=batch_range,
+                query_rewriter=query_rewriter,
+            )
+            continue
 
-            if model.materialized == "ephemeral":
-                console.print(f"  [dim]inline[/dim]  {label}")
-                results[model.full_name] = _record_ephemeral(
-                    conn, model, pipeline_run_id
-                ).status
-                continue
+        # @source_freshness is checked on the main connection before the
+        # tier is dispatched, with the same gate as the sequential runner;
+        # workers never saw it, so a stale source used to build anyway.
+        dispatch: list[SQLModel] = []
+        for model in tier:
+            if model.source_freshness and model.materialized != "ephemeral" and (
+                force or _parent_built(model, results) or _needs_build(conn, model)
+            ):
+                if _source_freshness_gate(
+                    conn, model, results, failed_models, pipeline_run_id
+                ) is not None:
+                    console.print(f"  [yellow]skip[/yellow]  [bold]{model.full_name}[/bold]: source stale")
+                    continue
+            dispatch.append(model)
+        tier = dispatch
+        if not tier:
+            continue
 
-            changed = force or _parent_built(model, results) or _needs_build(conn, model)
+        # Multiple models — run in parallel with separate connections
+        # Collect ALL results from all futures before reporting
+        tier_results: list[tuple[str, ModelResult]] = []
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(tier))) as executor:
+            futures = {
+                executor.submit(
+                    _execute_single_model,
+                    db_path_str, model, force, model_map,
+                    db_config, project_dir, pipeline_run_id,
+                    batch_range, query_rewriter,
+                    upstream_built=_parent_built(model, results),
+                ): model
+                for model in tier
+            }
+            for future in as_completed(futures):
+                tier_results.append(future.result())
 
-            if not changed:
+        # Report all results from this tier
+        for model_name, model_result in tier_results:
+            label = f"[bold]{model_name}[/bold]"
+            if model_result.status == "skipped":
                 console.print(f"  [dim]skip[/dim]  {label}")
-                results[model.full_name] = "skipped"
-                try:
-                    log_run(conn, "transform", model.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
-                except Exception:
-                    pass
-                continue
-
-            try:
-                schema_changes: list[str] = []
-                duration_ms, row_count = execute_model(
-                    conn, model, schema_changes, model_map,
-                    snapshot_settings=(
-                        snapshot_settings_for(project_dir)
-                        if model.materialized == "snapshot"
-                        else None
-                    ),
-                    batch_range=batch_range,
-                    force=force,
-                    run_id=pipeline_run_id,
-                    query_rewriter=query_rewriter,
-                )
-                _update_state(conn, model, duration_ms, row_count)
-                for change in schema_changes:
-                    console.print(f"         [cyan]schema[/cyan]  {change}")
-
-                # Assertions (and synthesised @grain check, if any)
-                ar_results = []
-                if model.assertions or model.grain:
-                    ar_results = run_assertions(conn, model)
-                    _save_assertions(conn, model, ar_results)
-                _log_build(
-                    conn, model, duration_ms, row_count, schema_changes,
-                    ar_results, pipeline_run_id,
-                )
-                if ar_results:
-                    failed_asserts = [
-                        ar for ar in ar_results
-                        if not ar.passed and (ar.severity or "error") == "error"
-                    ]
-                    if failed_asserts:
-                        for ar in failed_asserts:
-                            console.print(f"         [red]FAIL[/red]  assert: {ar.expression} ({ar.detail})")
-                        results[model.full_name] = "assertion_failed"
-                        failed_models.add(model.full_name)
-                        _invalidate_state(conn, model)
-                        continue
-                _clear_block(conn, model)
-
-                # Profile
-                if model.materialized in ("table", "incremental", "snapshot"):
-                    profile = profile_model(conn, model)
-                    _save_profile(conn, model, profile)
-
-                suffix = f" ({row_count:,} rows, {duration_ms}ms)" if row_count else f" ({duration_ms}ms)"
-                console.print(f"  [green]done[/green]  {label}{suffix}")
-                results[model.full_name] = "built"
-
-                # Capture snapshot for Pipeline Rewind
-                if project_dir and run_id:
-                    try:
-                        from havn.engine.snapshots import RewindConfig as _RC, capture_snapshot as _cs
-                        _rw = None
-                        if rewind_config is not None:
-                            _rw = _RC(
-                                enabled=getattr(rewind_config, "enabled", True),
-                                retention=getattr(rewind_config, "retention", "7d"),
-                                max_storage=getattr(rewind_config, "max_storage", None),
-                                dedup=getattr(rewind_config, "dedup", True),
-                                exclude=getattr(rewind_config, "exclude", []),
-                            )
-                        _cs(project_dir, conn, model.full_name, run_id, row_count, _rw)
-                    except Exception as snap_err:
-                        logger.warning("Snapshot capture failed for %s: %s", model.full_name, snap_err)
-
-            except Exception as e:
-                log_run(conn, "transform", model.full_name, "error", error=str(e), pipeline_run_id=pipeline_run_id)
-                console.print(f"  [red]fail[/red]  {label}: {e}")
-                results[model.full_name] = "error"
-                failed_models.add(model.full_name)
-        else:
-            # Multiple models — run in parallel with separate connections
-            # Collect ALL results from all futures before reporting
-            tier_results: list[tuple[str, ModelResult]] = []
-            with ThreadPoolExecutor(max_workers=min(max_workers, len(tier))) as executor:
-                futures = {
-                    executor.submit(
-                        _execute_single_model,
-                        db_path_str, model, force, model_map,
-                        db_config, project_dir, pipeline_run_id,
-                        batch_range, query_rewriter,
-                        upstream_built=_parent_built(model, results),
-                    ): model
-                    for model in tier
-                }
-                for future in as_completed(futures):
-                    tier_results.append(future.result())
-
-            # Report all results from this tier
-            for model_name, model_result in tier_results:
-                label = f"[bold]{model_name}[/bold]"
-                if model_result.status == "skipped":
-                    console.print(f"  [dim]skip[/dim]  {label}")
-                elif model_result.status == "inlined":
-                    console.print(f"  [dim]inline[/dim]  {label}")
-                elif model_result.status == "built":
-                    suffix = ""
-                    if model_result.row_count:
-                        suffix = f" ({model_result.row_count:,} rows, {model_result.duration_ms}ms)"
-                    else:
-                        suffix = f" ({model_result.duration_ms}ms)"
-                    console.print(f"  [green]done[/green]  {label}{suffix}")
-                    for change in model_result.schema_changes:
-                        console.print(f"         [cyan]schema[/cyan]  {change}")
-                elif model_result.status == "assertion_failed":
-                    console.print(f"  [red]FAIL[/red]  {label}: assertion(s) failed")
+            elif model_result.status == "inlined":
+                console.print(f"  [dim]inline[/dim]  {label}")
+            elif model_result.status == "built":
+                suffix = ""
+                if model_result.row_count:
+                    suffix = f" ({model_result.row_count:,} rows, {model_result.duration_ms}ms)"
                 else:
-                    console.print(f"  [red]fail[/red]  {label}: {model_result.error}")
+                    suffix = f" ({model_result.duration_ms}ms)"
+                console.print(f"  [green]done[/green]  {label}{suffix}")
+                for change in model_result.schema_changes:
+                    console.print(f"         [cyan]schema[/cyan]  {change}")
+            elif model_result.status == "assertion_failed":
+                console.print(f"  [red]FAIL[/red]  {label}: assertion(s) failed")
+            else:
+                console.print(f"  [red]fail[/red]  {label}: {model_result.error}")
 
-                results[model_name] = model_result.status
-                if model_result.status in ("error", "assertion_failed"):
-                    failed_models.add(model_name)
+            results[model_name] = model_result.status
+            if model_result.status in ("error", "assertion_failed"):
+                failed_models.add(model_name)
 
-                # Capture snapshot for Pipeline Rewind (parallel tier)
-                if project_dir and run_id and model_result.status == "built":
-                    try:
-                        from havn.engine.snapshots import RewindConfig as _RC, capture_snapshot as _cs
-                        _rw = None
-                        if rewind_config is not None:
-                            _rw = _RC(
-                                enabled=getattr(rewind_config, "enabled", True),
-                                retention=getattr(rewind_config, "retention", "7d"),
-                                max_storage=getattr(rewind_config, "max_storage", None),
-                                dedup=getattr(rewind_config, "dedup", True),
-                                exclude=getattr(rewind_config, "exclude", []),
-                            )
-                        _cs(project_dir, conn, model_name, run_id,
-                            model_result.row_count, _rw)
-                    except Exception as snap_err:
-                        logger.warning("Snapshot capture failed for %s: %s", model_name, snap_err)
+            # Capture snapshot for Pipeline Rewind (parallel tier)
+            if project_dir and run_id and model_result.status == "built":
+                try:
+                    from havn.engine.snapshots import RewindConfig as _RC, capture_snapshot as _cs
+                    _rw = None
+                    if rewind_config is not None:
+                        _rw = _RC(
+                            enabled=getattr(rewind_config, "enabled", True),
+                            retention=getattr(rewind_config, "retention", "7d"),
+                            max_storage=getattr(rewind_config, "max_storage", None),
+                            dedup=getattr(rewind_config, "dedup", True),
+                            exclude=getattr(rewind_config, "exclude", []),
+                        )
+                    _cs(project_dir, conn, model_name, run_id,
+                        model_result.row_count, _rw)
+                except Exception as snap_err:
+                    logger.warning("Snapshot capture failed for %s: %s", model_name, snap_err)
 
     return results

@@ -578,32 +578,31 @@ function ResourcesSection() {
   const [memLimit, setMemLimit] = useState("");
   const [threads, setThreads] = useState("");
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch("/api/config/database")
-      .then((r) => r.json())
+    api.getDatabaseConfig()
       .then((data) => {
         setMemLimit(data.memory_limit || "");
         setThreads(data.threads != null ? String(data.threads) : "");
       })
-      .catch(() => {});
+      .catch((e) => setError(e.message || "Failed to load resource settings"));
   }, []);
 
   const save = () => {
-    fetch("/api/config/database", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        memory_limit: memLimit || null,
-        threads: threads ? parseInt(threads, 10) : null,
-      }),
+    setError(null);
+    // The backend treats null as "leave unchanged", so a cleared field must be
+    // sent as "" / 0 to actually remove the limit from project.yml.
+    const parsedThreads = parseInt(threads, 10);
+    api.updateDatabaseConfig({
+      memory_limit: memLimit.trim(),
+      threads: Number.isFinite(parsedThreads) && parsedThreads > 0 ? parsedThreads : 0,
     })
-      .then((r) => r.json())
       .then(() => {
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       })
-      .catch(() => {});
+      .catch((e) => setError(e.message || "Failed to save resource settings"));
   };
 
   return (
@@ -641,6 +640,7 @@ function ResourcesSection() {
           {saved ? "Saved" : "Save"}
         </button>
       </div>
+      {error && <p role="alert" style={{ color: "var(--havn-red)", fontSize: "12px", margin: "8px 0 0" }}>{error}</p>}
     </div>
   );
 }

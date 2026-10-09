@@ -56,6 +56,25 @@ def _objects(db, schema):
 
 
 class TestEphemeralConsumers:
+    def test_recursive_cte_survives_inlining(self, db, transform_dir):
+        """WITH RECURSIVE r(n) must stay recursive and keep its column list.
+
+        Hoisting dropped both: the flag lives on the WITH clause and the
+        alias was replaced wholesale, losing `(n)`.
+        """
+        _write(transform_dir, "silver", "nums", """            @config materialized=ephemeral
+
+            WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3)
+            SELECT n FROM r
+        """)
+        _write(transform_dir, "gold", "total", """            @config materialized=table
+
+            SELECT sum(n) AS s FROM silver.nums
+        """)
+        results = run_transform(db, transform_dir, force=True)
+        assert results["gold.total"] == "built"
+        assert db.execute("SELECT s FROM gold.total").fetchone() == (6,)
+
     def test_consumed_by_a_view(self, db, transform_dir):
         db.execute("CREATE TABLE landing.raw AS SELECT 1 AS id, 10 AS amount")
         _write(transform_dir, "silver", "base", """\

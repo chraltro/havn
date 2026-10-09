@@ -1135,3 +1135,15 @@ def test_a_failed_local_copy_keeps_the_previous_install(tmp_path, monkeypatch):
     assert results[0].status == "error"
     assert (checkout / "transform" / "silver" / "dim.sql").exists()
     assert not list((project / "havn_packages").glob(".lib.*"))
+
+
+
+@pytest.mark.parametrize("body", ["- name: crm\n", "just a string\n", "packages: nope\n"])
+def test_malformed_lock_is_ignored_not_a_crash(tmp_path, body):
+    """Valid YAML of the wrong shape crashed discovery with AttributeError."""
+    (tmp_path / "project.yml").write_text("name: t\n")
+    (tmp_path / "transform" / "gold").mkdir(parents=True)
+    (tmp_path / "transform" / "gold" / "a.sql").write_text("SELECT 1 AS x\n")
+    (tmp_path / "havn_packages.lock").write_text(body)
+    assert read_lock(tmp_path) == {}
+    assert [m.full_name for m in discover_all_models(tmp_path)] == ["gold.a"]

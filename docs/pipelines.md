@@ -238,6 +238,23 @@ New jobs should set `resolve: none` and say what they mean with the selector
 syntax instead. `havn jobs preview <name>` prints the resolved plan, which is
 the quickest way to see which mode a job is in.
 
+### full_refresh
+
+By default a job rebuilds every model in its plan, changed or not, so models
+that read sources change detection cannot see (`read_csv`, external tables)
+stay fresh. Assertions run either way, and a failed one blocks everything
+downstream.
+
+```yaml
+name: incremental
+targets:
+  - gold.*
+full_refresh: false   # skip models whose SQL and upstream are unchanged
+```
+
+With `full_refresh: false` the job builds the way `havn transform` does.
+`havn jobs run <name> --force` rebuilds everything regardless.
+
 ## Python Ingest Scripts
 
 Ingest scripts are plain Python files. A DuckDB connection is pre-injected as `db`:
@@ -269,6 +286,13 @@ def run(db):
 - `stdout` and `stderr` are captured and logged
 - Scripts prefixed with `_` are skipped
 - Script output is masked to prevent leaking secrets from `.env`
+- A script is stopped after 2 hours, or after 30 minutes with no output and no
+  CPU use (stuck on a lock or a dead connection). A script that legitimately
+  waits longer on a slow remote source can say so in its first lines:
+  `# @havn: idle_timeout=3600` (seconds; `0` turns the idle check off). A
+  notebook puts the same line at the top of its first code cell. In a
+  job, a script also never runs past what is left of `timeout_minutes`.
+- A notebook used as a pipeline step stops at the first cell that fails.
 
 ## Running Individual Steps
 

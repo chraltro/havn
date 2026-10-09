@@ -154,6 +154,26 @@ def check_source_freshness(
     return out
 
 
+def _row_count_conjuncts(expr: str) -> str | None:
+    """The top-level AND conjuncts of ``expr`` that mention ``row_count``,
+    joined back with AND, or None when it does not parse."""
+    import sqlglot
+    from sqlglot import exp as _exp
+
+    try:
+        tree = sqlglot.parse_one(expr, dialect="duckdb")
+    except Exception:
+        return None
+    parts = list(tree.flatten()) if isinstance(tree, _exp.And) else [tree]
+    keep = [
+        p for p in parts
+        if any(c.name.lower() == "row_count" and not c.table for c in p.find_all(_exp.Column))
+    ]
+    if not keep:
+        return None
+    return " AND ".join(f"({p.sql(dialect='duckdb')})" for p in keep)
+
+
 def _evaluate_assertion(
     conn: duckdb.DuckDBPyConnection,
     model: SQLModel,
@@ -285,6 +305,32 @@ def _evaluate_assertion(
         if not has_col:
             total_rows = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             sql_expr = re.sub(r"\brow_count\b", str(total_rows), expr)
+            if total_rows == 0:
+                # An empty table has no rows to violate the expression, so the
+                # counting form below passed `row_count > 0 AND amount >= 0`.
+                # Evaluate only the top-level conjuncts that mention row_count,
+                # once, against a single all-NULL row: the rest are row-level
+                # and hold vacuously on zero rows (`amount IS NOT NULL` would
+                # be false on the NULL row). A NULL result is not a failure,
+                # as in the counting form.
+                probe = _row_count_conjuncts(expr)
+                check = None
+                if probe is not None:
+                    probe_sql = re.sub(r"\brow_count\b", "0", probe)
+                    try:
+                        check = conn.execute(
+                            f"SELECT ({probe_sql}) FROM (SELECT 1 AS __havn_one) AS __one "
+                            f"LEFT JOIN (SELECT * FROM {table} LIMIT 0) AS __t ON true"
+                        ).fetchone()
+                    except duckdb.Error:
+                        check = None  # aggregates and the like: the paths below
+                if check is not None:
+                    passed = check[0] is None or bool(check[0])
+                    detail = (
+                        "holds on an empty table" if passed
+                        else "got 0 rows: the expression is false on an empty table"
+                    )
+                    return AssertionResult(expression=expr, passed=passed, detail=detail)
 
     try:
         bad = conn.execute(

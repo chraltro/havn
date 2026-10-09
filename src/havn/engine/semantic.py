@@ -212,6 +212,11 @@ def _sql_literal(value: str, label: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def _quote_ident(name: str) -> str:
+    """Double-quote an (already validated) identifier."""
+    return '"' + name.replace('"', '""') + '"'
+
+
 def compile_metric(
     metric: MetricDef,
     *,
@@ -253,29 +258,31 @@ def compile_metric(
             "grain/start/end are not supported"
         )
 
+    # Identifiers are validated at load time but still quoted here: a column
+    # called ``group`` or ``order`` is a valid identifier and a reserved word.
+    q = _quote_ident
+    time_col = q(metric.time_dimension) if metric.time_dimension else None
     select_parts: list[str] = []
     if grain:
-        select_parts.append(
-            f"DATE_TRUNC('{grain}', {metric.time_dimension}) AS {grain}"
-        )
-    select_parts.extend(dimensions)
-    select_parts.append(f"{metric.measure} AS {metric.name}")
+        select_parts.append(f"DATE_TRUNC('{grain}', {time_col}) AS {q(grain)}")
+    select_parts.extend(q(d) for d in dimensions)
+    select_parts.append(f"{metric.measure} AS {q(metric.name)}")
     n_group = len(select_parts) - 1
 
     where_parts = [f"({f})" for f in metric.filters]
     if start is not None:
         where_parts.append(
-            f"{metric.time_dimension} >= CAST({_sql_literal(start, 'start')} AS TIMESTAMP)"
+            f"{time_col} >= CAST({_sql_literal(start, 'start')} AS TIMESTAMP)"
         )
     if end is not None:
         where_parts.append(
-            f"{metric.time_dimension} < CAST({_sql_literal(end, 'end')} AS TIMESTAMP)"
+            f"{time_col} < CAST({_sql_literal(end, 'end')} AS TIMESTAMP)"
         )
 
     lines = [
         "SELECT",
         "    " + ",\n    ".join(select_parts),
-        f"FROM {metric.model}",
+        "FROM " + ".".join(q(part) for part in metric.model.split(".")),
     ]
     if where_parts:
         lines.append("WHERE " + "\n  AND ".join(where_parts))

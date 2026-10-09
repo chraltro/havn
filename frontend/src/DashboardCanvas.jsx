@@ -163,7 +163,10 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
-      // Undo/Redo work even in inputs
+      // Text fields keep their own shortcuts: Ctrl+Z in a title input must undo
+      // the typing, not the last dashboard layout change.
+      const t = e.target;
+      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable) return;
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
         e.preventDefault();
         undo();
@@ -179,7 +182,6 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
         redo();
         return;
       }
-      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       if (e.key === "e" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         setEditMode(prev => !prev);

@@ -880,3 +880,155 @@ def test_mcp_run_unit_tests_tool(project):
     )
     assert "isError" not in resp["result"]
     assert '"passed": 1' in resp["result"]["content"][0]["text"]
+
+
+# --- audit-round regressions --------------------------------------------
+
+
+def _single_model_project(tmp_path, model_sql: str, test_yml: str):
+    (tmp_path / "project.yml").write_text("name: t\n")
+    (tmp_path / "transform" / "silver").mkdir(parents=True)
+    (tmp_path / "transform" / "silver" / "m.sql").write_text(model_sql)
+    (tmp_path / "tests" / "unit").mkdir(parents=True)
+    (tmp_path / "tests" / "unit" / "t.yml").write_text(test_yml)
+    return tmp_path
+
+
+def test_lossy_cast_to_integer_output_fails(tmp_path):
+    """Expected 9.99 cast into the model's INTEGER output became 10 and passed."""
+    project = _single_model_project(
+        tmp_path,
+        "@config materialized=table\n"
+        "SELECT id, CAST(amount AS INTEGER) AS amount FROM bronze.src\n",
+        """\
+model: silver.m
+tests:
+  - name: keeps cents
+    given:
+      bronze.src:
+        rows:
+          - {id: 1, amount: 9.99}
+    expect:
+      rows:
+        - {id: 1, amount: 9.99}
+""",
+    )
+    case = only(run_unit_tests(project))
+    assert case.status == "fail"
+    assert "amount" in case.message and "9.99" in case.message
+
+
+def test_whole_numbers_still_match_integer_output(tmp_path):
+    """The lossy check must not trip on 1.0 against an INTEGER 1."""
+    project = _single_model_project(
+        tmp_path,
+        "@config materialized=table\nSELECT CAST(x AS INTEGER) AS x FROM bronze.src\n",
+        """\
+model: silver.m
+tests:
+  - name: whole
+    given:
+      bronze.src:
+        rows:
+          - {x: 1.0}
+    expect:
+      rows:
+        - {x: 1.0}
+""",
+    )
+    assert only(run_unit_tests(project)).status == "pass"
+
+
+def test_csv_fixture_keeps_leading_zeros(tmp_path):
+    """'01234' in a CSV fixture is a zip code, not the integer 1234."""
+    project = _single_model_project(
+        tmp_path,
+        "@config materialized=table\nSELECT zip FROM bronze.addr WHERE zip = '01234'\n",
+        """\
+model: silver.m
+tests:
+  - name: declared varchar
+    given:
+      bronze.addr:
+        columns: {zip: VARCHAR}
+        format: csv
+        csv: |
+          zip
+          01234
+    expect:
+      format: csv
+      csv: |
+        zip
+        01234
+""",
+    )
+    assert only(run_unit_tests(project)).status == "pass"
+
+
+def test_csv_expectation_catches_a_stripped_leading_zero(tmp_path):
+    """A model that drops the zero must not pass against a CSV expectation."""
+    project = _single_model_project(
+        tmp_path,
+        "@config materialized=table\n"
+        "SELECT CAST(CAST(zip AS INTEGER) AS VARCHAR) AS zip FROM bronze.addr\n",
+        """\
+model: silver.m
+tests:
+  - name: stays padded
+    given:
+      bronze.addr:
+        rows:
+          - {zip: "01234"}
+    expect:
+      format: csv
+      csv: |
+        zip
+        01234
+""",
+    )
+    assert only(run_unit_tests(project)).status == "fail"
+
+
+def test_csv_fixture_numbers_still_infer_numeric_types(tmp_path):
+    """Without a declared type, canonical numbers in CSV still sum as numbers."""
+    project = _single_model_project(
+        tmp_path,
+        "@config materialized=table\nSELECT sum(n) AS total FROM bronze.src\n",
+        """\
+model: silver.m
+tests:
+  - name: sums
+    given:
+      bronze.src:
+        format: csv
+        csv: |
+          n
+          1
+          2.5
+    expect:
+      rows:
+        - {total: 3.5}
+""",
+    )
+    assert only(run_unit_tests(project)).status == "pass"
+
+
+def test_unit_test_rows_differing_only_by_separator_fail(tmp_path):
+    """Row hashes used to collide when '|' moved between columns."""
+    project = _single_model_project(
+        tmp_path,
+        "@config materialized=table\nSELECT a, b FROM bronze.src\n",
+        """\
+model: silver.m
+tests:
+  - name: collision
+    given:
+      bronze.src:
+        rows:
+          - {a: "x", b: "y|V:z"}
+    expect:
+      rows:
+        - {a: "x|V:y", b: "z"}
+""",
+    )
+    assert only(run_unit_tests(project)).status == "fail"

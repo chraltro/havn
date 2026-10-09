@@ -14,6 +14,7 @@ FastAPI don't need HTTP machinery; the server routes convert it to an
 from __future__ import annotations
 
 import re
+import threading
 
 _FORBIDDEN_STATEMENT_KEYWORDS = frozenset({
     "insert", "update", "delete", "drop", "create", "alter", "truncate", "merge",
@@ -61,6 +62,9 @@ _DANGEROUS_FUNCTION_NAMES = frozenset({
     "arrow_scan", "arrow_scan_dumb", "load_aws_credentials",
     # Spatial extension file readers.
     "st_read", "st_read_meta", "st_readosm", "shapefile_meta",
+    # Process environment and stored credentials. The server loads .env into
+    # its environment, so getenv() would hand out every project secret.
+    "getenv", "duckdb_secrets", "which_secret",
 })
 
 
@@ -76,26 +80,76 @@ class ReadOnlyQueryError(ValueError):
         self.status_code = status_code
 
 
+# Characters that continue an identifier in DuckDB's (Postgres-derived) lexer.
+# An E prefix or a $tag$ opener only starts a literal when it is not glued to
+# a preceding identifier: ``nameE'x'`` and ``x$$`` are identifiers.
+_IDENT_CONT_RE = re.compile(r"[A-Za-z0-9_$\u0080-\U0010ffff]")
+_DOLLAR_QUOTE_RE = re.compile(r"\$(?:[A-Za-z_\u0080-\U0010ffff][A-Za-z0-9_\u0080-\U0010ffff]*)?\$")
+
+
 def strip_sql_comments_and_strings(sql: str) -> str:
     """Remove string literals and comments so keyword/function scans cannot
-    be fooled by content inside quotes or comments."""
+    be fooled by content inside quotes or comments.
+
+    This must lex exactly as DuckDB does: any place where it ends a literal or
+    comment somewhere DuckDB doesn't lets a ``;`` hide from the statement
+    splitter. So it follows DuckDB's lexer on the points that differ from the
+    naive reading: ``--`` comments end at a line feed *or* a carriage return, block comments
+    nest, ``E'..'`` strings take backslash escapes, ``$tag$..$tag$`` is a
+    string, and ``"`` identifiers double ``""`` to embed a quote.
+
+    Quoted identifiers are kept (the function and path scans below need them),
+    but the ``;``, ``(`` and ``)`` inside them are neutralised so they cannot
+    unbalance the parenthesis depth the splitter relies on.
+    """
     out: list[str] = []
     i = 0
     n = len(sql)
     while i < n:
         c = sql[i]
         nx = sql[i + 1] if i + 1 < n else ""
+        glued = i > 0 and _IDENT_CONT_RE.match(sql[i - 1]) is not None
         if c == "-" and nx == "-":
-            j = sql.find("\n", i)
-            if j < 0:
+            j = i + 2
+            while j < n and sql[j] not in "\n\r":
+                j += 1
+            if j >= n:
                 break
             i = j + 1
+            out.append(" ")
             continue
         if c == "/" and nx == "*":
-            j = sql.find("*/", i + 2)
-            if j < 0:
+            depth = 1
+            j = i + 2
+            while j < n and depth:
+                if sql.startswith("/*", j):
+                    depth += 1
+                    j += 2
+                elif sql.startswith("*/", j):
+                    depth -= 1
+                    j += 2
+                else:
+                    j += 1
+            if depth:
                 break
-            i = j + 2
+            i = j
+            out.append(" ")
+            continue
+        if c in "eE" and nx == "'" and not glued:
+            # Escape string: backslash escapes the next character, '' too.
+            i += 2
+            while i < n:
+                if sql[i] == "\\":
+                    i += 2
+                    continue
+                if sql[i] == "'":
+                    if i + 1 < n and sql[i + 1] == "'":
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                i += 1
+            out.append("''")
             continue
         if c == "'":
             i += 1
@@ -109,11 +163,31 @@ def strip_sql_comments_and_strings(sql: str) -> str:
                 i += 1
             out.append("''")
             continue
+        if c == "$" and not glued:
+            m = _DOLLAR_QUOTE_RE.match(sql, i)
+            if m:
+                tag = m.group(0)
+                j = sql.find(tag, m.end())
+                if j < 0:
+                    break
+                i = j + len(tag)
+                out.append("''")
+                continue
         if c == '"':
-            j = sql.find('"', i + 1)
-            if j < 0:
+            j = i + 1
+            body: list[str] = []
+            while j < n:
+                if sql[j] == '"':
+                    if j + 1 < n and sql[j + 1] == '"':
+                        body.append("_")
+                        j += 2
+                        continue
+                    break
+                body.append("_" if sql[j] in ";()" else sql[j])
+                j += 1
+            if j >= n:
                 break
-            out.append(sql[i : j + 1])
+            out.append('"' + "".join(body) + '"')
             i = j + 1
             continue
         out.append(c)
@@ -255,6 +329,20 @@ def validate_read_only_query(sql: str) -> None:
     a parse error so the caller gets a 400 (not a misleading 403).
     """
     cleaned = strip_sql_comments_and_strings(sql)
+    # Callers wrap the query (``SELECT * FROM (<sql>) AS _q LIMIT n``), so an
+    # unbalanced ``SELECT 1) AS a, '<path>' AS b, (SELECT 1`` is a parse error
+    # here but a valid, different query once wrapped. Balanced SQL can't
+    # escape the wrapper's parentheses; unbalanced SQL is never valid anyway.
+    depth = 0
+    for ch in cleaned:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth < 0:
+                break
+    if depth != 0:
+        raise ReadOnlyQueryError("Unbalanced parentheses in query.", status_code=400)
     statements = split_statements(cleaned)
     if not statements:
         raise ReadOnlyQueryError("Empty query.", status_code=400)
@@ -262,6 +350,14 @@ def validate_read_only_query(sql: str) -> None:
         raise ReadOnlyQueryError("Multi-statement queries are not allowed.")
     stmt = statements[0]
     head = leading_statement_keyword(stmt)
+    # EXPLAIN ANALYZE executes the statement it profiles, so EXPLAIN is only as
+    # read-only as what it wraps: judge the inner statement's verb instead.
+    while head == "explain":
+        inner = _EXPLAIN_PREFIX_RE.sub("", stmt, count=1)
+        if inner == stmt:
+            break
+        stmt = inner
+        head = leading_statement_keyword(stmt)
     if head in _FORBIDDEN_STATEMENT_KEYWORDS:
         raise ReadOnlyQueryError(
             "Only SELECT queries are allowed through the query interface."
@@ -292,3 +388,177 @@ def validate_read_only_query(sql: str) -> None:
         raise ReadOnlyQueryError(
             "Reading files by path (FROM '<path>') is not allowed through the query interface.",
         )
+    _check_with_duckdb_parser(sql)
+
+
+_EXPLAIN_PREFIX_RE = re.compile(
+    r"^\s*explain(?![A-Za-z0-9_])\s*(?:analy[sz]e(?![A-Za-z0-9_]))?\s*(?:\([^()]*\)\s*)?",
+    re.IGNORECASE,
+)
+
+_parser_local = threading.local()
+
+
+def _parser_conn():
+    """A per-thread in-memory DuckDB used only for parsing (never executes)."""
+    conn = getattr(_parser_local, "conn", None)
+    if conn is None:
+        import duckdb
+
+        conn = duckdb.connect(":memory:")
+        _parser_local.conn = conn
+    return conn
+
+
+def _explain_target(query: str) -> str | None:
+    """Return the statement text an ``EXPLAIN [ANALYZE] [(opts)]`` wraps."""
+    import duckdb
+
+    tokens = duckdb.tokenize(query)
+    k = 1  # tokens[0] is EXPLAIN itself
+    if k < len(tokens):
+        m = _IDENT_RE.match(query, tokens[k][0])
+        if m and m.group(0).lower() in ("analyze", "analyse"):
+            k += 1
+    if k < len(tokens) and query[tokens[k][0]] == "(":
+        depth = 0
+        while k < len(tokens):
+            ch = query[tokens[k][0]]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    k += 1
+                    break
+            k += 1
+    if k >= len(tokens):
+        return None
+    return query[tokens[k][0]:]
+
+
+def _check_with_duckdb_parser(sql: str, *, _depth: int = 0) -> None:
+    """Second opinion from DuckDB's own parser on statement count and type.
+
+    The lexer above has to track DuckDB's lexer by hand, and every divergence
+    so far (escape strings, nested comments, ...) was a way to smuggle a second
+    statement past it. Asking DuckDB which statements it would run closes that
+    class of bug. It only parses; nothing is bound or executed.
+
+    A ParserException passes: execution would fail on the same parse, and some
+    callers validate SQL that is not executed verbatim (model bodies with
+    ``{start}`` placeholders). Any other failure means DuckDB parsed the text
+    but the binding could not describe it, so it is refused rather than
+    trusted to the hand lexer alone.
+    """
+    try:
+        import duckdb
+    except ImportError:  # pragma: no cover - duckdb is a hard dependency
+        return
+    try:
+        statements = _parser_conn().extract_statements(sql)
+    except duckdb.ParserException:
+        return
+    except Exception as e:
+        raise ReadOnlyQueryError(f"Query could not be parsed: {e}", status_code=400)
+    st = duckdb.StatementType
+    reads = 0
+    for stmt in statements:
+        if stmt.type == st.SELECT:
+            reads += 1
+            # A dynamic PIVOT's SELECT carries no text of its own; judge the
+            # whole input instead.
+            _check_parse_tree(stmt.query if stmt.query.strip() else sql)
+        elif stmt.type == st.EXPLAIN:
+            reads += 1
+            target = _explain_target(stmt.query)
+            if target is None or _depth > 2:
+                raise ReadOnlyQueryError("Only SELECT queries can be explained.")
+            _check_with_duckdb_parser(target, _depth=_depth + 1)
+            continue
+        elif stmt.type in (st.CREATE, st.SET) and not stmt.query.strip():
+            # A dynamic PIVOT expands into CREATE TYPE ... AS ENUM statements
+            # (wrapped in SETs once the connection has run a query) ahead of
+            # its SELECT. Those carry no source text; anything a user wrote
+            # does.
+            continue
+        else:
+            raise ReadOnlyQueryError(
+                "Only SELECT queries are allowed through the query interface."
+            )
+    if reads > 1:
+        raise ReadOnlyQueryError("Multi-statement queries are not allowed.")
+
+
+# Characters that make a table name a file path or URL rather than a catalog
+# name. DuckDB resolves an unknown name like 'x.csv' or "C:/data/x" as a
+# replacement scan, i.e. it reads the file.
+_PATH_CHARS = frozenset("./\\:")
+_PATH_LIKE_RE = re.compile(
+    r"[/\\]|^[a-z][a-z0-9+.-]*:|\.(?:" + _DATA_FILE_EXT + r"|wal|ddb)\b",
+    re.IGNORECASE,
+)
+
+
+def _check_parse_tree(query: str) -> None:
+    """Refuse file scans and dangerous calls found in DuckDB's own parse tree.
+
+    The regex scans above look at the text; this looks at what DuckDB actually
+    parsed, so table position is known exactly (comma joins, aliases, nested
+    FROMs, DESCRIBE/SUMMARIZE/TABLE targets) and quoting tricks around a
+    function name (U&"read_csv") do not matter. Only SELECT-shaped statements
+    serialise; for the rest (a dynamic PIVOT) any path-shaped literal or
+    identifier is refused instead.
+    """
+    import json
+
+    try:
+        raw = _parser_conn().execute("SELECT json_serialize_sql(?)", [query]).fetchone()[0]
+        tree = json.loads(raw)
+    except Exception:
+        tree = {"error": True}
+    if tree.get("error"):
+        if _has_path_like_token(query):
+            raise ReadOnlyQueryError(
+                "Reading files by path is not allowed through the query interface.",
+            )
+        return
+
+    stack: list = [tree]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, list):
+            stack.extend(node)
+            continue
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") == "BASE_TABLE":
+            name = str(node.get("table_name") or "")
+            if any(ch in _PATH_CHARS for ch in name):
+                raise ReadOnlyQueryError(
+                    "Reading files by path (FROM '<path>') is not allowed through "
+                    "the query interface.",
+                )
+        fname = node.get("function_name")
+        if isinstance(fname, str) and fname.lower() in _DANGEROUS_FUNCTION_NAMES:
+            raise ReadOnlyQueryError(
+                "File-access functions (read_csv, read_parquet, etc.) are not allowed.",
+            )
+        stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
+
+
+def _has_path_like_token(query: str) -> bool:
+    """Whether any string literal or quoted identifier looks like a file path."""
+    import duckdb
+
+    try:
+        tokens = duckdb.tokenize(query)
+    except Exception:
+        return False
+    for k, (offset, kind) in enumerate(tokens):
+        end = tokens[k + 1][0] if k + 1 < len(tokens) else len(query)
+        text = query[offset:end].strip()
+        if kind == duckdb.token_type.string_const or text.startswith('"'):
+            if _PATH_LIKE_RE.search(text.strip("'\"$")):
+                return True
+    return False

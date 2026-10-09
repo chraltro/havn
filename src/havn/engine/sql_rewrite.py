@@ -168,7 +168,9 @@ def rewrite_table_refs(
     cte_names = _cte_names(tree)
     lookup = {str(k).lower(): v for k, v in mapping.items()}
 
-    replaced: set[tuple[str, str]] = set()
+    # (schema, name) of every replaced reference -> the name a
+    # ``schema.table.column`` qualifier must use afterwards.
+    replaced: dict[tuple[str, str], str] = {}
     # How many relations each name could refer to. The implicit alias below
     # is only safe for a name that is unique in the query: mocking both
     # bronze.orders and silver.orders and calling both "orders" is a
@@ -177,6 +179,7 @@ def rewrite_table_refs(
     for t in tree.find_all(exp.Table):
         for name in {(t.name or "").lower(), (t.alias or "").lower()} - {""}:
             name_uses[name] = name_uses.get(name, 0) + 1
+    taken = set(name_uses)
     for table in list(tree.find_all(exp.Table)):
         if _skip_table(table, cte_names, skip_catalog_qualified):
             continue
@@ -186,32 +189,53 @@ def rewrite_table_refs(
             continue
         alias = table.alias
         replacement = exp.to_table(target, dialect=dialect)
-        if (
-            not alias
-            and replacement.name.lower() != table.name.lower()
-            and name_uses.get(table.name.lower(), 0) == 1
-        ):
-            # Columns qualified by the table's own name (orders.id) bind to
-            # that name; once the reference points at a differently named
-            # relation (a unit-test mock, a deferred copy) they would not
-            # bind any more, so the original name is kept as the alias.
-            alias = table.name
+        ref = ((table.db or "").lower(), table.name.lower())
+        if not alias:
+            if name_uses.get(table.name.lower(), 0) == 1:
+                if replacement.name.lower() != table.name.lower():
+                    # Columns qualified by the table's own name (orders.id)
+                    # bind to that name; once the reference points at a
+                    # differently named relation (a unit-test mock) they
+                    # would not bind any more, so the original name is kept
+                    # as the alias.
+                    alias = table.name
+            elif table.db:
+                # The name is shared (bronze.orders next to silver.orders),
+                # so the only thing telling the two apart was the schema in
+                # ``bronze.orders.id``. Give this relation an alias of its
+                # own and point those qualifiers at it; dropping the schema
+                # instead would leave ``orders.id`` ambiguous.
+                alias = replaced.get(ref) or _unique_alias(
+                    f"_havn_{table.db}_{table.name}".lower(), taken
+                )
         if alias:
             replacement.set("alias", exp.TableAlias(this=exp.to_identifier(alias)))
-        replaced.add(((table.db or "").lower(), table.name.lower()))
+        replaced.setdefault(ref, alias or replacement.name)
         table.replace(replacement)
 
     # schema.table.column qualifiers name the replaced relation by its old
-    # schema too; drop the schema (and catalog) so they bind via the alias.
+    # schema too; repoint them at the alias the relation now carries.
     if replaced:
         for column in tree.find_all(exp.Column):
             if not column.table or not column.args.get("db"):
                 continue
-            if ((column.text("db") or "").lower(), column.table.lower()) in replaced:
+            qualifier = replaced.get(((column.text("db") or "").lower(), column.table.lower()))
+            if qualifier is not None:
+                column.set("table", exp.to_identifier(qualifier))
                 column.set("db", None)
                 column.set("catalog", None)
 
     return restore(tree.sql(dialect=dialect))
+
+
+def _unique_alias(base: str, taken: set[str]) -> str:
+    """``base``, or ``base_2``, ``base_3``... whichever no relation uses yet."""
+    alias, n = base, 1
+    while alias in taken:
+        n += 1
+        alias = f"{base}_{n}"
+    taken.add(alias)
+    return alias
 
 
 def _parse(sql: str, dialect: str):

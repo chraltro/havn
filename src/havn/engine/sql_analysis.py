@@ -211,7 +211,9 @@ def parse_depends(sql: str) -> list[str]:
     )
     for m in matches:
         for dep in m.group(1).split(","):
-            d = dep.strip()
+            # Lowercased to match model full names and auto-extracted refs:
+            # ``@depends_on Silver.Z`` must order silver.z first.
+            d = dep.strip().lower()
             if d and d not in seen:
                 deps.append(d)
                 seen.add(d)

@@ -33,7 +33,25 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
-app = typer.Typer(
+class _HavnTyper(typer.Typer):
+    """Typer that reports a mistyped environment as a usage error.
+
+    Most commands go through ``_load_config``, which already does; this
+    catches the ones that call ``load_project`` themselves, which would
+    otherwise end in a traceback.
+    """
+
+    def __call__(self, *args, **kwargs):
+        from havn.config import UnknownEnvironmentError
+
+        try:
+            return super().__call__(*args, **kwargs)
+        except UnknownEnvironmentError as e:
+            console.print(f"[red]{e}[/red]")
+            raise SystemExit(1) from None
+
+
+app = _HavnTyper(
     name="havn",
     help="havn — self-hosted data platform. Data in safe waters.",
     no_args_is_help=True,
@@ -62,8 +80,15 @@ def _resolve_project(project_dir: Path | None = None) -> Path:
 
 def _load_config(project_dir: Path, env: str | None = None):
     """Load project config with optional environment override."""
-    from havn.config import load_project
-    return load_project(project_dir, env=env or _active_env)
+    from havn.config import UnknownEnvironmentError, load_project
+    try:
+        # The CLI is strict about a stale .havn-env: the user is right there
+        # to fix it, and a silent fallback would build into another warehouse.
+        return load_project(project_dir, env=env or _active_env, strict_env_file=True)
+    except UnknownEnvironmentError as e:
+        # A typo'd --env / .havn-env is a usage error, not a crash.
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
 
 
 def _warehouse_exists(config, project_dir: Path) -> bool:

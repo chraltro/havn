@@ -205,11 +205,22 @@ def _row_hash_expr(columns: list[str]) -> str:
     drift that bit `EXCEPT` on tables whose temp-rebuilt types differ slightly
     from the materialised types (e.g. DECIMAL precision on SUMs). Each value
     is prefixed (`V:` for present, `N` for NULL) so no real value can hash to
-    the same shape as a NULL, and CONCAT_WS keeps column boundaries
-    unambiguous.
+    the same shape as a NULL.
+
+    Inside a value, backslash and ``|`` are backslash-escaped before the values
+    are joined on ``|``. Without the escape the encoding was ambiguous:
+    ``('x|V:y', 'z')`` and ``('x', 'y|V:z')`` both joined to ``V:x|V:y|V:z``,
+    so a snapshot missed a real change and a unit test passed on wrong rows.
+
+    The escape is deliberately the only change from the original encoding: a
+    value containing neither character hashes exactly as before, so the
+    ``row_hash`` already stored in snapshot (SCD2) tables stays valid. Only a
+    row whose tracked values contain ``|`` or a backslash hashes differently after
+    the upgrade, and gets one new history version on its next snapshot run.
     """
     parts = ", ".join(
-        f"COALESCE('V:' || \"{c}\"::VARCHAR, 'N')"
+        "COALESCE('V:' || REPLACE(REPLACE("
+        f"\"{c}\"::VARCHAR, '\\', '\\\\'), '|', '\\|'), 'N')"
         for c in columns
     )
     return f"MD5(CONCAT_WS('|', {parts}))"

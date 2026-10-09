@@ -75,6 +75,25 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
   }, []);
 
   useEffect(() => { loadList(); }, [loadList]);
+
+  // Changes and deploys are git branches and commits. Without a repository
+  // the deploy box could only show the server's 400, so offer git init instead.
+  const [isRepo, setIsRepo] = useState(null);
+  const [gitInitError, setGitInitError] = useState(null);
+  const loadGit = useCallback(() => {
+    api.getGitStatus().then((g) => setIsRepo(!!g?.is_git_repo)).catch(() => setIsRepo(true));
+  }, []);
+  useEffect(() => { loadGit(); }, [loadGit]);
+  async function initGit() {
+    setGitInitError(null);
+    try {
+      await api.initGit("main");
+      loadGit();
+      loadList();
+    } catch (e) {
+      setGitInitError(e.message || "Could not initialize git");
+    }
+  }
   useEffect(() => {
     setReview(null);
     setReviewError(null);
@@ -178,9 +197,19 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
               A change is a branch you want to merge. havn builds it in isolation, shows how the
               data moves, and checks it can merge cleanly before anything reaches {`main`}.
             </p>
-            <button style={s.btnPrimary} onClick={() => onNavigate("Git:Reviews")}>Create a change</button>
-            <p style={{ ...s.dim, marginTop: 28 }}>Or deploy what is already on the base branch:</p>
-            <DeployCard showConfirm={showConfirm} onDeployed={onMerged} />
+            {isRepo === false ? (
+              <>
+                <p style={s.dim}>This project is not a git repository yet, so there are no branches to ship or deploy.</p>
+                <button style={s.btnPrimary} onClick={initGit}>Initialize git</button>
+                {gitInitError && <div style={{ ...s.err, marginTop: 12 }}>{gitInitError}</div>}
+              </>
+            ) : isRepo && (
+              <>
+                <button style={s.btnPrimary} onClick={() => onNavigate("Git:Reviews")}>Create a change</button>
+                <p style={{ ...s.dim, marginTop: 28 }}>Or deploy what is already on the base branch:</p>
+                <DeployCard showConfirm={showConfirm} onDeployed={onMerged} />
+              </>
+            )}
           </div>
         )}
         {reviewError && <div style={{ ...s.err, marginBottom: 12 }}>{reviewError}</div>}

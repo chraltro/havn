@@ -1966,7 +1966,13 @@ function JobTableRow({ job, onRun, onEdit, onClone, onDelete, onToggle, onTagCli
           <button style={s.btn} onClick={onRun} disabled={disabled}>Run</button>
           <button style={s.btn} onClick={onEdit} disabled={disabled}>Edit</button>
           <button style={s.btn} onClick={onClone} disabled={disabled} title="Clone this job">Clone</button>
-          <button style={s.btnDanger} onClick={onDelete} disabled={disabled}>×</button>
+          <button
+            style={s.btnDanger}
+            onClick={onDelete}
+            disabled={disabled}
+            aria-label={`Delete job ${job.name}`}
+            title={`Delete job ${job.name}`}
+          >×</button>
         </div>
       </td>
     </tr>

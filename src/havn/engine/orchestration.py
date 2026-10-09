@@ -43,6 +43,11 @@ class Job:
     # Selectors subtracted from `targets`, e.g. targets: ["gold.*"] with
     # exclude: ["tag:expensive"].
     exclude: list[str] = field(default_factory=list)
+    # Rebuild every model in the plan, changed or not (as `--force`). The
+    # default: a job's models may read sources change detection cannot see
+    # (read_csv, external tables), and jobs always rebuilt everything. Set
+    # `full_refresh: false` to skip unchanged models.
+    full_refresh: bool = True
 
     def __post_init__(self) -> None:
         # Mirror target <-> targets for backward compatibility
@@ -229,10 +234,18 @@ def discover_jobs(project_dir: Path) -> list[Job]:
                 timeout_minutes=int(data.get("timeout_minutes", 60) or 60),
                 description=data.get("description", "") or "",
                 file_path=yml_file,
+                full_refresh=_as_bool(data.get("full_refresh", True)),
             ))
         except Exception as e:
             logger.warning("Error parsing %s: %s", yml_file.name, e)
     return jobs
+
+
+def _as_bool(value) -> bool:
+    """YAML booleans, tolerating quoted "false"/"no"/"0"."""
+    if isinstance(value, str):
+        return value.strip().lower() not in ("false", "no", "off", "0", "")
+    return bool(value)
 
 
 def _find_job(project_dir: Path, name: str) -> Job | None:
@@ -569,6 +582,21 @@ def _interruptible_sleep(seconds: float, run_id: str, start: float, timeout_ms: 
         time.sleep(min(0.5, remaining))
 
 
+# build_one_model statuses as job step statuses. Skipped steps do not fail
+# the job; a model blocked by a failed upstream is skipped, as it is when
+# an earlier step errors.
+_JOB_STEP_STATUS = {
+    "built": "success",
+    "inlined": "success",
+    "skipped": "skipped",
+    "skipped_upstream_blocked": "skipped",
+    "source_stale": "skipped",
+    "error": "error",
+    "assertion_failed": "error",
+    "policy_denied": "error",
+}
+
+
 def execute_job(
     job: Job,
     plan: ExecutionPlan,
@@ -576,19 +604,34 @@ def execute_job(
     project_dir: Path,
     trigger: str = "manual",
     emit: Callable | None = None,
+    force: bool = False,
 ) -> JobResult:
-    """Execute a job's plan step by step, logging to _havn.job_runs."""
+    """Execute a job's plan step by step, logging to _havn.job_runs.
+
+    Transform steps are built by ``build_one_model``, as ``havn transform``
+    builds them: every model is rebuilt when ``force`` or the job's
+    ``full_refresh`` (the default) is set, otherwise an unchanged model is
+    skipped unless a parent was rebuilt earlier in the job; assertions run and a failed error
+    assertion blocks everything downstream, and tables are profiled for
+    anomaly detection. Jobs used to call ``execute_model`` directly, so a
+    scheduled job rebuilt every model and never ran a single ``@assert``.
+    """
     from havn.engine.database import log_run
     from havn.engine.runner import run_script
     from havn.engine.transform.discovery import (
         _compute_upstream_hash,
-        _update_state,
+        blocked_models,
         build_dag,
         discover_all_models,
     )
-    from havn.engine.transform.execution import execute_model
+    from havn.engine.transform.orchestration import (
+        _evaluate_deny_rules,
+        build_one_model,
+        detect_run_anomalies,
+    )
 
     ensure_job_runs_table(conn)
+    force = force or job.full_refresh
 
     # Insert initial run row
     run_id = conn.execute("SELECT gen_random_uuid()::VARCHAR").fetchone()[0]
@@ -607,6 +650,12 @@ def execute_job(
     start = time.perf_counter()
     timeout_ms = job.timeout_minutes * 60 * 1000
     failed_targets: set[str] = set()
+
+    def _remaining_s() -> float:
+        # A script step gets what is left of the job budget as its own
+        # timeout; the job timeout used to be checked only between steps,
+        # so one hung script ran for run_script's 2-hour default.
+        return max(1.0, (timeout_ms - (time.perf_counter() - start) * 1000) / 1000)
 
     def _emit(event_type: str, data: dict) -> None:
         if emit is not None:
@@ -630,6 +679,47 @@ def execute_job(
         # Compute upstream hashes
         for m in dag_sorted:
             m.upstream_hash = _compute_upstream_hash(m, model_map)
+
+        # Transform bookkeeping shared across steps, as in a transform run:
+        # statuses so far, models whose descendants must not build, and the
+        # profiles anomaly detection compares at the end.
+        transform_targets = [s.target for s in plan.steps if s.type == "transform"]
+        model_results: dict[str, str] = {}
+        blocked: set[str] = blocked_models(conn) - set(transform_targets)
+        run_profiles: dict[str, object] = {}
+        for full_name, reason in _evaluate_deny_rules(
+            [model_map[t] for t in transform_targets if t in model_map], project_dir,
+        ).items():
+            model_results[full_name] = "policy_denied"
+            blocked.add(full_name)
+            log_run(conn, "transform", full_name, "error", error=f"policy_denied: {reason}",
+                    pipeline_run_id=run_id)
+
+        def _build(model) -> dict:
+            outcome = build_one_model(
+                conn, model, model_map, model_results, blocked,
+                force=force, project_dir=project_dir, pipeline_run_id=run_id,
+                run_profiles=run_profiles,
+            )
+            status = _JOB_STEP_STATUS.get(outcome.status, "error")
+            if outcome.status == "policy_denied":
+                outcome.error = "Denied by a project policy"
+            out = {
+                "status": status,
+                "duration_ms": outcome.duration_ms,
+                "rows_affected": outcome.row_count,
+            }
+            if outcome.error:
+                out["error"] = outcome.error
+            if status == "success" and outcome.status == "built":
+                out["log_output"] = (
+                    f"Built {model.full_name} — {outcome.row_count:,} rows ({outcome.duration_ms}ms)"
+                )
+            elif status == "skipped" and not outcome.error:
+                out["log_output"] = f"Unchanged: {model.full_name}"
+            else:
+                out["log_output"] = outcome.error or outcome.status
+            return out
 
         for step in plan.steps:
             # Check cancellation
@@ -692,9 +782,14 @@ def execute_job(
                         conn,
                         script_path,
                         step.type,
+                        timeout=_remaining_s(),
                         use_circuit_breaker=False,
                         pipeline_run_id=run_id,
                     )
+                    if r.get("orphaned"):
+                        step_result["orphaned"] = True
+                    if r.get("timeout_reason") == "timeout":
+                        step_result["budget_exhausted"] = True
                     step_result["status"] = r.get("status", "error")
                     step_result["duration_ms"] = r.get("duration_ms", 0)
                     step_result["rows_affected"] = r.get("rows_affected", 0)
@@ -713,18 +808,9 @@ def execute_job(
                             error=step_result["error"], pipeline_run_id=run_id,
                         )
                     else:
-                        duration_ms, row_count = execute_model(conn, model)
-                        _update_state(conn, model, duration_ms, row_count)
-                        log_run(
-                            conn, "transform", model.full_name, "success",
-                            duration_ms, row_count, pipeline_run_id=run_id,
-                        )
-                        step_result["status"] = "success"
-                        step_result["duration_ms"] = duration_ms
-                        step_result["rows_affected"] = row_count
-                        if prev_rows is not None:
+                        step_result.update(_build(model))
+                        if prev_rows is not None and step_result["status"] == "success":
                             step_result["previous_row_count"] = prev_rows
-                        step_result["log_output"] = f"Built {step.target} — {row_count:,} rows ({duration_ms}ms)"
             except Exception as e:
                 step_result["status"] = "error"
                 step_result["error"] = str(e)
@@ -739,8 +825,15 @@ def execute_job(
                     except Exception:
                         pass
 
-            # Handle retries for failed steps
-            if step_result.get("status") == "error" and job.retry > 0:
+            # Handle retries for failed steps. A model that built but failed
+            # an assertion (or was denied by policy) is not retried: the
+            # same inputs give the same result.
+            retryable = step.type != "transform" or model_results.get(step.target) == "error"
+            # A script still running after its timeout holds the connection:
+            # retrying (or any later step) would race it.
+            if step_result.get("orphaned"):
+                retryable = False
+            if step_result.get("status") == "error" and job.retry > 0 and retryable:
                 for _attempt in range(job.retry):
                     sleep_outcome = _interruptible_sleep(
                         job.retry_delay, run_id, start, timeout_ms
@@ -754,9 +847,16 @@ def execute_job(
                                 conn,
                                 project_dir / step.target,
                                 step.type,
+                                timeout=_remaining_s(),
                                 use_circuit_breaker=False,
                                 pipeline_run_id=run_id,
                             )
+                            if r.get("orphaned"):
+                                step_result["orphaned"] = True
+                                break
+                            if r.get("timeout_reason") == "timeout":
+                                step_result["budget_exhausted"] = True
+                                break
                             if r.get("status") == "success":
                                 step_result["status"] = "success"
                                 step_result["duration_ms"] = r.get("duration_ms", 0)
@@ -765,18 +865,15 @@ def execute_job(
                                 step_result.pop("error", None)
                                 break
                         elif step.type == "transform" and step.target in model_map:
-                            duration_ms, row_count = execute_model(conn, model_map[step.target])
-                            _update_state(conn, model_map[step.target], duration_ms, row_count)
-                            log_run(
-                                conn, "transform", step.target, "success",
-                                duration_ms, row_count, pipeline_run_id=run_id,
-                            )
-                            step_result["status"] = "success"
-                            step_result["duration_ms"] = duration_ms
-                            step_result["rows_affected"] = row_count
-                            step_result["log_output"] = f"Built {step.target} — {row_count:,} rows ({duration_ms}ms)"
-                            step_result.pop("error", None)
-                            break
+                            # A retry is a fresh attempt: forget the failure
+                            # so build_one_model does not report it again.
+                            model_results.pop(step.target, None)
+                            blocked.discard(step.target)
+                            retried = _build(model_map[step.target])
+                            if retried["status"] == "success":
+                                step_result.pop("error", None)
+                                step_result.update(retried)
+                                break
                     except Exception:
                         pass
 
@@ -791,6 +888,12 @@ def execute_job(
                 "error": step_result.get("error"),
                 "num": step.step,
             })
+
+            if step_result.get("orphaned"):
+                # The orphaned script still uses `conn`; write the job's own
+                # bookkeeping through a cursor (a separate connection to the
+                # same database) so it does not race it.
+                conn = conn.cursor()
 
             status = step_result.get("status")
             if status == "success":
@@ -820,6 +923,25 @@ def execute_job(
                 )
             except Exception as e:
                 logger.debug("Progress update failed: %s", e)
+
+            # Out of budget, or a script that cannot be stopped still owns
+            # the connection: no later step may start.
+            elapsed_ms = int((time.perf_counter() - start) * 1000)
+            if step_result.get("status") == "error" and (
+                step_result.get("orphaned")
+                or step_result.get("budget_exhausted")
+                or elapsed_ms > timeout_ms
+            ):
+                result.status = "timeout"
+                result.error = f"Job exceeded timeout of {job.timeout_minutes} minutes"
+                if step_result.get("orphaned"):
+                    result.error = (
+                        f"{step.target} timed out and is still running; "
+                        "the remaining steps were not started"
+                    )
+                break
+
+        detect_run_anomalies(conn, run_profiles, project_dir)
 
         # Final status
         if result.status == "running":
@@ -955,7 +1077,11 @@ def is_valid_schedule(expr: str) -> bool:
         return False
     if is_interval_schedule(expr):
         return parse_interval(expr) is not None
-    return len(expr.strip().split()) == 5
+    from havn.engine.cron import is_valid_cron
+
+    # Parse every field: "99 * * * *" or "a b c d e" used to pass because
+    # only the token count was checked, then never fired.
+    return is_valid_cron(expr)
 
 
 def describe_interval(expr: str) -> str | None:
@@ -970,7 +1096,7 @@ def describe_interval(expr: str) -> str | None:
 def get_next_run(cron_expr: str, last_fire_iso: str | None = None) -> str | None:
     """Calculate the next run time for a cron or interval expression.
 
-    For cron: iterates forward minute-by-minute until a match is found.
+    For cron: the next matching minute, searched up to five years ahead.
     For interval: returns ``last_fire + interval``, or ``now`` if there is
     no prior fire.
 
@@ -993,20 +1119,12 @@ def get_next_run(cron_expr: str, last_fire_iso: str | None = None) -> str | None
         else:
             base = datetime.datetime.now()
         return (base + delta).isoformat()
-    # Cron path
-    parts = cron_expr.strip().split()
-    if len(parts) != 5:
-        return None
-    try:
-        now = datetime.datetime.now()
-        candidate = now.replace(second=0, microsecond=0) + datetime.timedelta(minutes=1)
-        for _ in range(48 * 60):
-            if _matches_cron(parts, candidate):
-                return candidate.isoformat()
-            candidate += datetime.timedelta(minutes=1)
-    except Exception:
-        return None
-    return None
+    # Cron path: the shared parser walks days, so a weekly or monthly
+    # schedule gets its next run (a 48-hour minute scan returned None).
+    from havn.engine.cron import next_cron_fire
+
+    nxt = next_cron_fire(cron_expr)
+    return nxt.isoformat() if nxt is not None else None
 
 
 def get_earliest_next_run(
@@ -1032,44 +1150,19 @@ def get_earliest_next_run(
 
 
 def _matches_cron(parts: list[str], dt: datetime.datetime) -> bool:
-    """Check if a datetime matches a 5-field cron expression.
+    """Check if a datetime matches a 5-field cron expression (split into parts).
 
-    Uses POSIX cron convention for weekday: 0=Sunday, 1=Monday, ..., 6=Saturday.
-    Python's datetime.weekday() returns 0=Monday..6=Sunday, so we convert.
+    Thin wrapper over ``engine.cron``; POSIX weekdays (0=Sunday), Vixie cron
+    semantics. Invalid expressions never match.
     """
-    # POSIX cron weekday: 0=Sun..6=Sat. Python's weekday(): 0=Mon..6=Sun.
-    # (weekday + 1) % 7 -> Mon(0)->1, Tue(1)->2, ..., Sat(5)->6, Sun(6)->0
-    posix_weekday = (dt.weekday() + 1) % 7
-    checks = [
-        (parts[0], dt.minute),
-        (parts[1], dt.hour),
-        (parts[2], dt.day),
-        (parts[3], dt.month),
-        (parts[4], posix_weekday),
-    ]
-    for pattern, current in checks:
-        if pattern == "*":
-            continue
-        try:
-            if "/" in pattern:
-                _, step_str = pattern.split("/", 1)
-                step = int(step_str)
-                if step <= 0:
-                    return False
-                if current % step != 0:
-                    return False
-            elif "," in pattern:
-                if current not in [int(v) for v in pattern.split(",")]:
-                    return False
-            elif "-" in pattern:
-                lo, hi = pattern.split("-", 1)
-                if not (int(lo) <= current <= int(hi)):
-                    return False
-            elif current != int(pattern):
-                return False
-        except (ValueError, ZeroDivisionError):
-            return False
-    return True
+    from havn.engine.cron import cron_matches
+
+    return cron_matches(" ".join(parts), dt)
+
+
+# ---------------------------------------------------------------------------
+# Save / delete
+# ---------------------------------------------------------------------------
 
 
 def save_job(project_dir: Path, job_data: dict) -> Path:
@@ -1147,6 +1240,11 @@ def save_job(project_dir: Path, job_data: dict) -> Path:
         out_data["exclude"] = exclusions
     else:
         out_data.pop("exclude", None)
+    # Written only when off, so files stay as they were for the default.
+    if "full_refresh" in out_data and _as_bool(out_data["full_refresh"]):
+        out_data.pop("full_refresh")
+    elif "full_refresh" in out_data:
+        out_data["full_refresh"] = False
 
     path = orch_dir / f"{slug}.yml"
     path.write_text(yaml.dump(out_data, default_flow_style=False, sort_keys=False), encoding="utf-8")

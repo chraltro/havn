@@ -224,3 +224,60 @@ class TestParallelExecution:
         # build models that depend on a failed upstream so bad data
         # can't cascade.
         assert results.get("silver.downstream") in ("error", "skipped", "skipped_upstream_blocked")
+
+
+class TestParallelSubsetAndGates:
+    def test_subset_tiers_follow_an_unselected_intermediate(self, tmp_path):
+        """bronze.a -> silver.b (view, unselected) -> gold.d: d must run after a.
+
+        Tiers were built from the selection alone, which has no a -> d edge,
+        so both landed in one tier and d read b's view over the old a.
+        """
+        (tmp_path / "project.yml").write_text("name: t\n")
+        t = tmp_path / "transform"
+        for sub in ("bronze", "silver", "gold"):
+            (t / sub).mkdir(parents=True)
+        (t / "bronze" / "a.sql").write_text("@config materialized=table, tags=daily\nSELECT 1 AS x\n")
+        (t / "silver" / "b.sql").write_text("@config materialized=view\nSELECT * FROM bronze.a\n")
+        (t / "gold" / "d.sql").write_text("@config materialized=table, tags=daily\nSELECT * FROM silver.b\n")
+        db_path = str(tmp_path / "w.duckdb")
+        conn = duckdb.connect(db_path)
+        run_transform(conn, t, project_dir=tmp_path)
+
+        models = discover_models(t)
+        subset = [m for m in models if m.full_name != "silver.b"]
+        assert [[m.full_name for m in tier] for tier in build_dag_tiers(subset, models)] == [
+            ["bronze.a"], ["gold.d"],
+        ]
+
+        (t / "bronze" / "a.sql").write_text("@config materialized=table, tags=daily\nSELECT 2 AS x\n")
+        run_transform(
+            conn, t, targets=["tag:daily"], project_dir=tmp_path,
+            parallel=True, db_path=db_path,
+        )
+        assert conn.execute("SELECT x FROM gold.d").fetchall() == [(2,)]
+        conn.close()
+
+    @pytest.mark.parametrize("siblings", [0, 1])
+    def test_parallel_honours_source_freshness(self, tmp_path, siblings):
+        """A stale error-severity source stops the model in parallel runs too,
+        whether it runs alone in its tier or beside another model."""
+        t = tmp_path / "transform"
+        (t / "silver").mkdir(parents=True)
+        db_path = str(tmp_path / "w.duckdb")
+        conn = duckdb.connect(db_path)
+        conn.execute("CREATE SCHEMA landing")
+        conn.execute("CREATE TABLE landing.tx (id INT, loaded_at TIMESTAMP)")
+        conn.execute("INSERT INTO landing.tx VALUES (1, now()::TIMESTAMP - INTERVAL 30 DAY)")
+        (t / "silver" / "tx.sql").write_text(
+            "@config materialized=table\n"
+            "@source_freshness landing.tx, max_age=1h, on=loaded_at\n"
+            "SELECT * FROM landing.tx\n"
+        )
+        if siblings:
+            (t / "silver" / "other.sql").write_text("@config materialized=table\nSELECT 1 AS x\n")
+        results = run_transform(conn, t, parallel=True, db_path=db_path)
+        assert results["silver.tx"] == "source_stale"
+        if siblings:
+            assert results["silver.other"] == "built"
+        conn.close()

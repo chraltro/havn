@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import AgentSidebar from "./AgentSidebar";
 
 // Mock WebSocket
@@ -145,6 +145,22 @@ describe("AgentSidebar", () => {
     // Agent picker tabs use data-havn-tab
     const tabs = container.querySelectorAll("[data-havn-tab]");
     expect(tabs.length).toBe(3);
+  });
+
+  it("unlocks the input when the socket drops mid-stream", async () => {
+    render(<AgentSidebar isOpen={true} onToggle={() => {}} />);
+    await new Promise((r) => setTimeout(r, 10));
+    const ws = MockWebSocket.instances[0];
+    act(() => ws._receive({ type: "ready" }));
+
+    fireEvent.change(screen.getByPlaceholderText("Ask the agent…"), { target: { value: "hi" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    act(() => ws._receive({ type: "chunk", content: "partial" }));
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+
+    // Unexpected drop: the server never got to send "done".
+    act(() => { ws.readyState = 3; ws.onclose(); });
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
   });
 
   it("marks active agent tab", () => {

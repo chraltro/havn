@@ -71,6 +71,7 @@ class CreateJobRequest(BaseModel):
     retry_delay: int = Field(default=10, ge=0, le=3600)
     timeout_minutes: int = Field(default=60, ge=1, le=1440)
     description: str = ""
+    full_refresh: bool = True
 
     @field_validator("target")
     @classmethod
@@ -100,6 +101,7 @@ class UpdateJobRequest(BaseModel):
     retry_delay: int | None = None
     timeout_minutes: int | None = None
     description: str | None = None
+    full_refresh: bool | None = None
 
     @field_validator("target")
     @classmethod
@@ -216,6 +218,7 @@ def list_jobs(request: Request, conn: DbConnReadOnly):
             "retry": job.retry,
             "retry_delay": job.retry_delay,
             "timeout_minutes": job.timeout_minutes,
+            "full_refresh": job.full_refresh,
             "description": job.description,
             "file": job.file_path.name,
             "sparkline": sparklines.get(job.name, []),
@@ -274,6 +277,7 @@ def get_job(name: str, request: Request, conn: DbConnReadOnly):
         "retry": job.retry,
         "retry_delay": job.retry_delay,
         "timeout_minutes": job.timeout_minutes,
+        "full_refresh": job.full_refresh,
         "notify": job.notify,
         "file": job.file_path.name,
         "next_run": get_earliest_next_run(schedules, last_fire_iso=last_fire_iso) if job.enabled and schedules else None,
@@ -298,7 +302,8 @@ def get_job_plan(name: str, request: Request, conn: DbConnReadOnly):
 
 
 @router.post("/api/jobs/{name}/run")
-def run_job(name: str, request: Request, conn: DbConn):
+def run_job(name: str, request: Request, conn: DbConn, force: bool = False):
+    """Start a job. Unchanged models are skipped unless ``force``."""
     _require_permission(request, "execute")
     from havn.engine.orchestration import (
         _find_job,
@@ -329,7 +334,7 @@ def run_job(name: str, request: Request, conn: DbConn):
             cursor = None
             try:
                 cursor = cursor_for(_get_shared_conn())
-                execute_job(job, plan, cursor, project_dir, trigger="manual", emit=_emit)
+                execute_job(job, plan, cursor, project_dir, trigger="manual", emit=_emit, force=force)
             except Exception as e:
                 logger.error("Job '%s' failed: %s", name, e)
             finally:
@@ -343,15 +348,15 @@ def run_job(name: str, request: Request, conn: DbConn):
         result = _start_operation("job", f"Job: {name}", _run_with_sse, ())
         if result.get("status") == "already_running":
             # Pipeline is busy — fall back to background thread without SSE
-            _run_job_background(job, plan, project_dir, name)
+            _run_job_background(job, plan, project_dir, name, force)
         return {"status": "started", "job": name, "steps": len(plan.steps)}
     except ImportError:
         # Pipeline routes not available — fall back
-        _run_job_background(job, plan, project_dir, name)
+        _run_job_background(job, plan, project_dir, name, force)
         return {"status": "started", "job": name, "steps": len(plan.steps)}
 
 
-def _run_job_background(job, plan, project_dir, name):
+def _run_job_background(job, plan, project_dir, name, force=False):
     """Run a job on a background thread without SSE (fallback)."""
     from havn.engine.orchestration import execute_job
 
@@ -361,7 +366,7 @@ def _run_job_background(job, plan, project_dir, name):
         cursor = None
         try:
             cursor = cursor_for(_get_shared_conn())
-            execute_job(job, plan, cursor, project_dir, trigger="manual")
+            execute_job(job, plan, cursor, project_dir, trigger="manual", force=force)
         except Exception as e:
             logger.error("Job '%s' failed: %s", name, e)
         finally:
@@ -415,9 +420,13 @@ def update_job(name: str, req: UpdateJobRequest, request: Request):
     if "schedules" in updates:
         new_schedules = updates["schedules"] or []
         # Validate each schedule
+        from havn.engine.orchestration import is_valid_schedule
+
         for sched in new_schedules:
-            if len(sched.split()) != 5:
-                raise HTTPException(400, f"Invalid cron (need 5 fields): {sched}")
+            # The shared validator: checks every cron field and accepts
+            # "every N unit" intervals, which a 5-token count rejected.
+            if not is_valid_schedule(sched):
+                raise HTTPException(400, f"Invalid schedule (cron 5-field or 'every N unit'): {sched}")
         data["schedules"] = new_schedules
         data["cron"] = new_schedules[0] if new_schedules else ""
         updates.pop("schedules", None)
