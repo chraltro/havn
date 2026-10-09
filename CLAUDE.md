@@ -243,8 +243,8 @@ A `.py` file under `transform/` with an `@model` function is a model:
 from havn import model
 
 @model(materialized="table", tags=["daily"])
-def order_stats(db, ref):
-    return db.sql(f"SELECT region, count(*) AS n FROM {ref('silver.orders')} GROUP BY 1")
+def order_stats(ref):
+    return ref("silver.orders").aggregate("region, count(*) AS n")
 ```
 
 - Parameters by name: `db`, `ref`, `this`, `is_incremental`. Return a DuckDB relation, pandas/polars DataFrame or pyarrow table.
