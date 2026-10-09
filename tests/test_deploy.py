@@ -267,3 +267,151 @@ def test_startup_closes_out_work_a_previous_server_left_running(tmp_path):
     assert mark_interrupted_builds(fresh) == 0 and mark_interrupted_deploys(fresh) == 0
     fresh.close()
     conn.close()
+
+
+def test_an_interrupted_deploy_can_be_restored_from_its_snapshot(project, prod, monkeypatch):
+    """A server restart mid-deploy left the target half changed with no way
+    back but a redeploy. The snapshot now survives on the record."""
+    import havn.engine.transform as transform_mod
+    from havn.engine.deploy import DeployError, mark_interrupted_deploys, restore_interrupted_deploy
+
+    _deploy(project, prod)
+    before_totals = prod.execute("SELECT * FROM gold.totals").fetchall()
+    before_state = _state(prod)
+    _commit(project, {"transform/bronze/orders.sql": ORDERS.replace("SELECT *", "SELECT id, amount * 2 AS amount")}, "double")
+
+    real = transform_mod.run_transform
+
+    def build_then_die(*args, **kwargs):
+        real(*args, **kwargs)
+        raise KeyboardInterrupt  # stands in for the process going away
+
+    monkeypatch.setattr(transform_mod, "run_transform", build_then_die)
+    with pytest.raises(KeyboardInterrupt):
+        _deploy(project, prod)
+    monkeypatch.setattr(transform_mod, "run_transform", real)
+    assert prod.execute("SELECT total FROM gold.totals").fetchone() == (110.0,)  # half-way state
+
+    assert mark_interrupted_deploys(prod) == 1
+    interrupted = list_deploys(prod)[0]
+    assert interrupted["status"] == "error" and interrupted["restorable"] is True
+    assert "Restore it to how it was before this deploy" in interrupted["error"]
+
+    rec = restore_interrupted_deploy(prod, prod, project, interrupted["id"], restored_by="ada")
+    assert rec["status"] == "rolled_back"
+    assert rec["restorable"] is False
+    assert set(rec["restored"]) == {"bronze.orders", "gold.big", "gold.totals"}
+    assert "Restored to the pre-deploy snapshot by ada." in rec["error"]
+    assert prod.execute("SELECT * FROM gold.totals").fetchall() == before_totals
+    assert _state(prod) == before_state
+
+    with pytest.raises(DeployError, match="nothing to restore"):
+        restore_interrupted_deploy(prod, prod, project, interrupted["id"])
+
+
+def test_finished_deploys_do_not_keep_their_snapshot(project, prod):
+    rec = _deploy(project, prod)
+    assert rec["status"] == "success"
+    assert "rollback" not in rec
+    detail = prod.execute("SELECT detail FROM _havn.deploys WHERE id = ?", [rec["id"]]).fetchone()[0]
+    assert "rollback" not in detail
+    assert list_deploys(prod)[0]["restorable"] is False
+
+
+def _interrupt(project, conn, monkeypatch):
+    """Deploy a change to bronze.orders that dies after building; returns its id."""
+    import havn.engine.transform as transform_mod
+    from havn.engine.deploy import mark_interrupted_deploys
+
+    _commit(project, {"transform/bronze/orders.sql": ORDERS.replace("SELECT *", "SELECT id, amount * 2 AS amount")}, "double")
+    real = transform_mod.run_transform
+
+    def build_then_die(*args, **kwargs):
+        real(*args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(transform_mod, "run_transform", build_then_die)
+    with pytest.raises(KeyboardInterrupt):
+        _deploy(project, conn)
+    monkeypatch.setattr(transform_mod, "run_transform", real)
+    mark_interrupted_deploys(conn)
+    return list_deploys(conn)[0]["id"]
+
+
+def test_a_later_deploy_makes_an_interrupted_one_unrestorable(project, prod, monkeypatch):
+    """Restoring after a successful redeploy would silently undo the redeploy."""
+    from havn.engine.deploy import DeployError, restore_interrupted_deploy
+
+    _deploy(project, prod)
+    interrupted = _interrupt(project, prod, monkeypatch)
+    assert list_deploys(prod, deploy_id=interrupted)[0]["restorable"] is True
+
+    _commit(project, {"transform/silver/other.sql": OTHER.replace("1 AS one", "2 AS one")}, "redeploy")
+    assert _deploy(project, prod)["status"] == "success"
+    assert list_deploys(prod, deploy_id=interrupted)[0]["restorable"] is False
+    with pytest.raises(DeployError, match="later deploy"):
+        restore_interrupted_deploy(prod, prod, project, interrupted)
+    assert prod.execute("SELECT one FROM silver.other").fetchone() == (2,)
+
+
+def test_a_restore_with_a_missing_snapshot_file_changes_nothing(project, prod, monkeypatch):
+    import shutil
+
+    from havn.engine.deploy import DeployError, restore_interrupted_deploy
+
+    _deploy(project, prod)
+    interrupted = _interrupt(project, prod, monkeypatch)
+    shutil.rmtree(project / "_snapshots")  # e.g. `havn version cleanup`
+    before = prod.execute("SELECT total FROM gold.totals").fetchone()
+
+    with pytest.raises(DeployError, match="snapshot is incomplete"):
+        restore_interrupted_deploy(prod, prod, project, interrupted)
+    assert prod.execute("SELECT total FROM gold.totals").fetchone() == before
+
+
+def test_a_restore_refuses_a_different_warehouse_file(project, prod, monkeypatch, tmp_path):
+    from havn.engine.deploy import DeployError, restore_interrupted_deploy
+
+    _deploy(project, prod)
+    interrupted = _interrupt(project, prod, monkeypatch)
+    with pytest.raises(DeployError, match="restore refused"):
+        restore_interrupted_deploy(prod, prod, project, interrupted, target_path=str(tmp_path / "other.duckdb"))
+
+
+def test_a_failed_rollback_leaves_the_deploy_restorable(project, prod, monkeypatch):
+    """When the in-flight rollback itself fails, a later Restore is the way back."""
+    import havn.engine.deploy as deploy_mod
+
+    _deploy(project, prod)
+    _commit(project, {"transform/gold/totals.sql": TOTALS.replace("COUNT(*)", "COUNT(*) * 0")}, "break the check")
+    real_restore = deploy_mod._restore
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] <= 2:  # the rollback, and the retry in the error path
+            raise RuntimeError("disk full")
+        return real_restore(*args, **kwargs)
+
+    monkeypatch.setattr(deploy_mod, "_restore", flaky)
+    rec = _deploy(project, prod)
+    assert rec["status"] == "error" and "rollback failed" in rec["error"]
+    assert list_deploys(prod)[0]["restorable"] is True
+    restored = deploy_mod.restore_interrupted_deploy(prod, prod, project, rec["id"])
+    assert restored["status"] == "rolled_back"
+    assert prod.execute("SELECT n FROM gold.totals").fetchone() == (3,)
+
+
+def test_a_build_in_the_target_since_the_snapshot_blocks_a_restore(project, prod, monkeypatch):
+    """A CLI redeploy records itself in the target, not where the server looks;
+    the target's run_log still shows the newer build."""
+    from havn.engine.database import log_run
+    from havn.engine.deploy import DeployError, restore_interrupted_deploy
+
+    _deploy(project, prod)
+    interrupted = _interrupt(project, prod, monkeypatch)
+    prod.execute("DELETE FROM _havn.deploys WHERE id <> ?", [interrupted])  # records kept elsewhere
+    log_run(prod, "transform", "gold.totals", "success", pipeline_run_id="deploy-elsewhere")
+
+    with pytest.raises(DeployError, match="built in this environment since"):
+        restore_interrupted_deploy(prod, prod, project, interrupted)

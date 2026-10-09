@@ -428,7 +428,76 @@ def _needs_build(
         return True
     if model.materialized == "incremental" and _rerun_safe(model):
         return True
-    return _has_changed(conn, model) or _is_blocked(conn, model)
+    return _has_changed(conn, model) or _is_blocked(conn, model) or _inputs_newer(conn, model)
+
+
+# Run types that load raw data into the warehouse outside the model DAG.
+_SOURCE_LOAD_RUN_TYPES = ("ingest", "import", "connector_sync", "seed")
+
+
+def _inputs_newer(conn: duckdb.DuckDBPyConnection, model: SQLModel) -> bool:
+    """Whether a table model's inputs hold newer data than its last build.
+
+    A table's SQL does not change when its inputs get new rows, so judged by
+    its definition alone it stayed on old data until ``--force``:
+
+    - an input model rebuilt in an earlier, narrower run (``havn transform
+      silver.x`` refreshes silver.x but not the gold table reading it);
+    - a raw source (``landing.*``) reloaded by an ingest, import, connector
+      sync or seed.
+
+    A dependency with a ``model_state`` row is an input model and counts when
+    it was built after this one. Anything else is a raw source and counts
+    when a successful load was logged after this model's build. That half is
+    coarse on purpose: the run log says *that* raw data arrived, not which
+    table, and fingerprinting every source on every run would mean a full
+    scan each time. Data written into ``landing`` outside havn (another tool,
+    an ad-hoc query) still needs ``--force``.
+
+    Within one run, ``_parent_built`` already covers parents rebuilt in that
+    run. Views read their inputs live and never need this, and a plain
+    ``append`` incremental would duplicate rows if re-run, so only tables
+    are considered.
+    """
+    if model.materialized != "table" or not model.depends_on:
+        return False
+    deps = sorted(model.depends_on)
+    try:
+        row = conn.execute(
+            "SELECT last_run_at FROM _havn.model_state WHERE model_path = ?",
+            [model.full_name],
+        ).fetchone()
+        if row is None or row[0] is None:
+            return False  # never built: _has_changed already builds it
+        built_at = row[0]
+        placeholders = ", ".join("?" for _ in deps)
+        # Views and ephemerals hold no data of their own: a view reads its
+        # inputs live and is only rebuilt when its SQL changes, an ephemeral
+        # is recorded on every run without being built. Their timestamps say
+        # nothing about their data, so they are treated like the raw sources
+        # they read through to. (A table reached through a view that was
+        # rebuilt in a narrower run is not seen this way; --force covers it.)
+        dep_rows = conn.execute(
+            f"SELECT model_path, last_run_at FROM _havn.model_state "
+            f"WHERE model_path IN ({placeholders}) AND materialized_as NOT IN ('ephemeral', 'view')",
+            deps,
+        ).fetchall()
+        if any(ts is not None and ts > built_at for _, ts in dep_rows):
+            return True
+        if len(dep_rows) == len(deps):
+            return False  # every input is a built model, and none is newer
+        types = ", ".join("?" for _ in _SOURCE_LOAD_RUN_TYPES)
+        hit = conn.execute(
+            f"""
+            SELECT 1 FROM _havn.run_log
+            WHERE status = 'success' AND run_type IN ({types}) AND started_at > ?
+            LIMIT 1
+            """,
+            [*_SOURCE_LOAD_RUN_TYPES, built_at],
+        ).fetchone()
+    except duckdb.CatalogException:
+        return False
+    return hit is not None
 
 
 def _rerun_safe(model: SQLModel) -> bool:

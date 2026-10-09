@@ -285,8 +285,17 @@ background and returns its record with `status: "running"`.
 
 Deploy records: `{id, env, ref, commit, pr_id, deployed_by, status, started_at,
 finished_at, duration_ms, models, results, failed, version_id, restored,
-error}`. `status` is `running`, `success`, `up_to_date`, `rolled_back` or
-`error`. `failed` maps each model that did not build to `{status, error}`.
+error, restorable}`. `status` is `running`, `success`, `up_to_date`,
+`rolled_back` or `error`. `failed` maps each model that did not build to
+`{status, error}`. `restorable` is true for a deploy a server restart cut
+short whose pre-deploy snapshot survived.
+
+### POST /api/deploys/{id}/restore
+
+Execute permission. Puts an interrupted deploy's target back as it was before
+the deploy, from its snapshot, and returns the record with `status:
+"rolled_back"`. 409 when the deploy has nothing to restore or another deploy
+is running. Home lists restorable deploys under "Needs attention".
 
 ## DAG
 

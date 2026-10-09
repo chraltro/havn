@@ -158,13 +158,17 @@ New code should use the `@`-prefixed form.
 
 ## Change Detection
 
-havn uses SHA256 hashing to detect when a model's SQL has changed. On each `havn transform` run:
+havn uses SHA256 hashing to detect when a model's SQL has changed. Each model's normalized SQL (whitespace-insensitive) is hashed and compared against `_havn.model_state`, together with a combined hash of all its transitive upstreams.
 
-1. The SQL content is normalized (whitespace-insensitive)
-2. A SHA256 hash is computed from the normalized SQL
-3. The hash is compared against the stored hash in `_havn.model_state`
-4. If the hash matches **and** the combined hash of all transitive upstreams hasn't changed, the model is **skipped**
-5. Otherwise the model is **rebuilt**
+On each `havn transform` run a model is **rebuilt** when any of these holds, and **skipped** otherwise:
+
+- its SQL, or the SQL of anything upstream of it, changed;
+- its last build was rejected by an error-severity `@assert` (it stays blocked until a build passes);
+- it is a snapshot, or an incremental that is safe to re-run (`merge`, `delete+insert`, `microbatch`, or `append` with an `incremental_filter`);
+- a parent was rebuilt earlier in the same run;
+- it is a `table` whose inputs hold newer data than its last build: an input model was built after it (say, by `havn transform silver.x` on its own), or it reads a raw source such as `landing.*` and a successful ingest, import, connector sync or seed was logged since.
+
+The raw-source rule is deliberately coarse: the run log records *that* raw data arrived, not which table changed, so any successful load rebuilds every `table` that reads a source directly. Data written into `landing` outside havn (another tool, an ad-hoc query) is not seen; use `--force` after it. Views always read their inputs live, and a plain `append` incremental is never re-run on new data (it would duplicate rows).
 
 Most `havn transform` runs only rebuild what has actually changed, making iterative development fast.
 
@@ -188,7 +192,7 @@ If a circular dependency is detected, `havn transform` will fail with an error. 
 havn transform
 ```
 
-Only rebuilds models whose SQL has changed or whose upstream dependencies were rebuilt.
+Only rebuilds models whose SQL changed, whose inputs have newer data, or whose upstream dependencies were rebuilt (see [Change Detection](#change-detection)).
 
 ### Force Rebuild Everything
 

@@ -73,7 +73,7 @@ const ONBOARDING_STEPS = [
     description: "Write SQL, get results. The query editor has {autocomplete|Suggests table names, columns, and SQL keywords as you type.} for every table, column, and function in your warehouse. Browse tables, build charts, or inspect {query plans|Shows how DuckDB will execute your SQL, useful for spotting bottlenecks.}.\nTry editing the query, or write your own.",
     illustration: "explore",
     navigate: "Query",
-    highlight: ['[data-havn-guide="main-panel"]', '[data-havn-guide="sub-tab-bar"]', '[data-havn-guide="tables-pane"]'],
+    highlight: ['[data-havn-guide="main-panel"]', '[data-havn-guide="sub-tab-bar"]', '[data-havn-guide="query-tables"]'],
     position: "bottom-center",
     autoSelectTable: false,
     autoOpenFile: null,

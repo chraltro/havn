@@ -135,3 +135,102 @@ def test_auth_editors_deploy_only_merged_code_to_production(project):
     finally:
         server_app.AUTH_ENABLED = False
         reset_shared_conn()
+
+
+def test_restore_an_interrupted_deploy(project, monkeypatch):
+    """Home's "Restore" button: the snapshot on the record puts the target back."""
+    import havn.engine.transform as transform_mod
+    import havn.server.app as server_app
+    from havn.engine.database import ensure_meta_table
+    from havn.engine.deploy import mark_interrupted_deploys, new_record, run_deploy
+    from havn.server.deps import reset_shared_conn
+
+    dev = str(project / "dev.duckdb")
+    conn = duckdb.connect(dev)
+    ensure_meta_table(conn)
+    run_deploy(project, new_record("dev", "main"), conn, db_path=dev)
+    _commit(project, {"transform/bronze/orders.sql": ORDERS.replace("SELECT *", "SELECT id, amount * 2 AS amount")}, "double")
+    real = transform_mod.run_transform
+
+    def build_then_die(*args, **kwargs):
+        real(*args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(transform_mod, "run_transform", build_then_die)
+    with pytest.raises(KeyboardInterrupt):
+        run_deploy(project, new_record("dev", "main"), conn, db_path=dev)
+    monkeypatch.setattr(transform_mod, "run_transform", real)
+    mark_interrupted_deploys(conn)
+    assert conn.execute("SELECT total FROM gold.totals").fetchone() == (50.0,)
+    conn.close()
+
+    reset_shared_conn()
+    server_app.PROJECT_DIR = project
+    server_app.AUTH_ENABLED = False
+    try:
+        client = TestClient(server_app.app)
+        latest = client.get("/api/deploys").json()[0]
+        assert latest["restorable"] is True
+        home = client.get("/api/home").json()["attention"]
+        assert [a["deploy_id"] for a in home if a["kind"] == "deploy"] == [latest["id"]]
+
+        resp = client.post(f"/api/deploys/{latest['id']}/restore")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "rolled_back"
+        rows = client.post("/api/query", json={"sql": "SELECT total FROM gold.totals"}).json()["rows"]
+        assert float(rows[0][0]) == 25.0
+        assert not [a for a in client.get("/api/home").json()["attention"] if a["kind"] == "deploy"]
+
+        again = client.post(f"/api/deploys/{latest['id']}/restore")
+        assert again.status_code == 409
+        assert client.post("/api/deploys/deploy-nope/restore").status_code == 404
+    finally:
+        reset_shared_conn()
+
+
+def test_restore_an_interrupted_deploy_to_another_environment(project, monkeypatch):
+    """The record lives in the server's warehouse (dev); the target is prod.duckdb."""
+    import havn.engine.transform as transform_mod
+    import havn.server.app as server_app
+    from havn.engine.database import ensure_meta_table
+    from havn.engine.deploy import mark_interrupted_deploys, new_record, run_deploy
+    from havn.server.deps import reset_shared_conn
+
+    prod_path = str(project / "prod.duckdb")
+    dev = duckdb.connect(str(project / "dev.duckdb"))
+    ensure_meta_table(dev)
+    prod = duckdb.connect(prod_path)
+    ensure_meta_table(prod)
+    run_deploy(project, new_record("prod", "main"), prod, record_conn=dev, db_path=prod_path)
+    _commit(project, {"transform/bronze/orders.sql": ORDERS.replace("SELECT *", "SELECT id, amount * 2 AS amount")}, "double")
+    real = transform_mod.run_transform
+
+    def build_then_die(*args, **kwargs):
+        real(*args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(transform_mod, "run_transform", build_then_die)
+    with pytest.raises(KeyboardInterrupt):
+        run_deploy(project, new_record("prod", "main"), prod, record_conn=dev, db_path=prod_path)
+    monkeypatch.setattr(transform_mod, "run_transform", real)
+    mark_interrupted_deploys(dev)
+    prod.close()
+    dev.close()
+
+    reset_shared_conn()
+    server_app.PROJECT_DIR = project
+    server_app.AUTH_ENABLED = False
+    try:
+        client = TestClient(server_app.app)
+        latest = client.get("/api/deploys").json()[0]
+        assert latest["env"] == "prod" and latest["restorable"] is True
+        resp = client.post(f"/api/deploys/{latest['id']}/restore")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "rolled_back"
+    finally:
+        reset_shared_conn()
+    check = duckdb.connect(prod_path, read_only=True)
+    try:
+        assert check.execute("SELECT total FROM gold.totals").fetchone() == (25.0,)
+    finally:
+        check.close()

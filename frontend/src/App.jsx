@@ -1191,7 +1191,7 @@ function AppContent() {
               <input
                 value={sidebarFilter}
                 onChange={(e) => setSidebarFilter(e.target.value)}
-                placeholder="Filter files &amp; tables..."
+                placeholder={activeTab === "Query" ? "Filter files..." : "Filter files & tables..."}
                 style={{ flex: 1, padding: "4px 8px", background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", outline: "none", minWidth: 0 }}
                 aria-label="Filter files and tables"
               />
@@ -1210,18 +1210,24 @@ function AppContent() {
               <FileTree files={files} onSelect={openFile} activeFile={activeFile} onNewFile={createFile} onDeleteFile={deleteFile} onMoveFile={moveFile} filter={sidebarFilter} />
             </div>
           </div>
-          <div style={styles.sidebarDivider} />
-          <div style={styles.sidebarPane} data-havn-guide="tables-pane">
-            <div style={styles.sidebarSectionHeader}>TABLES</div>
-            <div style={styles.sidebarPaneContent}>
-              <SchemaTree
-                tables={tables}
-                selectedTable={selectedTable}
-                onSelectTable={handleSelectTable}
-                filter={sidebarFilter}
-              />
-            </div>
-          </div>
+          {/* The Query page has its own table list (click to insert, columns,
+              masking marks), so a second tree here only competes with it. */}
+          {activeTab !== "Query" && (
+            <>
+              <div style={styles.sidebarDivider} />
+              <div style={styles.sidebarPane} data-havn-guide="tables-pane">
+                <div style={styles.sidebarSectionHeader}>TABLES</div>
+                <div style={styles.sidebarPaneContent}>
+                  <SchemaTree
+                    tables={tables}
+                    selectedTable={selectedTable}
+                    onSelectTable={handleSelectTable}
+                    filter={sidebarFilter}
+                  />
+                </div>
+              </div>
+            </>
+          )}
         </aside>
         )}
 
@@ -1322,6 +1328,7 @@ function AppContent() {
                   }}
                   onClearSample={handleClearSample}
                   onAttentionCount={setAttentionCount}
+                  showConfirm={showConfirm}
                   firstRun={
                 <OverviewPanel
                   onNavigate={navigateToTab}

@@ -7,6 +7,7 @@ const getDeployPlan = vi.fn();
 const startDeploy = vi.fn();
 const getDeploy = vi.fn();
 const listDeploys = vi.fn();
+const restoreDeploy = vi.fn();
 vi.mock("./api", () => ({
   api: {
     getDeployTargets: (...a) => getDeployTargets(...a),
@@ -14,6 +15,7 @@ vi.mock("./api", () => ({
     startDeploy: (...a) => startDeploy(...a),
     getDeploy: (...a) => getDeploy(...a),
     listDeploys: (...a) => listDeploys(...a),
+    restoreDeploy: (...a) => restoreDeploy(...a),
   },
 }));
 
@@ -29,7 +31,7 @@ const TARGETS = {
 
 describe("DeployCard", () => {
   beforeEach(() => {
-    for (const f of [getDeployTargets, getDeployPlan, startDeploy, getDeploy, listDeploys]) f.mockReset();
+    for (const f of [getDeployTargets, getDeployPlan, startDeploy, getDeploy, listDeploys, restoreDeploy]) f.mockReset();
     getDeployTargets.mockResolvedValue(TARGETS);
     getDeployPlan.mockResolvedValue({ env: "prod", ref: "main", commit: "abc1234def", models: ["silver.a", "gold.b"] });
     listDeploys.mockResolvedValue([]);
@@ -68,6 +70,21 @@ describe("DeployCard", () => {
     expect(await screen.findByText(/Rolled back\. prod is exactly as it was/, {}, { timeout: 4000 })).toBeTruthy();
     expect(screen.getByText(/assertion failed: n > 0/)).toBeTruthy();
     expect(onDeployed).toHaveBeenCalled();
+  });
+
+  it("offers to restore an interrupted deploy from the history", async () => {
+    listDeploys.mockResolvedValue([
+      { id: "deploy-9", env: "prod", ref: "main", commit: "abc1234def", deployed_by: "ada", status: "error", restorable: true },
+    ]);
+    restoreDeploy.mockResolvedValue({ id: "deploy-9", status: "rolled_back" });
+    const showConfirm = vi.fn().mockResolvedValue(true);
+    render(<DeployCard refName="main" showConfirm={showConfirm} />);
+
+    expect(await screen.findByText(/interrupted/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(restoreDeploy).toHaveBeenCalledWith("deploy-9"));
+    expect(showConfirm.mock.calls[0][0]).toBe("Restore prod?");
+    await waitFor(() => expect(listDeploys).toHaveBeenCalledTimes(2));
   });
 
   it("switching to a non-production environment re-plans", async () => {
