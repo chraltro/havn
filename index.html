@@ -85,7 +85,7 @@ code { font-family: var(--mono); font-size: 0.9em; }
 /* Opening */
 .opening {
   display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 1.75rem 3.5rem; align-items: end;
-  padding-top: 3.5rem; padding-bottom: 2.5rem;
+  padding-top: 7rem; padding-bottom: 3rem;
 }
 .opening h1 { grid-column: 1 / -1; font-size: clamp(2.6rem, 6.4vw, 5rem); line-height: 1.02; letter-spacing: -0.02em; max-width: 21ch; }
 .opening .lede { font-size: 1.2rem; max-width: 34em; }
@@ -176,7 +176,7 @@ footer a { color: var(--muted); }
 
 @media (max-width: 860px) {
   .opening, .pair, .fit, .editions { grid-template-columns: 1fr; gap: 2rem; }
-  .opening { padding-top: 2.5rem; }
+  .opening { padding-top: 5rem; }
   .contents th { width: auto; display: block; padding-bottom: 0.2rem; }
   .contents td { display: block; border-top: none; padding-top: 0; }
   .contents td:last-child { width: auto; padding-bottom: 0.9rem; }
@@ -186,7 +186,9 @@ footer a { color: var(--muted); }
   .facts div:nth-child(n+3) { border-top: 1px solid var(--rule); }
 }
 @media (max-width: 600px) {
-  .wrap { padding: 0 1rem; }
+  /* On a phone the headline opens about halfway down the first screen. */
+  .opening { padding-top: 34vh; padding-top: 34svh; }
+  .wrap { padding-left: 1rem; padding-right: 1rem; }
   .top nav { gap: 1rem; }
   .top nav .wide { display: none; }
   .cmd { font-size: 0.85rem; }
