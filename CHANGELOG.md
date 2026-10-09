@@ -4,9 +4,23 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
-The dbt v2 gap work. Every item below came out of a research pass over the
-current code against dbt v2.0 (GA 2026-09-16); the plan and its evidence live
-in `docs/internal/dbt-v2-gap-plan.md`.
+## [0.2.28] - 2026-10-09
+
+Most of what dbt v2 offers (validation, modeling, selectors, defer, packages),
+a web UI rebuilt around reviewing and shipping changes, and a hardening pass
+on top.
+
+### Upgrade notes
+
+- **Approvals given before this release no longer count.** An approval is now
+  pinned to the commit it was given on, and old ones carry no commit, so open
+  PRs need approving again.
+- **Snapshots and re-run-safe incrementals run on every transform**, and the
+  models below them rebuild in the same run. Before, they were skipped once
+  built, so new source data never arrived.
+- **With sign-in on, non-admins can deploy to `prod`, `production` or `live`
+  only code already merged into the base branch.
+- sqlglot is pinned to `>=26.17,<30`.
 
 ### Validation and types
 
