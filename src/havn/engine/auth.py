@@ -71,6 +71,117 @@ def ensure_auth_tables(conn: duckdb.DuckDBPyConnection) -> None:
             expires_at   TIMESTAMP
         )
     """, is_lake))
+    _ensure_attributes_column(conn)
+
+
+def _ensure_attributes_column(conn: duckdb.DuckDBPyConnection) -> None:
+    """Add ``_havn.users.attributes`` to a users table that predates it.
+
+    Attributes are admin-managed key/value pairs (``{"region": "north"}``)
+    that row policies read through ``havn_attr('region')``. Checked before
+    altering, because ensure_auth_tables runs on every token validation and
+    an ALTER is a catalog write even when the column is already there.
+    """
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM duckdb_columns() WHERE schema_name = '_havn' "
+            "AND table_name = 'users' AND column_name = 'attributes'"
+        ).fetchone()
+        if row is None:
+            conn.execute("ALTER TABLE _havn.users ADD COLUMN IF NOT EXISTS attributes JSON")
+    except duckdb.Error:
+        logger.debug("Could not add _havn.users.attributes", exc_info=True)
+
+
+def _decode_attributes(raw) -> dict:
+    """``attributes`` as stored (JSON text, or already decoded) -> a plain dict."""
+    if raw is None or raw == "":
+        return {}
+    if isinstance(raw, dict):
+        return dict(raw)
+    try:
+        import json
+
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+# Attribute keys are referenced from row-policy SQL as havn_attr('<key>'), so
+# they are kept to identifier-like names. Values are strings, numbers,
+# booleans or flat lists of those.
+_ATTR_KEY_MAX = 64
+_ATTR_VALUE_MAX = 1000
+
+
+def normalize_attributes(attributes: dict) -> dict:
+    """Validate and normalise a user-attribute mapping, or raise ValueError."""
+    import re
+
+    if not isinstance(attributes, dict):
+        raise ValueError("attributes must be an object of key/value pairs")
+    if len(attributes) > 100:
+        raise ValueError("at most 100 attributes per user")
+    out: dict = {}
+    for key, value in attributes.items():
+        if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)                 or len(key) > _ATTR_KEY_MAX:
+            raise ValueError(
+                f"Invalid attribute name {key!r}: use letters, digits and underscores"
+            )
+        out[key.lower()] = _normalize_attr_value(key, value)
+    return out
+
+
+def _normalize_attr_value(key: str, value):
+    scalar = (str, int, float, bool)
+    if value is None:
+        return None
+    if isinstance(value, scalar):
+        if isinstance(value, str) and len(value) > _ATTR_VALUE_MAX:
+            raise ValueError(f"Attribute {key!r} is longer than {_ATTR_VALUE_MAX} characters")
+        return value
+    if isinstance(value, (list, tuple)):
+        if len(value) > 500:
+            raise ValueError(f"Attribute {key!r} has more than 500 values")
+        items = []
+        for item in value:
+            if not isinstance(item, scalar):
+                raise ValueError(f"Attribute {key!r} may only list strings and numbers")
+            items.append(item)
+        return items
+    raise ValueError(f"Attribute {key!r} must be a string, number, boolean or list")
+
+
+def get_user_attributes(conn: duckdb.DuckDBPyConnection, username: str) -> dict | None:
+    """A user's attributes, or None when the user does not exist."""
+    ensure_auth_tables(conn)
+    row = conn.execute(
+        "SELECT attributes FROM _havn.users WHERE username = ?", [username]
+    ).fetchone()
+    if row is None:
+        return None
+    return _decode_attributes(row[0])
+
+
+def set_user_attributes(
+    conn: duckdb.DuckDBPyConnection, username: str, attributes: dict
+) -> dict | None:
+    """Replace a user's attributes. Returns the stored mapping, or None if no such user."""
+    import json
+
+    ensure_auth_tables(conn)
+    clean = normalize_attributes(attributes)
+    existing = conn.execute(
+        "SELECT username FROM _havn.users WHERE username = ?", [username]
+    ).fetchone()
+    if not existing:
+        return None
+    conn.execute(
+        "UPDATE _havn.users SET attributes = ? WHERE username = ?",
+        [json.dumps(clean), username],
+    )
+    return clean
 
 
 def create_user(
@@ -141,7 +252,7 @@ def validate_token(conn: duckdb.DuckDBPyConnection, token: str) -> dict | None:
     token_hash = _hash_token(token)
     row = conn.execute(
         """
-        SELECT t.username, u.role, u.display_name
+        SELECT t.username, u.role, u.display_name, u.attributes
         FROM _havn.tokens t
         JOIN _havn.users u ON t.username = u.username
         WHERE t.token = ?
@@ -155,7 +266,12 @@ def validate_token(conn: duckdb.DuckDBPyConnection, token: str) -> dict | None:
             "DELETE FROM _havn.tokens WHERE expires_at IS NOT NULL AND expires_at <= current_timestamp"
         )
         return None
-    return {"username": row[0], "role": row[1], "display_name": row[2]}
+    return {
+        "username": row[0],
+        "role": row[1],
+        "display_name": row[2],
+        "attributes": _decode_attributes(row[3]),
+    }
 
 
 def list_users(conn: duckdb.DuckDBPyConnection) -> list[dict]:
@@ -163,7 +279,7 @@ def list_users(conn: duckdb.DuckDBPyConnection) -> list[dict]:
     ensure_auth_tables(conn)
     rows = conn.execute(
         """
-        SELECT username, role, display_name, created_at, last_login
+        SELECT username, role, display_name, created_at, last_login, attributes
         FROM _havn.users
         ORDER BY created_at
         """
@@ -175,6 +291,7 @@ def list_users(conn: duckdb.DuckDBPyConnection) -> list[dict]:
             "display_name": r[2],
             "created_at": str(r[3]) if r[3] else None,
             "last_login": str(r[4]) if r[4] else None,
+            "attributes": _decode_attributes(r[5]),
         }
         for r in rows
     ]

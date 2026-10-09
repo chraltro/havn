@@ -213,6 +213,31 @@ class PoliciesConfig(BaseModel):
     deny: list[DenyRule] = Field(default_factory=list)
 
 
+class GovernanceConfig(BaseModel):
+    """Masking, row-level security and governed Python, under ``governance:``.
+
+    ``python``: how a script or notebook run by a user that masking or row
+    policies apply to is executed. ``subprocess`` (default) runs it in a
+    separate process whose ``db`` sends SQL to the server, which governs it;
+    ``refuse`` does not run it at all.
+
+    ``isolation``: ``best_effort`` (default) runs governed Python even where
+    the operating system does not keep the warehouse file away from the
+    child process (Linux and macOS: the child runs as the same OS user), with
+    Python-level guards only and a warning in the run log; ``strict`` refuses
+    to run it there.
+
+    ``pii_schemas``: schemas where ``havn validate`` warns about a column
+    that carries PII without a masking policy (exposures' tables and the
+    tables export scripts read are always checked).
+    """
+    model_config = ConfigDict(extra="ignore")
+
+    python: str = "subprocess"
+    isolation: str = "best_effort"
+    pii_schemas: list[str] = Field(default_factory=lambda: ["gold"])
+
+
 class ValidationConfig(BaseModel):
     """What `havn validate` reports beyond errors, declared under ``validation:``."""
     model_config = ConfigDict(extra="ignore")
@@ -271,6 +296,7 @@ class ProjectConfig(BaseModel):
     sentinel: SentinelConfig = Field(default_factory=SentinelConfig)
     policies: PoliciesConfig = Field(default_factory=PoliciesConfig)
     validation: ValidationConfig = Field(default_factory=ValidationConfig)
+    governance: GovernanceConfig = Field(default_factory=GovernanceConfig)
     snapshots: SnapshotsConfig = Field(default_factory=SnapshotsConfig)
     environments: dict[str, EnvironmentConfig] = Field(default_factory=dict)
     active_environment: str | None = None

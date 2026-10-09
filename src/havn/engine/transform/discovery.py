@@ -20,10 +20,12 @@ from havn.engine.sql_analysis import (
     parse_assertions,
     parse_column_docs,
     parse_config,
+    parse_declassify,
     parse_depends,
     parse_description,
     parse_grain,
     parse_owner,
+    parse_pii,
     parse_source_freshness,
     parse_sql,
     strip_config_comments,
@@ -184,6 +186,8 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
             owner=owner,
             source_freshness=source_freshness,
             tags=tags,
+            pii=parse_pii(sql),
+            declassified=parse_declassify(sql),
         )
         if ast is not None:
             model.ast = ast
@@ -852,3 +856,6 @@ def _update_state(
             params,
         )
     save_model_columns(conn, model)
+    from havn.engine.governance.lineage import save_model_lineage
+
+    save_model_lineage(conn, model)
