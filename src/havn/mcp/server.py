@@ -443,6 +443,89 @@ class MCPServer:
                 },
                 self._tool_run_unit_tests,
             ),
+            (
+                "ask",
+                "Answer a business question from the semantic layer. havn's "
+                "configured model maps the question onto metrics/*.yml (metric, "
+                "dimensions, grain, filters, time range), compiles it and runs it "
+                "read-only. Returns the result, the structured spec, the compiled "
+                "SQL, lineage and freshness, or says plainly that no metric "
+                "answers it and suggests one. Pass history to refine a previous "
+                "answer ('now by month').",
+                {
+                    "type": "object",
+                    "properties": {
+                        "question": {"type": "string", "description": "The question"},
+                        "history": {
+                            "type": "array",
+                            "description": "Earlier turns: [{question, spec}] from previous ask results",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "question": {"type": "string"},
+                                    "spec": {"type": "object"},
+                                },
+                                "required": ["question"],
+                            },
+                        },
+                        "exploratory": {
+                            "type": "boolean",
+                            "description": "When no metric fits, try unverified exploratory SQL "
+                            "(only if the project allows it)",
+                        },
+                    },
+                    "required": ["question"],
+                },
+                self._tool_ask,
+            ),
+            (
+                "submit_change_set",
+                "Propose edits to model files as a change set and get the "
+                "verification report back. Nothing is written to the project: "
+                "havn checks the change (parse and DAG, bind pass, affected unit "
+                "tests, contracts, assertions) and builds every affected model "
+                "into a scratch database to diff it against the real tables. "
+                "Iterate by passing change_set_id with the full new file set "
+                "until the report is ok; the user applies it from the havn UI. "
+                "Paths are relative to the project: transform/**/*.sql, macros/, "
+                "tests/unit/, contracts/, metrics/.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "files": {
+                            "type": "array",
+                            "description": "Full proposed contents: [{path, content}]; "
+                            "content null or delete: true removes the file",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {"type": "string"},
+                                    "content": {"type": ["string", "null"]},
+                                    "delete": {"type": "boolean"},
+                                },
+                                "required": ["path"],
+                            },
+                        },
+                        "title": {"type": "string", "description": "One line saying what the change does"},
+                        "change_set_id": {
+                            "type": "string",
+                            "description": "Revise this open change set instead of creating a new one",
+                        },
+                    },
+                    "required": ["files"],
+                },
+                self._tool_submit_change_set,
+            ),
+            (
+                "get_change_set",
+                "Show a change set's status and verification report.",
+                {
+                    "type": "object",
+                    "properties": {"change_set_id": {"type": "string"}},
+                    "required": ["change_set_id"],
+                },
+                self._tool_get_change_set,
+            ),
         ]
         if not self.read_only:
             tools.append(
@@ -813,6 +896,102 @@ class MCPServer:
         result["sql"] = sql
         return result
 
+    def _tool_ask(self, args: dict) -> dict:
+        from havn.engine.ai.config import AIConfigError
+        from havn.engine.ai.service import ServerAskError, call_server, local_context
+
+        question = args.get("question")
+        if not isinstance(question, str) or not question.strip():
+            raise _InvalidParams("question is required")
+        history = args.get("history") or []
+        if not isinstance(history, list):
+            raise _InvalidParams("history must be a list")
+        body = {
+            "question": question,
+            "history": [h for h in history if isinstance(h, dict) and h.get("question")][:10],
+            "exploratory": bool(args.get("exploratory", False)),
+        }
+        try:
+            via_server = call_server(self.project_dir, "POST", "/api/ask", body)
+        except ServerAskError as e:
+            raise ToolError(str(e))
+        if via_server is not None:
+            return _trim_ask(via_server)
+
+        from havn.engine.ai.ask import ask
+
+        try:
+            with local_context(self.project_dir, env=self.env) as ctx:
+                result = ask(
+                    question, ctx, history=body["history"], exploratory=body["exploratory"],
+                )
+        except AIConfigError as e:
+            raise ToolError(str(e))
+        return _trim_ask(result)
+
+    def _tool_submit_change_set(self, args: dict) -> dict:
+        from havn.engine.ai.service import ServerAskError, call_server
+        from havn.engine.changesets import (
+            ChangeSet,
+            ChangeSetError,
+            create_change_set,
+            revise_change_set,
+        )
+        from havn.engine.changesets.service import report_text, verify_locally
+
+        files = args.get("files")
+        if not isinstance(files, list) or not files:
+            raise _InvalidParams("files must be a non-empty list of {path, content}")
+        proposals = []
+        for f in files:
+            if not isinstance(f, dict) or not isinstance(f.get("path"), str):
+                raise _InvalidParams("each file needs a path")
+            delete = bool(f.get("delete")) or f.get("content") is None
+            proposals.append({"path": f["path"], "content": None if delete else str(f["content"])})
+        title = str(args.get("title") or "")
+        cs_id = args.get("change_set_id")
+        if cs_id is not None and not isinstance(cs_id, str):
+            raise _InvalidParams("change_set_id must be a string")
+
+        body = {
+            "files": [
+                {"path": p["path"], "content": p["content"], "delete": p["content"] is None}
+                for p in proposals
+            ],
+            "title": title,
+            "source": "mcp",
+            "change_set_id": cs_id,
+        }
+        try:
+            via_server = call_server(self.project_dir, "POST", "/api/changesets", body)
+        except ServerAskError as e:
+            raise ToolError(str(e))
+        try:
+            if via_server is not None:
+                cs = ChangeSet.from_dict(via_server)
+            else:
+                if cs_id:
+                    cs = revise_change_set(self.project_dir, cs_id, proposals, title=title or None)
+                else:
+                    cs = create_change_set(self.project_dir, proposals, source="mcp", title=title)
+                cs = verify_locally(self.project_dir, cs.id, env=self.env)
+        except ChangeSetError as e:
+            raise ToolError(str(e))
+        return _change_set_payload(cs, report_text(cs))
+
+    def _tool_get_change_set(self, args: dict) -> dict:
+        from havn.engine.changesets import ChangeSetError, get_change_set
+        from havn.engine.changesets.service import report_text
+
+        cs_id = args.get("change_set_id")
+        if not isinstance(cs_id, str) or not cs_id:
+            raise _InvalidParams("change_set_id is required")
+        try:
+            cs = get_change_set(self.project_dir, cs_id)
+        except ChangeSetError as e:
+            raise ToolError(str(e))
+        return _change_set_payload(cs, report_text(cs))
+
     def _tool_run_transform(self, args: dict) -> dict:
         if self._server_info() is not None:
             raise ToolError(
@@ -894,6 +1073,42 @@ def _claim_protocol_stdout():
 
 class _InvalidParams(ValueError):
     """Raised by handlers when tool/method params are malformed."""
+
+
+def _trim_ask(result: dict, max_rows: int = 200) -> dict:
+    """An ask answer sized for an agent's context: rows capped, rest intact."""
+    out = dict(result)
+    res = out.get("result")
+    if isinstance(res, dict) and len(res.get("rows") or []) > max_rows:
+        res = dict(res)
+        res["rows"] = res["rows"][:max_rows]
+        res["rows_shown"] = max_rows
+        out["result"] = res
+    return out
+
+
+def _change_set_payload(cs, summary: str) -> dict:
+    """What an agent needs to iterate: the verdict, the failures, the diff."""
+    data = cs.to_dict(include_content=False)
+    report = data.get("report") or {}
+    return {
+        "change_set_id": cs.id,
+        "revision": cs.revision,
+        "status": cs.status,
+        "ok": bool(report.get("ok")),
+        "summary": summary,
+        "failures": [
+            c for c in report.get("checks", []) if c.get("status") in ("fail", "warn")
+        ],
+        "diffs": report.get("diffs", []),
+        "files": [f"{f['action']} {f['path']}" for f in data["files"]],
+        "ignored": data.get("ignored", []),
+        "next": (
+            "Verified. Tell the user it is ready to apply from the havn UI (Agent sidebar, Changes)."
+            if report.get("ok")
+            else "Fix the failures and call submit_change_set again with change_set_id."
+        ),
+    }
 
 
 def _error_response(msg_id: Any, code: int, message: str) -> dict:

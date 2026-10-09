@@ -215,6 +215,8 @@ from havn.server.routes.streaming import router as streaming_router  # noqa: E40
 from havn.server.routes.unit_tests import router as unit_tests_router  # noqa: E402
 from havn.server.routes.bind import router as bind_router  # noqa: E402
 from havn.server.routes.rename import router as rename_router  # noqa: E402
+from havn.server.routes.ask import router as ask_router  # noqa: E402
+from havn.server.routes.changesets import router as changesets_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(files_router)
@@ -254,6 +256,8 @@ app.include_router(sql_api_router)
 app.include_router(export_router)
 app.include_router(streaming_router)
 app.include_router(unit_tests_router)
+app.include_router(ask_router)
+app.include_router(changesets_router)
 
 # Register WebSocket endpoints (can't use APIRouter for WebSocket)
 register_websocket(app)

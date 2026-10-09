@@ -270,6 +270,8 @@ def init(
         ".havn/deploy/\n"
         # The `havn serve` lockfile: runtime state, never shared.
         ".havn/serve.json\n"
+        # Agent change sets and `havn ask --continue` history: local state.
+        ".havn/changesets/\n.havn/ask/\n"
         # Installed package sources are reproducible from havn_packages.lock,
         # which IS committed. Only the checkout is ignored.
         "havn_packages/\n"
