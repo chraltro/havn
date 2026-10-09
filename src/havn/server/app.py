@@ -316,6 +316,8 @@ from havn.server.routes.rename import router as rename_router  # noqa: E402
 from havn.server.routes.perf import router as perf_router  # noqa: E402
 from havn.server.routes.sharing import router as sharing_router  # noqa: E402
 from havn.server.routes.reports import router as reports_router  # noqa: E402
+from havn.server.routes.ask import router as ask_router  # noqa: E402
+from havn.server.routes.changesets import router as changesets_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(files_router)
@@ -361,6 +363,8 @@ app.include_router(unit_tests_router)
 app.include_router(perf_router)
 app.include_router(sharing_router)
 app.include_router(reports_router)
+app.include_router(ask_router)
+app.include_router(changesets_router)
 
 # Register WebSocket endpoints (can't use APIRouter for WebSocket)
 register_websocket(app)

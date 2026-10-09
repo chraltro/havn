@@ -104,6 +104,7 @@ def _warehouse_exists(config, project_dir: Path) -> bool:
 # Order doesn't matter for registration, but keep alphabetical for clarity.
 from havn.cli import admin  # noqa: E402, F401
 from havn.cli import branch  # noqa: E402, F401
+from havn.cli import ask  # noqa: E402, F401
 from havn.cli import connectors  # noqa: E402, F401
 from havn.cli import diff  # noqa: E402, F401
 from havn.cli import env  # noqa: E402, F401

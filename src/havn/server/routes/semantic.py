@@ -7,13 +7,14 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from havn.engine.masking_rewriter import MaskedColumnAccessError
 from havn.engine.semantic import (
     SemanticError,
     compile_metric,
     get_metric,
     load_metrics,
 )
-from havn.engine.sql_safety import ReadOnlyQueryError, validate_read_only_query
+from havn.engine.sql_safety import ReadOnlyQueryError
 from havn.server.deps import (
     DbConnReadOnly,
     _get_project_dir,
@@ -61,39 +62,32 @@ def query_metric_endpoint(request: Request, req: MetricQueryRequest, conn: DbCon
     user = _require_permission(request, "read")
     sql = _compile_or_400(req)
 
-    # Defense in depth: the compiler only emits SELECTs, but the measure and
-    # filter expressions come from project YAML — run the same read-only
-    # validation as /api/query before touching the warehouse.
-    try:
-        validate_read_only_query(sql)
-    except ReadOnlyQueryError as e:
-        raise HTTPException(e.status_code, str(e))
-
-    from havn.server.deps import _govern
-
-    governed = _govern(sql, user, conn)
-    sql_to_execute = governed.sql
+    # The compiler only emits SELECTs, but the measure and filter expressions
+    # come from project YAML: run it through the same governed read path as
+    # /api/query (read-only validation, masking before and after, timeout).
+    from havn.engine.read_path import QueryTimeoutError, run_read_query
 
     cap = req.limit or _DEFAULT_ROW_CAP
     try:
-        cur = conn.execute(sql_to_execute)
-        columns = [d[0] for d in cur.description] if cur.description else []
-        rows = [list(row) for row in cur.fetchmany(cap + 1)]
+        result = run_read_query(conn, sql, user=user, limit=cap + 1)
+    except ReadOnlyQueryError as e:
+        raise HTTPException(e.status_code, str(e))
+    except MaskedColumnAccessError as e:
+        raise HTTPException(403, str(e))
+    except QueryTimeoutError as e:
+        raise HTTPException(408, str(e))
     except Exception as e:
         logger.warning("Metric query failed (%s): %s", req.metric, e)
         raise HTTPException(400, str(e))
 
-    # Post-query masking backstop -- same as /api/query: a metric surfacing a
-    # masked dimension the rewrite could not mask in place is masked here.
-    rows = governed.post_mask(columns, rows, conn)
-
+    rows = result.rows
     truncated = len(rows) > cap
     rows = rows[:cap]
     return {
         "metric": req.metric,
         "sql": sql,
-        "columns": columns,
-        "rows": [list(row) for row in rows],
+        "columns": result.columns,
+        "rows": rows,
         "row_count": len(rows),
         "truncated": truncated,
     }

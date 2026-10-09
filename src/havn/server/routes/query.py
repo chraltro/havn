@@ -295,6 +295,29 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
 
     return data
 
+    data = result.to_dict()
+    duration_ms = result.duration_ms
+
+    # Log slow queries
+    if duration_ms >= _SLOW_QUERY_THRESHOLD_MS:
+        try:
+            from havn.engine.database import ensure_meta_table
+            from havn.engine.write_queue import cursor_for
+            from havn.server.deps import _get_shared_conn
+            conn_rw = cursor_for(_get_shared_conn())
+            try:
+                ensure_meta_table(conn_rw)
+                conn_rw.execute(
+                    "INSERT INTO _havn.slow_queries (query_text, duration_ms, row_count) VALUES (?, ?, ?)",
+                    [req.sql[:10_000], duration_ms, len(data["rows"])],
+                )
+            finally:
+                conn_rw.close()
+        except Exception:
+            logger.debug("Failed to log slow query", exc_info=True)
+
+    return data
+
 
 # --- Tables ---
 

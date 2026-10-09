@@ -40,6 +40,10 @@ VALID_ACTIONS = frozenset({
     "report_update",
     "report_delete",
     "report_delivery",
+    "ask",
+    "changeset_submit",
+    "changeset_apply",
+    "changeset_discard",
 })
 
 
