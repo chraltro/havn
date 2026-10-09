@@ -68,7 +68,31 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
     # full_name -> the file that claimed it first
     claimed: dict[str, Path] = {}
 
-    for sql_file in sorted(transform_dir.rglob("*.sql")):
+    def claim(full_name: str, path: Path) -> None:
+        previous = claimed.get(full_name)
+        if previous is not None:
+            raise DuplicateModelError(
+                f"Duplicate model '{full_name}': both "
+                f"{previous} and {path} produce it. "
+                "Rename one of the files, or point one at another schema "
+                "with @config schema=."
+            )
+        claimed[full_name] = path
+
+    # One sorted pass over both kinds, so a .sql and a .py claiming the same
+    # name are reported the same way two .sql files are.
+    files = sorted([*transform_dir.rglob("*.sql"), *_python_model_files(transform_dir)])
+    for sql_file in files:
+        if sql_file.suffix == ".py":
+            from .python_models import build_python_model
+
+            py_model = build_python_model(sql_file, read_project_text(sql_file), transform_dir)
+            if py_model is None:
+                continue  # a helper module, not a model
+            claim(py_model.full_name, sql_file)
+            models.append(py_model)
+            continue
+
         sql = read_project_text(sql_file)
         config = parse_config(sql)
         depends = parse_depends(sql)
@@ -116,15 +140,7 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
         validate_identifier(name, f"model name for {sql_file.name}")
 
         full_name = f"{schema}.{name}"
-        previous = claimed.get(full_name)
-        if previous is not None:
-            raise DuplicateModelError(
-                f"Duplicate model '{full_name}': both "
-                f"{previous} and {sql_file} produce it. "
-                "Rename one of the files, or point one at another schema "
-                "with @config schema=."
-            )
-        claimed[full_name] = sql_file
+        claim(full_name, sql_file)
 
         materialized = config.get("materialized", "view")
         unique_key = config.get("unique_key")
@@ -192,6 +208,25 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
     return models
 
 
+def _python_model_files(transform_dir: Path) -> list[Path]:
+    """``.py`` files under ``transform_dir`` that may define a model.
+
+    ``_``-prefixed files are helpers by convention and never read as models,
+    and neither is anything in ``__pycache__`` or a hidden directory.
+    Whether a remaining file *is* a model is decided by its content (see
+    :func:`havn.engine.transform.python_models.build_python_model`).
+    """
+    out: list[Path] = []
+    for path in transform_dir.rglob("*.py"):
+        if path.name.startswith("_"):
+            continue
+        rel_parts = path.relative_to(transform_dir).parts[:-1]
+        if any(p == "__pycache__" or p.startswith(".") for p in rel_parts):
+            continue
+        out.append(path)
+    return out
+
+
 def discover_package_models(root: PackageRoot) -> list[SQLModel]:
     """Discover one installed package's models, namespaced into the project.
 
@@ -225,6 +260,25 @@ def discover_package_models(root: PackageRoot) -> list[SQLModel]:
 
     models: list[SQLModel] = []
     for m in raw:
+        if m.python is not None:
+            # No SQL to rewrite. The package's own names are mapped at the
+            # other end instead: ref("silver.customers") inside the package
+            # resolves through ref_aliases to crm_silver.customers.
+            target_schema = root.schema_for(m.schema).lower()
+            aliases = {
+                d.lower(): mapping[d.lower()] for d in m.depends_on if d.lower() in mapping
+            }
+            models.append(
+                replace(
+                    m,
+                    schema=target_schema,
+                    full_name=f"{target_schema}.{m.name}",
+                    depends_on=[mapping.get(d.lower(), d) for d in m.depends_on],
+                    package=root.name,
+                    python=replace(m.python, ref_aliases=aliases),
+                )
+            )
+            continue
         query = m.query
         try:
             refs = find_table_refs(query)
@@ -433,7 +487,11 @@ def _apply_macro_hashes(models: list[SQLModel], macro_dirs: list[Path]) -> None:
     if not defs:
         return
     for model in models:
-        called = {c.lower() for c in _CALL_RE.findall(model.query)}
+        # A Python model has no query; its SQL, if any, is in string literals
+        # in the source, which the same scan reaches (an unrelated Python call
+        # that happens to share a macro's name only costs an extra rebuild).
+        text = model.sql if model.is_python else model.query
+        called = {c.lower() for c in _CALL_RE.findall(text)}
         digests = sorted({d for name in called & defs.keys() for d in defs[name]})
         if not digests:
             continue
@@ -621,8 +679,11 @@ def _compute_upstream_hash(model: SQLModel, model_map: dict[str, SQLModel]) -> s
             # Without the macro fingerprint (see SQLModel.definition_hash).
             # A model built by hand with content_hash set directly has no
             # macro_hash, and its content_hash is used as is.
+            outside_code = dep_model.macro_hash or (
+                dep_model.python is not None and dep_model.python.helper_hash
+            )
             upstream_hashes.append(
-                dep_model.definition_hash if dep_model.macro_hash else dep_model.content_hash
+                dep_model.definition_hash if outside_code else dep_model.content_hash
             )
             upstream_hashes.append(dep_model.upstream_hash)
     return hashlib.sha256("".join(upstream_hashes).encode()).hexdigest()[:16]

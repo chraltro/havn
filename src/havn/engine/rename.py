@@ -70,6 +70,7 @@ UNPARSED = "unparsed"
 POSITION = "position_mismatch"
 PACKAGE = "installed_package"
 CONFIG_EXPRESSION = "config_expression"
+PYTHON = "python_model"
 
 # Where installed packages live. Nothing under it is ever edited: the next
 # ``havn packages install`` deletes the checkout, so a rename written there is
@@ -77,6 +78,11 @@ CONFIG_EXPRESSION = "config_expression"
 PACKAGES_DIR = "havn_packages"
 
 PACKAGE_MESSAGE = "installed package; edit the package source"
+
+PYTHON_MESSAGE = (
+    "Python model; the column is named in code, which a rename does not "
+    "edit. Change it there by hand"
+)
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -878,7 +884,7 @@ def find_column_references(
 
     def scan_directives(model: Any) -> None:
         key = model.full_name.lower()
-        if key in scanned_directives:
+        if key in scanned_directives or getattr(model, "is_python", False):
             return
         scanned_directives.add(key)
         report.sites.extend(_directive_sites(model, root, column))
@@ -970,6 +976,9 @@ def _index_definition(
 ) -> bool:
     """Record the defining site in the target model. True if it was found."""
     path = _model_path(target, root)
+    if getattr(target, "is_python", False):
+        report.blocked.append(Blocker(PYTHON, target.full_name, path, PYTHON_MESSAGE))
+        return False
     parsed = getattr(target, "ast", None) or parse_sql(target.query)
     if parsed is None:
         report.blocked.append(
@@ -1058,6 +1067,11 @@ def _index_downstream(
     the caller knows to carry the rename on to the model's own children.
     """
     path = _model_path(model, root)
+    if getattr(model, "is_python", False):
+        # Reading the column through ref() is invisible to a SQL index, so
+        # the model is a blocker rather than a silent miss.
+        report.blocked.append(Blocker(PYTHON, model.full_name, path, PYTHON_MESSAGE))
+        return False
     parsed = getattr(model, "ast", None) or parse_sql(model.query)
     if parsed is None:
         report.blocked.append(Blocker(UNPARSED, model.full_name, path, "does not parse"))
@@ -1496,6 +1510,8 @@ def schemas_from_models(models: list[Any]) -> dict[str, list[tuple[str, str]]]:
     """
     found: dict[str, list[tuple[str, str]]] = {}
     for model in models:
+        if getattr(model, "is_python", False):
+            continue
         parsed = getattr(model, "ast", None) or parse_sql(
             model.query or strip_config_comments(model.sql)
         )

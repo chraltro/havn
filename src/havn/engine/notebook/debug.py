@@ -103,12 +103,9 @@ def generate_debug_notebook(
             f"Edit and run to test fixes:"
         ),
     })
-    cells.append({
-        "id": _make_cell_id(),
-        "type": "sql",
-        "source": target.sql,
-        "outputs": [],
-    })
+    from havn.engine.notebook.conversion import _model_cell
+
+    cells.append({"id": _make_cell_id(), **_model_cell(target)})
 
     # Assertion failure details
     if assertion_failures:

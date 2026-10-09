@@ -681,7 +681,8 @@ def _run_case(
 
     # A narrow mock only distorts the result when the model expands a star:
     # an explicit column list is unaffected by columns the mock leaves out.
-    star_model = _selects_star(sql_model.query)
+    # A Python model's projection is not known statically; keep the warning.
+    star_model = True if sql_model.is_python else _selects_star(sql_model.query)
 
     conn = duckdb.connect(":memory:")
     try:
@@ -701,10 +702,27 @@ def _run_case(
             res.warnings.extend(warnings)
             mapping[ref] = table_name
 
-        try:
-            rewritten = rewrite_table_refs(sql_model.query, mapping)
-        except SQLRewriteError as e:
-            return finish("error", f"could not rewrite model SQL: {e}")
+        if sql_model.is_python:
+            # The function runs for real, on this in-memory connection, and
+            # its ref() returns the mocks: ref_map is the same mapping the
+            # SQL rewrite below uses. Its result is staged like a build's.
+            from havn.engine.transform.python_models import (
+                PythonModelError,
+                run_python_model,
+            )
+
+            try:
+                staged = run_python_model(
+                    conn, sql_model, ref_map=mapping, is_incremental=False,
+                )
+            except PythonModelError as e:
+                return finish("error", f"model function failed: {e}")
+            rewritten = f"SELECT * FROM {staged}"
+        else:
+            try:
+                rewritten = rewrite_table_refs(sql_model.query, mapping)
+            except SQLRewriteError as e:
+                return finish("error", f"could not rewrite model SQL: {e}")
 
         try:
             conn.execute(

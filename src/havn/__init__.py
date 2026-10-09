@@ -17,6 +17,8 @@ except PackageNotFoundError:
 
 # Re-export decorators for user-facing macros
 from havn.engine.macros import macro, table_macro  # noqa: F401
+# ...and the decorator for Python models (transform/**/*.py)
+from havn.engine.model_decorator import model  # noqa: F401
 
 
 _TEXT_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"

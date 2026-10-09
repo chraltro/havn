@@ -579,6 +579,21 @@ def analyze_impact(
         if not model:
             continue
 
+        if model_name in direct_deps and getattr(model, "is_python", False):
+            # Which columns a function reads cannot be seen without running
+            # it, so a Python consumer is reported as possibly affected.
+            impacts.append(ImpactRecord(
+                model_name=model_name,
+                impact_type="direct",
+                columns_affected=["*"],
+                fix_suggestion=(
+                    f"Python model {model.path.name}: check how it uses "
+                    f"{source_name}; column use inside a function is not traced."
+                ),
+                lines=[],
+            ))
+            continue
+
         if model_name in direct_deps:
             # Analyze which columns are referenced
             col_refs, uses_star, lines = _extract_column_refs_from_sql(model.sql, source_name)

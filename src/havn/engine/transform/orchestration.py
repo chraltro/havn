@@ -11,6 +11,7 @@ from typing import Callable
 
 import duckdb
 from rich.console import Console
+from rich.markup import escape
 
 from havn.engine.database import ensure_meta_table, log_run
 
@@ -421,6 +422,7 @@ def build_one_model(
     if stale is not None:
         return stale
 
+    py_output: list[str] = []
     try:
         schema_changes: list[str] = []
         duration_ms, row_count = execute_model(
@@ -434,6 +436,7 @@ def build_one_model(
             force=force,
             run_id=pipeline_run_id,
             query_rewriter=query_rewriter,
+            python_output=py_output,
         )
         _update_state(conn, model, duration_ms, row_count)
 
@@ -441,6 +444,7 @@ def build_one_model(
         console.print(f"  [green]done[/green]  {label}{suffix}")
         for change in schema_changes:
             console.print(f"         [cyan]schema[/cyan]  {change}")
+        _print_python_output(py_output)
 
         # Capture snapshot for Pipeline Rewind
         if project_dir and run_id:
@@ -467,7 +471,7 @@ def build_one_model(
             _save_assertions(conn, model, assertion_results)
         _log_build(
             conn, model, duration_ms, row_count, schema_changes,
-            assertion_results, pipeline_run_id,
+            assertion_results, pipeline_run_id, output="".join(py_output),
         )
         if assertion_results:
             for ar in assertion_results:
@@ -515,11 +519,36 @@ def build_one_model(
         return ModelOutcome("built", duration_ms, row_count)
 
     except Exception as e:
-        log_run(conn, "transform", model.full_name, "error", error=str(e), pipeline_run_id=pipeline_run_id)
-        console.print(f"  [red]fail[/red]  {label}: {e}")
+        log_run(
+            conn, "transform", model.full_name, "error", error=str(e),
+            log_output=getattr(e, "output", None) or "".join(py_output) or None,
+            pipeline_run_id=pipeline_run_id,
+        )
+        console.print(f"  [red]fail[/red]  {label}: {escape(str(e))}")
+        _print_python_output(py_output)
         results[model.full_name] = "error"
         blocked.add(model.full_name)
         return ModelOutcome("error", error=str(e))
+
+
+_PRINTED_LINES_SHOWN = 20
+
+
+def _print_python_output(chunks: list[str]) -> None:
+    """Echo what a Python model printed, indented under its line.
+
+    The run log keeps all of it; the console shows the last few lines, which
+    is where the useful part of a long progress log is.
+    """
+    text = "".join(chunks).rstrip()
+    if not text:
+        return
+    lines = text.splitlines()
+    if len(lines) > _PRINTED_LINES_SHOWN:
+        console.print(f"         [dim]... {len(lines) - _PRINTED_LINES_SHOWN} more line(s) in the run log[/dim]")
+        lines = lines[-_PRINTED_LINES_SHOWN:]
+    for line in lines:
+        console.print(f"         [dim]|[/dim] {escape(line)}", highlight=False)
 
 
 def detect_run_anomalies(

@@ -41,7 +41,12 @@ def extract_column_lineage(
     Tracing several models in one pass? Call
     :func:`havn.engine.sql_analysis.fetch_column_catalog` once and pass the
     result as ``column_catalog`` so the catalog is not re-read per model.
+
+    A Python model has no SQL to trace and returns ``{}``: which input column
+    a function's output came from is not knowable without running it.
     """
+    if model.is_python:
+        return {}
     return _extract_column_lineage_impl(
         query=model.query,
         depends_on=model.depends_on,
@@ -157,7 +162,9 @@ def _validate_snapshot_config(models: list[SQLModel]) -> list[ValidationError]:
     """
     errors: list[ValidationError] = []
     for model in models:
-        config = parse_config(model.sql)
+        # A Python model has no @config header to read the raw keys from;
+        # its settings are checked through the model's own attributes.
+        config = {} if model.is_python else parse_config(model.sql)
         is_snapshot = model.materialized == "snapshot"
 
         if not is_snapshot:
@@ -478,6 +485,16 @@ def validate_models(
             )
 
     for model in models:
+        if model.is_python:
+            # What discovery read off the file: syntax, @model keys, the
+            # function's parameters, dynamic ref() calls. The table and
+            # dependency checks below (4-7) apply to it like any model; the
+            # SQL-level ones in between do not.
+            from .python_models import python_validation_errors
+
+            errors.extend(python_validation_errors(model))
+            continue
+
         # 1. Parse check. ``model.ast`` is the tree discovery already parsed.
         parsed = model.ast
         if parsed is None:
@@ -615,10 +632,14 @@ def validate_models(
 
     # --- Additional pre-build validations ---
 
-    errors.extend(_validate_config_keys(models))
+    # The @config checks read a SQL file's header; a Python model's keys were
+    # checked against PYTHON_CONFIG_KEYS when it was discovered. Tags and the
+    # snapshot settings mean the same thing in both, so those run on both.
+    sql_models = [m for m in models if not m.is_python]
+    errors.extend(_validate_config_keys(sql_models))
     errors.extend(_validate_tags(models))
     errors.extend(_validate_snapshot_config(models))
-    errors.extend(_validate_microbatch_config(models))
+    errors.extend(_validate_microbatch_config(sql_models))
 
     # Default landing schemas if not provided
     _landing = {s.lower() for s in landing_schemas} if landing_schemas else {"landing"}
@@ -1001,6 +1022,15 @@ def impact_analysis(
         for ds_name in downstream:
             ds_model = model_map.get(ds_name)
             if not ds_model:
+                continue
+            if ds_model.is_python:
+                # Column use inside a function cannot be traced statically.
+                # A Python consumer of the target is reported as possibly
+                # affected rather than silently left out.
+                if any(d.lower() == target_key for d in ds_model.depends_on):
+                    affected_columns.append({
+                        "model": ds_name, "column": column, "clause": "python",
+                    })
                 continue
             lineage = extract_column_lineage(ds_model, conn, column_catalog=catalog)
             for out_col, sources in lineage.items():
