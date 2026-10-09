@@ -124,7 +124,7 @@ def _discover_models_cached(transform_dir: Path):
     """Discover project and package models, with file-mtime-based caching.
 
     The cache key covers every ``.sql`` file the DAG is built from, including
-    each installed package's, plus ``havn_packages.lock`` itself: installing
+    each installed package's, every macro file, plus ``havn_packages.lock`` itself: installing
     or upgrading a package changes the model list without touching a single
     file under ``transform/``.
     """
@@ -144,6 +144,15 @@ def _discover_models_cached(transform_dir: Path):
     for root in roots:
         for sql_file in sorted(root.transform_dir.rglob("*.sql")):
             current_mtimes[str(sql_file)] = sql_file.stat().st_mtime
+    # A model's hash includes the macros it calls, so a macro edit changes
+    # which models count as modified.
+    macro_dirs = [project_dir / "macros"] if transform_dir.name == "transform" else []
+    macro_dirs += [root.macros_dir for root in roots]
+    for macro_dir in macro_dirs:
+        if macro_dir.is_dir():
+            for macro_file in sorted(macro_dir.rglob("*")):
+                if macro_file.suffix in (".py", ".sql"):
+                    current_mtimes[str(macro_file)] = macro_file.stat().st_mtime
 
     if (
         _model_cache["models"] is not None

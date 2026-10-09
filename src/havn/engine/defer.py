@@ -452,7 +452,10 @@ def snapshot_defer_target(
     try:
         copier = duckdb.connect()
         copier.execute(f"ATTACH '{literal}' AS defer_src (READ_ONLY)")
-        copier.execute(f"ATTACH '{out.as_posix()}' AS defer_snap (TYPE DUCKDB)")
+        # The temp dir comes from the environment (a user called O'Brien has
+        # a quote in TEMP), so it is escaped exactly like the source path.
+        out_literal = out.as_posix().replace("'", "''")
+        copier.execute(f"ATTACH '{out_literal}' AS defer_snap (TYPE DUCKDB)")
         copier.execute("COPY FROM DATABASE defer_src TO defer_snap")
         copier.execute("DETACH defer_snap")
         copier.execute("DETACH defer_src")

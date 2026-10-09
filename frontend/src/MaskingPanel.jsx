@@ -15,7 +15,7 @@ const CATEGORY_COLORS = {
 const CATEGORY_ORDER = ['general', 'pii', 'financial', 'analytics'];
 const CATEGORY_LABELS = { general: 'General', pii: 'PII', financial: 'Financial', analytics: 'Analytics' };
 
-function emptyPolicy(authRequired) {
+function emptyPolicy(authEnabled) {
   // When auth is disabled the local user is auto-admin, so the legacy default
   // of exempted_roles=['admin'] makes new policies silently inert for the
   // only user who exists. Default to no exemption in no-auth mode so the
@@ -23,7 +23,7 @@ function emptyPolicy(authRequired) {
   return {
     schema_name: '', table_name: '', column_name: '', method: 'hash',
     method_config: {}, condition_column: '', condition_value: '',
-    exempted_roles: authRequired ? ['admin'] : [],
+    exempted_roles: authEnabled ? ['admin'] : [],
   };
 }
 
@@ -309,7 +309,11 @@ function PolicyFormRow({ initial, methods, onSave, onCancel, saving, colSpan }) 
 /* ------------------------------------------------------------------ */
 
 export default function MaskingPanel({ showConfirm }) {
-  const { authRequired } = useAuth();
+  const { authEnabled, currentUser } = useAuth();
+  // Policies are a security control: only admins may change them (the API
+  // answers 403 to anyone else), so the controls are not offered.
+  // With auth off the local user is an admin, so this covers both modes.
+  const canManage = currentUser?.role === 'admin';
   const [policies, setPolicies] = useState([]);
   const [methods, setMethods] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -417,7 +421,7 @@ export default function MaskingPanel({ showConfirm }) {
 
   // Build initial form data for the inline form
   const formInitial = useMemo(() => {
-    if (formMode === 'new') return emptyPolicy(authRequired);
+    if (formMode === 'new') return emptyPolicy(authEnabled);
     if (formMode != null) {
       const p = policies.find(pol => pol.id === formMode);
       if (p) return {
@@ -432,8 +436,8 @@ export default function MaskingPanel({ showConfirm }) {
         exempted_roles: p.exempted_roles || ['admin'],
       };
     }
-    return emptyPolicy(authRequired);
-  }, [formMode, policies, authRequired]);
+    return emptyPolicy(authEnabled);
+  }, [formMode, policies, authEnabled]);
 
   const COL_COUNT = 7;
 
@@ -447,7 +451,7 @@ export default function MaskingPanel({ showConfirm }) {
             <span style={s.countBadge}>{policies.length}</span>
           )}
         </div>
-        <button style={s.btnPrimary} onClick={handleOpenNew} disabled={formMode === 'new'} title={formMode === 'new' ? 'Finish the open form first' : 'Add a masking policy'}>+ Add Policy</button>
+        {canManage && <button style={s.btnPrimary} onClick={handleOpenNew} disabled={formMode === 'new'} title={formMode === 'new' ? 'Finish the open form first' : 'Add a masking policy'}>+ Add Policy</button>}
       </div>
 
       {/* Filter bar */}
@@ -495,7 +499,7 @@ export default function MaskingPanel({ showConfirm }) {
             <div style={s.emptyIcon}>--</div>
             <div style={s.emptyTitle}>No masking policies configured</div>
             <div style={s.emptyText}>Add a policy to protect sensitive data in query results.</div>
-            <button style={{ ...s.btnPrimary, marginTop: 12 }} onClick={handleOpenNew}>+ Add Policy</button>
+            {canManage && <button style={{ ...s.btnPrimary, marginTop: 12 }} onClick={handleOpenNew}>+ Add Policy</button>}
           </div>
         ) : (
           <table style={s.table}>
@@ -567,10 +571,10 @@ export default function MaskingPanel({ showConfirm }) {
                       </span>
                     </td>
                     <td style={{ ...s.td, textAlign: 'right' }}>
-                      <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                      {canManage && <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
                         <button style={s.actionBtn} onClick={() => handleEdit(p)} disabled={formMode != null} title={formMode != null ? 'Finish the open form first' : 'Edit'}>Edit</button>
                         <button style={s.actionBtnDanger} onClick={() => handleDelete(p.id)} disabled={formMode != null} title={formMode != null ? 'Finish the open form first' : 'Delete'}>Delete</button>
-                      </div>
+                      </div>}
                     </td>
                   </tr>
                 );

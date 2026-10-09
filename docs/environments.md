@@ -26,7 +26,14 @@ environments:
       path: ":memory:"             # In-memory database for tests
 ```
 
-Each environment can override the `database.path` setting. When no environment is specified, the top-level `database.path` is used.
+Each environment can override the `database.path` setting. The active environment is resolved in this order:
+
+1. `--env <name>` on the command line
+2. the name in `.havn-env` (written by `havn env use`)
+3. `dev`, when an environment of that name is defined
+4. otherwise none: the top-level `database.path` is used
+
+A name in step 1 or 2 that `project.yml` does not define is an error, so a typo such as `--env prdo` never builds into a different warehouse. `havn env show` reports the same resolution, including which step picked it. An environment with nothing under it (`dev:`) is valid and means "no overrides".
 
 ## Using Environments
 
@@ -49,7 +56,7 @@ havn env show
 # List all available environments
 havn env list
 
-# Reset to default (no environment override)
+# Clear .havn-env (back to dev if defined, else the top-level database)
 havn env reset
 ```
 

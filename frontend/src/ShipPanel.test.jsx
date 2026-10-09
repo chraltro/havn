@@ -9,6 +9,8 @@ const mergePr = vi.fn();
 const buildPr = vi.fn();
 const requestPrChanges = vi.fn();
 const updatePr = vi.fn();
+const getGitStatus = vi.fn();
+const initGit = vi.fn();
 
 vi.mock("./api", () => ({
   api: {
@@ -22,6 +24,8 @@ vi.mock("./api", () => ({
     getDeployTargets: () => Promise.resolve({ environments: [{ name: "prod", production: true, active: false, exists: true }], default_ref: "main" }),
     getDeployPlan: () => Promise.resolve({ models: [], commit: "abc" }),
     listDeploys: () => Promise.resolve([]),
+    getGitStatus: (...a) => getGitStatus(...a),
+    initGit: (...a) => initGit(...a),
   },
 }));
 vi.mock("./AuthContext", () => ({ useAuth: () => ({ currentUser: { username: "ingrid" } }) }));
@@ -93,7 +97,8 @@ describe("layoutColumns", () => {
 
 describe("ShipPanel", () => {
   beforeEach(() => {
-    for (const f of [listPrs, getPrReview, approvePr, mergePr, buildPr, requestPrChanges, updatePr]) f.mockReset();
+    for (const f of [listPrs, getPrReview, approvePr, mergePr, buildPr, requestPrChanges, updatePr, getGitStatus, initGit]) f.mockReset();
+    getGitStatus.mockResolvedValue({ is_git_repo: true });
     listPrs.mockResolvedValue([PR]);
     getPrReview.mockResolvedValue(review());
   });
@@ -151,6 +156,17 @@ describe("ShipPanel", () => {
     const h = renderShip();
     fireEvent.click(await screen.findByRole("button", { name: "Create a change" }));
     expect(h.onNavigate).toHaveBeenCalledWith("Git:Reviews");
+  });
+
+  it("offers git init in place of the deploy box when the project is not a repository", async () => {
+    listPrs.mockResolvedValue([]);
+    getGitStatus.mockResolvedValueOnce({ is_git_repo: false }).mockResolvedValue({ is_git_repo: true });
+    initGit.mockResolvedValue({});
+    renderShip();
+    fireEvent.click(await screen.findByRole("button", { name: "Initialize git" }));
+    expect(screen.queryByLabelText("Deploy")).toBeNull();
+    await waitFor(() => expect(initGit).toHaveBeenCalledWith("main"));
+    expect(await screen.findByRole("button", { name: "Create a change" })).toBeTruthy();
   });
 
   it("stops an author approving their own change and offers the waiver", async () => {

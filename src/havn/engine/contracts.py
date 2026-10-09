@@ -123,6 +123,13 @@ class Contract:
     them without a broken file taking the whole run down.
     """
 
+    def __post_init__(self) -> None:
+        # Model names are lowercase (DuckDB identifiers are case-insensitive
+        # and discovery lowercases them), so `model: silver.Customers` must
+        # name the same model and find its state and profile rows.
+        if isinstance(self.model, str):
+            self.model = self.model.strip().lower()
+
 
 @dataclass
 class ContractSchemaFinding:
@@ -585,6 +592,42 @@ def describe_with_nullability(
     return columns, nullability
 
 
+def _previous_profile(conn: duckdb.DuckDBPyConnection, model: str) -> tuple | None:
+    """The profile of the build before the latest one, or None.
+
+    ``model_profiles`` holds only the latest profile, which every build
+    overwrites before contracts run, so reading it made ``{previous}`` the
+    current count and relative thresholds could never fail. The append-only
+    ``profile_history`` keeps every build: the newest row is the build being
+    checked, the one before it is the baseline. A single history row means the
+    model has been built once and has no baseline yet.
+
+    Only when there is no history at all (a warehouse from before
+    profile_history existed, or a hand-seeded profile) does the stored
+    ``model_profiles`` row stand in as the baseline.
+    """
+    try:
+        history = conn.execute(
+            "SELECT row_count, null_percentages, distinct_counts "
+            "FROM _havn.profile_history WHERE model_path = ? "
+            # rowid breaks ties between two builds inside one clock tick.
+            "ORDER BY profiled_at DESC, rowid DESC LIMIT 2",
+            [model],
+        ).fetchall()
+    except Exception:
+        history = []
+    if history:
+        return history[1] if len(history) > 1 else None
+    try:
+        return conn.execute(
+            "SELECT row_count, null_percentages, distinct_counts "
+            "FROM _havn.model_profiles WHERE model_path = ?",
+            [model],
+        ).fetchone()
+    except Exception:
+        return None
+
+
 def _resolve_previous(
     conn: duckdb.DuckDBPyConnection,
     model: str,
@@ -600,15 +643,7 @@ def _resolve_previous(
     if not matches:
         return expr, None
 
-    # Look up previous profile data
-    try:
-        row = conn.execute(
-            "SELECT row_count, null_percentages, distinct_counts "
-            "FROM _havn.model_profiles WHERE model_path = ?",
-            [model],
-        ).fetchone()
-    except Exception:
-        row = None
+    row = _previous_profile(conn, model)
 
     if not row:
         return None, f"No baseline available yet for {model}"
@@ -787,7 +822,7 @@ def evaluate_contract(
     exists = conn.execute(
         "SELECT COUNT(*) FROM information_schema.tables "
         "WHERE table_catalog = current_database() "
-        "AND table_schema = ? AND table_name = ?",
+        "AND lower(table_schema) = lower(?) AND lower(table_name) = lower(?)",
         [schema, name],
     ).fetchone()[0] > 0
 

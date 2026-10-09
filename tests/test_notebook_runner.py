@@ -170,3 +170,29 @@ def test_run_notebook_with_all_cell_types(tmp_path):
     assert all(not cr["has_error"] for cr in result["cell_results"])
     assert result["last_run_ms"] >= 0
     conn.close()
+
+
+def test_run_notebook_stop_on_error():
+    """Pipeline mode stops at the first failing cell; interactive mode
+    (the default) runs every cell."""
+    def _nb():
+        return {"title": "t", "cells": [
+            {"id": "a", "type": "code", "source": "x = 1"},
+            {"id": "b", "type": "code", "source": "1 / 0"},
+            {"id": "c", "type": "code", "source": "x = 3", "outputs": [{"type": "text", "text": "old"}]},
+        ]}
+
+    conn = duckdb.connect(":memory:")
+    started = []
+    stopped = run_notebook(
+        conn, _nb(), stop_on_error=True, on_cell_start=lambda c: started.append(c["id"])
+    )
+    assert [r["cell_id"] for r in stopped["cell_results"]] == ["a", "b"]
+    assert stopped["skipped_cells"] == ["c"]
+    assert stopped["cells"][2]["outputs"] == []  # stale output cleared
+    assert started == ["a", "b"]
+
+    full = run_notebook(conn, _nb())
+    assert [r["cell_id"] for r in full["cell_results"]] == ["a", "b", "c"]
+    assert "skipped_cells" not in full
+    conn.close()

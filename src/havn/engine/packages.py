@@ -277,8 +277,20 @@ def read_lock(project_dir: Path) -> dict[str, LockEntry]:
     except Exception as exc:
         logger.warning("Could not read %s: %s", path, exc)
         return {}
+    # Valid YAML of the wrong shape (a bare list, a string) is as unreadable
+    # as invalid YAML; without this check ``raw.get`` crashed discovery.
+    if not isinstance(raw, dict):
+        logger.warning(
+            "Ignoring %s: expected a mapping with a 'packages' list, got %s",
+            path, type(raw).__name__,
+        )
+        return {}
+    items = raw.get("packages", []) or []
+    if not isinstance(items, list):
+        logger.warning("Ignoring %s: 'packages' is not a list", path)
+        return {}
     entries: dict[str, LockEntry] = {}
-    for item in raw.get("packages", []) or []:
+    for item in items:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name", ""))

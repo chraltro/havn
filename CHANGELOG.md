@@ -4,6 +4,88 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
+### Security
+
+- **A viewer could write to the warehouse through `/api/query`.** The read-only
+  check misread DuckDB escape strings (`E'\''`), dollar quotes, nested block
+  comments and quoted identifiers, so a second statement could ride along
+  (`DROP TABLE`, or making yourself admin). `EXPLAIN ANALYZE` also ran writes.
+  Queries are now split the way DuckDB reads them and checked once more by
+  DuckDB's own parser: exactly one `SELECT` or `EXPLAIN` of one.
+- **Database files through the file API.** Any reader could download
+  `warehouse.duckdb` or a backup, which holds every column unmasked. The file
+  API now refuses to read, move or delete warehouse, WAL and backup files.
+- **Masking bypasses.** `to_json(p)`, a bare row reference, `COLUMNS(...)`,
+  `PIVOT`, `UNPIVOT` and `SUMMARIZE` returned masked columns in clear text to
+  non-exempt roles; those queries are now refused. Creating, changing or
+  deleting a masking policy needs an admin (editors could remove them), and
+  the Masking page only offers those controls to admins.
+
+### Fixed
+
+- **Jobs skipped data-quality checks.** `havn jobs run`, scheduled jobs and
+  jobs started from the UI built models without running their `@assert`s,
+  and stored every build as good. Jobs now build models the way `havn
+  transform` does: assertions run, a failed assertion blocks everything
+  downstream, and tables are profiled for anomaly detection. A job still
+  rebuilds every model by default; `full_refresh: false` in the job file
+  skips unchanged ones (the scaffold's `incremental` job sets it). `havn jobs run` gains the `--force` and
+  `--env` options the docs already described, and exits non-zero on failure.
+- **Job and script timeouts.** A job's `timeout_minutes` now also limits the
+  step that is running, notebooks run under the same timeout as scripts, and
+  the idle check (no output, no CPU for 30 minutes) works again. A script can
+  ask for longer with `# @havn: idle_timeout=<seconds>` (a notebook, in its
+  first code cell). A notebook used as a
+  pipeline step stops at its first failing cell.
+- **Cron schedules.** `*/2` in the day-of-month field fired on even days, `*/3`
+  in the month field picked the wrong months, `MON`, `JAN`, weekday `7` and
+  `5/15` never fired, and a day-of-month plus day-of-week schedule needed both
+  to match. Invalid schedules were accepted and never ran. Weekly and monthly
+  jobs showed no next run.
+- **Change detection.** Editing a macro now rebuilds the models that call it,
+  and an edit to the whitespace inside a string literal is no longer ignored.
+  Model names are case-insensitive, so `silver/Customers.sql` and
+  `FROM silver.customers` are the same model (a mixed-case model rebuilds once).
+- **Parallel runs** of a selection could build a model before an upstream it
+  reached through an unselected view, and ignored `@source_freshness`.
+- **Microbatch** windows processed while still open are redone once they
+  close; late rows in them were lost with `lookback=0`.
+- **Assertions and contracts.** A compound `row_count` assertion passed on an
+  empty table, and `{previous}` in a contract compared a model with itself.
+- **Unit tests** no longer pass when a column is cast to a lossy type, and CSV
+  fixtures keep text such as `01234` as text.
+- **`havn rename-column`** now renames `@config` keys (`unique_key`,
+  `partition_by` and the like), aliases used in `GROUP BY`/`ORDER BY`/
+  `QUALIFY`, and columns read through a subquery, and works on files saved
+  with a byte order mark.
+- **Defer and unit-test mocks** no longer make `schema.table.column` ambiguous
+  when two schemas have a table of the same name.
+- **Selectors:** `path:` accepts Windows paths, and `config.<key>:` matches
+  custom keys and ignores case.
+- **Snapshot models** see a change that moves a `|` between columns.
+- **The semantic layer** quotes identifiers, so a dimension named `group` or
+  `order` works.
+- **Home's "Last run"** showed the length of the slowest step instead of the
+  run: the run log recorded each step at the time it finished.
+- **`havn init`** into a directory that already has files refuses instead of
+  overwriting `.env` and `project.yml`; `--force` adds only missing files.
+- **Environments.** An unknown `--env` or `.havn-env` name is an error
+  instead of silently using another warehouse, and `havn env show` reports the
+  environment builds actually use.
+- **Backups.** `havn backup-verify` and `backup-list` compare against the
+  recorded checksum, a restore is verified first and swapped in atomically,
+  and `--keep` must be at least 1.
+- **`havn mcp`**: build output no longer lands in the JSON-RPC stream.
+- **A new project passes `havn lint`**, and `havn packages list` exists as
+  documented.
+- **CSV connector**: a path containing a quote produces a working script.
+- **Web UI.** Ship offers to initialise git in a project without one; Settings
+  → Resources saves with authentication on and reports errors; undo on a
+  dashboard no longer fires while typing; the agent sidebar recovers when the
+  connection drops mid-answer; opening files quickly no longer shows the wrong
+  file; wiki pages in "Other" are listed; dialogs trap focus and close on
+  Escape; the Query toolbar no longer wraps its buttons.
+
 ## [0.2.30] - 2026-10-09
 
 ### Fixed

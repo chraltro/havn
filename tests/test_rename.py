@@ -1090,3 +1090,135 @@ def test_atomic_write_keeps_the_file_line_endings(tmp_path, ending):
     path.write_bytes(b"SELECT a" + ending + b"FROM t" + ending)
     _atomic_write(path, "SELECT b\nFROM t\n")
     assert path.read_bytes() == b"SELECT b" + ending + b"FROM t" + ending
+
+
+# ---------------------------------------------------------------------------
+# Audit-round regressions
+# ---------------------------------------------------------------------------
+
+
+def _rename_in(tmp_path, files, model, old, new, *, force=False):
+    (tmp_path / "project.yml").write_text("name: t\n")
+    for rel, sql in files.items():
+        path = tmp_path / "transform" / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(sql, bytes):
+            path.write_bytes(sql)
+        else:
+            path.write_text(sql)
+    found = discover_models(tmp_path / "transform")
+    shapes = schemas_from_models(found)
+    report = find_column_references(found, model, old, schemas=shapes, project_dir=tmp_path)
+    apply_rename(tmp_path, plan_rename(report, old, new, force=force, schemas=shapes))
+    return report
+
+
+def test_rename_reaches_config_column_keys(tmp_path):
+    """unique_key / partition_by name output columns; left behind, the merge breaks."""
+    _rename_in(
+        tmp_path,
+        {
+            "silver/customers.sql": (
+                "@config materialized=incremental, unique_key=customer_id, "
+                "incremental_strategy=merge, partition_by=customer_id\n"
+                "SELECT customer_id, name FROM bronze.raw\n"
+            )
+        },
+        "silver.customers", "customer_id", "cust_id",
+    )
+    text = (tmp_path / "transform/silver/customers.sql").read_text()
+    assert "unique_key=cust_id" in text and "partition_by=cust_id" in text
+    assert "incremental_strategy=merge" in text
+
+
+def test_incremental_filter_mention_is_a_blocker(tmp_path):
+    """An expression in @config may mean an upstream's column; never guessed."""
+    (tmp_path / "project.yml").write_text("name: t\n")
+    write(
+        tmp_path, "silver", "c",
+        "@config materialized=incremental, unique_key=id, "
+        "incremental_filter=WHERE updated_at > (SELECT max(updated_at) FROM {this})\n"
+        "SELECT id, updated_at FROM bronze.raw\n",
+    )
+    found = discover_models(tmp_path / "transform")
+    report = find_column_references(found, "silver.c", "updated_at", project_dir=tmp_path)
+    assert any(b.reason == "config_expression" for b in report.blocked)
+
+
+def test_rename_follows_alias_into_order_by(tmp_path):
+    """ORDER BY customer_id names the alias; renaming only the alias broke the build."""
+    _rename_in(
+        tmp_path,
+        {"silver/customers.sql": "SELECT id AS customer_id, name FROM bronze.raw ORDER BY customer_id\n"},
+        "silver.customers", "customer_id", "cust_id",
+    )
+    text = (tmp_path / "transform/silver/customers.sql").read_text()
+    assert text.strip().endswith("ORDER BY cust_id")
+    conn = duckdb.connect()
+    conn.execute("CREATE SCHEMA bronze")
+    conn.execute("CREATE TABLE bronze.raw (id INT, name TEXT)")
+    conn.execute(text)
+
+
+def test_downstream_directives_on_another_tables_column_are_left_alone(tmp_path):
+    """gold.orders asserts on bronze.orders.customer_id, not the renamed column."""
+    _rename_in(
+        tmp_path,
+        {
+            "silver/customers.sql": "SELECT customer_id, name FROM bronze.raw_customers\n",
+            "gold/orders.sql": (
+                "@config materialized=table\n"
+                "@assert no_nulls(customer_id)\n"
+                "SELECT o.order_id, o.customer_id, c.name\n"
+                "FROM bronze.orders o JOIN silver.customers c ON o.customer_id = c.customer_id\n"
+            ),
+        },
+        "silver.customers", "customer_id", "cust_id",
+    )
+    text = (tmp_path / "transform/gold/orders.sql").read_text()
+    assert "@assert no_nulls(customer_id)" in text
+    assert "c.cust_id" in text and "o.customer_id" in text
+
+
+def test_downstream_directives_follow_a_re_export(tmp_path):
+    """A model that re-exports the column under its name renames its @assert too."""
+    _rename_in(
+        tmp_path,
+        {
+            "silver/customers.sql": "SELECT customer_id FROM bronze.raw\n",
+            "gold/report.sql": "@assert no_nulls(customer_id)\nSELECT customer_id FROM silver.customers\n",
+        },
+        "silver.customers", "customer_id", "cust_id",
+    )
+    assert "no_nulls(cust_id)" in (tmp_path / "transform/gold/report.sql").read_text()
+
+
+def test_rename_reaches_through_a_derived_table(tmp_path):
+    """The inner reference was renamed while the outer s.customer_id was not."""
+    _rename_in(
+        tmp_path,
+        {
+            "silver/customers.sql": "SELECT customer_id, name FROM bronze.raw\n",
+            "gold/x.sql": "SELECT s.customer_id FROM (SELECT customer_id FROM silver.customers) s\n",
+        },
+        "silver.customers", "customer_id", "cust_id",
+    )
+    assert (tmp_path / "transform/gold/x.sql").read_text() == (
+        "SELECT s.cust_id FROM (SELECT cust_id FROM silver.customers) s\n"
+    )
+
+
+def test_rename_in_a_file_with_a_bom(tmp_path):
+    """Discovery drops the BOM; apply_rename read it, so every offset was one off."""
+    _rename_in(
+        tmp_path,
+        {
+            "silver/customers.sql": (
+                b"\xef\xbb\xbf@config materialized=table\nSELECT customer_id, name FROM bronze.raw\n"
+            )
+        },
+        "silver.customers", "customer_id", "cust_id",
+    )
+    raw = (tmp_path / "transform/silver/customers.sql").read_bytes()
+    assert raw.startswith(b"\xef\xbb\xbf")
+    assert b"customer_id AS cust_id" in raw

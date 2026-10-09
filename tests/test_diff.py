@@ -731,3 +731,55 @@ def test_ci_diff_comment_missing_file():
         assert "not found" in result.get("error", "")
     finally:
         del os.environ["GITHUB_TOKEN"]
+
+
+# ---- Row hash encoding ----
+
+
+def test_row_hash_separator_in_values_does_not_collide():
+    """('x|V:y', 'z') and ('x', 'y|V:z') used to join to the same string."""
+    from havn.engine.diff import _row_hash_expr
+
+    conn = duckdb.connect()
+    conn.execute("CREATE TABLE t (a VARCHAR, b VARCHAR)")
+    rows = [("x|V:y", "z"), ("x", "y|V:z"), ("a\\", "|b"), ("a\\|", "b"), ("a", "\\|b")]
+    conn.executemany("INSERT INTO t VALUES (?, ?)", rows)
+    hashes = conn.execute(f"SELECT {_row_hash_expr(['a', 'b'])} FROM t").fetchall()
+    assert len(set(hashes)) == len(rows)
+
+
+def test_row_hash_unchanged_for_plain_values():
+    """Values without '|' or a backslash keep the pre-escape hash.
+
+    Snapshot (SCD2) tables persist this hash; a different one for every row
+    would close and reopen every row's history on the first run after upgrade.
+    """
+    from havn.engine.diff import _row_hash_expr
+
+    conn = duckdb.connect()
+    got = conn.execute(
+        f"SELECT {_row_hash_expr(['a', 'b'])} FROM (SELECT 'plain' AS a, NULL AS b)"
+    ).fetchone()[0]
+    legacy = conn.execute("SELECT MD5(CONCAT_WS('|', 'V:plain', 'N'))").fetchone()[0]
+    assert got == legacy
+
+
+def test_snapshot_sees_change_that_moves_a_separator(tmp_path):
+    """A snapshot must record a new version when only '|' moved between columns."""
+    from havn.engine.transform import run_transform
+
+    (tmp_path / "project.yml").write_text("name: t\n")
+    conn = duckdb.connect(str(tmp_path / "w.duckdb"))
+    conn.execute("CREATE SCHEMA landing")
+    conn.execute("CREATE TABLE landing.c (id INT, a VARCHAR, b VARCHAR)")
+    conn.execute("INSERT INTO landing.c VALUES (1, 'x|V:y', 'z')")
+    _create_model(
+        tmp_path, "silver", "c_hist",
+        "@config materialized=snapshot, unique_key=id\nSELECT * FROM landing.c\n",
+    )
+    run_transform(conn, tmp_path / "transform", project_dir=tmp_path)
+    conn.execute("UPDATE landing.c SET a = 'x', b = 'y|V:z'")
+    run_transform(conn, tmp_path / "transform", project_dir=tmp_path)
+    versions = conn.execute("SELECT count(*) FROM silver.c_hist").fetchone()[0]
+    conn.close()
+    assert versions == 2

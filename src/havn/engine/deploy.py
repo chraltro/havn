@@ -247,6 +247,14 @@ class _Checkout:
             raise DeployError(f"Invalid ref: {self.ref!r}")
         res = _run_git(self.project_dir, "rev-parse", "--verify", f"{self.ref}^{{commit}}")
         if res.returncode != 0:
+            # A freshly initialised repository has no commits, so even the
+            # default branch does not resolve yet: say what to do about it.
+            head = _run_git(self.project_dir, "rev-parse", "--verify", "HEAD")
+            if head.returncode != 0:
+                raise DeployError(
+                    "Nothing is committed yet. Commit the project (Build → Git) "
+                    "and deploy from there."
+                )
             raise DeployError(f"Unknown ref {self.ref!r}: {res.stderr.strip()}")
         self.sha = res.stdout.strip()
         self.path.parent.mkdir(parents=True, exist_ok=True)

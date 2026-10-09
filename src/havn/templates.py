@@ -627,6 +627,7 @@ tags:
 enabled: true
 retry: 0
 timeout_minutes: 30
+full_refresh: false        # skip models whose SQL and upstream are unchanged
 # schedules:
 #   - "0 * * * *"          # every hour on the hour
 """

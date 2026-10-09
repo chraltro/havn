@@ -208,3 +208,30 @@ class TestAssertions:
         assert len(results) == 1
         assert results[0].passed is False
         assert "Assertion error" in results[0].detail
+
+
+@pytest.mark.parametrize(
+    "expr, passed",
+    [
+        ("row_count > 0 AND amount >= 0", False),
+        ("row_count >= 100 OR row_count = 50", False),
+        # The row-level half is NULL on the stand-in row, which is not a failure.
+        ("row_count >= 0 AND amount >= 0", True),
+        # Only the row_count conjuncts are probed: `amount IS NOT NULL` holds
+        # vacuously on zero rows, but is false on the all-NULL probe row.
+        ("row_count >= 0 AND amount IS NOT NULL", True),
+        ("row_count > 0 AND amount IS NOT NULL", False),
+    ],
+)
+def test_compound_row_count_assertion_on_an_empty_table(db, expr, passed):
+    """An empty table has no rows to violate the row-level form, so a compound
+    `row_count > 0 AND ...` used to pass on zero rows."""
+    db.execute("CREATE SCHEMA IF NOT EXISTS gold")
+    db.execute("CREATE TABLE gold.orders (id INT, amount DOUBLE)")
+    model = SQLModel(
+        path=Path("gold/orders.sql"), name="orders", schema="gold",
+        full_name="gold.orders", sql="", query="SELECT 1", materialized="table",
+        assertions=[expr],
+    )
+    [result] = run_assertions(db, model)
+    assert result.passed is passed

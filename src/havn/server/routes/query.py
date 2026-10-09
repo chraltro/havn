@@ -19,6 +19,7 @@ from havn.server.deps import (
 )
 from havn.engine.masking import apply_masking, list_policies, create_policy, delete_policy
 from havn.engine.masking_rewriter import rewrite_query_with_masking, MaskedColumnAccessError
+from havn.server.routes.masking import MANAGE_MASKING_PERMISSION
 
 logger = logging.getLogger("havn.server")
 
@@ -208,7 +209,8 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
         sql_stripped, re.IGNORECASE | re.DOTALL
     )
     if create_match:
-        _require_permission(request, "write")
+        # Same gate as the /api/masking/policies endpoints (admin only).
+        _require_permission(request, MANAGE_MASKING_PERMISSION)
         schema, table, column, method, exempt_str = create_match.groups()
         method = method.lower()
         if method not in ('hash', 'redact', 'null', 'partial'):
@@ -227,7 +229,7 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
 
     drop_match = re.match(r'^\s*DROP\s+MASKING\s+POLICY\s+([\w-]+)\s*$', sql_stripped, re.IGNORECASE | re.DOTALL)
     if drop_match:
-        _require_permission(request, "write")
+        _require_permission(request, MANAGE_MASKING_PERMISSION)
         policy_id = drop_match.group(1)
         from havn.engine.masking import ensure_masking_table
         from havn.engine.write_queue import cursor_for
@@ -290,6 +292,10 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
                 else:
                     wrapped = sql_to_execute
 
+                # Validate what actually runs, not only what was sent: the
+                # wrapper and the masking rewrite both change the text.
+                if wrapped != sql:
+                    validate_read_only_query(wrapped)
                 result = conn.execute(wrapped, req.params)
                 columns = [desc[0] for desc in result.description]
                 column_types = [str(desc[1]) for desc in result.description]
@@ -337,6 +343,8 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
         duration_ms = int((time.monotonic() - t_start) * 1000)
 
         if query_error:
+            if isinstance(query_error[0], ReadOnlyQueryError):
+                raise HTTPException(query_error[0].status_code, str(query_error[0]))
             raise query_error[0]
         data = query_result["data"]
         # Post-query masking: skip policies already handled by pre-query rewriting

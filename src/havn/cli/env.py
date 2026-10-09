@@ -69,7 +69,13 @@ def env(
             )
             return
 
-        active = _read_env_file(project_dir)
+        from havn.config import UnknownEnvironmentError, resolve_active_environment
+
+        try:
+            active, source = resolve_active_environment(project_dir, environments, strict_env_file=True)
+        except UnknownEnvironmentError as e:
+            console.print(f"[yellow]{e}[/yellow]")
+            active, source = None, "none"
 
         tbl = Table(title="Environments")
         tbl.add_column("", width=2)
@@ -87,7 +93,7 @@ def env(
 
         console.print(tbl)
         if active:
-            console.print(f"\n[dim]Active environment: [bold]{active}[/bold] (from .havn-env)[/dim]")
+            console.print(f"\n[dim]Active environment: [bold]{active}[/bold] ({'default' if source == 'default' else 'from ' + source})[/dim]")
         else:
             console.print("\n[dim]No active environment set. Use [bold]havn env use <name>[/bold] to set one.[/dim]")
 
@@ -114,21 +120,38 @@ def env(
         console.print(f"[green]Active environment set to [bold]{name}[/bold][/green]")
 
     elif action == "show":
-        active = _read_env_file(project_dir)
+        from havn.config import UnknownEnvironmentError, resolve_active_environment
+
+        config_path = project_dir / "project.yml"
+        raw = yaml.safe_load(read_project_text(config_path)) or {}
+        environments = raw.get("environments") or {}
+        # Same resolution as load_project, so what is shown here is the
+        # warehouse the next build actually writes to.
+        try:
+            active, source = resolve_active_environment(project_dir, environments, strict_env_file=True)
+        except UnknownEnvironmentError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+        top_db = (raw.get("database") or {}).get("path", "warehouse.duckdb")
         if active:
-            console.print(f"Active environment: [bold]{active}[/bold]")
+            db_path = ((environments.get(active) or {}).get("database") or {}).get("path") or top_db
+            console.print(f"Active environment: [bold]{active}[/bold] [dim]({db_path})[/dim]")
+            if source == "default":
+                console.print(
+                    "[dim]No .havn-env file; 'dev' is the default when it is defined. "
+                    "Use [bold]havn env use <name>[/bold] to pick another.[/dim]"
+                )
+            else:
+                console.print(f"[dim](from {source})[/dim]")
         else:
-            console.print("Active environment: [bold]default[/bold]")
-            console.print("[dim]No .havn-env file. Use [bold]havn env use <name>[/bold] to set one.[/dim]")
+            console.print(f"Active environment: [bold]none[/bold] [dim](top-level database: {top_db})[/dim]")
+            if environments:
+                console.print("[dim]No .havn-env file. Use [bold]havn env use <name>[/bold] to set one.[/dim]")
 
         # The defer target is part of what "which environment am I on" means:
         # it decides where unbuilt upstreams are read from on the next
         # transform, and that is easy to forget once it is in project.yml.
         if active:
-            config_path = project_dir / "project.yml"
-            raw = yaml.safe_load(read_project_text(config_path)) if config_path.exists() else {}
-            raw = raw or {}
-            environments = raw.get("environments") or {}
             env_raw = environments.get(active) or {}
             target = env_raw.get("defer")
             if target:

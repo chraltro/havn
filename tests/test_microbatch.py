@@ -245,9 +245,35 @@ def test_initial_run_starts_at_begin(events):
     _, row_count = _execute_microbatch(events, model)
 
     assert row_count == 1
-    # begin, begin+1 and today: three windows, all recorded.
+    # begin, begin+1 and today: three windows, all recorded. Today's is
+    # still open, so it is recorded as such and redone once it closes.
     assert len(batch_state(events)) == 3
-    assert {s for _, s, _ in batch_state(events)} == {"done"}
+    assert [s for _, s, _ in batch_state(events)] == ["done", "done", "open"]
+
+
+def test_a_window_processed_while_open_is_redone_after_it_closes(events, monkeypatch):
+    """lookback=0 must not lose rows that arrive later in a window run while open.
+
+    The window was recorded ``done`` while it was still open, so with no
+    lookback the next run started after it and its late rows were never read.
+    """
+    import havn.engine.transform.execution as ex
+
+    model = make_model(begin="2024-01-01", lookback=0)
+    monkeypatch.setattr(ex, "utc_now", lambda: datetime(2024, 1, 2, 10, 0))
+    _execute_microbatch(events, model)  # 01-01 closed, 01-02 open
+    assert [s for _, s, _ in batch_state(events)] == ["done", "open"]
+
+    # A row for 01-02 lands after that run; 01-02's own row (id 1) is at 00:00.
+    events.execute(
+        "INSERT INTO landing.events VALUES (50, TIMESTAMP '2024-01-02 15:00:00')"
+    )
+    monkeypatch.setattr(ex, "utc_now", lambda: datetime(2024, 1, 3, 10, 0))
+    _execute_microbatch(events, model)
+
+    ids = events.execute("SELECT list(id ORDER BY id) FROM gold.events").fetchone()[0]
+    assert ids == [0, 1, 2, 50]
+    assert [s for _, s, _ in batch_state(events)] == ["done", "done", "open"]
 
 
 def test_incremental_run_resumes_with_lookback(events):

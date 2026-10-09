@@ -414,6 +414,9 @@ function AppContent() {
   const [activeFile, setActiveFile] = useState(null);
   const [sidebarFilter, setSidebarFilter] = useState("");
   const activeFileRef = useRef(null);
+  // Bumped by every openFile call; a slower readFile for an earlier click
+  // checks it and drops its result instead of replacing the newer file.
+  const openFileSeqRef = useRef(0);
   // /api/models result, cached for model-path resolution (see resolveModelPath)
   const modelsCacheRef = useRef(null);
   const [fileContent, setFileContent] = useState("");
@@ -688,6 +691,7 @@ function AppContent() {
   }, []);
 
   async function openFile(path, opts = {}) {
+    const seq = ++openFileSeqRef.current;
     path = path.replace(/\\/g, "/");
     if (path.endsWith(".dpnb")) {
       setNotebookPath(path);
@@ -712,10 +716,11 @@ function AppContent() {
     }
     if (dirty && activeFile) {
       const ok = await showConfirm("Unsaved changes", "Discard unsaved changes and open another file?", "Discard", true);
-      if (!ok) return;
+      if (!ok || seq !== openFileSeqRef.current) return;
     }
     try {
       const data = await api.readFile(path);
+      if (seq !== openFileSeqRef.current) return;
       const content = data.content || "";
 
       // Binary file check: look for null bytes in first 1000 chars
@@ -741,7 +746,7 @@ function AppContent() {
           "Open anyway",
           false
         );
-        if (!ok) return;
+        if (!ok || seq !== openFileSeqRef.current) return;
       }
 
       setActiveFile(path);
@@ -752,6 +757,7 @@ function AppContent() {
       setPreviewError(null);
       setActiveTab("Editor");
     } catch (e) {
+      if (seq !== openFileSeqRef.current) return;
       addOutput("error", `Failed to open: ${e.message}`);
     }
   }

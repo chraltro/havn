@@ -354,6 +354,342 @@ def _check_masked_column_access(
                 )
 
 
+_WHOLE_ROW_MESSAGE = (
+    "This query reads a table with masked columns through {what}, which "
+    "masking cannot follow. Select the columns by name, or use * / alias.*, "
+    "instead."
+)
+
+
+def _policied_tables(lookup: dict[tuple[str, str, str], dict]) -> set[tuple[str, str]]:
+    return {(s, t) for (s, t, _c) in lookup}
+
+
+def _references_policied_table(
+    parsed: exp.Expression,
+    cte_names: set[str],
+    policied: set[tuple[str, str]],
+) -> bool:
+    policied_names = {t for (_s, t) in policied}
+    for table in parsed.find_all(exp.Table):
+        name = (table.name or "").lower()
+        schema = (table.db or "").lower()
+        if not name or (not schema and name in cte_names):
+            continue
+        if schema and (schema, name) in policied:
+            return True
+        if not schema and name in policied_names:
+            return True
+    return False
+
+
+def _check_whole_row_access(parsed: exp.Expression, scope: "_Scope") -> None:
+    """Raise MaskedColumnAccessError for any whole-row or column-set read.
+
+    Masking works per named column: the rewriter replaces a column reference
+    with its mask, and the post-query pass masks result columns by name. A
+    reference that carries a row's columns inside one value (``to_json(p)``,
+    ``SELECT p``, ``row(p.*)``, ``struct_pack(*)``) or produces columns the
+    rewriter never sees by name (``COLUMNS(...)``, PIVOT/UNPIVOT, SUMMARIZE)
+    slips past both. Only called when the query touches a policied table, and
+    any relation counts: a subquery or CTE over the table carries the raw
+    column just the same.
+    """
+    def _deny(what: str) -> None:
+        raise MaskedColumnAccessError(_WHOLE_ROW_MESSAGE.format(what=what))
+
+    if isinstance(parsed, exp.Summarize) or parsed.find(exp.Summarize):
+        _deny("SUMMARIZE")
+    if parsed.find(exp.Pivot):
+        _deny("PIVOT/UNPIVOT")
+    if parsed.find(exp.Columns):
+        _deny("COLUMNS(...)")
+
+    # A star is fine as a select-list item (expanded or masked by name) and
+    # inside COUNT(*); anywhere else it packs the row into one value.
+    for star in parsed.find_all(exp.Star):
+        node = star.parent if isinstance(star.parent, exp.Column) else None
+        item = node if node is not None else star
+        parent = item.parent
+        if isinstance(parent, exp.Select) and item in parent.expressions:
+            continue
+        if isinstance(parent, exp.Count) and parent.this is item:
+            continue
+        _deny(f"{item.sql(dialect='duckdb')} inside an expression")
+
+    # A bare name is a row reference only when DuckDB would bind it to a
+    # relation: no relation in scope has a column of that name.
+    qualified_tables = {
+        ((t.db or "").lower(), (t.name or "").lower())
+        for t in parsed.find_all(exp.Table) if t.db
+    }
+    for column in parsed.find_all(exp.Column):
+        if isinstance(column.this, exp.Star) or column.find_ancestor(exp.Star):
+            continue
+        name = column.name.lower()
+        qualifier = (column.table or "").lower()
+        relations = scope.visible_relations(column)
+        if not qualifier:
+            if name in relations and not scope.is_visible_column(name, relations):
+                _deny(f"row reference '{column.name}'")
+        elif (qualifier, name) in qualified_tables:
+            cols = relations.get(qualifier)
+            if not (cols and name in cols):
+                _deny(f"row reference '{column.sql(dialect='duckdb')}'")
+
+    # The rewriter masks select-list expressions only, so a masked column used
+    # inside a FROM item (``unnest([p.ssn]) u(v)``) would come out raw.
+    masked_names = {c for (_s, _t, c) in scope.lookup}
+    for column in parsed.find_all(exp.Column):
+        if isinstance(column.this, exp.Star) or column.name.lower() not in masked_names:
+            continue
+        node = column
+        while node.parent is not None and not isinstance(node.parent, exp.Select):
+            if isinstance(node.parent, (exp.From, exp.Join)) and node is node.parent.this:
+                _deny(f"the masked column '{column.name}' inside a FROM item")
+            node = node.parent
+
+    _check_renamed_output(parsed, scope, _deny)
+
+
+def _check_renamed_output(parsed: exp.Expression, scope: "_Scope", deny) -> None:
+    """Refuse shapes that move a masked column's value under another name.
+
+    ``SELECT *`` over a masked table is masked after the query, by result
+    column name. Anything that renames the column on the way out escapes that:
+    alias column lists, ``* RENAME``/``* REPLACE``, a star in a later UNION
+    branch (the first branch names the columns), and a star that emits the
+    masked column twice (DuckDB renames the second copy ``ssn_1``).
+    """
+    for alias in parsed.find_all(exp.TableAlias):
+        if not alias.columns:
+            continue
+        source = alias.parent
+        body = source.this if isinstance(source, exp.CTE) else source
+        if body is not None and scope.contains_policied(body):
+            deny(f"the column alias list '{alias.sql(dialect='duckdb')}'")
+
+    for star in parsed.find_all(exp.Star):
+        if (star.args.get("rename") or star.args.get("replace")) and scope.contains_policied(
+            star.find_ancestor(exp.Select) or parsed
+        ):
+            deny("* RENAME / * REPLACE")
+
+    for setop in parsed.find_all(exp.SetOperation):
+        branch = setop.expression
+        if branch is not None and scope.has_star_over_policied(branch):
+            deny("a * in a later UNION/EXCEPT/INTERSECT branch")
+
+    masked_names = {c for (_s, _t, c) in scope.lookup}
+    for select in parsed.find_all(exp.Select):
+        emitted: list[str] = []
+        for item in select.expressions:
+            if isinstance(item, exp.Star):
+                for src in scope.sources(select):
+                    emitted.extend(scope.source_columns(src) or ())
+            elif isinstance(item, exp.Column) and isinstance(item.this, exp.Star):
+                src = scope.source_by_name(select, (item.table or "").lower())
+                if src is not None:
+                    emitted.extend(scope.source_columns(src) or ())
+            else:
+                emitted.append((item.alias_or_name or "").lower())
+        for name in masked_names:
+            if emitted.count(name) > 1 and scope.has_star_over_policied(select):
+                deny(f"two copies of the masked column '{name}'")
+
+
+class _Scope:
+    """Just enough name resolution to tell a column from a relation."""
+
+    def __init__(
+        self,
+        parsed: exp.Expression,
+        conn: duckdb.DuckDBPyConnection,
+        lookup: dict[tuple[str, str, str], dict],
+    ) -> None:
+        self.conn = conn
+        self.lookup = lookup
+        self.policied = _policied_tables(lookup)
+        self.ctes: dict[str, exp.CTE] = {}
+        for cte in parsed.find_all(exp.CTE):
+            if cte.alias:
+                self.ctes[cte.alias.lower()] = cte
+        self._catalog: dict[tuple[str, str], set[str] | None] = {}
+        self._busy: set[int] = set()
+
+    # -- sources ---------------------------------------------------------
+
+    @staticmethod
+    def sources(select: exp.Select) -> list[exp.Expression]:
+        out: list[exp.Expression] = []
+        frm = select.args.get("from_") or select.args.get("from")
+        if frm is not None and frm.this is not None:
+            out.append(frm.this)
+        for join in select.args.get("joins") or []:
+            if join.this is not None:
+                out.append(join.this)
+        return out
+
+    @staticmethod
+    def source_name(src: exp.Expression) -> str:
+        alias = src.args.get("alias")
+        if isinstance(alias, exp.TableAlias) and alias.name:
+            return alias.name.lower()
+        if isinstance(src, exp.Table):
+            return (src.name or "").lower()
+        return ""
+
+    def source_by_name(self, select: exp.Select, name: str) -> exp.Expression | None:
+        for src in self.sources(select):
+            if self.source_name(src) == name:
+                return src
+        return None
+
+    def _cte_for(self, src: exp.Expression) -> exp.CTE | None:
+        if isinstance(src, exp.Table) and not src.db:
+            return self.ctes.get((src.name or "").lower())
+        return None
+
+    # -- columns ---------------------------------------------------------
+
+    def _catalog_columns(self, schema: str, table: str) -> set[str] | None:
+        key = (schema, table)
+        if key not in self._catalog:
+            sql = (
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_catalog = current_database() AND table_name = ?"
+            )
+            params = [table]
+            if schema:
+                sql += " AND table_schema = ?"
+                params.append(schema)
+            try:
+                rows = self.conn.execute(sql, params).fetchall()
+                self._catalog[key] = {r[0].lower() for r in rows} if rows else None
+            except Exception:
+                self._catalog[key] = None
+        return self._catalog[key]
+
+    def source_columns(self, src: exp.Expression) -> set[str] | None:
+        """Output column names of a FROM item, or None when unknown."""
+        alias = src.args.get("alias")
+        if isinstance(alias, exp.TableAlias) and alias.columns:
+            return {c.name.lower() for c in alias.columns}
+        if id(src) in self._busy:
+            return None
+        self._busy.add(id(src))
+        try:
+            cte = self._cte_for(src)
+            if cte is not None:
+                if cte.args.get("alias") is not None and cte.args["alias"].columns:
+                    return {c.name.lower() for c in cte.args["alias"].columns}
+                return self.query_columns(cte.this)
+            if isinstance(src, exp.Table) and isinstance(src.this, exp.Identifier):
+                return self._catalog_columns((src.db or "").lower(), (src.name or "").lower())
+            if isinstance(src, (exp.Subquery, exp.Lateral)):
+                return self.query_columns(src.this)
+            return None
+        finally:
+            self._busy.discard(id(src))
+
+    def query_columns(self, query: exp.Expression | None) -> set[str] | None:
+        while isinstance(query, (exp.Subquery, exp.Paren)):
+            query = query.this
+        while isinstance(query, exp.SetOperation):
+            query = query.this
+        if not isinstance(query, exp.Select):
+            return None
+        cols: set[str] = set()
+        for item in query.expressions:
+            if isinstance(item, exp.Star):
+                for src in self.sources(query):
+                    cols |= self.source_columns(src) or set()
+            elif isinstance(item, exp.Column) and isinstance(item.this, exp.Star):
+                src = self.source_by_name(query, (item.table or "").lower())
+                if src is not None:
+                    cols |= self.source_columns(src) or set()
+            elif item.alias_or_name:
+                cols.add(item.alias_or_name.lower())
+        return cols
+
+    def visible_relations(self, node: exp.Expression) -> dict[str, set[str] | None]:
+        """Relation name -> its columns, for every SELECT enclosing ``node``."""
+        out: dict[str, set[str] | None] = {}
+        select = node.find_ancestor(exp.Select)
+        while select is not None:
+            for src in self.sources(select):
+                name = self.source_name(src)
+                if name and name not in out:
+                    out[name] = self.source_columns(src)
+            select = select.find_ancestor(exp.Select)
+        return out
+
+    @staticmethod
+    def is_visible_column(name: str, relations: dict[str, set[str] | None]) -> bool:
+        return any(cols and name in cols for cols in relations.values())
+
+    # -- policied reach --------------------------------------------------
+
+    def _is_policied_table(self, table: exp.Table) -> bool:
+        name = (table.name or "").lower()
+        schema = (table.db or "").lower()
+        if not name:
+            return False
+        if schema:
+            return (schema, name) in self.policied
+        if name in self.ctes:
+            return False
+        return any(t == name for (_s, t) in self.policied)
+
+    def contains_policied(self, node: exp.Expression) -> bool:
+        """Whether ``node`` reads a policied table, directly or through a CTE."""
+        if id(node) in self._busy:
+            return False
+        self._busy.add(id(node))
+        try:
+            tables = [node] if isinstance(node, exp.Table) else list(node.find_all(exp.Table))
+            for table in tables:
+                if self._is_policied_table(table):
+                    return True
+                cte = self._cte_for(table)
+                if cte is not None and cte.this is not None and self.contains_policied(cte.this):
+                    return True
+            return False
+        finally:
+            self._busy.discard(id(node))
+
+    def has_star_over_policied(self, node: exp.Expression) -> bool:
+        """Whether a select-list star inside ``node`` expands a policied source."""
+        selects = [node] if isinstance(node, exp.Select) else []
+        selects += [s for s in node.find_all(exp.Select) if s is not node]
+        for select in selects:
+            for item in select.expressions:
+                if isinstance(item, exp.Star):
+                    if any(self.contains_policied(s) for s in self.sources(select)):
+                        return True
+                elif isinstance(item, exp.Column) and isinstance(item.this, exp.Star):
+                    src = self.source_by_name(select, (item.table or "").lower())
+                    if src is not None and self.contains_policied(src):
+                        return True
+        return False
+
+
+def _mentions_policied_table(sql: str, policied: set[tuple[str, str]]) -> bool:
+    """Textual fallback for SQL sqlglot cannot analyse: does any identifier
+    outside strings and comments name a policied table?"""
+    import re
+
+    from havn.engine.sql_safety import strip_sql_comments_and_strings
+
+    names = {t for (_s, t) in policied}
+    cleaned = strip_sql_comments_and_strings(sql)
+    for ident in re.findall(r'"([^"]*)"|([A-Za-z_][A-Za-z0-9_$]*)', cleaned):
+        word = (ident[0] or ident[1]).lower()
+        if word in names:
+            return True
+    return False
+
+
 def rewrite_query_with_masking(
     sql: str,
     user_role: str,
@@ -391,19 +727,40 @@ def rewrite_query_with_masking(
     if not active_policies:
         return sql, False, set()
 
+    lookup = _policy_lookup(active_policies)
+    policied = _policied_tables(lookup)
+
     # Parse
     try:
         parsed = sqlglot.parse_one(sql, read="duckdb")
     except sqlglot.errors.ParseError:
+        parsed = None
+    if parsed is None or isinstance(parsed, exp.Command):
+        # Post-query masking matches result columns by name, which is only
+        # safe when we know the query's shape. EXPLAIN returns a plan, not
+        # rows, so it keeps working.
+        is_explain = (
+            isinstance(parsed, exp.Command)
+            and str(parsed.this).strip().upper() == "EXPLAIN"
+        )
+        if not is_explain and _mentions_policied_table(sql, policied):
+            raise MaskedColumnAccessError(
+                "This query reads a table with masked columns but could not be "
+                "analysed for masking. Rewrite it as a plain SELECT."
+            )
         logger.debug("SQLGlot parse failed, falling back to post-query masking")
         return sql, False, set()
 
     alias_map = _build_alias_map(parsed)
     cte_names = _collect_cte_names(parsed)
-    lookup = _policy_lookup(active_policies)
 
     # Deny queries that filter/sort/join on masked columns
     _check_masked_column_access(parsed, alias_map, cte_names, lookup)
+    star_over_policied = False
+    if _references_policied_table(parsed, cte_names, policied):
+        scope = _Scope(parsed, conn, lookup)
+        _check_whole_row_access(parsed, scope)
+        star_over_policied = scope.has_star_over_policied(parsed)
 
     rewritten_any = False
     handled_ids: set[str] = set()
@@ -432,6 +789,16 @@ def rewrite_query_with_masking(
 
     if not rewritten_any:
         return sql, False, set()
+
+    if star_over_policied:
+        # Callers skip the post-query pass for every policy in handled_ids,
+        # but a * over the table still emits the raw column for that pass to
+        # mask (SELECT *, ssn LIKE '1%' AS x / LATERAL (SELECT p.ssn AS z)).
+        raise MaskedColumnAccessError(
+            "This query combines * over a table with masked columns with "
+            "expressions on a masked column, which masking cannot follow. "
+            "List the columns by name instead."
+        )
 
     try:
         rewritten_sql = parsed.sql(dialect="duckdb")

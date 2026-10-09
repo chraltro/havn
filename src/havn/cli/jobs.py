@@ -148,9 +148,16 @@ def preview(
 @jobs_app.command()
 def run(
     name: str = typer.Argument(..., help="Job name or filename stem"),
+    force: bool = typer.Option(False, "--force", "-f", help="Rebuild every model, changed or not"),
+    env: Optional[str] = typer.Option(None, "--env", "-e", help="Environment to use"),
     project_dir: Optional[Path] = typer.Option(None, "--project", "-p"),
 ) -> None:
-    """Trigger a job manually."""
+    """Trigger a job manually.
+
+    Models are built as `havn transform` builds them and their assertions
+    run. Every model is rebuilt unless the job sets `full_refresh: false`,
+    in which case unchanged ones are skipped (--force rebuilds them anyway).
+    """
     from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.orchestration import (
         _find_job,
@@ -161,7 +168,7 @@ def run(
     from havn.engine.transform.discovery import build_dag, discover_all_models
 
     project_dir = _resolve_project(project_dir)
-    config = _load_config(project_dir)
+    config = _load_config(project_dir, env)
     job = _find_job(project_dir, name)
     if not job:
         console.print(f"[red]Job '{name}' not found[/red]")
@@ -178,16 +185,24 @@ def run(
             resolve=job.resolve, exclude=job.exclude or None,
         )
         console.print(f"[bold]Running {job.name}[/bold] \u2014 {len(plan.steps)} steps")
-        result = execute_job(job, plan, conn, project_dir, trigger="manual")
+        result = execute_job(job, plan, conn, project_dir, trigger="manual", force=force)
         color = "green" if result.status == "success" else "red"
+        counts = [f"{result.steps_completed} ran"]
+        if result.steps_skipped:
+            counts.append(f"{result.steps_skipped} skipped")
+        if result.steps_failed:
+            counts.append(f"{result.steps_failed} failed")
         console.print(
             f"[{color}]{result.status}[/{color}] \u2014 "
-            f"{result.steps_completed}/{result.steps_total} steps, {result.duration_ms}ms"
+            f"{', '.join(counts)} of {result.steps_total} steps, {result.duration_ms}ms"
         )
         if result.error:
             console.print(f"[red]Error: {result.error}[/red]")
     finally:
         conn.close()
+    # Non-zero so cron, CI and scripts can tell a failed job from a good one.
+    if result.status != "success":
+        raise typer.Exit(1)
 
 
 @jobs_app.command()

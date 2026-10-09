@@ -533,3 +533,64 @@ class TestSkipPolicyIds:
                                schema="gold", table="customers",
                                skip_policy_ids={policy["id"]})
         assert result[0][2] == "alice@example.com"
+
+
+# ---------------------------------------------------------------------------
+# Whole-row and unanalysable reads of a masked table
+# ---------------------------------------------------------------------------
+
+
+class TestWholeRowAccess:
+    """A row-valued reference would carry the raw masked column."""
+
+    @pytest.mark.parametrize("sql", [
+        "SELECT to_json(c) FROM gold.customers c",
+        "SELECT c FROM gold.customers c",
+        "SELECT struct_pack(c.*) FROM gold.customers c",
+        "SELECT COLUMNS('e.*') FROM gold.customers",
+        "SELECT gold.customers FROM gold.customers",
+    ])
+    def test_rejected(self, conn, sql):
+        from havn.engine.masking_rewriter import MaskedColumnAccessError, rewrite_query_with_masking
+
+        _create_policy(conn)
+        with pytest.raises(MaskedColumnAccessError):
+            rewrite_query_with_masking(sql, "viewer", conn)
+
+    def test_unrelated_table_untouched(self, conn):
+        from havn.engine.masking_rewriter import rewrite_query_with_masking
+
+        _create_policy(conn)
+        conn.execute("CREATE TABLE gold.other AS SELECT 1 AS a")
+        sql = "SELECT to_json(o) FROM gold.other o"
+        assert rewrite_query_with_masking(sql, "viewer", conn) == (sql, False, set())
+
+    def test_exempt_role_untouched(self, conn):
+        from havn.engine.masking_rewriter import rewrite_query_with_masking
+
+        _create_policy(conn)
+        sql = "SELECT to_json(c) FROM gold.customers c"
+        assert rewrite_query_with_masking(sql, "admin", conn)[1] is False
+
+    def test_unparseable_query_on_masked_table_rejected(self, conn, monkeypatch):
+        import sqlglot
+
+        from havn.engine import masking_rewriter
+        from havn.engine.masking_rewriter import MaskedColumnAccessError
+
+        _create_policy(conn)
+
+        def boom(*a, **k):
+            raise sqlglot.errors.ParseError("unsupported")
+
+        # Post-query masking only matches result columns by name, so SQL
+        # the rewriter cannot read must not reach a masked table.
+        monkeypatch.setattr(masking_rewriter.sqlglot, "parse_one", boom)
+        with pytest.raises(MaskedColumnAccessError):
+            masking_rewriter.rewrite_query_with_masking(
+                "SELECT to_json(c) FROM gold.customers c", "viewer", conn,
+            )
+        # ...but a table name inside a string literal is not a reference.
+        assert masking_rewriter.rewrite_query_with_masking(
+            "SELECT 'customers' AS t", "viewer", conn,
+        )[1] is False

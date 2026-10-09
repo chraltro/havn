@@ -224,7 +224,7 @@ def connect(
     console.print("[bold]Next steps:[/bold]")
     console.print(f"  havn run {result['script_path']}          # run sync now")
     console.print(f"  havn transform                             # build downstream models")
-    console.print(f"  havn connect --test --name {connection_name}  # re-test later")
+    console.print(f"  havn connectors test {result['connection_name']}  # re-test later")
 
 
 # --- connectors subapp ---

@@ -46,7 +46,11 @@ from typing import Any, Iterator
 from sqlglot import exp
 
 from havn.engine.selectors import descendants
+from havn.textio import read_project_text
 from havn.engine.sql_analysis import (
+    _CONFIG_PAREN,
+    _CONFIG_SPACE,
+    _LEGACY_CONFIG_PATTERN,
     extract_column_references,
     parse_sql,
     relation_aliases,
@@ -65,6 +69,7 @@ NO_DEFINITION = "no_definition"
 UNPARSED = "unparsed"
 POSITION = "position_mismatch"
 PACKAGE = "installed_package"
+CONFIG_EXPRESSION = "config_expression"
 
 # Where installed packages live. Nothing under it is ever edited: the next
 # ``havn packages install`` deletes the checkout, so a rename written there is
@@ -89,6 +94,28 @@ _DIRECTIVE_PREFIXES = (
     "-- assert:",
     "-- col:",
 )
+
+
+# @config keys whose value is a list of the model's own output columns. A
+# rename that leaves ``unique_key=customer_id`` behind breaks an incremental
+# merge, a snapshot or a microbatch on the next build.
+_CONFIG_COLUMN_KEYS = frozenset({
+    "unique_key",
+    "partition_by",
+    "event_time",
+    "updated_at",
+    "check_cols",
+    "watermark",
+})
+
+# @config keys whose value is a SQL expression. A mention there may be the
+# model's own column or an upstream's, which text matching cannot tell apart,
+# so it is a blocker rather than an edit.
+_CONFIG_EXPRESSION_KEYS = frozenset({"incremental_filter"})
+
+# ``key=value`` pairs inside a config body; a value runs to the next
+# ``, key=`` (same rule as sql_analysis._split_config_pairs).
+_CONFIG_PAIR = re.compile(r"(\w+)\s*=\s*(.*?)\s*(?=,\s*\w+\s*=|$)", re.DOTALL)
 
 
 class RenameError(ValueError):
@@ -470,6 +497,12 @@ def _select_relations(select: exp.Select, aliases: dict[str, str]) -> set[str]:
         if node is None:
             continue
         for part in node if isinstance(node, list) else [node]:
+            relation = part.this if isinstance(part, (exp.From, exp.Join)) else part
+            if isinstance(relation, exp.Subquery) and relation.alias:
+                # A derived table is read under its alias; the tables inside
+                # it belong to the subquery's scope, not this one.
+                found.add(relation.alias.lower())
+                continue
             for table in part.find_all(exp.Table):
                 name = _unquote(table.name or "").lower()
                 db = _unquote(table.db or "").lower()
@@ -569,8 +602,10 @@ def _yaml_sites(
             if path.suffix not in (".yml", ".yaml") or not path.is_file():
                 continue
             try:
-                text = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
+                # The same reader apply_rename uses, so a BOM or CRLF file's
+                # offsets line up when the splice is checked.
+                text = read_project_text(path)
+            except OSError:
                 continue
             starts = _line_starts(text)
             rel = path.relative_to(root).as_posix()
@@ -648,6 +683,150 @@ def _directive_sites(
     return sites
 
 
+def _config_sites(
+    model: Any, root: Path | None, column: str
+) -> tuple[list[RenameSite], list[Blocker]]:
+    """Mentions of ``column`` in this model's ``@config`` column settings.
+
+    ``unique_key``, ``partition_by``, ``event_time``, ``updated_at``,
+    ``check_cols`` and ``watermark`` name the model's own output columns, and
+    the config line is blanked before parsing like every directive, so the
+    AST walk never sees them. An ``incremental_filter`` is an expression over
+    the model's and its upstreams' columns alike, so a mention there is
+    reported as a blocker instead of being guessed at.
+    """
+    text = getattr(model, "sql", "") or ""
+    if not text:
+        return [], []
+    word = re.compile(rf"\b{re.escape(column)}\b", re.IGNORECASE)
+    path = _model_path(model, root)
+    starts = _line_starts(text)
+    sites: list[RenameSite] = []
+    blocked: list[Blocker] = []
+    seen: set[int] = set()
+    for pattern in (_CONFIG_PAREN, _CONFIG_SPACE, _LEGACY_CONFIG_PATTERN):
+        for header in pattern.finditer(text):
+            body_start = header.start(1)
+            if body_start in seen:
+                continue
+            seen.add(body_start)
+            for pair in _CONFIG_PAIR.finditer(header.group(1)):
+                key = pair.group(1).lower()
+                value_start = body_start + pair.start(2)
+                hits = list(word.finditer(pair.group(2)))
+                if not hits:
+                    continue
+                line = bisect_right(starts, value_start)
+                if key in _CONFIG_EXPRESSION_KEYS:
+                    blocked.append(
+                        Blocker(
+                            CONFIG_EXPRESSION,
+                            model.full_name,
+                            path,
+                            f"@config {key} mentions {column}; it is an expression, "
+                            "so edit it by hand",
+                            line=line,
+                        )
+                    )
+                    continue
+                if key not in _CONFIG_COLUMN_KEYS:
+                    continue
+                for hit in hits:
+                    start = value_start + hit.start()
+                    sites.append(
+                        RenameSite(
+                            model=model.full_name,
+                            path=path,
+                            line=line,
+                            col=start - starts[line - 1] + 1,
+                            start=start,
+                            end=start + len(hit.group(0)),
+                            clause="config",
+                            kind="directive",
+                            resolved=True,
+                            text=hit.group(0),
+                        )
+                    )
+    return sites, blocked
+
+
+def _alias_clause_sites(
+    model: Any,
+    root: Path | None,
+    offsets: _OffsetMap,
+    select: exp.Select,
+    column: str,
+    schemas: dict[str, list[tuple[str, str]]] | None,
+    aliases: dict[str, str],
+) -> tuple[list[RenameSite], list[Blocker]]:
+    """Unqualified uses of an output alias in the SELECT's own later clauses.
+
+    ``SELECT id AS customer_id ... ORDER BY customer_id`` names the alias in
+    ORDER BY (DuckDB also takes it in GROUP BY, HAVING and QUALIFY). Renaming
+    the alias without them leaves a reference to a column that no longer
+    exists. A mention is skipped when a relation the SELECT reads is known to
+    carry a column of that name, since it may then mean that column; that
+    case is a blocker.
+    """
+    sites: list[RenameSite] = []
+    blocked: list[Blocker] = []
+    clauses = (("group", "group"), ("order", "order"), ("having", "having"), ("qualify", "qualify"))
+    candidates: list[tuple[exp.Column, str]] = []
+    for key, clause in clauses:
+        node = select.args.get(key)
+        if node is None:
+            continue
+        for col in node.find_all(exp.Column):
+            if col.table or _unquote(col.name).lower() != column:
+                continue
+            # Only this SELECT's scope: a nested subquery binds its own names.
+            if col.find_ancestor(exp.Select) is not select:
+                continue
+            candidates.append((col, clause))
+    if not candidates:
+        return sites, blocked
+
+    path = _model_path(model, root)
+    known = schemas or {}
+    shadowed = any(
+        column in {name.lower() for name, _ in known.get(rel, []) or []}
+        for rel in _select_relations(select, aliases)
+    )
+    for col, clause in candidates:
+        span = _identifier_span(col.this)
+        if span is None:
+            continue
+        if shadowed:
+            blocked.append(
+                Blocker(
+                    UNRESOLVED,
+                    model.full_name,
+                    path,
+                    f"{column} on line {span[0]} may name the output alias or a "
+                    "source column of the same name",
+                    line=span[0],
+                )
+            )
+            continue
+        site = _site_from_span(
+            model, root, offsets, span, column=column, kind="reference", clause=clause
+        )
+        if site is None:
+            blocked.append(
+                Blocker(
+                    POSITION,
+                    model.full_name,
+                    path,
+                    f"a mention of {column} on line {span[0]} could not be located "
+                    "in the file",
+                    line=span[0],
+                )
+            )
+            continue
+        sites.append(site)
+    return sites, blocked
+
+
 def find_column_references(
     models: list[Any],
     target_model: str,
@@ -703,9 +882,12 @@ def find_column_references(
             return
         scanned_directives.add(key)
         report.sites.extend(_directive_sites(model, root, column))
+        config_sites, config_blocked = _config_sites(model, root, column)
+        report.sites.extend(config_sites)
+        report.blocked.extend(config_blocked)
 
     # The definition, in the target itself.
-    exports_own_name = _index_definition(report, target, root, column)
+    exports_own_name = _index_definition(report, target, root, column, schemas)
     scan_directives(target)
 
     # Downstream, one hop at a time, carrying the column only where it keeps
@@ -729,8 +911,13 @@ def find_column_references(
                 if key in visited:
                     continue
                 visited.add(key)
-                scan_directives(child)
                 if _index_downstream(report, child, root, column, producing, schemas):
+                    # Directives (@assert, @col, @grain, @config keys) name
+                    # the model's own output columns, so they follow the
+                    # rename only where the model re-exports the column under
+                    # its name. A model that merely joins on it may well
+                    # assert on a different table's column of the same name.
+                    scan_directives(child)
                     if child.full_name.lower() not in producing:
                         producing.add(child.full_name.lower())
                         queue.append(child.full_name.lower())
@@ -739,7 +926,13 @@ def find_column_references(
     report.sites.extend(yaml_sites)
     report.blocked.extend(yaml_blocked)
     _block_package_sites(report)
-    report.sites.sort(key=lambda s: (s.path, s.start))
+    # One identifier can be reached twice (an alias clause scan and the
+    # reference index both seeing ``ORDER BY x``); a site spliced twice fails
+    # the apply, so keep the first.
+    unique: dict[tuple[str, int, int], RenameSite] = {}
+    for site in report.sites:
+        unique.setdefault((site.path, site.start, site.end), site)
+    report.sites = sorted(unique.values(), key=lambda s: (s.path, s.start))
     return report
 
 
@@ -769,7 +962,11 @@ def _block_package_sites(report: ReferenceReport) -> None:
 
 
 def _index_definition(
-    report: ReferenceReport, target: Any, root: Path | None, column: str
+    report: ReferenceReport,
+    target: Any,
+    root: Path | None,
+    column: str,
+    schemas: dict[str, list[tuple[str, str]]] | None = None,
 ) -> bool:
     """Record the defining site in the target model. True if it was found."""
     path = _model_path(target, root)
@@ -781,6 +978,7 @@ def _index_definition(
         return False
 
     offsets = _OffsetMap(target.sql, target.query)
+    aliases = _combined_aliases(parsed)
     found = False
     for select in _output_selects(parsed):
         projections = _defining_projections(select, column)
@@ -821,6 +1019,18 @@ def _index_definition(
                 continue
             report.sites.append(site)
             found = True
+            behind = node.parent.this if isinstance(node.parent, exp.Alias) else None
+            if is_alias and not (
+                # ``c.customer_id AS customer_id ... GROUP BY customer_id``:
+                # the clause binds the source column, which keeps its name.
+                isinstance(behind, exp.Column)
+                and _unquote(behind.name).lower() == column
+            ):
+                clause_sites, clause_blocked = _alias_clause_sites(
+                    target, root, offsets, select, column, schemas, aliases
+                )
+                report.sites.extend(clause_sites)
+                report.blocked.extend(clause_blocked)
 
     if not found and not any(b.model == target.full_name for b in report.blocked):
         report.blocked.append(
@@ -861,25 +1071,51 @@ def _index_downstream(
     # the upstream models already renamed, plus every CTE that re-exports it.
     # CTEs are walked in definition order, which is the order the column can
     # travel through them.
+    #
+    # Derived tables (``FROM (SELECT customer_id ...) s``) are local relations
+    # exactly like CTEs: the inner reference is renamed, so ``s.customer_id``
+    # outside has to be too, or the outer query names a column the subquery
+    # no longer outputs. A derived table can sit inside a CTE and the other
+    # way round, so the exposed set is grown to a fixpoint before any site is
+    # recorded, and the sites are taken in one final pass.
+    local: list[tuple[str, exp.Expression, str]] = []
+    for node in parsed.find_all(exp.CTE, exp.Subquery, bfs=False):
+        name = (node.alias or "").lower()
+        if not name:
+            continue
+        body = node.this
+        label = f"CTE {name}" if isinstance(node, exp.CTE) else f"subquery {name}"
+        local.append((name, body, label))
+
     exposed = set(producing)
+    for _ in range(len(local) + 1):
+        grew = False
+        for name, body, _label in local:
+            if name in exposed:
+                continue
+            for select in _output_selects(body):
+                if _has_star(select) and _select_relations(select, aliases) & exposed:
+                    break
+                if _classify_projections(select, column, exposed, aliases)[0]:
+                    exposed.add(name)
+                    grew = True
+                    break
+        if not grew:
+            break
+
     alias_sites: list[tuple[exp.Expression, str]] = []
     same_name_aliases: list[exp.Expression] = []
-    for cte in parsed.find_all(exp.CTE):
-        select = cte.this if isinstance(cte.this, exp.Select) else cte.find(exp.Select)
-        if select is None:
-            continue
-        name = (cte.alias or "").lower()
-        star = _star_blocker(model, path, select, exposed, aliases, f"CTE {name}")
-        if star is not None:
-            report.blocked.append(star)
-            continue
-        re_exported, same_name, renamed = _classify_projections(
-            select, column, exposed, aliases
-        )
-        alias_sites.extend(renamed)
-        same_name_aliases.extend(same_name)
-        if re_exported and name:
-            exposed.add(name)
+    for name, body, label in local:
+        for select in _output_selects(body):
+            star = _star_blocker(model, path, select, exposed, aliases, label)
+            if star is not None:
+                report.blocked.append(star)
+                continue
+            _re_exported, same_name, renamed = _classify_projections(
+                select, column, exposed, aliases
+            )
+            alias_sites.extend(renamed)
+            same_name_aliases.extend(same_name)
 
     re_export = False
     for select in _output_selects(parsed):
@@ -1153,8 +1389,11 @@ def apply_rename(
         if not full.is_file():
             raise RenameError(f"{path}: file not found")
         try:
-            content = full.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as e:
+            # Discovery read the model with read_project_text (BOM dropped,
+            # newlines normalised), so the plan's offsets are into that text;
+            # reading the raw file here put every offset one off after a BOM.
+            content = read_project_text(full)
+        except OSError as e:
             raise RenameError(f"{path}: cannot read ({e})") from e
         originals[path] = content
         updated[path] = _splice(content, file_edits, path)
@@ -1196,7 +1435,7 @@ def write_files_atomically(
         for path in sorted(contents):
             full = root / path
             if path not in previous and full.is_file():
-                previous[path] = full.read_text(encoding="utf-8")
+                previous[path] = read_project_text(full)
             mode = full.stat().st_mode if full.exists() else stat.S_IWUSR
             if not mode & stat.S_IWUSR:
                 raise RenameError(f"{path}: file is read-only")
@@ -1225,13 +1464,19 @@ def _atomic_write(path: Path, content: str) -> None:
     every LF file a rename touched into CRLF, a whole-file diff in git.
     """
     newline = "\n"
+    encoding = "utf-8"
     try:
-        if b"\r\n" in path.read_bytes():
+        raw = path.read_bytes()
+        if b"\r\n" in raw:
             newline = "\r\n"
+        if raw.startswith(b"\xef\xbb\xbf"):
+            # read_project_text dropped the BOM; put it back so the rename
+            # is not also an invisible encoding change.
+            encoding = "utf-8-sig"
     except OSError:
         pass  # a new file: LF
     tmp = path.with_name(f".{path.name}.havn-rename")
-    with open(tmp, "w", encoding="utf-8", newline=newline) as f:
+    with open(tmp, "w", encoding=encoding, newline=newline) as f:
         f.write(content)
     os.replace(tmp, path)
 

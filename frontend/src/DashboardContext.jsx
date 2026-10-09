@@ -246,12 +246,17 @@ export function DashboardProvider({ children }) {
     setParameters(prev => ({ ...prev, [name]: value }));
   }, []);
 
+  // Timers call through this ref: a closure captured when the timer was set
+  // would run a refreshAll with stale filters and parameters.
+  const refreshAllRef = useRef(refreshAll);
+  refreshAllRef.current = refreshAll;
+
   // Auto-refresh on filter/parameter/crossFilter changes (debounced)
   const filterDebounceRef = useRef(null);
   useEffect(() => {
     if (!dashboard || !dashboard.widgets?.some(w => w.sql_query)) return;
     if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
-    filterDebounceRef.current = setTimeout(() => refreshAll(), 300);
+    filterDebounceRef.current = setTimeout(() => refreshAllRef.current(), 300);
     return () => { if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current); };
   }, [globalFilters, crossFilter, parameters]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -264,7 +269,7 @@ export function DashboardProvider({ children }) {
     if (autoRefresh > 0 && dashboard) {
       refreshTimerRef.current = setInterval(() => {
         if (!document.hidden) {
-          refreshAll();
+          refreshAllRef.current();
         }
       }, autoRefresh * 1000);
     }

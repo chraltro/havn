@@ -956,3 +956,79 @@ def test_upstream_exclude_does_not_drop_shared_parents(dag_models):
         ["gold.dim_customer"], dag_models, resolve="upstream", exclude=["+gold.fct_orders"]
     )
     assert widened.selected == ["gold.dim_customer"]
+
+
+# ---------------------------------------------------------------------------
+# Audit-round regressions
+# ---------------------------------------------------------------------------
+
+
+def test_selected_order_follows_unselected_intermediates(tmp_path):
+    """a -> b -> d with only a and d selected: d must still come after a.
+
+    Ordering used only edges with both ends selected, so the dependency
+    through the unselected b was lost and d could be listed (and built) first.
+    """
+    t = tmp_path / "transform"
+    _write(t, "bronze/a.sql", "@config materialized=table, tags=daily\nSELECT 1 AS x\n")
+    _write(t, "silver/b.sql", "SELECT * FROM bronze.a\n")
+    _write(t, "gold/d.sql", "@config materialized=table, tags=daily\nSELECT * FROM silver.b\n")
+    _write(t, "gold/z.sql", "@config tags=daily\nSELECT 1 AS x\n")
+    models = discover_models(t)
+    # Feed the models in reverse so input order cannot produce the answer.
+    order = select_models(["tag:daily"], list(reversed(models))).selected
+    assert order.index("bronze.a") < order.index("gold.d")
+
+
+def test_path_selector_accepts_backslashes_and_absolute_paths(dag_project, dag_models):
+    """Windows users type backslashed paths, shells complete absolute ones."""
+    expected = sel(dag_models, "path:transform/gold", project_dir=dag_project)
+    assert expected
+    for value in (
+        "transform\\gold",
+        "transform\\gold\\",
+        str(dag_project / "transform" / "gold"),
+    ):
+        assert sel(dag_models, f"path:{value}", project_dir=dag_project) == expected
+
+
+def test_config_selector_reads_custom_keys_case_insensitively(tmp_path):
+    """Keys discovery does not model (owner_team) still select; case is ignored."""
+    t = tmp_path / "transform"
+    _write(t, "gold/a.sql", "@config materialized=table, owner_team=Finance\nSELECT 1 AS x\n")
+    _write(t, "gold/b.sql", "SELECT 1 AS x\n")
+    models = discover_models(t)
+    assert sel(models, "config.owner_team:finance") == ["gold.a"]
+    assert sel(models, "config.MATERIALIZED:table") == ["gold.a"]
+    assert sel(models, "config.materialized:TABLE") == ["gold.a"]
+    # A model attribute that is not a config key is not selectable this way.
+    assert sel(models, "config.sql:*") == []
+
+
+@pytest.mark.parametrize(
+    "selector, expected",
+    [
+        ("Silver.Customers", ["silver.customers"]),
+        ("CUSTOMERS", ["bronze.customers", "silver.customers"]),
+        ("+Gold.Dim_Customer", sorted(["bronze.customers", "bronze.orders", "silver.customers", "gold.dim_customer"])),
+        ("1+GOLD.dim_customer", ["gold.dim_customer", "silver.customers"]),
+        ("GOLD.FCT_*", ["gold.fct_events", "gold.fct_orders"]),
+        ("fqn:Gold.Fct_Orders", ["gold.fct_orders"]),
+        ("name:FCT_ORDERS", ["gold.fct_orders"]),
+    ],
+)
+def test_model_names_in_selectors_are_case_insensitive(dag_models, selector, expected):
+    """Discovery lowercases model names, so a mixed-case selector must still match."""
+    assert sel(dag_models, selector) == expected
+
+
+def test_config_package_selects_package_models(tmp_path):
+    """`config.package:crm` matched before the config allowlist; keep it."""
+    from dataclasses import replace
+
+    t = tmp_path / "transform"
+    _write(t, "gold/a.sql", "SELECT 1 AS x\n")
+    _write(t, "gold/b.sql", "SELECT 1 AS x\n")
+    a, b = discover_models(t)
+    models = [replace(a, package="crm"), b]
+    assert sel(models, "config.package:crm") == ["gold.a"]

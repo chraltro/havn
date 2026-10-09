@@ -9,7 +9,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -51,9 +53,63 @@ def _save_manifest(project_dir: Path, entries: list[dict]) -> None:
 def _compute_sha256(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+# (resolved path, size, mtime_ns) -> sha256. list_backups re-checks every
+# file on each call (the dashboard calls it per page load); an unchanged file
+# is not re-hashed.
+_SHA_CACHE: dict[tuple[str, int, int], str] = {}
+
+
+def _cached_sha256(path: Path) -> str:
+    st = path.stat()
+    key = (str(path.resolve()), st.st_size, st.st_mtime_ns)
+    sha = _SHA_CACHE.get(key)
+    if sha is None:
+        sha = _compute_sha256(path)
+        _SHA_CACHE[key] = sha
+    return sha
+
+
+def _same_file(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve() == b.resolve()
+    except OSError:
+        return False
+
+
+def _manifest_entry_for(backup_path: Path, project_dir: Path | None = None) -> dict | None:
+    """The manifest entry recorded for ``backup_path``, if any.
+
+    Looks in ``project_dir``'s manifest, then in a manifest beside the backup
+    (the default ``_backups/`` layout keeps ``manifest.json`` there).
+    """
+    sources: list[tuple[Path, list[dict]]] = []
+    if project_dir is not None:
+        sources.append((project_dir, _load_manifest(project_dir)))
+    beside = backup_path.parent / Path(BACKUP_MANIFEST).name
+    if beside.exists():
+        try:
+            sources.append((backup_path.parent.parent, json.loads(beside.read_text(encoding="utf-8"))))
+        except (json.JSONDecodeError, OSError):
+            pass
+    for base, entries in sources:
+        for entry in reversed(entries):
+            recorded = Path(entry.get("path", ""))
+            if not recorded.is_absolute():
+                recorded = base / recorded
+            if _same_file(recorded, backup_path):
+                return entry
+    return None
+
+
+_LOCKED_HINT = (
+    "the warehouse file is in use by another process "
+    "(is `havn serve` or another havn command running?). Stop it and retry."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +168,14 @@ def create_backup(
                 pass
 
     # 2. Copy
-    shutil.copy2(str(db_path), str(output))
+    try:
+        shutil.copy2(str(db_path), str(output))
+    except PermissionError as e:
+        output.unlink(missing_ok=True)
+        raise BackupError(f"Cannot read {db_path}: {_LOCKED_HINT} ({e})")
+    except OSError as e:
+        output.unlink(missing_ok=True)
+        raise BackupError(f"Cannot copy {db_path} to {output}: {e}")
 
     # 3. Verify integrity (open read-only, query metadata)
     verified = False
@@ -158,33 +221,69 @@ def restore_backup(
 ) -> dict[str, Any]:
     """Restore the warehouse from a backup file.
 
-    1. Optionally verify the backup file integrity
-    2. Copy backup over the active database
-    3. Remove stale WAL file
+    1. Optionally verify the backup (it opens as DuckDB, and its SHA-256
+       matches the manifest when the backup is tracked)
+    2. Copy the backup to a temp file beside the warehouse
+    3. Move the old WAL aside, then atomically replace the warehouse
+    4. Drop the old WAL: it belongs to the old database, and replaying it
+       onto the restored file would corrupt it
 
+    Any failure leaves the original warehouse and its WAL as they were, so a
+    crash or a locked file mid-restore never leaves a half-copied warehouse.
     Returns restore metadata dict.
     """
     if not backup_path.exists():
         raise BackupError(f"Backup file not found: {backup_path}")
 
-    # Verify the backup before restoring
     if verify:
-        try:
-            verify_conn = duckdb.connect(str(backup_path), read_only=True)
-            verify_conn.execute(
-                "SELECT COUNT(*) FROM information_schema.tables"
-            ).fetchone()
-            verify_conn.close()
-        except Exception as e:
-            raise BackupError(f"Cannot open backup file: {e}")
+        result = verify_backup(backup_path, project_dir=project_dir)
+        if not result.get("valid"):
+            raise BackupError(
+                f"Backup failed verification: {result.get('error', 'unknown error')}"
+            )
 
-    # Copy
-    shutil.copy2(str(backup_path), str(db_path))
-
-    # Remove stale WAL
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    # Same directory as the target, so os.replace is a rename and not a copy.
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{db_path.name}.restore-", suffix=".tmp", dir=str(db_path.parent)
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
     wal_path = Path(str(db_path) + ".wal")
-    if wal_path.exists():
-        wal_path.unlink()
+    wal_aside = Path(tmp_name + ".wal")
+    try:
+        try:
+            shutil.copyfile(str(backup_path), str(tmp_path))
+            with open(tmp_path, "rb+") as f:
+                os.fsync(f.fileno())
+            # mkstemp creates the file 0600; without this the restored
+            # warehouse would silently lose group/other access on POSIX.
+            if db_path.exists():
+                shutil.copymode(str(db_path), str(tmp_path))
+            else:
+                # Not reading the umask: os.umask() is process-wide and
+                # racy under the server's threads.
+                os.chmod(tmp_path, 0o644)
+        except OSError as e:
+            raise BackupError(f"Cannot copy {backup_path}: {e}")
+
+        moved_wal = False
+        try:
+            if wal_path.exists():
+                os.replace(wal_path, wal_aside)
+                moved_wal = True
+            os.replace(tmp_path, db_path)
+        except OSError as e:
+            if moved_wal:
+                os.replace(wal_aside, wal_path)
+            hint = _LOCKED_HINT if isinstance(e, PermissionError) else str(e)
+            raise BackupError(f"Cannot replace {db_path}: {hint}")
+    finally:
+        tmp_path.unlink(missing_ok=True)
+    try:
+        wal_aside.unlink(missing_ok=True)
+    except OSError as e:
+        logger.warning("Could not remove the pre-restore WAL %s: %s", wal_aside, e)
 
     return {
         "restored_from": str(backup_path),
@@ -195,14 +294,33 @@ def restore_backup(
     }
 
 
-def verify_backup(backup_path: Path) -> dict[str, Any]:
+def verify_backup(backup_path: Path, project_dir: Path | None = None) -> dict[str, Any]:
     """Verify a backup file's integrity and compute its checksum.
 
-    Opens the file as a read-only DuckDB database and runs
-    PRAGMA integrity_check.  Also counts schemas and tables.
+    A tracked backup whose SHA-256 no longer matches the manifest is invalid
+    even when DuckDB can still open it (bit rot, a partial overwrite, an
+    edit). The file is then opened read-only and its schemas and tables are
+    counted. ``project_dir`` locates the manifest; without it the manifest
+    beside the backup (the default ``_backups/`` layout) is used.
     """
     if not backup_path.exists():
         raise BackupError(f"Backup file not found: {backup_path}")
+
+    sha256 = _compute_sha256(backup_path)
+    entry = _manifest_entry_for(backup_path, project_dir)
+    expected = entry.get("sha256") if entry else None
+    if expected and expected != sha256:
+        return {
+            "path": str(backup_path),
+            "valid": False,
+            "sha256": sha256,
+            "expected_sha256": expected,
+            "checksum_match": False,
+            "error": (
+                f"SHA-256 mismatch: the manifest records {expected[:16]}..., "
+                f"the file is {sha256[:16]}... (it changed after the backup was taken)"
+            ),
+        }
 
     try:
         conn = duckdb.connect(str(backup_path), read_only=True)
@@ -231,12 +349,13 @@ def verify_backup(backup_path: Path) -> dict[str, Any]:
 
         conn.close()
 
-        sha256 = _compute_sha256(backup_path)
-
         return {
             "path": str(backup_path),
             "valid": integrity_ok,
             "sha256": sha256,
+            "expected_sha256": expected,
+            # None: untracked backup, nothing to compare against.
+            "checksum_match": True if expected else None,
             "size_bytes": backup_path.stat().st_size,
             "schemas": [s[0] for s in schemas],
             "table_count": table_count,
@@ -257,7 +376,20 @@ def list_backups(project_dir: Path) -> list[dict]:
     """
     entries = _load_manifest(project_dir)
     for entry in entries:
-        entry["exists"] = Path(entry["path"]).exists()
+        path = Path(entry["path"])
+        if not path.is_absolute():
+            path = project_dir / path
+        entry["exists"] = path.exists()
+        # "verified" was recorded when the backup was taken; a file that has
+        # changed on disk since is no longer verified.
+        entry["checksum_match"] = None
+        if entry["exists"] and entry.get("sha256"):
+            try:
+                entry["checksum_match"] = _cached_sha256(path) == entry["sha256"]
+            except OSError:
+                entry["checksum_match"] = False
+            if not entry["checksum_match"]:
+                entry["verified"] = False
     return entries
 
 
@@ -269,6 +401,10 @@ def cleanup_backups(
 
     Returns list of removed entries.
     """
+    # keep=0 used to remove nothing (manifest[:-0] is empty) and a negative
+    # keep removed from the oldest end by count; neither is a retention policy.
+    if keep < 1:
+        raise ValueError(f"keep must be at least 1, got {keep}")
     manifest = _load_manifest(project_dir)
     if len(manifest) <= keep:
         return []

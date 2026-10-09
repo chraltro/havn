@@ -4,6 +4,8 @@ import { api, type UserInfo } from "./api";
 interface AuthState {
   authChecked: boolean;
   authRequired: boolean;
+  /** The server has authentication on (authRequired only says a login is due now). */
+  authEnabled: boolean;
   needsSetup: boolean;
   currentUser: UserInfo | null;
   handleLogin: (result: { username: string; role?: string }) => void;
@@ -16,12 +18,14 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authChecked, setAuthChecked] = useState(false);
   const [authRequired, setAuthRequired] = useState(false);
+  const [authEnabled, setAuthEnabled] = useState(false);
   const [needsSetup, setNeedsSetup] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserInfo | null>(null);
 
   const checkAuth = useCallback(async () => {
     try {
       const status = await api.getAuthStatus();
+      setAuthEnabled(!!status.auth_enabled);
       if (!status.auth_enabled) {
         setAuthChecked(true);
         setCurrentUser({ username: "local", role: "admin", display_name: "Local User" });
@@ -76,7 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ authChecked, authRequired, needsSetup, currentUser, handleLogin, handleLogout, isAuthenticated }}
+      value={{ authChecked, authRequired, authEnabled, needsSetup, currentUser, handleLogin, handleLogout, isAuthenticated }}
     >
       {children}
     </AuthContext.Provider>

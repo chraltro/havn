@@ -107,6 +107,65 @@ def _safe_project_path(project_dir: Path, rel_path: str) -> Path:
     return full
 
 
+# A DuckDB database or its WAL by name: warehouse.duckdb, x.duckdb.wal,
+# x.duckdb.tmp, x.ddb, x.wal.
+_DATABASE_NAME_RE = re.compile(r"\.(?:duckdb|ddb)(?:\.|$)|\.wal$", re.IGNORECASE)
+# Every DuckDB database file carries this magic at bytes 8..12, whatever it is
+# named, so a renamed copy is still recognised.
+_DUCKDB_MAGIC = b"DUCK"
+
+
+def _configured_database_paths(project_dir: Path) -> set[Path]:
+    """The warehouse path of the active config and of every environment."""
+    from havn.server.deps import _get_config
+
+    paths: set[Path] = set()
+    try:
+        config = _get_config()
+    except Exception:
+        return paths
+    raw = [config.database.path]
+    for env in (getattr(config, "environments", None) or {}).values():
+        env_path = (env.database or {}).get("path")
+        if env_path:
+            raw.append(env_path)
+    for value in raw:
+        try:
+            db = (project_dir / str(value)).resolve()
+        except (OSError, ValueError):
+            continue
+        paths.add(db)
+        paths.add(db.with_name(db.name + ".wal"))
+    return paths
+
+
+def _is_database_file(project_dir: Path, full_path: Path) -> bool:
+    """Whether ``full_path`` is a warehouse, backup or WAL file.
+
+    The file API serves raw bytes. A database file holds every table unmasked,
+    so serving one to a reader would bypass masking and the table-level checks
+    that guard /api/query. Backups are the same data.
+    """
+    from havn.engine.backup import BACKUPS_DIR
+
+    if _DATABASE_NAME_RE.search(full_path.name):
+        return True
+    try:
+        rel_parts = full_path.relative_to(project_dir.resolve()).parts
+    except ValueError:
+        rel_parts = ()
+    if rel_parts and rel_parts[0].lower() == BACKUPS_DIR.lower():
+        return True
+    if full_path in _configured_database_paths(project_dir):
+        return True
+    try:
+        with open(full_path, "rb") as fh:
+            head = fh.read(12)
+    except OSError:
+        return False
+    return head[8:12] == _DUCKDB_MAGIC
+
+
 def _package_of(rel_path: str) -> str | None:
     """The package a project-relative path belongs to, or None.
 
@@ -261,6 +320,12 @@ def read_file(request: Request, file_path: str) -> dict:
         raise HTTPException(404, f"File not found: {file_path}")
     if not full_path.is_file():
         raise HTTPException(400, "Not a file")
+    if _is_database_file(project_dir, full_path):
+        raise HTTPException(
+            403,
+            "Database and backup files cannot be read through the file API; "
+            "query the warehouse instead.",
+        )
     try:
         content = full_path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
@@ -268,6 +333,9 @@ def read_file(request: Request, file_path: str) -> dict:
             content = full_path.read_text(encoding="latin-1")
         except Exception:
             raise HTTPException(422, "Cannot read file: unsupported encoding")
+    except OSError as e:
+        # Typically a file another process holds an exclusive lock on (Windows).
+        raise HTTPException(409, f"Cannot read file: {e.strerror or e}")
     fh = _file_hash(content)
     return JSONResponse(
         content={
@@ -327,6 +395,10 @@ def move_file(request: Request, file_path: str, req: MoveFileRequest) -> dict:
         raise HTTPException(400, "Not a file")
     if dst.exists():
         raise HTTPException(409, f"Destination already exists: {req.destination}")
+    # Moving the warehouse or a backup away loses data as surely as deleting
+    # it, and moving a file onto a database path would shadow one.
+    if _is_database_file(project_dir, src) or _is_database_file(project_dir, dst):
+        raise HTTPException(403, "Database and backup files cannot be moved through the file API.")
     dst.parent.mkdir(parents=True, exist_ok=True)
     src.rename(dst)
     # Remove empty parent directories up to project root
@@ -354,6 +426,8 @@ def delete_file(
     # Prevent deleting critical files
     if full_path.name in ("project.yml", ".env", ".gitignore"):
         raise HTTPException(400, f"Cannot delete {full_path.name}")
+    if _is_database_file(project_dir, full_path):
+        raise HTTPException(403, "Database and backup files cannot be deleted through the file API.")
 
     dropped = None
     if drop_object:

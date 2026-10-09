@@ -6,6 +6,7 @@ import { formatNumber } from "./chartStyleDefaults";
 import ChartPanel from "./ChartPanel";
 import DashboardChart from "./DashboardCharts";
 import SortableTable from "./SortableTable";
+import FocusTrap from "./FocusTrap";
 
 /**
  * Widget Editor — visual query builder + chart configurator.
@@ -509,12 +510,17 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
   }, []);
 
   return (
-    <div style={st.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <FocusTrap
+      labelledBy="havn-widget-editor-title"
+      style={st.overlay}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onEscape={onClose}
+    >
       <div style={st.panel} className="havn-widget-editor">
         {/* Header */}
         <div style={st.header}>
           <div style={st.headerLeft}>
-            <h3 style={st.heading}>{isNew ? "Add Widget" : "Edit Widget"}</h3>
+            <h3 id="havn-widget-editor-title" style={st.heading}>{isNew ? "Add Widget" : "Edit Widget"}</h3>
             <div style={st.modeToggle}>
               <button
                 style={{ ...st.modeBtn, ...(mode === "visual" ? st.modeBtnActive : {}) }}
@@ -533,7 +539,7 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
               </button>
             </div>
           </div>
-          <button style={st.closeBtn} onClick={onClose}>×</button>
+          <button style={st.closeBtn} onClick={onClose} aria-label="Close">×</button>
         </div>
 
         <div style={st.body}>
@@ -638,7 +644,7 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
           </div>
         </div>
       </div>
-    </div>
+    </FocusTrap>
   );
 }
 

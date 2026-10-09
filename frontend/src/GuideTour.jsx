@@ -88,6 +88,13 @@ export default function GuideTour({ steps, onComplete, isOpen }) {
   useEffect(() => {
     if (!isOpen) return;
     function handleKey(e) {
+      // Enter on a focused button already fires its click; advancing here too
+      // would skip a step. Text fields keep their own keys entirely.
+      const tag = e.target?.tagName;
+      if (e.key !== "Escape") {
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (e.key === "Enter" && (tag === "BUTTON" || tag === "A")) return;
+      }
       if (e.key === "Escape") {
         onComplete();
       } else if (e.key === "ArrowRight" || e.key === "Enter") {

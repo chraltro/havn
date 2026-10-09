@@ -478,3 +478,147 @@ def test_sql_parsed_once_per_pass(tmp_path, monkeypatch):
     # business, not a second parse of the model.
     model_parses = [sql for sql in calls if "landing.src" in str(sql)]
     assert len(model_parses) == 1, calls
+
+
+# ---------------------------------------------------------------------------
+# Name case, hash normalisation, macro fingerprints
+# ---------------------------------------------------------------------------
+
+
+def test_mixed_case_file_names_keep_their_edges(tmp_path):
+    """`Customers.sql` and `FROM silver.Customers` must be one node.
+
+    The file name kept its case while auto-extracted refs were lowercased,
+    so the edge was lost and gold.report was ordered first.
+    """
+    t = tmp_path / "transform"
+    (t / "silver").mkdir(parents=True)
+    (t / "gold").mkdir()
+    (t / "silver" / "Customers.sql").write_text("SELECT 1 AS id\n")
+    (t / "gold" / "report.sql").write_text("SELECT * FROM silver.Customers\n")
+    models = discover_models(t)
+    assert {m.full_name for m in models} == {"silver.customers", "gold.report"}
+    assert [m.full_name for m in build_dag(models)] == ["silver.customers", "gold.report"]
+
+
+def test_depends_on_is_case_insensitive(tmp_path):
+    t = tmp_path / "transform"
+    (t / "silver").mkdir(parents=True)
+    (t / "silver" / "a.sql").write_text(
+        "@config materialized=table\n@depends_on Silver.Z\n"
+        "SELECT * FROM query_table('silver.z')\n"
+    )
+    (t / "silver" / "z.sql").write_text("@config materialized=table\nSELECT 1 AS x\n")
+    models = discover_models(t)
+    assert [m.depends_on for m in models if m.name == "a"] == [["silver.z"]]
+    assert [m.full_name for m in build_dag(models)] == ["silver.z", "silver.a"]
+
+
+def test_whitespace_inside_a_literal_changes_the_hash():
+    from havn.engine.transform.models import _hash_content
+
+    assert _hash_content("SELECT 'a  b' AS v") != _hash_content("SELECT 'a b' AS v")
+    assert _hash_content('SELECT 1 AS "my  col"') != _hash_content('SELECT 1 AS "my col"')
+    # Outside quotes (comments included) whitespace still does not matter.
+    assert _hash_content("SELECT  1\n\tFROM t -- it's  x\n") == _hash_content("SELECT 1 FROM t -- it's x")
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT  a,\n  b FROM t WHERE x = 'one two'",
+    "-- customer's orders\nSELECT\n    'x' AS y\n  FROM   t",
+    "/* multi\n   line */ SELECT \"Col A\" FROM t WHERE s = 'it''s'",
+])
+def test_hash_is_unchanged_for_queries_without_whitespace_runs_in_literals(sql):
+    """Upgrading must not rebuild every model: the old rule collapsed all
+    whitespace, and the new one agrees whenever literals hold single spaces."""
+    import hashlib
+    import re
+
+    from havn.engine.transform.models import _hash_content
+
+    old = hashlib.sha256(re.sub(r"\s+", " ", sql.strip()).encode()).hexdigest()[:16]
+    assert _hash_content(sql) == old
+
+
+def test_literal_whitespace_edit_rebuilds(tmp_path):
+    transform_dir = tmp_path / "transform"
+    (transform_dir / "silver").mkdir(parents=True)
+    db = duckdb.connect(str(tmp_path / "w.duckdb"))
+    (transform_dir / "silver" / "m.sql").write_text("@config materialized=table\nSELECT 'a  b' AS v")
+    run_transform(db, transform_dir)
+    (transform_dir / "silver" / "m.sql").write_text("@config materialized=table\nSELECT 'a b' AS v")
+    assert run_transform(db, transform_dir)["silver.m"] == "built"
+    assert db.execute("SELECT v FROM silver.m").fetchone() == ("a b",)
+
+
+def test_macro_edit_rebuilds_only_the_models_that_call_it(tmp_path):
+    from havn.engine.transform import discover_all_models
+
+    (tmp_path / "project.yml").write_text("name: t\n")
+    (tmp_path / "macros").mkdir()
+    macro_file = tmp_path / "macros" / "m.py"
+    macro_file.write_text("def tax(x: float) -> float:\n    return x * 1.25\n")
+    t = tmp_path / "transform"
+    (t / "gold").mkdir(parents=True)
+    (t / "gold" / "taxed.sql").write_text("@config materialized=table\nSELECT tax(100.0) AS v\n")
+    (t / "gold" / "plain.sql").write_text("@config materialized=table\nSELECT 1 AS v\n")
+
+    def hashes():
+        return {m.full_name: m.content_hash for m in discover_all_models(tmp_path)}
+
+    before = hashes()
+    # Stable across discoveries, or every run would rebuild.
+    assert hashes() == before
+    # A model calling no macro keeps exactly the hash it had without macros/.
+    assert before["gold.plain"] == next(
+        m.content_hash for m in discover_models(t) if m.name == "plain"
+    )
+
+    macro_file.write_text("def tax(x: float) -> float:\n    return x * 1.10\n")
+    after = hashes()
+    assert after["gold.taxed"] != before["gold.taxed"]
+    assert after["gold.plain"] == before["gold.plain"]
+
+
+def test_macro_fingerprint_is_per_function_and_not_transitive(tmp_path):
+    """Editing one macro rebuilds only its callers; descendants of a caller
+    are not marked modified (they follow in the same run via _parent_built),
+    and a model calling a different macro in the same file is untouched."""
+    from havn.engine.transform import discover_all_models
+    from havn.engine.transform.discovery import _compute_upstream_hash
+
+    (tmp_path / "project.yml").write_text("name: t\n")
+    (tmp_path / "macros").mkdir()
+    macro_file = tmp_path / "macros" / "m.py"
+    body = (
+        "from havn import macro\n\nRATE = 1.25\n\n"
+        "@macro\ndef tax(x: float) -> float:\n    return x * RATE\n\n"
+        "@macro\ndef double(x: float) -> float:\n    return x * {k}\n"
+    )
+    macro_file.write_text(body.format(k=2))
+    t = tmp_path / "transform"
+    (t / "silver").mkdir(parents=True)
+    (t / "gold").mkdir()
+    (t / "silver" / "taxed.sql").write_text("@config materialized=table\nSELECT tax(100.0) AS v\n")
+    (t / "silver" / "doubled.sql").write_text("@config materialized=table\nSELECT double(1.0) AS v\n")
+    (t / "gold" / "report.sql").write_text("@config materialized=table\nSELECT * FROM silver.doubled\n")
+
+    def hashes():
+        models = build_dag(discover_all_models(tmp_path))
+        by_name = {m.full_name: m for m in models}
+        for m in models:
+            m.upstream_hash = _compute_upstream_hash(m, by_name)
+        return {m.full_name: (m.content_hash, m.upstream_hash) for m in models}
+
+    before = hashes()
+    macro_file.write_text(body.format(k=3))
+    after = hashes()
+    assert after["silver.doubled"][0] != before["silver.doubled"][0]
+    assert after["silver.taxed"] == before["silver.taxed"]
+    assert after["gold.report"] == before["gold.report"]
+
+    # A shared constant counts for the function that uses it.
+    macro_file.write_text(body.format(k=3).replace("RATE = 1.25", "RATE = 1.1"))
+    again = hashes()
+    assert again["silver.taxed"][0] != after["silver.taxed"][0]
+    assert again["silver.doubled"] == after["silver.doubled"]

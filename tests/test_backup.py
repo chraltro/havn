@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import duckdb
@@ -267,3 +268,177 @@ class TestCleanupBackups:
         assert len(remaining) == 1
         # The one remaining should still exist on disk
         assert Path(remaining[0]["path"]).exists()
+
+
+# ---------------------------------------------------------------------------
+# Audit regressions: checksum, atomic restore, locked warehouse, --keep
+# ---------------------------------------------------------------------------
+
+
+def _tamper(path: Path) -> None:
+    """Flip a byte near the end: DuckDB may still open it, the SHA changes."""
+    data = bytearray(path.read_bytes())
+    data[-1] ^= 0xFF
+    path.write_bytes(bytes(data))
+
+
+class TestChecksumAgainstManifest:
+    def test_verify_reports_sha_mismatch(self, project):
+        from havn.engine.backup import create_backup, verify_backup
+
+        project_dir, db_path = project
+        entry = create_backup(project_dir, db_path)
+        backup = Path(entry["path"])
+        _tamper(backup)
+
+        # Located through the manifest beside the backup, and via project_dir.
+        for result in (verify_backup(backup), verify_backup(backup, project_dir=project_dir)):
+            assert result["valid"] is False
+            assert result["checksum_match"] is False
+            assert "SHA-256 mismatch" in result["error"]
+
+    def test_verify_untouched_backup_matches(self, project):
+        from havn.engine.backup import create_backup, verify_backup
+
+        project_dir, db_path = project
+        entry = create_backup(project_dir, db_path)
+        result = verify_backup(Path(entry["path"]))
+        assert result["valid"] is True
+        assert result["checksum_match"] is True
+
+    def test_list_does_not_call_tampered_backup_verified(self, project):
+        from havn.engine.backup import create_backup, list_backups
+
+        project_dir, db_path = project
+        entry = create_backup(project_dir, db_path)
+        _tamper(Path(entry["path"]))
+
+        [listed] = list_backups(project_dir)
+        assert listed["checksum_match"] is False
+        assert listed["verified"] is False
+
+    def test_restore_refuses_tampered_backup(self, project):
+        from havn.engine.backup import BackupError, create_backup, restore_backup
+
+        project_dir, db_path = project
+        entry = create_backup(project_dir, db_path)
+        _tamper(Path(entry["path"]))
+        before = db_path.read_bytes()
+
+        with pytest.raises(BackupError, match="SHA-256 mismatch"):
+            restore_backup(project_dir, db_path, Path(entry["path"]))
+        assert db_path.read_bytes() == before
+
+    def test_cli_backup_verify_and_list(self, project):
+        from typer.testing import CliRunner
+
+        from havn.cli import app
+        from havn.engine.backup import create_backup
+
+        project_dir, db_path = project
+        (project_dir / "project.yml").write_text("name: t\n", encoding="utf-8")
+        entry = create_backup(project_dir, db_path)
+        _tamper(Path(entry["path"]))
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["backup-verify", entry["path"], "-p", str(project_dir)])
+        assert result.exit_code == 1
+        assert "INVALID" in result.output
+        result = runner.invoke(app, ["backup-list", "-p", str(project_dir)])
+        assert result.exit_code == 0
+        assert "mismatch" in result.output
+
+
+class TestAtomicRestore:
+    def test_failed_copy_leaves_warehouse_and_wal_untouched(self, project, monkeypatch):
+        import shutil
+
+        from havn.engine.backup import BackupError, create_backup, restore_backup
+
+        project_dir, db_path = project
+        entry = create_backup(project_dir, db_path)
+        wal = Path(str(db_path) + ".wal")
+        wal.write_bytes(b"pending")
+        before = db_path.read_bytes()
+
+        def half_copy(src, dst, *a, **k):
+            Path(dst).write_bytes(Path(src).read_bytes()[:100])
+            raise OSError("disk full")
+
+        monkeypatch.setattr(shutil, "copyfile", half_copy)
+        with pytest.raises(BackupError, match="disk full"):
+            restore_backup(project_dir, db_path, Path(entry["path"]))
+
+        assert db_path.read_bytes() == before
+        assert wal.read_bytes() == b"pending"
+        leftovers = [p.name for p in project_dir.iterdir() if ".restore-" in p.name]
+        assert leftovers == []
+
+    def test_restore_replaces_contents(self, project):
+        from havn.engine.backup import create_backup, restore_backup
+
+        project_dir, db_path = project
+        entry = create_backup(project_dir, db_path)
+        conn = duckdb.connect(str(db_path))
+        conn.execute("DROP TABLE gold.customers")
+        conn.close()
+
+        restore_backup(project_dir, db_path, Path(entry["path"]))
+        conn = duckdb.connect(str(db_path), read_only=True)
+        try:
+            assert conn.execute("SELECT COUNT(*) FROM gold.customers").fetchone()[0] == 2
+        finally:
+            conn.close()
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="open files are only unreplaceable on Windows")
+    def test_locked_warehouse_gives_clear_error(self, project):
+        from havn.engine.backup import BackupError, create_backup, restore_backup
+
+        project_dir, db_path = project
+        entry = create_backup(project_dir, db_path)
+        holder = duckdb.connect(str(db_path))
+        try:
+            with pytest.raises(BackupError, match="in use by another process"):
+                restore_backup(project_dir, db_path, Path(entry["path"]))
+        finally:
+            holder.close()
+        assert [p for p in project_dir.iterdir() if ".restore-" in p.name] == []
+
+
+class TestKeepValidation:
+    @pytest.mark.parametrize("keep", [0, -1])
+    def test_engine_rejects_keep_below_one(self, project, keep):
+        from havn.engine.backup import cleanup_backups, create_backup, list_backups
+
+        project_dir, db_path = project
+        for _ in range(3):
+            create_backup(project_dir, db_path)
+        with pytest.raises(ValueError, match="at least 1"):
+            cleanup_backups(project_dir, keep=keep)
+        assert len(list_backups(project_dir)) == 3
+
+    @pytest.mark.parametrize("keep", ["0", "-2"])
+    def test_cli_rejects_keep_below_one(self, project, keep):
+        from typer.testing import CliRunner
+
+        from havn.cli import app
+
+        project_dir, _ = project
+        (project_dir / "project.yml").write_text("name: t\n", encoding="utf-8")
+        result = CliRunner().invoke(app, ["backup", "--keep", keep, "-p", str(project_dir)])
+        assert result.exit_code == 2  # usage error, before any backup is taken
+        assert not (project_dir / "_backups").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_restore_keeps_warehouse_mode(project):
+    import os
+    import stat
+
+    from havn.engine.backup import create_backup, restore_backup
+
+    project_dir, db_path = project
+    entry = create_backup(project_dir, db_path)
+    os.chmod(db_path, 0o664)
+    restore_backup(project_dir, db_path, Path(entry["path"]))
+    assert stat.S_IMODE(db_path.stat().st_mode) == 0o664

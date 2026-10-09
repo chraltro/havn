@@ -572,6 +572,56 @@ def test_execute_job_success(project, conn):
     assert result.steps_failed == 0
 
 
+def _transform_job(project, conn, target="bronze.orders", full_refresh=False):
+    from havn.engine.transform.discovery import build_dag, discover_models
+
+    dag = build_dag(discover_models(project / "transform"))
+    job = Job(
+        name="t", target=target, resolve="none", full_refresh=full_refresh,
+        file_path=project / "orchestration" / "t.yml",
+    )
+    return job, resolve_execution_plan(job.target, dag, project, conn=conn, resolve="none")
+
+
+def test_execute_job_runs_assertions_and_skips_unchanged(project, conn):
+    """Jobs build models as `havn transform` does: assertions run, and a
+    second run with nothing changed builds nothing unless forced."""
+    sql = project / "transform" / "bronze" / "orders.sql"
+    sql.write_text("@assert row_count > 0\n" + sql.read_text())
+    job, plan = _transform_job(project, conn)
+
+    first = execute_job(job, plan, conn, project)
+    assert first.status == "success" and first.steps_completed == 1
+    assert conn.execute(
+        "SELECT count(*) FROM _havn.assertion_results WHERE model_path = 'bronze.orders'"
+    ).fetchone()[0] == 1
+
+    second = execute_job(job, plan, conn, project)
+    assert second.status == "success"
+    assert (second.steps_completed, second.steps_skipped) == (0, 1)
+
+    forced = execute_job(job, plan, conn, project, force=True)
+    assert (forced.steps_completed, forced.steps_skipped) == (1, 0)
+
+
+def test_execute_job_failed_assertion_blocks_downstream(project, conn):
+    sql = project / "transform" / "bronze" / "orders.sql"
+    sql.write_text("@assert row_count > 100\n" + sql.read_text())
+    from havn.engine.transform.discovery import build_dag, discover_models
+
+    dag = build_dag(discover_models(project / "transform"))
+    job = Job(name="b", target="bronze.orders", targets=["bronze.orders", "silver.orders"], resolve="none",
+              file_path=project / "orchestration" / "b.yml")
+    plan = resolve_execution_plan(job.targets, dag, project, conn=conn, resolve="none")
+
+    result = execute_job(job, plan, conn, project)
+    by_target = {d["target"]: d for d in result.step_details}
+    assert result.status == "failure"
+    assert by_target["bronze.orders"]["status"] == "error"
+    assert "row_count > 100" in by_target["bronze.orders"]["error"]
+    assert by_target["silver.orders"]["status"] == "skipped"
+
+
 # --- Save/Delete ---
 
 
@@ -938,3 +988,108 @@ def test_scheduler_weekday_posix_convention(project):
     # agrees with what the scheduler does for the same time. This is covered
     # by test_cron_weekday_is_posix above.
     pass
+
+
+# --- Cron validation / next run (shared engine.cron parser) ---
+
+
+def test_is_valid_schedule_rejects_bad_cron_fields():
+    from havn.engine.orchestration import is_valid_schedule
+
+    assert not is_valid_schedule("a b c d e")
+    assert not is_valid_schedule("99 * * * *")
+    assert not is_valid_schedule("0 0 * * 9")
+    assert is_valid_schedule("0 9 * * MON-FRI")
+    assert is_valid_schedule("5/15 * * * *")
+    assert is_valid_schedule("every 1 day")
+
+
+def test_discover_jobs_drops_invalid_cron_field(project):
+    (project / "orchestration" / "bad.yml").write_text(
+        "name: bad\ntarget: silver.orders\nschedules:\n  - '61 * * * *'\n  - '0 6 * * 1'\n"
+    )
+    job = next(j for j in discover_jobs(project) if j.name == "bad")
+    assert job.schedules == ["0 6 * * 1"]
+
+
+def test_get_next_run_weekly_and_monthly_are_found():
+    import datetime
+
+    for expr in ("0 6 * * 1", "0 0 1 * *", "0 0 1 1 *"):
+        nxt = get_next_run(expr)
+        assert nxt is not None, expr
+        assert datetime.datetime.fromisoformat(nxt) > datetime.datetime.now()
+
+
+def test_matches_cron_day_step_anchored_at_one():
+    import datetime
+
+    assert _matches_cron(["0", "0", "*/2", "*", "*"], datetime.datetime(2026, 4, 1))
+    assert not _matches_cron(["0", "0", "*/2", "*", "*"], datetime.datetime(2026, 4, 2))
+
+
+# --- Job timeout reaches script steps ---
+
+
+def test_job_timeout_bounds_a_running_script(project, conn, monkeypatch):
+    """The job budget is the step timeout: a hung ingest is stopped when the
+    job runs out of time, not after run_script's 2-hour default."""
+    import time
+
+    from havn.engine import runner as runner_mod
+
+    monkeypatch.setattr(runner_mod, "SCRIPT_POLL_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setattr(runner_mod, "SCRIPT_STOP_GRACE_SECONDS", 2)
+    (project / "ingest" / "slow.py").write_text(
+        "import time\nfor _ in range(1000):\n    time.sleep(0.01)\n"
+    )
+    from havn.engine.orchestration import ExecutionPlan, ExecutionStep
+
+    job = Job(name="slow", target="ingest/slow.py", file_path=project / "orchestration" / "slow.yml")
+    job.timeout_minutes = 0.01  # 0.6s
+    plan = ExecutionPlan(steps=[
+        ExecutionStep(step=1, type="ingest", target="ingest/slow.py"),
+        ExecutionStep(step=2, type="ingest", target="ingest/orders.py"),
+    ])
+    t0 = time.perf_counter()
+    result = execute_job(job, plan, conn, project)
+    assert time.perf_counter() - t0 < 5
+    assert result.status == "timeout"
+    assert len(result.step_details) == 1  # the second step never started
+    assert "timed out" in result.step_details[0]["error"]
+
+
+# --- full_refresh ---
+
+
+def test_job_full_refresh_default_rebuilds_unchanged(project, conn):
+    """A job rebuilds every model by default, as jobs always did, so models
+    reading sources change detection cannot see stay fresh."""
+    job, plan = _transform_job(project, conn, full_refresh=True)
+    assert Job(name="x", target="a").full_refresh is True
+    execute_job(job, plan, conn, project)
+    again = execute_job(job, plan, conn, project)
+    assert (again.steps_completed, again.steps_skipped) == (1, 0)
+
+
+def test_job_full_refresh_parsed_and_saved(project):
+    (project / "orchestration" / "quick.yml").write_text(
+        "name: quick\ntarget: silver.orders\nfull_refresh: false\n"
+    )
+    (project / "orchestration" / "full.yml").write_text("name: full\ntarget: silver.orders\n")
+    jobs = {j.name: j for j in discover_jobs(project)}
+    assert jobs["quick"].full_refresh is False
+    assert jobs["full"].full_refresh is True
+
+    path = save_job(project, {"name": "saved-quick", "targets": ["silver.orders"], "full_refresh": False})
+    assert "full_refresh: false" in path.read_text()
+    path = save_job(project, {"name": "saved-full", "targets": ["silver.orders"], "full_refresh": True})
+    assert "full_refresh" not in path.read_text()  # the default is not written
+
+
+def test_scaffold_incremental_job_skips_unchanged():
+    import yaml
+
+    from havn.templates import SAMPLE_INCREMENTAL_JOB
+
+    assert yaml.safe_load(SAMPLE_INCREMENTAL_JOB)["full_refresh"] is False

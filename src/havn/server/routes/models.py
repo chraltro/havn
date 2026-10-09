@@ -294,7 +294,7 @@ def get_lineage(
     models = _discover_models_cached(transform_dir)
     model_map = {m.full_name: m for m in models}
 
-    target = model_map.get(model_name)
+    target = model_map.get(model_name.lower())
     if not target:
         matches = [m for m in models if m.name == model_name]
         if matches:
@@ -392,7 +392,7 @@ def get_explain(
 
     models = discover_all_models(_get_project_dir())
 
-    target = next((m for m in models if m.full_name == model_name), None) or next(
+    target = next((m for m in models if m.full_name == model_name.lower()), None) or next(
         (m for m in models if m.name == model_name), None
     )
     if target is None:
@@ -455,7 +455,7 @@ def get_model_notebook_view(
     models = _discover_models_cached(transform_dir)
     model_map = {m.full_name: m for m in models}
 
-    target = model_map.get(model_name)
+    target = model_map.get(model_name.lower())
     if not target:
         matches = [m for m in models if m.name == model_name]
         if matches:

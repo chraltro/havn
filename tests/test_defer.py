@@ -892,3 +892,46 @@ def test_defer_is_refused_on_the_ducklake_backend(project, prod_db):
     with pytest.raises(DeferUnsupportedError) as exc:
         resolve_defer(config, project)
     assert "DuckLake" in str(exc.value)
+
+
+
+def test_defer_snapshot_survives_a_quote_in_the_temp_dir(project, prod_db, tmp_path, monkeypatch):
+    """TEMP under a user called O'Brien broke the snapshot's ATTACH literal."""
+    import shutil
+    import tempfile
+
+    from havn.engine.defer import snapshot_defer_target
+
+    quoted = tmp_path / "O'Brien" / "Temp"
+    quoted.mkdir(parents=True)
+    monkeypatch.setattr(tempfile, "tempdir", str(quoted))
+    snapshot = snapshot_defer_target(prod_db, project_dir=project)
+    try:
+        assert snapshot.source == "copy"
+        assert "O'Brien" in str(snapshot.path)
+    finally:
+        if snapshot.cleanup_dir is not None:
+            shutil.rmtree(snapshot.cleanup_dir, ignore_errors=True)
+
+
+def test_deferred_table_keeps_its_schema_qualifiers_apart(project, prod_db):
+    """bronze.orders deferred next to a local silver.orders: both called orders.
+
+    Dropping the schema from ``bronze.orders.amt`` left ``orders.amt``, which
+    DuckDB rejects as ambiguous; the deferred relation now gets its own alias.
+    """
+    prod = duckdb.connect(str(prod_db))
+    prod.execute("CREATE TABLE bronze.orders AS SELECT 1 AS id, 10 AS amt")
+    prod.close()
+    conn = duckdb.connect(str(project / "dev.duckdb"))
+    try:
+        conn.execute("CREATE SCHEMA silver")
+        conn.execute("CREATE TABLE silver.orders AS SELECT 1 AS id, 'x' AS tag")
+        sql = (
+            "SELECT bronze.orders.amt, silver.orders.tag FROM bronze.orders "
+            "JOIN silver.orders ON bronze.orders.id = silver.orders.id"
+        )
+        with defer_session(conn, DeferSpec(target="prod", path=prod_db)) as rewrite:
+            assert conn.execute(rewrite(sql)).fetchall() == [(10, "x")]
+    finally:
+        conn.close()

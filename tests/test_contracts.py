@@ -1425,3 +1425,103 @@ class TestSchemaDriftWarning:
             assert [e.message for e in errors] == []
         finally:
             conn.close()
+
+
+
+def test_previous_is_the_build_before_the_latest(tmp_path: Path):
+    """{previous} must not be the count of the build being checked.
+
+    model_profiles is overwritten by every build before contracts run, so a
+    1000 -> 10 row drop resolved {previous * 0.9} to 9 and passed.
+    """
+    from havn.engine.contracts import run_contracts
+    from havn.engine.database import connect
+    from havn.engine.transform import run_transform
+
+    (tmp_path / "transform" / "gold").mkdir(parents=True)
+    (tmp_path / "contracts").mkdir()
+    (tmp_path / "contracts" / "c.yml").write_text(
+        "contracts:\n"
+        "  - name: no_big_drop\n"
+        "    model: gold.orders\n"
+        "    assertions:\n"
+        '      - "row_count > {previous * 0.9}"\n'
+    )
+    (tmp_path / "transform" / "gold" / "orders.sql").write_text(
+        "@config materialized=table\nSELECT id FROM landing.src\n"
+    )
+    conn = connect(str(tmp_path / "warehouse.duckdb"))
+    try:
+        conn.execute("CREATE SCHEMA landing")
+        conn.execute("CREATE TABLE landing.src AS SELECT range AS id FROM range(1000)")
+        run_transform(conn, tmp_path / "transform", project_dir=tmp_path)
+        first = run_contracts(conn, tmp_path / "contracts")[0]
+        # One build: nothing to compare against yet.
+        assert first.passed and first.results[0].get("skipped")
+
+        conn.execute("DELETE FROM landing.src WHERE id >= 10")
+        run_transform(conn, tmp_path / "transform", project_dir=tmp_path, force=True)
+        second = run_contracts(conn, tmp_path / "contracts")[0]
+        assert second.passed is False
+        assert "expected > 900" in second.results[0]["detail"]
+    finally:
+        conn.close()
+
+
+def test_contract_model_name_is_case_insensitive(tmp_path: Path):
+    """Model names are lowercase; `model: silver.Customers` still finds it."""
+    from havn.engine.contracts import run_contracts
+    from havn.engine.database import ensure_meta_table
+    from havn.engine.transform import run_transform
+
+    (tmp_path / "project.yml").write_text("name: t\n")
+    (tmp_path / "transform" / "silver").mkdir(parents=True)
+    (tmp_path / "contracts").mkdir()
+    (tmp_path / "transform" / "silver" / "Customers.sql").write_text(
+        "@config materialized=table\nSELECT 1 AS id\n"
+    )
+    (tmp_path / "contracts" / "c.yml").write_text(
+        "contracts:\n  - name: c\n    model: silver.Customers\n"
+        "    assertions:\n      - row_count > 0\n      - freshness < 24h\n"
+    )
+    conn = duckdb.connect(str(tmp_path / "w.duckdb"))
+    ensure_meta_table(conn)
+    run_transform(conn, tmp_path / "transform", project_dir=tmp_path)
+    [result] = run_contracts(conn, tmp_path / "contracts")
+    assert result.error is None
+    assert result.passed
+    conn.close()
+
+
+def test_mixed_case_metadata_keys_are_lowercased_once(tmp_path: Path):
+    """Metadata recorded under `silver.Customers` moves to `silver.customers`,
+    unless a lowercase row already exists, so a microbatch model resumes
+    where it was instead of reprocessing from begin."""
+    from havn.engine.database import ensure_meta_table
+
+    conn = duckdb.connect(str(tmp_path / "w.duckdb"))
+    ensure_meta_table(conn)
+    conn.execute(
+        "INSERT INTO _havn.model_state (model_path, content_hash, upstream_hash, materialized_as) "
+        "VALUES ('silver.Customers', 'h', '', 'table'), ('gold.Report', 'old', '', 'table'), "
+        "('gold.report', 'new', '', 'table')"
+    )
+    conn.execute(
+        "INSERT INTO _havn.batch_state (model_path, window_start, window_end, status) "
+        "VALUES ('silver.Customers', TIMESTAMP '2024-01-01', TIMESTAMP '2024-01-02', 'done')"
+    )
+    conn.execute(
+        "INSERT INTO _havn.assertion_results (id, model_path, expression, passed) "
+        "VALUES ('1', 'silver.Customers', 'row_count > 0', true)"
+    )
+    ensure_meta_table(conn)
+    assert conn.execute(
+        "SELECT model_path, content_hash FROM _havn.model_state ORDER BY 1"
+    ).fetchall() == [("gold.report", "new"), ("silver.customers", "h")]
+    assert conn.execute("SELECT model_path FROM _havn.batch_state").fetchall() == [
+        ("silver.customers",)
+    ]
+    assert conn.execute("SELECT model_path FROM _havn.assertion_results").fetchall() == [
+        ("silver.customers",)
+    ]
+    conn.close()

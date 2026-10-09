@@ -112,7 +112,7 @@ def test_get_metric_unknown(project):
 
 def test_compile_plain_aggregate(project):
     sql = compile_metric(get_metric(project, "order_count"))
-    assert "COUNT(*) AS order_count" in sql
+    assert 'COUNT(*) AS "order_count"' in sql
     assert "GROUP BY" not in sql
     validate_read_only_query(sql)
 
@@ -121,7 +121,7 @@ def test_compile_with_dimensions_and_grain(project):
     sql = compile_metric(
         get_metric(project, "revenue"), dimensions=["region"], grain="day",
     )
-    assert "DATE_TRUNC('day', order_date) AS day" in sql
+    assert """DATE_TRUNC('day', "order_date") AS "day\"""" in sql
     assert "GROUP BY 1, 2" in sql
     assert "(status != 'cancelled')" in sql
     validate_read_only_query(sql)
@@ -235,3 +235,30 @@ def test_api_query_respects_limit(client):
     )
     assert resp.status_code == 200
     assert len(resp.json()["rows"]) == 1
+
+
+
+def test_reserved_word_dimensions_are_quoted():
+    """Columns called group / order are valid identifiers and reserved words."""
+    from havn.engine.semantic import _parse_metric
+
+    conn = duckdb.connect()
+    conn.execute("CREATE SCHEMA gold")
+    conn.execute(
+        'CREATE TABLE gold.orders AS SELECT * FROM (VALUES '
+        "('eu', 'a', 10, TIMESTAMP '2024-01-05'), ('us', 'b', 20, TIMESTAMP '2024-02-05')) "
+        't("group", "order", amount, ts)'
+    )
+    metric = _parse_metric(
+        {
+            "name": "revenue",
+            "model": "gold.orders",
+            "measure": "SUM(amount)",
+            "dimensions": ["group", "order"],
+            "time_dimension": "ts",
+        },
+        "x",
+    )
+    for dims in (["group"], ["order"]):
+        sql = compile_metric(metric, dimensions=dims, grain="year")
+        assert conn.execute(sql).fetchall()

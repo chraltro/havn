@@ -436,10 +436,9 @@ def _parse_rows(spec: dict, label: str, declared: list[str]) -> list[Any]:
 def _rows_from_csv(text: str, label: str) -> list[dict]:
     """Parse an inline CSV block into dict rows.
 
-    An empty field is NULL. Values that look like integers or floats are
-    converted, so a CSV fixture behaves like the list form; anything else
-    stays a string and is cast by DuckDB on insert when the column has a
-    declared or catalog type.
+    An empty field is NULL. Every other field stays text (``_CsvText``) and is
+    cast by DuckDB on insert into the column's declared, catalog or output
+    type; a column with no known type is inferred from the text.
     """
     reader = csv.reader(io.StringIO(text.strip("\n")))
     try:
@@ -466,16 +465,45 @@ def _rows_from_csv(text: str, label: str) -> list[dict]:
     return out
 
 
+class _CsvText(str):
+    """A CSV fixture field, still text.
+
+    Kept as text rather than converted at parse time: the column's type, when
+    declared or known from the catalog, decides what it becomes (DuckDB casts
+    it on insert), so ``01234`` in a VARCHAR column stays ``01234``. Only a
+    column with no known type is inferred from these values (``_infer_type``).
+    """
+
+    __slots__ = ()
+
+
 def _csv_value(value: str) -> Any:
     text = value.strip()
     if text == "":
         return None
-    for caster in (int, float):
-        try:
-            return caster(text)
-        except ValueError:
+    return _CsvText(text)
+
+
+def _csv_column_type(values: list[str]) -> str:
+    """Infer a column type from CSV text: BIGINT, DOUBLE or VARCHAR.
+
+    An integer counts only in its own spelling: ``01234`` or ``+5`` is text
+    (a zip code, an account number), since as a BIGINT it would come back as
+    ``1234`` and a comparison against the original would never match.
+    """
+    kind = "BIGINT"
+    for text in values:
+        if _CSV_INT_RE.fullmatch(text):
             continue
-    return text
+        if not _CSV_FLOAT_RE.fullmatch(text):
+            return "VARCHAR"
+        kind = "DOUBLE"
+    return kind
+
+
+# No leading zeros, no leading '+': those spellings are identifiers, not numbers.
+_CSV_INT_RE = re.compile(r"-?(?:0|[1-9][0-9]*)")
+_CSV_FLOAT_RE = re.compile(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?")
 
 
 def _parse_expect(raw: Any, label: str) -> ExpectedRows:
@@ -697,7 +725,7 @@ def _run_case(
             return finish("fail", mismatch)
 
         try:
-            _create_expected_table(conn, case.expect, actual_columns)
+            lossy = _create_expected_table(conn, case.expect, actual_columns)
         except UnitTestError as e:
             return finish("error", str(e))
         except Exception as e:
@@ -713,6 +741,11 @@ def _run_case(
         res.missing_rows = missing[1]
         res.unexpected_rows = unexpected[1]
 
+        if lossy:
+            # Compared after the cast the rows may well match; the values the
+            # test asked for still are not what the model can produce.
+            shown = "; ".join(lossy[:5]) + ("; ..." if len(lossy) > 5 else "")
+            return finish("fail", f"expected value(s) changed by the output type: {shown}")
         if res.missing_count or res.unexpected_count:
             return finish(
                 "fail",
@@ -854,6 +887,12 @@ def _row_column_names(rows: list[Any]) -> list[str]:
 
 def _infer_type(rows: list[Any], column: str) -> str:
     """Infer a DuckDB type from the first non-null Python value in a column."""
+    csv_values = [
+        row.get(column) for row in rows
+        if isinstance(row, dict) and isinstance(row.get(column), _CsvText)
+    ]
+    if csv_values:
+        return _csv_column_type(csv_values)
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -925,8 +964,11 @@ def _create_expected_table(
     conn: duckdb.DuckDBPyConnection,
     expect: ExpectedRows,
     actual_columns: list[tuple[str, str]],
-) -> None:
+) -> list[str]:
     """Materialize the expected rows using the actual output's column types.
+
+    Returns the expected values the cast changed (see
+    :func:`_lossy_expected_values`); the caller fails the test on any.
 
     Casting the fixture into the model's own types is what makes
     ``order_count: 1`` compare equal to a BIGINT and ``amount: 5.0`` equal to
@@ -965,6 +1007,67 @@ def _create_expected_table(
             )
         except Exception as e:
             raise UnitTestError(f"expected rows do not fit the model's output types: {e}")
+    return _lossy_expected_values(conn, values, actual_columns)
+
+
+# Output types an expected number is rounded into without complaint. Floats
+# (REAL, DOUBLE) are left out: 0.1 into a REAL is inexact by nature, not a
+# sign that the model is wrong.
+_EXACT_NUMERIC_TYPES = frozenset({
+    "TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT",
+    "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "UHUGEINT",
+})
+
+
+def _lossy_expected_values(
+    conn: duckdb.DuckDBPyConnection,
+    values: list[list[Any]],
+    actual_columns: list[tuple[str, str]],
+) -> list[str]:
+    """Expected numbers that changed when cast into the model's output type.
+
+    The expected rows are cast into the output types so ``1`` equals a
+    BIGINT and ``5.0`` a DECIMAL. The same cast also turned ``9.99`` into
+    ``10`` for a model that wrongly CASTs to INTEGER, and the test passed.
+    Any expected number that does not survive the cast is therefore reported:
+    the model's output cannot hold the value the test expects.
+    """
+    from decimal import Decimal, InvalidOperation
+
+    checked = [
+        i for i, (_, col_type) in enumerate(actual_columns)
+        if col_type.upper() in _EXACT_NUMERIC_TYPES or col_type.upper().startswith("DECIMAL")
+    ]
+    if not checked or not values:
+        return []
+    names = [name for name, _ in actual_columns]
+    select_cols = ", ".join(f'"{n}"' for n in names)
+    stored = {
+        row[0]: row[1:]
+        for row in conn.execute(
+            f'SELECT "{_POS_COLUMN}", {select_cols} FROM {_EXPECTED_TABLE}'
+        ).fetchall()
+    }
+    notes: list[str] = []
+    for row in values:
+        position, raw_values = row[0], row[1:]
+        got = stored.get(position)
+        if got is None:
+            continue
+        for i in checked:
+            raw, cast = raw_values[i], got[i]
+            if raw is None or cast is None or isinstance(raw, bool):
+                continue
+            try:
+                same = Decimal(str(raw).strip()) == Decimal(str(cast))
+            except (InvalidOperation, ValueError):
+                continue
+            if not same:
+                notes.append(
+                    f"row {position}: {names[i]} expected {raw!r} but the model's "
+                    f"{actual_columns[i][1]} output can only hold {cast!r}"
+                )
+    return notes
 
 
 def _compare_unordered(

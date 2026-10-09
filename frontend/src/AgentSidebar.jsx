@@ -400,7 +400,13 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
     };
 
     ws.onclose = () => {
-      updateAgent(agentId, { isConnected: false });
+      // A dropped socket never sends "done", so end the stream here; otherwise
+      // the input stays locked and the last bubble keeps its cursor forever.
+      updateAgent(agentId, (s) => {
+        const last = s.messages[s.messages.length - 1];
+        const messages = last && last.streaming ? [...s.messages.slice(0, -1), { ...last, streaming: false }] : s.messages;
+        return { ...s, isConnected: false, isStreaming: false, messages };
+      });
       if (intentionalCloseRef.current[agentId]) {
         intentionalCloseRef.current[agentId] = false;
         return;

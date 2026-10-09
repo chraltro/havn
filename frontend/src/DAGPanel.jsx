@@ -224,11 +224,14 @@ function DetailPanel({ modelName, runId, runs, snapshotsByRun, onClose, onRestor
 
   useEffect(() => {
     if (!runId || !modelName || !snapshot?.file_path) { setSample(null); return; }
+    // Scrubbing the timeline fires one fetch per run; only the latest may land.
+    let stale = false;
     setLoading(true);
     api.getSnapshotSample(runId, modelName, 50)
-      .then(setSample)
-      .catch(() => setSample(null))
-      .finally(() => setLoading(false));
+      .then((s) => { if (!stale) setSample(s); })
+      .catch(() => { if (!stale) setSample(null); })
+      .finally(() => { if (!stale) setLoading(false); });
+    return () => { stale = true; };
   }, [runId, modelName]);
 
   // Row count history across runs
@@ -437,7 +440,12 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
     // Only fetch for transform models (not ingest/export scripts)
     const node = dag?.nodes?.find(n => n.id === selectedNode);
     if (!node || node.id.startsWith("script:")) { setColumnLineage(null); return; }
-    api.getLineage(selectedNode).then(setColumnLineage).catch(() => setColumnLineage(null));
+    // Clicking through nodes quickly must not leave an earlier node's lineage on screen.
+    let stale = false;
+    api.getLineage(selectedNode)
+      .then((l) => { if (!stale) setColumnLineage(l); })
+      .catch(() => { if (!stale) setColumnLineage(null); });
+    return () => { stale = true; };
   }, [selectedNode, rewindMode, dag]);
 
   // When a column is highlighted, compute which edges carry it

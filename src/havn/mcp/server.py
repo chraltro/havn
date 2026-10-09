@@ -19,8 +19,11 @@ from __future__ import annotations
 
 from havn.textio import read_project_text
 
+import contextlib
+import io
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -64,7 +67,8 @@ class MCPServer:
     def serve(self, stdin=None, stdout=None) -> None:
         """Read newline-delimited JSON-RPC messages until EOF."""
         stdin = stdin or sys.stdin
-        stdout = stdout or sys.stdout
+        if stdout is None:
+            stdout = _claim_protocol_stdout()
         for line in stdin:
             line = line.strip()
             if not line:
@@ -74,7 +78,12 @@ class MCPServer:
             except json.JSONDecodeError:
                 self._write(stdout, _error_response(None, _PARSE_ERROR, "Parse error"))
                 continue
-            response = self.handle_message(msg)
+            # Engine code prints progress (the transform engine's module-level
+            # Rich Console, print() in user macros). Rich resolves sys.stdout
+            # on every write when built without file=, so swapping sys.stdout
+            # for the call keeps those lines off the protocol stream.
+            with contextlib.redirect_stdout(sys.stderr):
+                response = self.handle_message(msg)
             if response is not None:
                 self._write(stdout, response)
 
@@ -577,7 +586,7 @@ class MCPServer:
     def _find_model(self, name: str):
         models = self._models()
         for m in models:
-            if m.full_name == name or m.name == name:
+            if m.full_name == name.lower() or m.name == name.lower():
                 return m
         available = ", ".join(m.full_name for m in models) or "none"
         raise ToolError(f"Unknown model {name!r} (available: {available})")
@@ -862,6 +871,25 @@ class MCPServer:
             "errors": sum(1 for s in results.values() if s == "error"),
         }
         return {"summary": summary, "results": results}
+
+
+def _claim_protocol_stdout():
+    """Reserve the process's real stdout for JSON-RPC frames.
+
+    Returns a writer on a duplicate of file descriptor 1 and points fd 1 at
+    stderr, so output that bypasses ``sys.stdout`` (C extensions, child
+    processes) cannot interleave with protocol frames either. Falls back to
+    ``sys.stdout`` when it has no usable descriptor (e.g. under a test runner
+    that replaced it); the per-message ``redirect_stdout`` still applies.
+    """
+    try:
+        sys.stdout.flush()
+        fd = sys.stdout.fileno()
+        protocol = os.fdopen(os.dup(fd), "w", encoding="utf-8", newline="\n")
+        os.dup2(sys.stderr.fileno(), fd)
+    except (AttributeError, OSError, ValueError, io.UnsupportedOperation):
+        return sys.stdout
+    return protocol
 
 
 class _InvalidParams(ValueError):

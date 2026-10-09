@@ -61,9 +61,19 @@ class CSVConnector(BaseConnector):
             table_name = table_name.replace("-", "_").replace(" ", "_").lower()
         return [DiscoveredResource(name=table_name, description=path)]
 
+    _FORMATS = ("csv", "parquet", "json")
+
     def _detect_format(self, config: dict[str, Any]) -> str:
-        fmt = config.get("format", "")
+        # Saved connections may hold "CSV" or " parquet"; normalise first so
+        # `connectors regenerate` keeps working for them.
+        fmt = str(config.get("format") or "").strip().lower()
         if fmt:
+            # The format lands in generated code (reader name, temp-file
+            # suffix), so only the known values are accepted.
+            if fmt not in self._FORMATS:
+                raise ValueError(
+                    f"Unknown format {fmt!r}; expected one of: {', '.join(self._FORMATS)}"
+                )
             return fmt
         lower = config.get("path", "").lower()
         if lower.endswith(".parquet") or lower.endswith(".pq"):
@@ -73,6 +83,8 @@ class CSVConnector(BaseConnector):
         return "csv"
 
     def _reader_call(self, fmt: str, path_var: str) -> str:
+        # path_var names a variable in the generated script that already holds
+        # the path with single quotes doubled for a SQL string literal.
         if fmt == "parquet":
             return f"read_parquet('{{{path_var}}}')"
         if fmt == "json":
@@ -94,62 +106,69 @@ class CSVConnector(BaseConnector):
         table_name = tables[0] if tables else "data"
         is_url = path.startswith("http://") or path.startswith("https://")
 
-        # Escape backslashes for safe embedding in Python string literals
-        safe_path = path.replace("\\", "\\\\")
+        # The path is user input embedded in two languages. repr() gives a
+        # valid Python literal for any string (quotes, backslashes, newlines);
+        # the script then doubles single quotes at runtime for the SQL literal.
+        # Hand-escaping only backslashes broke on O'Brien/data.csv.
+        path_literal = repr(path)
+        sql_escape = """.replace("'", "''")"""
 
         if is_url:
-            reader = self._reader_call(fmt, "tmp_path")
+            reader = self._reader_call(fmt, "sql_path")
             lines = [
-                f'"""Auto-generated CSV/file ingest script.',
-                f"",
-                f"Imports data from {safe_path} into {target_schema}.{table_name}.",
-                f'"""',
-                f"",
-                f"import os",
-                f"import tempfile",
-                f"from urllib.request import urlopen",
-                f"",
-                f'url = "{safe_path}"',
-                f"",
-                f'print(f"Downloading {{url}}...")',
-                f"with urlopen(url, timeout=60) as resp:",
-                f"    data = resp.read()",
-                f"",
+                '"""Auto-generated CSV/file ingest script.',
+                "",
+                f"Imports data from the URL below into {target_schema}.{table_name}.",
+                '"""',
+                "",
+                "import os",
+                "import tempfile",
+                "from urllib.request import urlopen",
+                "",
+                f"url = {path_literal}",
+                "",
+                'print(f"Downloading {url}...")',
+                "with urlopen(url, timeout=60) as resp:",
+                "    data = resp.read()",
+                "",
                 f'with tempfile.NamedTemporaryFile(mode="wb", suffix=".{fmt}", delete=False) as f:',
-                f"    f.write(data)",
-                f"    tmp_path = f.name",
-                f"",
+                "    f.write(data)",
+                "    tmp_path = f.name",
+                # The temp dir sits under the user's profile, which can hold a quote too.
+                f"sql_path = tmp_path{sql_escape}",
+                "",
                 f'db.execute("CREATE SCHEMA IF NOT EXISTS {target_schema}")',
-                f'db.execute(f"""',
+                'db.execute(f"""',
                 f"    CREATE OR REPLACE TABLE {target_schema}.{table_name} AS",
                 f"    SELECT * FROM {reader}",
-                f'""")',
-                f"",
-                f"os.unlink(tmp_path)",
+                '""")',
+                "",
+                "os.unlink(tmp_path)",
                 f'rows = db.execute("SELECT COUNT(*) FROM {target_schema}.{table_name}").fetchone()[0]',
                 f'print(f"Loaded {{rows}} rows into {target_schema}.{table_name}")',
-                f"",
+                "",
             ]
             return "\n".join(lines)
         else:
-            reader = self._reader_call(fmt, "file_path")
+            reader = self._reader_call(fmt, "sql_path")
             lines = [
-                f'"""Auto-generated CSV/file ingest script.',
-                f"",
-                f"Imports data from {safe_path} into {target_schema}.{table_name}.",
-                f'"""',
-                f"",
-                f'file_path = "{safe_path}"',
-                f"",
-                f'print(f"Reading {{file_path}}...")',
+                '"""Auto-generated CSV/file ingest script.',
+                "",
+                f"Imports data from the file below into {target_schema}.{table_name}.",
+                '"""',
+                "",
+                f"file_path = {path_literal}",
+                f"sql_path = file_path{sql_escape}",
+                "",
+                'print(f"Reading {file_path}...")',
                 f'db.execute("CREATE SCHEMA IF NOT EXISTS {target_schema}")',
-                f'db.execute(f"""',
+                'db.execute(f"""',
                 f"    CREATE OR REPLACE TABLE {target_schema}.{table_name} AS",
                 f"    SELECT * FROM {reader}",
-                f'""")',
-                f"",
+                '""")',
+                "",
                 f'rows = db.execute("SELECT COUNT(*) FROM {target_schema}.{table_name}").fetchone()[0]',
                 f'print(f"Loaded {{rows}} rows into {target_schema}.{table_name}")',
-                f"",
+                "",
             ]
             return "\n".join(lines)
