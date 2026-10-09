@@ -4,6 +4,8 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.31] - 2026-10-09
+
 ### Security
 
 - **A viewer could write to the warehouse through `/api/query`.** The read-only
