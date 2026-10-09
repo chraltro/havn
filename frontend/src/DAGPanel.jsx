@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { api } from "./api";
 import { useHintTriggerFn } from "./HintSystem";
 import { usePipeline } from "./PipelineContext";
+import { STATUS_META as LIVE_STATUS, fmtLag } from "./LivePanel";
 
 /** Where the selector grammar is written down, for the input's tooltip. */
 const SELECTOR_HELP =
@@ -382,6 +383,8 @@ const ds = {
 export default function DAGPanel({ onOpenFile, showConfirm }) {
   const canvasRef = useRef(null);
   const [dag, setDag] = useState(null);
+  // Live models' lag and status, keyed by model, for the badge on their node.
+  const [liveInfo, setLiveInfo] = useState({});
   const [hovered, setHovered] = useState(null);
   const setHintTrigger = useHintTriggerFn();
   const [error, setError] = useState(null);
@@ -426,6 +429,25 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
     loadDAG();
     setHintTrigger("dagOpened", true);
   }, []);
+
+  // Live models: poll their lag while the DAG shows any. Cheap (one status
+  // read every few seconds) and only runs when there is something to show.
+  const hasLive = useMemo(() => !!dag?.nodes?.some((n) => n.live), [dag]);
+  useEffect(() => {
+    if (!hasLive) { setLiveInfo({}); return; }
+    let cancelled = false;
+    const load = () => api.getLiveStatus()
+      .then((s) => {
+        if (cancelled) return;
+        const map = {};
+        for (const m of s.models || []) map[m.model] = { lag: m.lag_seconds, status: m.status, view: m.materialized === "view" };
+        setLiveInfo(map);
+      })
+      .catch(() => {});
+    load();
+    const t = setInterval(load, 3000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [hasLive]);
 
   // Auto-refresh when pipeline completes
   useEffect(() => {
@@ -823,6 +845,25 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
         ctx.textAlign = "right";
         ctx.fillText(badge, pos.x + NODE_W - 6, pos.y + 12);
 
+        // Live models: lag (or state) in the bottom-right corner, colored
+        // like the Live view, so a stalled chain is visible on the graph.
+        if (n.live) {
+          const info = liveInfo[n.id];
+          const meta = LIVE_STATUS[info?.status] || LIVE_STATUS.live;
+          const text = !info ? "live"
+            : info.status === "failing" || info.status === "paused" || info.status === "waiting" ? info.status
+            : info.view ? "live" : `lag ${fmtLag(info.lag)}`;
+          ctx.font = `600 9px ${monoFamily}`;
+          ctx.textAlign = "right";
+          const tw = ctx.measureText(text).width;
+          const cx = pos.x + NODE_W - 8 - tw - 8;
+          ctx.fillStyle = getCV(meta.color.slice(4, -1)) || "#3fb950";
+          ctx.beginPath();
+          ctx.arc(cx, pos.y + NODE_H - 12, 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillText(text, pos.x + NODE_W - 8, pos.y + NODE_H - 11);
+        }
+
         // Package provenance. A model from havn_packages/ is not this
         // project's to edit, so it says where it came from — quietly, since
         // the point is orientation, not a warning.
@@ -840,7 +881,7 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
 
     ctx.globalAlpha = 1;
     ctx.restore();
-  }, [dag, layout, hovered, rewindMode, currentSnaps, prevSnaps, selectedNode, scale, offsetX, offsetY, dagSearch, columnEdgeSet, selectorMatches]);
+  }, [dag, layout, hovered, rewindMode, currentSnaps, prevSnaps, selectedNode, scale, offsetX, offsetY, dagSearch, columnEdgeSet, selectorMatches, liveInfo]);
 
   useEffect(() => {
     draw();

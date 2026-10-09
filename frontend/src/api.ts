@@ -1562,7 +1562,134 @@ export const api = {
     })();
     return () => ctrl.abort();
   },
+
+  // Live models: continuous refresh from streaming ingest
+  getLiveStatus: () => request<LiveStatus>("/live/status"),
+  startLiveRunner: () => request<{ running: boolean }>("/live/start", { method: "POST" }),
+  stopLiveRunner: () => request<{ running: boolean }>("/live/stop", { method: "POST" }),
+  pauseLiveModel: (model: string) =>
+    request(`/live/models/${encodeURIComponent(model)}/pause`, { method: "POST" }),
+  resumeLiveModel: (model: string) =>
+    request(`/live/models/${encodeURIComponent(model)}/resume`, { method: "POST" }),
+  refreshLiveModel: (model: string) =>
+    request(`/live/models/${encodeURIComponent(model)}/refresh`, { method: "POST" }),
+  /** Follow GET /live/events (SSE). Calls onEvent(type, data); returns a stop function. */
+  streamLiveEvents: (onEvent: (type: string, data: any, id?: number) => void, signal?: AbortSignal) => {
+    const headers: Record<string, string> = {};
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+    const ctrl = new AbortController();
+    if (signal) signal.addEventListener("abort", () => ctrl.abort());
+    (async () => {
+      let after = 0;
+      // Reconnect with backoff until stopped: the stream ends when the
+      // server restarts, and a live view should simply carry on.
+      for (let attempt = 0; !ctrl.signal.aborted; attempt++) {
+        try {
+          const resp = await fetch(`${BASE}/live/events?after=${after}`, { headers, signal: ctrl.signal });
+          if (!resp.body) return;
+          attempt = 0;
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = "";
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            let idx;
+            while ((idx = buf.indexOf("\n\n")) !== -1) {
+              const frame = parseSSEFrame(buf.slice(0, idx));
+              buf = buf.slice(idx + 2);
+              if (!frame) continue;
+              if (frame.id) after = Number(frame.id) || after;
+              onEvent(frame.event, frame.data, frame.id ? Number(frame.id) : undefined);
+            }
+          }
+        } catch {
+          if (ctrl.signal.aborted) return;
+        }
+        await new Promise((r) => setTimeout(r, Math.min(1000 * 2 ** attempt, 15000)));
+      }
+    })();
+    return () => ctrl.abort();
+  },
 };
+
+/** One `id:`/`event:`/`data:` SSE frame, or null for a comment / keepalive. */
+export function parseSSEFrame(frame: string): { id?: string; event: string; data: any } | null {
+  let id: string | undefined;
+  let event = "message";
+  const data: string[] = [];
+  for (const line of frame.split("\n")) {
+    if (line.startsWith(":")) continue;
+    if (line.startsWith("id: ")) id = line.slice(4);
+    else if (line.startsWith("event: ")) event = line.slice(7);
+    else if (line.startsWith("data: ")) data.push(line.slice(6));
+  }
+  if (!data.length) return null;
+  try {
+    return { id, event, data: JSON.parse(data.join("\n")) };
+  } catch {
+    return null;
+  }
+}
+
+export interface LiveInput {
+  source: string;
+  consumed: number;
+  watermark: number;
+  behind: number;
+}
+
+export interface LiveModelStatus {
+  model: string;
+  materialized: string;
+  strategy?: string | null;
+  cdc?: boolean;
+  live_interval?: number | null;
+  status: "live" | "behind" | "waiting" | "failing" | "paused";
+  waiting_on?: string | null;
+  lag_seconds: number;
+  events_per_second?: number;
+  inputs: LiveInput[];
+  paused?: boolean;
+  consecutive_failures?: number;
+  next_retry_at?: string | null;
+  last_error?: string | null;
+  last_refresh_at?: string | null;
+  last_duration_ms?: number;
+  last_lag_ms?: number | null;
+  refreshes?: number;
+  rows_total?: number;
+  refreshing?: boolean;
+}
+
+export interface LiveSourceStatus {
+  source: string;
+  kind: "source" | "model";
+  watermark: number;
+  rows_total: number;
+  advanced_at: string | null;
+  events_per_second: number;
+  consumers: string[];
+}
+
+export interface LiveStatus {
+  now?: string;
+  runner: {
+    running: boolean;
+    started_at?: string | null;
+    cycles?: number;
+    refreshes?: number;
+    events_seen?: number;
+    last_cycle_at?: string | null;
+    last_cycle_ms?: number;
+    discovery_error?: string | null;
+  };
+  settings: Record<string, number | boolean>;
+  models: LiveModelStatus[];
+  sources: LiveSourceStatus[];
+  max_lag_seconds: number;
+}
 
 export interface ResourceCategory {
   name: string;
