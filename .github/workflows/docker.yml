@@ -3,11 +3,18 @@ name: Docker
 # run-name puts the release tag and commit in the run title, so a failure
 # notification says WHICH build failed. A re-run of an old, superseded commit
 # otherwise sends an email indistinguishable from a fresh failure.
-run-name: Docker ${{ github.event.release.tag_name || github.sha }}
+run-name: Docker ${{ github.event.release.tag_name || inputs.version || github.sha }}
 
 on:
   release:
     types: [published]
+  # Publish a version from main by hand, e.g. when the release build failed
+  # for a reason outside the release itself.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, e.g. 0.3.0"
+        required: true
   # Build (without pushing) on main and on Dockerfile/packaging PRs. The image
   # only ever built at release time, so a Dockerfile break stayed invisible
   # until the next release: hatch_build.py became a build requirement on
@@ -33,7 +40,7 @@ jobs:
 
       # Only publish for a real release; other triggers build as a check.
       - name: Log in to GHCR
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -48,12 +55,14 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+            type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}
 
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: ${{ github.event_name == 'release' }}
+          push: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

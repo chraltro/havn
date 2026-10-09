@@ -1,5 +1,7 @@
 # --- Stage 1: Build frontend ---
-FROM node:20-slim AS frontend
+# Official Docker images through the ECR Public mirror: Docker Hub rate-limits
+# anonymous pulls, and GitHub's shared runners hit that limit (429).
+FROM public.ecr.aws/docker/library/node:20-slim AS frontend
 WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install
@@ -7,7 +9,7 @@ COPY frontend/ .
 RUN npm run build
 
 # --- Stage 2: Python runtime ---
-FROM python:3.12-slim
+FROM public.ecr.aws/docker/library/python:3.12-slim
 
 WORKDIR /app
 COPY pyproject.toml README.md LICENSE hatch_build.py ./
