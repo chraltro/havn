@@ -50,9 +50,16 @@ def _reset_server_singletons():
     warehouse (see the test_version_detail nightly flake). Teardown-only is
     enough: every test then starts with clean singletons, and they re-create
     lazily from the current PROJECT_DIR on the next request.
+
+    The login rate limiter is cleared too: every TestClient signs in from the
+    same address, so a sixth login within a minute, across tests, was refused
+    and failed whichever auth test happened to come sixth.
     """
     yield
     import havn.server.deps as deps
+
+    with deps._login_attempts_lock:
+        deps._login_attempts.clear()
 
     if (
         deps._backend is not None
