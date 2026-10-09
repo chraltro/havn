@@ -12,6 +12,11 @@ This module adds a staging layer: webhook rows land in ``_havn.webhook_staging``
 seconds, and batches into the target landing table. On DuckLake the worker
 respects per-table ``inlining_row_limit`` (up to ~500 rows per insert) so
 streaming writes stay in the Postgres catalog until a CHECKPOINT.
+
+Each flushed batch is a live source commit: the rows are stamped with
+``_havn_seq`` and ``landing.<source>`` is announced as advanced
+(:func:`havn.engine.live.sources.advance_source`), so live models reading it
+refresh within seconds of the flush.
 """
 
 from __future__ import annotations
@@ -197,9 +202,16 @@ class FlushWorker:
                     pass
 
     def _acquire_conn(self) -> tuple[duckdb.DuckDBPyConnection, bool]:
-        """Return (conn, owns_it). When ``owns_it`` is True the caller must close it."""
+        """Return (conn, owns_it). When ``owns_it`` is True the caller must close it.
+
+        With a shared connection the worker takes a cursor of it: a cursor has
+        its own transaction state, so the flush's transaction can never pick
+        up statements another thread runs on the shared connection meanwhile.
+        """
         if self._shared is not None:
-            return self._shared, False
+            from havn.engine.write_queue import cursor_for
+
+            return cursor_for(self._shared), True
         assert self._factory is not None  # guarded in __init__
         return self._factory(), True
 
@@ -245,6 +257,13 @@ class FlushWorker:
             f"UPDATE {STAGING_TABLE} SET flushed = true WHERE id IN ({placeholders})",
             ids,
         )
+        # The batch is committed: stamp it and tell the live runner.
+        try:
+            from havn.engine.live.sources import advance_source
+
+            advance_source(conn, target)
+        except Exception as e:
+            logger.warning("live advance for %s failed: %s", target, e)
         return len(ids)
 
     def purge_flushed(self, older_than_seconds: int = 3600) -> int:
