@@ -813,6 +813,14 @@ def test_server_build_status_and_diff(project, client):
     listing = client.get("/api/branch/list").json()
     assert [e["branch"] for e in listing] == ["feature/x"]
 
+    # Home calls unbuilt models "from base" on a branch, not "not built".
+    home = client.get("/api/home").json()
+    assert home["branch"] == {"name": "feature/x", "base": "base"}
+    assert home["tiles"]["models"]["deferred"] == 2
+    assert home["tiles"]["models"]["never_built"] == 0
+    statuses = {m["full_name"]: m["status"] for layer in home["layers"] for m in layer["models"]}
+    assert statuses["bronze.orders"] == "deferred"
+
 
 def test_a_server_with_sign_in_never_follows_branches(project, client):
     """Users and tokens live in the warehouse; a fresh branch file has none."""
