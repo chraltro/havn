@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 from pathlib import Path
 from typing import Optional
 
@@ -278,7 +280,7 @@ def _toggle_enabled(name: str, enabled: bool, project_dir: Path | None) -> None:
     if not job:
         console.print(f"[red]Job '{name}' not found[/red]")
         raise typer.Exit(1)
-    data = yaml.safe_load(job.file_path.read_text())
+    data = yaml.safe_load(read_project_text(job.file_path))
     data["enabled"] = enabled
     job.file_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False), encoding="utf-8")
     console.print(f"Job '{name}' {'enabled' if enabled else 'disabled'}")

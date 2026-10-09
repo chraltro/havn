@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import json
 import logging
 from pathlib import Path
@@ -495,7 +497,7 @@ def list_streaming_pollers(
         pidfile = pidfile_dir / f"{connector}.pid"
         if pidfile.exists():
             try:
-                pid = int(pidfile.read_text().strip())
+                pid = int(read_project_text(pidfile).strip())
                 os.kill(pid, 0)
                 running = True
             except (OSError, ValueError):

@@ -49,6 +49,8 @@ before anything is built, and again against the live table afterwards. See
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import logging
 import re
 import time
@@ -305,7 +307,7 @@ def discover_contracts(contracts_dir: Path) -> list[Contract]:
     try:
         for yml_file in sorted(contracts_dir.glob("*.yml")):
             try:
-                raw = yaml.safe_load(yml_file.read_text()) or {}
+                raw = yaml.safe_load(read_project_text(yml_file)) or {}
                 for c_raw in raw.get("contracts", []):
                     name = c_raw.get("name", yml_file.stem)
                     columns, errors = _parse_columns(

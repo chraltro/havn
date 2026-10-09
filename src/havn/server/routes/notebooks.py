@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import json
 import re
 from pathlib import Path
@@ -126,7 +128,7 @@ def list_notebooks(request: Request) -> list[dict]:
     for f in sorted(project_dir.rglob("*.dpnb")):
         rel = f.relative_to(project_dir).as_posix()
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(read_project_text(f))
             notebooks.append(
                 {
                     "name": f.stem,

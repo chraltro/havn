@@ -4,6 +4,25 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.30] - 2026-10-09
+
+### Fixed
+
+- **Nordic letters in scripts and models on Windows.** Project files (SQL
+  models, ingest and export scripts, YAML, `.env`) were read in the Windows
+  default encoding, so `'Tromsø'` in an ingest script landed in the warehouse
+  as `'TromsÃ¸'`. They are now read as UTF-8. A byte order mark is ignored,
+  and a file that is not valid UTF-8 still falls back to the old encoding,
+  so existing cp1252 files keep working.
+- **The Docker command in the docs.** `docker run ... ghcr.io/chraltro/havn
+  serve` replaced the image's `serve --host 0.0.0.0`, so the server listened
+  only inside the container. The docs now leave the command off.
+
+### Changed
+
+- New project site and README: current screenshots, a real terminal session,
+  plainer wording, and the job file and deploy examples brought up to date.
+
 ## [0.2.29] - 2026-10-09
 
 ### Changed

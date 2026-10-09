@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -168,7 +170,7 @@ def _fetch_via_server(project_dir: Path, sql: str) -> tuple[list, list, str, boo
     if not info_path.exists():
         return None
     try:
-        info = _json.loads(info_path.read_text())
+        info = _json.loads(read_project_text(info_path))
         host = info.get("host", "127.0.0.1")
         port = int(info.get("port", 3000))
         pid = info.get("pid")

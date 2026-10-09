@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -135,7 +137,7 @@ def get_lint_config(request: Request) -> dict:
     sqlfluff_path = _get_project_dir() / ".sqlfluff"
     if not sqlfluff_path.exists():
         return {"exists": False, "content": ""}
-    return {"exists": True, "content": sqlfluff_path.read_text()}
+    return {"exists": True, "content": read_project_text(sqlfluff_path)}
 
 
 @router.put("/api/lint/config")

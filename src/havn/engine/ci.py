@@ -218,7 +218,7 @@ def post_diff_comment(
 
     # Read diff data
     try:
-        with open(json_path) as f:
+        with open(json_path, encoding="utf-8") as f:
             diff_data = json.load(f)
     except FileNotFoundError:
         return {"error": f"Diff results file not found: {json_path}"}

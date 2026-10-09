@@ -6,6 +6,8 @@ via environment variables. Masks secret values in logs and API responses.
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import os
 import re
 from pathlib import Path
@@ -18,7 +20,7 @@ def load_env(project_dir: Path) -> dict[str, str]:
     if not env_path.exists():
         return loaded
 
-    for line in env_path.read_text().splitlines():
+    for line in read_project_text(env_path).splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -43,7 +45,7 @@ def list_secrets(project_dir: Path) -> list[dict]:
     if not env_path.exists():
         return secrets
 
-    for line in env_path.read_text().splitlines():
+    for line in read_project_text(env_path).splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -70,7 +72,7 @@ def set_secret(project_dir: Path, key: str, value: str) -> None:
     found = False
 
     if env_path.exists():
-        for line in env_path.read_text().splitlines():
+        for line in read_project_text(env_path).splitlines():
             stripped = line.strip()
             if stripped and not stripped.startswith("#") and "=" in stripped:
                 existing_key = stripped.split("=", 1)[0].strip()
@@ -100,7 +102,7 @@ def delete_secret(project_dir: Path, key: str) -> bool:
 
     lines: list[str] = []
     found = False
-    for line in env_path.read_text().splitlines():
+    for line in read_project_text(env_path).splitlines():
         stripped = line.strip()
         if stripped and not stripped.startswith("#") and "=" in stripped:
             existing_key = stripped.split("=", 1)[0].strip()
@@ -135,7 +137,7 @@ def mask_output(text: str, project_dir: Path) -> str:
     if not env_path.exists():
         return text
 
-    for line in env_path.read_text().splitlines():
+    for line in read_project_text(env_path).splitlines():
         line_stripped = line.strip()
         if not line_stripped or line_stripped.startswith("#") or "=" not in line_stripped:
             continue

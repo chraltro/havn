@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import os
 import re
 from pathlib import Path
@@ -310,7 +312,7 @@ def _parse_sources(project_dir: Path) -> list[SourceConfig]:
     sources_path = project_dir / "sources.yml"
     if not sources_path.exists():
         return []
-    raw = yaml.safe_load(sources_path.read_text()) or {}
+    raw = yaml.safe_load(read_project_text(sources_path)) or {}
     raw = _expand_env_vars(raw)
     sources = []
     for src_raw in raw.get("sources", []):
@@ -365,7 +367,7 @@ def _parse_exposures(project_dir: Path) -> list[ExposureConfig]:
     exposures_path = project_dir / "exposures.yml"
     if not exposures_path.exists():
         return []
-    raw = yaml.safe_load(exposures_path.read_text()) or {}
+    raw = yaml.safe_load(read_project_text(exposures_path)) or {}
     raw = _expand_env_vars(raw)
     exposures = []
     for exp_raw in raw.get("exposures", []):
@@ -399,7 +401,7 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
     if not config_path.exists():
         return ProjectConfig(project_dir=project_dir)
 
-    raw = yaml.safe_load(config_path.read_text()) or {}
+    raw = yaml.safe_load(read_project_text(config_path)) or {}
     raw = _expand_env_vars(raw)
 
     # Database
@@ -543,7 +545,7 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
         # Check .havn-env file for persisted environment selection
         havn_env_path = project_dir / ".havn-env"
         if havn_env_path.exists():
-            file_env = havn_env_path.read_text().strip()
+            file_env = read_project_text(havn_env_path).strip()
             if file_env and file_env in environments:
                 active_env = file_env
         if active_env is None:

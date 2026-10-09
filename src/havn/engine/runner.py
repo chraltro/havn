@@ -8,6 +8,8 @@ Scripts can be:
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import ast
 import importlib.util
 import io
@@ -355,7 +357,7 @@ def _run_script_body(
     # Read the file once and stash it so we can reuse it as the script body
     # below (avoids a second disk read).
     try:
-        _source_cache = script_path.read_text()
+        _source_cache = read_project_text(script_path)
     except Exception:
         _source_cache = ""
 
@@ -414,7 +416,7 @@ def _run_script_body(
             return {"script": script_path.name, "status": "error", "duration_ms": duration_ms, "log_output": error_msg, "error": str(e)}
 
     # .py scripts (reuse the source we already read for pragma parsing)
-    source = _source_cache or script_path.read_text()
+    source = _source_cache or read_project_text(script_path)
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
     start = time.perf_counter()

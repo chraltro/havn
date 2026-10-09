@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import json
 from pathlib import Path
 from typing import Any
@@ -221,7 +223,7 @@ def update_database_config(request: Request, body: DatabaseConfigUpdate) -> dict
     if not yml_path.exists():
         raise HTTPException(404, "project.yml not found")
 
-    raw = yaml.safe_load(yml_path.read_text()) or {}
+    raw = yaml.safe_load(read_project_text(yml_path)) or {}
     if "database" not in raw:
         raw["database"] = {}
 

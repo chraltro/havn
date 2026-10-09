@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import hashlib
 import json
 import logging
@@ -951,7 +953,7 @@ def apply_rename_fix(
     if not full_path.exists():
         return {"status": "error", "message": f"File not found: {model_path}"}
 
-    content = full_path.read_text()
+    content = read_project_text(full_path)
     # Word-boundary replacement to avoid partial matches
     pattern = re.compile(r'\b' + re.escape(old_name) + r'\b', re.IGNORECASE)
     new_content = pattern.sub(new_name, content)

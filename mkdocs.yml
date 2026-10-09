@@ -1,6 +1,6 @@
 site_name: havn
-site_description: The open-source data platform that runs on your machine. DuckDB + SQL transforms + Python. Data in safe waters.
-site_url: https://chraltro.github.io/db
+site_description: Self-hosted data platform built on DuckDB. Plain SQL transforms, Python ingest, one warehouse file.
+site_url: https://chraltro.github.io/havn/docs/
 repo_url: https://github.com/chraltro/havn
 repo_name: chraltro/havn
 
@@ -11,8 +11,8 @@ theme:
       primary: teal
       accent: teal
   font:
-    text: Outfit
-    code: JetBrains Mono
+    text: IBM Plex Sans
+    code: IBM Plex Mono
   features:
     - navigation.tabs
     - navigation.sections

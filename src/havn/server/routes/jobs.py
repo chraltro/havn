@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import json
 import logging
 import threading
@@ -401,7 +403,7 @@ def update_job(name: str, req: UpdateJobRequest, request: Request):
     job = _find_job(project_dir, name)
     if not job:
         raise HTTPException(404, f"Job '{name}' not found")
-    data = yaml.safe_load(job.file_path.read_text()) or {}
+    data = yaml.safe_load(read_project_text(job.file_path)) or {}
     updates = req.model_dump(exclude_none=True)
     # If `targets` is sent, replace both targets and the mirrored target field
     if "targets" in updates:

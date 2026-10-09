@@ -11,6 +11,8 @@ mirroring ``havn query``'s behavior at ``cli/query.py:_try_route_via_server``.
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import os
 import sys
 import time
@@ -282,7 +284,7 @@ def _server_info(project_dir: Path) -> dict | None:
     if not info_path.exists():
         return None
     try:
-        info = _json.loads(info_path.read_text())
+        info = _json.loads(read_project_text(info_path))
     except Exception:
         return None
     pid = info.get("pid")

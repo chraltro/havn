@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import re
 from pathlib import Path
 
@@ -39,7 +41,7 @@ def _scan_ingest_targets(project_dir: Path) -> dict[str, list[str]]:
         if script_file.name.startswith("_"):
             continue
         try:
-            text = script_file.read_text()
+            text = read_project_text(script_file)
         except Exception:
             continue
         for match in pattern.finditer(text):
@@ -184,7 +186,7 @@ def _scan_export_sources(project_dir: Path, model_fqns: set[str]) -> dict[str, l
         if script_file.name.startswith("_"):
             continue
         try:
-            text = script_file.read_text()
+            text = read_project_text(script_file)
         except Exception:
             continue
         refs: list[str] = []

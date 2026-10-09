@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import asyncio
 import json
 from typing import Literal
@@ -102,7 +104,7 @@ def _persist_allocation(body: BudgetUpdate) -> None:
     if not path.exists():
         return
     try:
-        raw = yaml.safe_load(path.read_text()) or {}
+        raw = yaml.safe_load(read_project_text(path)) or {}
     except Exception:
         return
     resources = raw.get("resources") or {}

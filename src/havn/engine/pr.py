@@ -10,6 +10,8 @@ See ``docs/internal/to-do.md`` for the cloud (hosted) version roadmap.
 
 from __future__ import annotations
 
+from havn.textio import read_project_text
+
 import datetime
 import json
 import logging
@@ -188,7 +190,7 @@ def _load_pr(project_dir: Path, pr_id: str) -> PullRequest | None:
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(read_project_text(path))
         return PullRequest.from_dict(data)
     except Exception as e:
         logger.warning("Failed to load PR %s: %s", pr_id, e)
@@ -362,7 +364,7 @@ def list_prs(project_dir: Path, status: str | None = None) -> list[PullRequest]:
     results: list[PullRequest] = []
     for json_file in sorted(pr_dir.glob("*.json")):
         try:
-            data = json.loads(json_file.read_text())
+            data = json.loads(read_project_text(json_file))
             pr = PullRequest.from_dict(data)
             if status is None or pr.status == status:
                 results.append(pr)
