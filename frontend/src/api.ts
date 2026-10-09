@@ -620,7 +620,7 @@ interface RequestOptions extends RequestInit {
 }
 
 /** Endpoints that need a longer timeout (e.g. diff can scan many models). */
-const LONG_TIMEOUT_PATHS = ["/diff", "/transform", "/stream/", "/query", "/contracts", "/docs/", "/unit-tests"];
+const LONG_TIMEOUT_PATHS = ["/diff", "/transform", "/stream/", "/query", "/contracts", "/docs/", "/unit-tests", "/ask", "/changesets"];
 
 function getTimeoutForPath(path: string): number {
   if (LONG_TIMEOUT_PATHS.some((p) => path.startsWith(p) || path === p)) {
@@ -1228,6 +1228,37 @@ export const api = {
       method: "POST",
       body: JSON.stringify(model ? { model } : {}),
     }),
+
+  // Ask the warehouse (semantic-layer questions)
+  getAskStatus: () => request<Record<string, unknown>>("/ask/status"),
+  ask: (
+    question: string,
+    history: { question: string; spec: Record<string, unknown> | null }[] = [],
+    options: { exploratory?: boolean; summarize?: boolean } = {},
+  ) =>
+    request<Record<string, any>>("/ask", {
+      method: "POST",
+      body: JSON.stringify({ question, history, ...options }),
+    }),
+  acceptSuggestedMetric: (definition: Record<string, unknown>, path: string | null = null) =>
+    request<{ path: string }>("/ask/accept-metric", {
+      method: "POST",
+      body: JSON.stringify({ definition, path }),
+    }),
+
+  // Change sets (verified agent changes)
+  listChangeSets: (openOnly: boolean = true) =>
+    request<{ changesets: Record<string, any>[] }>(`/changesets?open=${openOnly ? "true" : "false"}`),
+  getChangeSet: (id: string) => request<Record<string, any>>(`/changesets/${encodeURIComponent(id)}`),
+  verifyChangeSet: (id: string) =>
+    request<Record<string, any>>(`/changesets/${encodeURIComponent(id)}/verify`, { method: "POST" }),
+  applyChangeSet: (id: string, force: boolean = false) =>
+    request<Record<string, any>>(`/changesets/${encodeURIComponent(id)}/apply`, {
+      method: "POST",
+      body: JSON.stringify({ force }),
+    }),
+  discardChangeSet: (id: string) =>
+    request<Record<string, any>>(`/changesets/${encodeURIComponent(id)}/discard`, { method: "POST" }),
 
   // Contracts
   runContracts: () => request("/contracts/run", { method: "POST" }),

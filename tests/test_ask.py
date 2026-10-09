@@ -95,8 +95,7 @@ class FakeProvider(LLMProvider):
         return json.dumps(self.calls)
 
 
-@pytest.fixture
-def project(tmp_path):
+def _make_project(tmp_path):
     (tmp_path / "project.yml").write_text(
         "name: asktest\ndatabase:\n  path: warehouse.duckdb\n"
         "ai:\n  provider: openai\n  base_url: http://localhost:11434/v1\n  model: local-test\n"
@@ -137,6 +136,11 @@ def project(tmp_path):
     run_transform(conn, tmp_path / "transform", project_dir=tmp_path)
     conn.close()
     return tmp_path
+
+
+@pytest.fixture
+def project(tmp_path):
+    return _make_project(tmp_path)
 
 
 def _ctx(project: Path, provider, *, ai: AIConfig | None = None, role: str = "admin", conn=None):
