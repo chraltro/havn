@@ -2745,14 +2745,16 @@ written with a space instead of a comma.</p>
 </code></pre></div>
 <p>New code should use the <code>@</code>-prefixed form.</p>
 <h2 id="change-detection">Change Detection<a class="headerlink" href="#change-detection" title="Permanent link">&para;</a></h2>
-<p>havn uses SHA256 hashing to detect when a model's SQL has changed. On each <code>havn transform</code> run:</p>
-<ol>
-<li>The SQL content is normalized (whitespace-insensitive)</li>
-<li>A SHA256 hash is computed from the normalized SQL</li>
-<li>The hash is compared against the stored hash in <code>_havn.model_state</code></li>
-<li>If the hash matches <strong>and</strong> the combined hash of all transitive upstreams hasn't changed, the model is <strong>skipped</strong></li>
-<li>Otherwise the model is <strong>rebuilt</strong></li>
-</ol>
+<p>havn uses SHA256 hashing to detect when a model's SQL has changed. Each model's normalized SQL (whitespace-insensitive) is hashed and compared against <code>_havn.model_state</code>, together with a combined hash of all its transitive upstreams.</p>
+<p>On each <code>havn transform</code> run a model is <strong>rebuilt</strong> when any of these holds, and <strong>skipped</strong> otherwise:</p>
+<ul>
+<li>its SQL, or the SQL of anything upstream of it, changed;</li>
+<li>its last build was rejected by an error-severity <code>@assert</code> (it stays blocked until a build passes);</li>
+<li>it is a snapshot, or an incremental that is safe to re-run (<code>merge</code>, <code>delete+insert</code>, <code>microbatch</code>, or <code>append</code> with an <code>incremental_filter</code>);</li>
+<li>a parent was rebuilt earlier in the same run;</li>
+<li>it is a <code>table</code> whose inputs hold newer data than its last build: an input model was built after it (say, by <code>havn transform silver.x</code> on its own), or it reads a raw source such as <code>landing.*</code> and a successful ingest, import, connector sync or seed was logged since.</li>
+</ul>
+<p>The raw-source rule is deliberately coarse: the run log records <em>that</em> raw data arrived, not which table changed, so any successful load rebuilds every <code>table</code> that reads a source directly. Data written into <code>landing</code> outside havn (another tool, an ad-hoc query) is not seen; use <code>--force</code> after it. Views always read their inputs live, and a plain <code>append</code> incremental is never re-run on new data (it would duplicate rows).</p>
 <p>Most <code>havn transform</code> runs only rebuild what has actually changed, making iterative development fast.</p>
 <h2 id="dag-ordering">DAG Ordering<a class="headerlink" href="#dag-ordering" title="Permanent link">&para;</a></h2>
 <p>Models are automatically sorted in topological order based on their dependencies (auto-extracted from SQL or declared via <code>@depends_on</code>). This ensures upstream tables exist before downstream models try to read from them.</p>
@@ -2765,7 +2767,7 @@ bronze.orders ─────┘
 <h3 id="build-all-models">Build All Models<a class="headerlink" href="#build-all-models" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>transform
 </code></pre></div>
-<p>Only rebuilds models whose SQL has changed or whose upstream dependencies were rebuilt.</p>
+<p>Only rebuilds models whose SQL changed, whose inputs have newer data, or whose upstream dependencies were rebuilt (see <a href="#change-detection">Change Detection</a>).</p>
 <h3 id="force-rebuild-everything">Force Rebuild Everything<a class="headerlink" href="#force-rebuild-everything" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>transform<span class="w"> </span>--force
 </code></pre></div>

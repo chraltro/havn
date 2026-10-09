@@ -2029,6 +2029,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#post-apideploysidrestore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/deploys/{id}/restore
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3743,6 +3754,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#post-apideploysidrestore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/deploys/{id}/restore
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5074,8 +5096,15 @@ background and returns its record with <code>status: "running"</code>.</p>
 <h3 id="get-apideployspr_idlimit-and-get-apideploysid">GET /api/deploys?pr_id=&amp;limit= and GET /api/deploys/{id}<a class="headerlink" href="#get-apideployspr_idlimit-and-get-apideploysid" title="Permanent link">&para;</a></h3>
 <p>Deploy records: <code>{id, env, ref, commit, pr_id, deployed_by, status, started_at,
 finished_at, duration_ms, models, results, failed, version_id, restored,
-error}</code>. <code>status</code> is <code>running</code>, <code>success</code>, <code>up_to_date</code>, <code>rolled_back</code> or
-<code>error</code>. <code>failed</code> maps each model that did not build to <code>{status, error}</code>.</p>
+error, restorable}</code>. <code>status</code> is <code>running</code>, <code>success</code>, <code>up_to_date</code>,
+<code>rolled_back</code> or <code>error</code>. <code>failed</code> maps each model that did not build to
+<code>{status, error}</code>. <code>restorable</code> is true for a deploy a server restart cut
+short whose pre-deploy snapshot survived.</p>
+<h3 id="post-apideploysidrestore">POST /api/deploys/{id}/restore<a class="headerlink" href="#post-apideploysidrestore" title="Permanent link">&para;</a></h3>
+<p>Execute permission. Puts an interrupted deploy's target back as it was before
+the deploy, from its snapshot, and returns the record with <code>status:
+"rolled_back"</code>. 409 when the deploy has nothing to restore or another deploy
+is running. Home lists restorable deploys under "Needs attention".</p>
 <h2 id="dag">DAG<a class="headerlink" href="#dag" title="Permanent link">&para;</a></h2>
 <h3 id="get-apidag">GET /api/dag<a class="headerlink" href="#get-apidag" title="Permanent link">&para;</a></h3>
 <p>Get the model dependency DAG (nodes and edges).</p>
