@@ -4,6 +4,8 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.29] - 2026-10-09
+
 ### Changed
 
 - **New raw data reaches tables without `--force`.** A `table` model that reads
