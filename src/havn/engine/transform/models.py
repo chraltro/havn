@@ -233,6 +233,13 @@ class SQLModel:
     def language(self) -> str:
         """``"python"`` or ``"sql"``, for API payloads and display."""
         return "python" if self.python is not None else "sql"
+    # Governance metadata, deliberately out of content_hash: classifying a
+    # column changes who may see it, not what the build writes.
+    # @pii email, phone -> output columns this model classifies as PII.
+    pii: list[str] = field(default_factory=list)
+    # @declassify col: reason -> {col: reason}; the key "*rows" carries an
+    # @declassify rows: reason (inherited row policies stop here).
+    declassified: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.refresh_content_hash()

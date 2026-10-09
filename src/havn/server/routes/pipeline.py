@@ -73,8 +73,12 @@ def _send_webhook_notification(
 def run_script_endpoint(
     request: Request, req: RunScriptRequest, conn: DbConn
 ) -> dict:
-    """Run an ingest or export script."""
-    _require_permission(request, "execute")
+    """Run an ingest or export script.
+
+    Runs for the requesting user: if masking or row policies apply to them,
+    the script runs in a governed child process (see engine/governance).
+    """
+    user = _require_permission(request, "execute")
     from havn.engine.runner import run_script
 
     logger.info("Script run requested: %s", req.script_path)
@@ -86,7 +90,7 @@ def run_script_endpoint(
     if not script_path.exists():
         raise HTTPException(404, f"Script not found: {req.script_path}")
     script_type = "ingest" if "ingest" in req.script_path else "export"
-    result = run_script(conn, script_path, script_type, force=req.force)
+    result = run_script(conn, script_path, script_type, force=req.force, run_as=user)
     from havn.engine.secrets import mask_output
 
     if result.get("log_output"):
@@ -257,7 +261,7 @@ def _run_contracts_thread(project_dir):
 # --- Background thread: Script ---
 
 
-def _run_script_thread(script_path_str, project_dir, force=False):
+def _run_script_thread(script_path_str, project_dir, force=False, user=None):
     """Run a single script in background thread."""
     import time as _time
     from havn.server.deps import _get_shared_conn
@@ -270,7 +274,7 @@ def _run_script_thread(script_path_str, project_dir, force=False):
         conn = _get_shared_conn()
         script_path = project_dir / script_path_str
         script_type = "ingest" if "ingest" in script_path_str else "export"
-        result = run_script(conn, script_path, script_type, force=force)
+        result = run_script(conn, script_path, script_type, force=force, run_as=user)
 
         from havn.engine.secrets import mask_output
         log_output = result.get("log_output", "")
@@ -550,7 +554,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
             result_q.put(("__start__", start_data))
             try:
                 if info["type"] == "ingest":
-                    result = _run_script(local, info["path"], "ingest", pipeline_run_id=pipeline_run_id, force=force)
+                    result = _run_script(local, info["path"], "ingest", pipeline_run_id=pipeline_run_id, force=force, run_as=user)
                     result_q.put((node_id, {
                         "status": result["status"],
                         "duration_ms": result.get("duration_ms", 0),
@@ -608,7 +612,7 @@ def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, f
                         "row_count": row_count,
                     }))
                 elif info["type"] == "export":
-                    result = _run_script(local, info["path"], "export", pipeline_run_id=pipeline_run_id, force=force)
+                    result = _run_script(local, info["path"], "export", pipeline_run_id=pipeline_run_id, force=force, run_as=user)
                     result_q.put((node_id, {
                         "status": result["status"],
                         "duration_ms": result.get("duration_ms", 0),
@@ -991,7 +995,7 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
             result_q.put(("__start__", start_data))
             try:
                 if info["type"] == "ingest":
-                    result = _run_script(local, info["path"], "ingest", pipeline_run_id=pipeline_run_id, force=force)
+                    result = _run_script(local, info["path"], "ingest", pipeline_run_id=pipeline_run_id, force=force, run_as=user)
                     result_q.put((node_id, {
                         "status": result["status"],
                         "duration_ms": result.get("duration_ms", 0),
@@ -1049,7 +1053,7 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
                         "row_count": row_count,
                     }))
                 elif info["type"] == "export":
-                    result = _run_script(local, info["path"], "export", pipeline_run_id=pipeline_run_id, force=force)
+                    result = _run_script(local, info["path"], "export", pipeline_run_id=pipeline_run_id, force=force, run_as=user)
                     result_q.put((node_id, {
                         "status": result["status"],
                         "duration_ms": result.get("duration_ms", 0),
@@ -1350,7 +1354,7 @@ def start_contracts(request: Request) -> dict:
 @router.post("/api/run/start")
 def start_script(request: Request, req: RunScriptRequest) -> dict:
     """Start a script in background thread. Returns immediately."""
-    _require_permission(request, "execute")
+    user = _require_permission(request, "execute")
     project_dir = _get_project_dir()
     script_path = (project_dir / req.script_path).resolve()
     # Path traversal protection
@@ -1358,7 +1362,7 @@ def start_script(request: Request, req: RunScriptRequest) -> dict:
         raise HTTPException(400, "Invalid script path")
     if not script_path.exists():
         raise HTTPException(404, f"Script not found: {req.script_path}")
-    return _start_operation("script", req.script_path, _run_script_thread, (req.script_path, project_dir, req.force))
+    return _start_operation("script", req.script_path, _run_script_thread, (req.script_path, project_dir, req.force, user))
 
 
 @router.post("/api/transform/start")
@@ -1628,7 +1632,7 @@ def run_stream_endpoint(
 
         if step.action == "ingest":
             results = run_scripts_in_dir(
-                conn, _get_project_dir() / "ingest", "ingest", step.targets
+                conn, _get_project_dir() / "ingest", "ingest", step.targets, run_as=user
             )
             if any(r["status"] == "success" for r in results):
                 ingest_ran = True
@@ -1653,7 +1657,7 @@ def run_stream_endpoint(
             }
         elif step.action == "export":
             results = run_scripts_in_dir(
-                conn, _get_project_dir() / "export", "export", step.targets
+                conn, _get_project_dir() / "export", "export", step.targets, run_as=user
             )
             return {
                 "action": "export",

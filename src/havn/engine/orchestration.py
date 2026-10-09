@@ -605,8 +605,14 @@ def execute_job(
     trigger: str = "manual",
     emit: Callable | None = None,
     force: bool = False,
+    run_as=None,
 ) -> JobResult:
     """Execute a job's plan step by step, logging to _havn.job_runs.
+
+    ``run_as`` is the user who started the job from the UI or API: its
+    script steps run governed for them if masking or row policies apply
+    (see ``runner.run_script``). Scheduled runs pass None and run as the
+    system.
 
     Transform steps are built by ``build_one_model``, as ``havn transform``
     builds them: every model is rebuilt when ``force`` or the job's
@@ -801,6 +807,7 @@ def execute_job(
                         timeout=_remaining_s(),
                         use_circuit_breaker=False,
                         pipeline_run_id=run_id,
+                        run_as=run_as,
                     )
                     if r.get("orphaned"):
                         step_result["orphaned"] = True
@@ -866,6 +873,7 @@ def execute_job(
                                 timeout=_remaining_s(),
                                 use_circuit_breaker=False,
                                 pipeline_run_id=run_id,
+                                run_as=run_as,
                             )
                             if r.get("orphaned"):
                                 step_result["orphaned"] = True

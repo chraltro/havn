@@ -723,6 +723,49 @@ def _require_permission(request: Request, permission: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Governance (masking + row-level security)
+# ---------------------------------------------------------------------------
+
+
+def _govern(sql: str, user: dict, conn, *, params=None):
+    """Govern ``sql`` for ``user``: masking and row policies, or a 403.
+
+    Every route that hands warehouse rows to a person runs its SQL through
+    this (see ``havn.engine.governance``). Returns a GovernedQuery: execute
+    ``.sql`` and pass the rows through ``.post_mask(columns, rows, conn)``.
+    """
+    from havn.engine.governance import govern_query
+    from havn.engine.masking_rewriter import MaskedColumnAccessError
+
+    try:
+        return govern_query(sql, user, conn, project_dir=_get_project_dir(), params=params)
+    except MaskedColumnAccessError as e:
+        raise HTTPException(403, str(e))
+
+
+def _is_governed(user: dict, conn) -> bool:
+    """Whether any masking or row policy applies to ``user``."""
+    from havn.engine.governance import is_governed
+
+    return is_governed(conn, user, _get_project_dir())
+
+
+def _governed_relation(user: dict, conn, schema: str, table: str) -> bool:
+    """Whether masking or row policies apply to ``user`` on this relation."""
+    from havn.engine.governance import viewer_policies
+
+    try:
+        vp = viewer_policies(conn, user, _get_project_dir())
+    except Exception:
+        return user.get("role") != "admin"
+    key = (schema.lower(), table.lower())
+    if key in vp.rows or key in vp.masked or key in vp.opaque:
+        return True
+    cat = vp.snapshot.catalog
+    return bool(set(cat.closure(key)) & vp.governed_base_tables())
+
+
+# ---------------------------------------------------------------------------
 # Rate limiting
 # ---------------------------------------------------------------------------
 

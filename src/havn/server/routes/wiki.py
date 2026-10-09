@@ -42,6 +42,7 @@ def _extract_category(slug: str) -> str:
         "lineage": "Data Quality",
         "auth": "Security",
         "masking": "Security",
+        "governance": "Security",
         "sentinel": "Data Quality",
         "performance": "Advanced",
         "telemetry": "Advanced",

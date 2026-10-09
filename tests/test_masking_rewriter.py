@@ -301,8 +301,12 @@ class TestRewriter:
             # email should be redacted
             assert row[1] == "***"
 
-    def test_conditional_policy_not_rewritten(self, conn):
-        """Conditional policies should not be rewritten (left for post-query)."""
+    def test_conditional_policy_rewritten_pre_query(self, conn):
+        """A conditional policy masks pre-query with a CASE on its condition.
+
+        It used to be left to the post-query pass, which matches result
+        columns by name, so ``SELECT email AS e`` came out unmasked.
+        """
         _create_policy(
             conn,
             condition_column="status",
@@ -310,10 +314,15 @@ class TestRewriter:
         )
         from havn.engine.masking_rewriter import rewrite_query_with_masking
 
-        sql = "SELECT email, status FROM gold.customers"
+        sql = "SELECT email AS e, status FROM gold.customers"
         rewritten, ok, handled = rewrite_query_with_masking(sql, "viewer", conn)
-        # Should not rewrite conditional policies
-        assert not ok or len(handled) == 0
+        assert ok and len(handled) == 1
+        assert "CASE WHEN" in rewritten
+        for email, status in conn.execute(rewritten).fetchall():
+            if status == "inactive":
+                assert email == "***"
+            else:
+                assert email != "***"
 
     def test_column_name_only_matching(self, conn):
         """Ad-hoc query without table qualifier matches on column name."""

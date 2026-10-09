@@ -13,12 +13,12 @@ from pydantic import BaseModel, Field
 from havn.server.deps import (
     DbConn,
     DbConnReadOnly,
+    _govern,
     _require_permission,
     _serialize,
     _validate_identifier,
 )
-from havn.engine.masking import apply_masking, list_policies, create_policy, delete_policy
-from havn.engine.masking_rewriter import rewrite_query_with_masking, MaskedColumnAccessError
+from havn.engine.masking import list_policies, create_policy, delete_policy
 from havn.server.routes.masking import MANAGE_MASKING_PERMISSION
 
 logger = logging.getLogger("havn.server")
@@ -87,12 +87,15 @@ _QUERY_TIMEOUT_SECONDS = 30  # fallback; overridden per-role below
 @router.post("/api/query/explain")
 def explain_endpoint(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
     """Run EXPLAIN on a SQL query and return structured plan + raw text."""
-    _require_permission(request, "read")
+    user = _require_permission(request, "read")
     _validate_query_sql(req.sql)
+    # A plan carries row estimates (and, analysed, actual counts) of what it
+    # reads, so it is planned for the governed query, not the raw one.
+    sql = _govern(req.sql, user, conn, params=req.params).sql
     try:
         from havn.engine.explain import explain_query as _explain_query, plan_to_dict
 
-        plan_node, raw = _explain_query(conn, req.sql, params=req.params)
+        plan_node, raw = _explain_query(conn, sql, params=req.params)
         return {"plan": plan_to_dict(plan_node), "raw": raw}
     except Exception as e:
         logger.warning("EXPLAIN failed: %s", e)
@@ -102,12 +105,13 @@ def explain_endpoint(request: Request, req: ExplainRequest, conn: DbConnReadOnly
 @router.post("/api/query/explain-analyze")
 def explain_analyze_endpoint(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
     """Run EXPLAIN ANALYZE on a SQL query and return structured plan + raw text."""
-    _require_permission(request, "read")
+    user = _require_permission(request, "read")
     _validate_query_sql(req.sql)
+    sql = _govern(req.sql, user, conn, params=req.params).sql
     try:
         from havn.engine.explain import explain_analyze_query as _explain_analyze, plan_to_dict
 
-        plan_node, raw = _explain_analyze(conn, req.sql, params=req.params)
+        plan_node, raw = _explain_analyze(conn, sql, params=req.params)
         return {"plan": plan_to_dict(plan_node), "raw": raw}
     except Exception as e:
         logger.warning("EXPLAIN ANALYZE failed: %s", e)
@@ -117,12 +121,13 @@ def explain_analyze_endpoint(request: Request, req: ExplainRequest, conn: DbConn
 @router.post("/api/query/profile")
 def profile_query(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
     """Run EXPLAIN ANALYZE on a SQL query and return the profiled plan."""
-    _require_permission(request, "read")
+    user = _require_permission(request, "read")
     _validate_query_sql(req.sql)
+    sql = _govern(req.sql, user, conn, params=req.params).sql
     try:
         from havn.engine.explain import explain_analyze_query as _explain_analyze, plan_to_dict
 
-        plan_node, raw = _explain_analyze(conn, req.sql, params=req.params)
+        plan_node, raw = _explain_analyze(conn, sql, params=req.params)
         return {"plan": plan_to_dict(plan_node), "raw": raw}
     except Exception as e:
         logger.warning("EXPLAIN ANALYZE failed: %s", e)
@@ -408,10 +413,11 @@ def sample_table(
             f'"{catalog}"."{schema_name}"."{table}"' if catalog
             else f'"{schema_name}"."{table}"'
         )
-        result = conn.execute(f"SELECT * FROM {quoted} LIMIT {limit} OFFSET {offset}")
+        governed = _govern(f"SELECT * FROM {quoted} LIMIT {limit} OFFSET {offset}", user, conn)
+        result = conn.execute(governed.sql)
         columns = [desc[0] for desc in result.description]
         rows = [[_serialize(v) for v in row] for row in result.fetchall()]
-        rows = apply_masking(columns, rows, user["role"], conn, schema=schema, table=table)
+        rows = governed.post_mask(columns, rows, conn)
         return {
             "schema": schema,
             "table": table,
@@ -420,6 +426,8 @@ def sample_table(
             "limit": limit,
             "offset": offset,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning("Sample query failed for %s.%s: %s", schema, table, e)
         raise HTTPException(400, str(e))
@@ -440,7 +448,6 @@ def profile_table(
             f'"{catalog}"."{schema_name}"."{table}"' if catalog
             else f'"{schema_name}"."{table}"'
         )
-        row_count = conn.execute(f"SELECT COUNT(*) FROM {quoted}").fetchone()[0]
         if catalog is None:
             cols = conn.execute(
                 "SELECT column_name, data_type FROM information_schema.columns "
@@ -462,13 +469,28 @@ def profile_table(
                 [schema_name, table],
             ).fetchall()
 
+        # Every statistic is computed over what this viewer may see: the
+        # row-filtered relation, with masked columns already masked. Naming
+        # the columns lets the rewriter mask each one before the query runs;
+        # one it cannot (a by-name post-query policy) gets no min/max/avg
+        # and masked samples.
+        select_list = ", ".join(f'"{c}"' for c, _t in cols) if cols else "*"
+        governed = _govern(f"SELECT {select_list} FROM {quoted}", user, conn)
+        source = f"({governed.sql}) AS _g"
+        residual = {
+            p["column_name"].lower() for p in governed.masks
+            if not governed.masking_rewritten or p["id"] not in governed.handled_ids
+        }
+        row_count = conn.execute(f"SELECT COUNT(*) FROM {source}").fetchone()[0]
+
         profiles = []
         for col_name, col_type in cols:
             qcol = f'"{col_name}"'
             stats: dict = {"name": col_name, "type": col_type}
+            post_masked = col_name.lower() in residual
 
             basic = conn.execute(
-                f"SELECT COUNT(*) - COUNT({qcol}), COUNT(DISTINCT {qcol}) FROM {quoted}"
+                f"SELECT COUNT(*) - COUNT({qcol}), COUNT(DISTINCT {qcol}) FROM {source}"
             ).fetchone()
             stats["null_count"] = basic[0]
             stats["distinct_count"] = basic[1]
@@ -487,43 +509,33 @@ def profile_table(
                     "HUGEINT",
                 )
             )
-            if is_numeric:
+            if post_masked:
+                stats["min"] = stats["max"] = None
+                if is_numeric:
+                    stats["avg"] = None
+            elif is_numeric:
                 num = conn.execute(
-                    f"SELECT MIN({qcol}), MAX({qcol}), AVG({qcol}::DOUBLE) FROM {quoted}"
+                    f"SELECT MIN({qcol}), MAX({qcol}), AVG(TRY_CAST({qcol} AS DOUBLE)) FROM {source}"
                 ).fetchone()
                 stats["min"] = _serialize(num[0])
                 stats["max"] = _serialize(num[1])
                 stats["avg"] = round(num[2], 4) if num[2] is not None else None
             else:
                 minmax = conn.execute(
-                    f"SELECT MIN({qcol}::VARCHAR), MAX({qcol}::VARCHAR) FROM {quoted}"
+                    f"SELECT MIN({qcol}::VARCHAR), MAX({qcol}::VARCHAR) FROM {source}"
                 ).fetchone()
                 stats["min"] = minmax[0]
                 stats["max"] = minmax[1]
 
             samples = conn.execute(
-                f"SELECT DISTINCT {qcol}::VARCHAR FROM {quoted} WHERE {qcol} IS NOT NULL LIMIT 5"
+                f"SELECT DISTINCT {qcol}::VARCHAR FROM {source} WHERE {qcol} IS NOT NULL LIMIT 5"
             ).fetchall()
-            stats["sample_values"] = [s[0] for s in samples]
+            values = [[s[0]] for s in samples]
+            if post_masked:
+                values = governed.post_mask([col_name], values, conn)
+            stats["sample_values"] = [v[0] for v in values]
 
             profiles.append(stats)
-
-        # Mask sample_values in profile output
-        from havn.engine.masking import load_policies, apply_mask
-
-        policies = load_policies(conn)
-        for col_profile in profiles:
-            for p in policies:
-                if user["role"] in p["exempted_roles"]:
-                    continue
-                if (p["schema_name"].lower() == schema.lower()
-                        and p["table_name"].lower() == table.lower()
-                        and p["column_name"].lower() == col_profile["name"].lower()):
-                    col_profile["sample_values"] = [
-                        apply_mask(v, p["method"], p["method_config"])
-                        for v in col_profile["sample_values"]
-                    ]
-                    break
 
         return {
             "schema": schema,
@@ -531,6 +543,8 @@ def profile_table(
             "row_count": row_count,
             "columns": profiles,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning("Profile failed for %s.%s: %s", schema, table, e)
         raise HTTPException(400, str(e))
@@ -628,7 +642,7 @@ def export_csv(request: Request, req: ExportRequest):
 
         csv_identity = QueryIdentity.from_user(user, source="export")
         try:
-            csv_prepared = prepare_governed_sql(conn, req.sql, csv_identity)
+            csv_prepared = prepare_governed_sql(conn, req.sql, csv_identity, params=req.params)
         except GovernedQueryError as e:
             raise HTTPException(e.status_code, str(e))
         csv_sql = csv_prepared.sql

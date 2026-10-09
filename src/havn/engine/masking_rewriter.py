@@ -694,6 +694,7 @@ def rewrite_query_with_masking(
     sql: str,
     user_role: str,
     conn: duckdb.DuckDBPyConnection,
+    policies: list[dict] | None = None,
 ) -> tuple[str, bool, set[str]]:
     """Rewrite SQL to inject masking expressions at the column source level.
 
@@ -702,6 +703,8 @@ def rewrite_query_with_masking(
     sql : the original SQL query
     user_role : the requesting user's role (for exemption checks)
     conn : DuckDB connection (for loading policies and resolving ``SELECT *``)
+    policies : the policies to enforce. Defaults to ``_havn.masking_policies``;
+        the governance layer passes explicit plus lineage-inherited ones.
 
     Returns
     -------
@@ -717,7 +720,8 @@ def rewrite_query_with_masking(
         If the query filters, sorts, or joins on a masked column.
     """
     # Load policies and filter by role exemption
-    policies = load_policies(conn)
+    if policies is None:
+        policies = load_policies(conn)
     if not policies:
         return sql, False, set()
 
@@ -851,9 +855,11 @@ def _rewrite_select_expression(
         fqn = _resolve_column_table(inner_expr, alias_map, cte_names)
         matched_policy = _match_policy(fqn, col_name, lookup)
 
-        if matched_policy and not matched_policy.get("condition_column"):
+        if matched_policy:
             col_sql = inner_expr.sql(dialect="duckdb")
             mask_sql = _mask_expression(col_sql, matched_policy)
+            if mask_sql and matched_policy.get("condition_column"):
+                mask_sql = _conditional(mask_sql, col_sql, inner_expr, matched_policy)
             if mask_sql:
                 try:
                     mask_node = sqlglot.parse_one(mask_sql, read="duckdb")
@@ -882,13 +888,13 @@ def _rewrite_select_expression(
 
         if matched_policy is None:
             continue
-        if matched_policy.get("condition_column"):
-            continue
 
         col_sql = column.sql(dialect="duckdb")
         mask_sql = _mask_expression(col_sql, matched_policy)
         if mask_sql is None:
             continue
+        if matched_policy.get("condition_column"):
+            mask_sql = _conditional(mask_sql, col_sql, column, matched_policy)
 
         try:
             mask_node = sqlglot.parse_one(mask_sql, read="duckdb")
@@ -902,6 +908,22 @@ def _rewrite_select_expression(
         return None
 
     return sel_expr, handled
+
+
+def _conditional(mask_sql: str, col_sql: str, column: exp.Column, policy: dict) -> str:
+    """Mask only the rows whose condition column holds the condition value.
+
+    The condition column is read from the same relation as the masked column
+    (same qualifier), the way the post-query pass reads it from the same
+    result row. If the relation has no such column the query fails to bind,
+    which refuses it rather than leaving the column unmasked.
+    """
+    cond = exp.column(policy["condition_column"], table=column.table or None, quoted=True)
+    value = str(policy.get("condition_value") or "").replace("'", "''")
+    return (
+        f"CASE WHEN CAST({cond.sql(dialect='duckdb')} AS VARCHAR) = '{value}' "
+        f"THEN {mask_sql} ELSE {col_sql} END"
+    )
 
 
 def _rewrite_star(

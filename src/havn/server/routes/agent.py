@@ -234,6 +234,18 @@ def register_agent_websocket(app) -> None:
             if not has_permission(ws_user.get("role", ""), "write"):
                 await websocket.close(code=4003, reason="Permission denied")
                 return
+            # A coding agent has a shell as the server's OS user, which no
+            # masking or row policy can follow; refuse it to users they apply to.
+            try:
+                from havn.server.deps import _get_read_pool, _is_governed
+
+                with _get_read_pool().connection() as cur:
+                    governed = _is_governed(ws_user, cur)
+            except Exception:
+                governed = ws_user.get("role") != "admin"
+            if governed:
+                await websocket.close(code=4003, reason="Not available: masking or row policies apply to you")
+                return
 
             await websocket.accept()
             ws_id = id(websocket)

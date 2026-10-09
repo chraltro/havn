@@ -7,11 +7,6 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from havn.engine.masking import apply_masking
-from havn.engine.masking_rewriter import (
-    MaskedColumnAccessError,
-    rewrite_query_with_masking,
-)
 from havn.engine.semantic import (
     SemanticError,
     compile_metric,
@@ -74,13 +69,10 @@ def query_metric_endpoint(request: Request, req: MetricQueryRequest, conn: DbCon
     except ReadOnlyQueryError as e:
         raise HTTPException(e.status_code, str(e))
 
-    try:
-        rewritten_sql, rewrite_ok, handled_ids = rewrite_query_with_masking(
-            sql, user["role"], conn,
-        )
-    except MaskedColumnAccessError as e:
-        raise HTTPException(403, str(e))
-    sql_to_execute = rewritten_sql if rewrite_ok else sql
+    from havn.server.deps import _govern
+
+    governed = _govern(sql, user, conn)
+    sql_to_execute = governed.sql
 
     cap = req.limit or _DEFAULT_ROW_CAP
     try:
@@ -91,17 +83,9 @@ def query_metric_endpoint(request: Request, req: MetricQueryRequest, conn: DbCon
         logger.warning("Metric query failed (%s): %s", req.metric, e)
         raise HTTPException(400, str(e))
 
-    # Post-query masking backstop — same as /api/query. If the pre-query
-    # rewrite couldn't be applied (parse failure, unsupported method, or a
-    # column reference the rewriter can't resolve) we must still mask the
-    # result set, otherwise a metric surfacing a masked dimension would leak
-    # unmasked values.
-    if not rewrite_ok:
-        rows = apply_masking(columns, rows, user["role"], conn)
-    elif handled_ids:
-        rows = apply_masking(
-            columns, rows, user["role"], conn, skip_policy_ids=handled_ids,
-        )
+    # Post-query masking backstop -- same as /api/query: a metric surfacing a
+    # masked dimension the rewrite could not mask in place is masked here.
+    rows = governed.post_mask(columns, rows, conn)
 
     truncated = len(rows) > cap
     rows = rows[:cap]

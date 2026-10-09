@@ -353,6 +353,7 @@ def apply_masking(
     schema: str | None = None,
     table: str | None = None,
     skip_policy_ids: set[str] | None = None,
+    policies: list[dict] | None = None,
 ) -> list[list[Any]]:
     """Apply masking policies to query result rows.
 
@@ -365,10 +366,14 @@ def apply_masking(
     schema / table : when known (e.g. /sample), enables exact matching.
         When None (ad-hoc /query), does best-effort column-name matching.
     skip_policy_ids : policy IDs already handled by pre-query rewriting.
+    policies : the policies to apply, when the caller already has them (the
+        governance layer passes explicit plus lineage-inherited policies).
+        Defaults to every policy in ``_havn.masking_policies``.
 
     Returns the (possibly modified) rows.
     """
-    policies = load_policies(conn)
+    if policies is None:
+        policies = load_policies(conn)
     if not policies:
         return rows
 

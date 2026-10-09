@@ -6,10 +6,11 @@ rules applied to a query do not depend on which surface sent it:
 
 1. ``validate_read_only_query`` (``engine/sql_safety.py``): one read-only
    statement, checked by the splitter and by DuckDB's own parser.
-2. Governance rewrites for the identity the query runs as. Today that is the
-   column-masking rewriter (``engine/masking_rewriter.py``). New rewriting
-   passes, such as row-level security, belong in :func:`prepare_governed_sql`
-   so every caller picks them up without changes of its own.
+2. Governance rewrites for the identity the query runs as:
+   ``havn.engine.governance.govern_query`` applies column masking and row
+   policies, explicit and inherited through lineage, and refuses what it
+   cannot govern. :func:`prepare_governed_sql` is the only caller on this
+   path, so every surface picks up new governance without changes.
 3. The query governor (``engine/query_governor.py``): a per-role timeout,
    enforced with ``conn.interrupt()``, and a resource-manager ``query`` slot.
 4. Post-query masking for the policies the rewriter could not apply in SQL.
@@ -29,8 +30,10 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import duckdb
@@ -56,23 +59,65 @@ class QueryIdentity:
     username: str
     role: str
     source: str = "query"
+    # User attributes row policies read through havn_attr(). None means
+    # "look them up for username"; {} means the identity has none (a public
+    # link that views as a role).
+    attributes: dict | None = field(default=None, compare=False, hash=False)
 
     @classmethod
     def from_user(cls, user: dict, source: str = "query") -> "QueryIdentity":
+        attrs = user.get("attributes")
         return cls(
             username=str(user.get("username") or "anonymous"),
             role=str(user.get("role") or "viewer"),
             source=source,
+            attributes=dict(attrs) if isinstance(attrs, dict) else None,
         )
 
     def cache_key(self) -> str:
         """Key for caching results per identity.
 
-        Includes the username, not only the role: once row-level rules depend
-        on who is asking, two viewers with the same role can see different
-        rows and must not share a cache entry.
+        Includes the username and attributes, not only the role: row policies
+        depend on who is asking, so two viewers with the same role can see
+        different rows and must not share a cache entry.
         """
-        return f"{self.role}:{self.username}"
+        import json
+
+        attrs = json.dumps(self.attributes, sort_keys=True, default=str) if self.attributes else ""
+        return f"{self.role}:{self.username}:{attrs}"
+
+    def viewer(self, conn: duckdb.DuckDBPyConnection) -> dict:
+        """The ``{username, role, attributes}`` governance evaluates policies against."""
+        attrs = self.attributes
+        if attrs is None:
+            attrs = _stored_attributes(conn, self.username)
+        return {"username": self.username, "role": self.role, "attributes": attrs}
+
+
+def _stored_attributes(conn: duckdb.DuckDBPyConnection, username: str) -> dict:
+    """A user's attributes from ``_havn.users``; {} for synthetic or missing users."""
+    try:
+        row = conn.execute(
+            "SELECT attributes FROM _havn.users WHERE username = ?", [username]
+        ).fetchone()
+    except duckdb.Error:
+        return {}
+    if not row:
+        return {}
+    from havn.engine.auth import _decode_attributes
+
+    return _decode_attributes(row[0])
+
+
+def _default_project_dir() -> Path | None:
+    """The served project, when this runs inside ``havn serve``.
+
+    Governance reads ``@pii`` / ``@declassify`` from the project's model
+    files. Only consulted when the server module is already loaded, so the
+    engine never imports the server.
+    """
+    app = sys.modules.get("havn.server.app")
+    return getattr(app, "PROJECT_DIR", None) if app is not None else None
 
 
 class GovernedQueryError(Exception):
@@ -89,25 +134,26 @@ class PreparedQuery:
 
     original_sql: str
     sql: str
-    rewrite_ok: bool
-    handled_policy_ids: set[str] = field(default_factory=set)
+    # havn.engine.governance.GovernedQuery: owes the post-query masking pass.
+    governed: Any = None
 
 
 def prepare_governed_sql(
     conn: duckdb.DuckDBPyConnection,
     sql: str,
     identity: QueryIdentity,
+    *,
+    params: dict | list | None = None,
+    project_dir: Path | None = None,
 ) -> PreparedQuery:
     """Validate ``sql`` as read-only and apply the governance rewrites for ``identity``.
 
     Raises :class:`GovernedQueryError` (400/403) when the SQL is not a
-    single read-only statement or reads a masked column in a way masking
-    cannot follow.
+    single read-only statement, or reads governed data (masked columns,
+    row-filtered tables) in a way governance cannot follow.
     """
-    from havn.engine.masking_rewriter import (
-        MaskedColumnAccessError,
-        rewrite_query_with_masking,
-    )
+    from havn.engine.governance import govern_query
+    from havn.engine.masking_rewriter import MaskedColumnAccessError
     from havn.engine.sql_safety import ReadOnlyQueryError, validate_read_only_query
 
     try:
@@ -116,23 +162,22 @@ def prepare_governed_sql(
         raise GovernedQueryError(e.status_code, str(e)) from e
 
     try:
-        rewritten, rewrite_ok, handled = rewrite_query_with_masking(sql, identity.role, conn)
-    except MaskedColumnAccessError as e:
+        governed = govern_query(
+            sql, identity.viewer(conn), conn,
+            project_dir=project_dir or _default_project_dir(),
+            params=params,
+        )
+    except MaskedColumnAccessError as e:  # GovernanceError included
         raise GovernedQueryError(403, str(e)) from e
 
-    final_sql = rewritten if rewrite_ok else sql
+    final_sql = governed.sql
     if final_sql != sql:
         # Validate what actually runs, not only what was sent.
         try:
             validate_read_only_query(final_sql)
         except ReadOnlyQueryError as e:
             raise GovernedQueryError(e.status_code, str(e)) from e
-    return PreparedQuery(
-        original_sql=sql,
-        sql=final_sql,
-        rewrite_ok=rewrite_ok,
-        handled_policy_ids=set(handled or ()),
-    )
+    return PreparedQuery(original_sql=sql, sql=final_sql, governed=governed)
 
 
 def apply_post_query_governance(
@@ -143,18 +188,9 @@ def apply_post_query_governance(
     conn: duckdb.DuckDBPyConnection,
 ) -> list[list]:
     """Apply what the SQL rewrite could not: post-query masking by column name."""
-    from havn.engine.masking import apply_masking
-
-    if not prepared.rewrite_ok:
-        return apply_masking(columns, rows, identity.role, conn)
-    if prepared.handled_policy_ids:
-        # Conditional policies and methods without a SQL form still need the
-        # post-query pass; skip the ones the rewrite already applied.
-        return apply_masking(
-            columns, rows, identity.role, conn,
-            skip_policy_ids=prepared.handled_policy_ids,
-        )
-    return rows
+    if prepared.governed is None:
+        return rows
+    return prepared.governed.post_mask(columns, rows, conn)
 
 
 def _serialize(value: Any) -> Any:
@@ -208,7 +244,7 @@ def run_governed_query(
     from havn.engine.resource_manager import current_task, get_resource_manager
     from havn.engine.sql_safety import ReadOnlyQueryError, validate_read_only_query
 
-    prepared = prepare_governed_sql(conn, sql, identity)
+    prepared = prepare_governed_sql(conn, sql, identity, params=params)
     wrapped, effective_limit = _wrap_for_paging(prepared.sql, limit, offset, row_cap)
     if wrapped != prepared.sql:
         try:

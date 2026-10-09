@@ -267,9 +267,15 @@ def _selection_warnings(conn, req: TransformRequest) -> dict | None:
 
 @router.post("/api/diff")
 def run_diff_endpoint(request: Request, req: DiffRequest, conn: DbConn) -> list[dict]:
-    """Diff models: compare SQL output against materialized tables."""
-    _require_permission(request, "read")
+    """Diff models: compare SQL output against materialized tables.
+
+    Counts and schema changes are returned to everyone with read access.
+    Sample rows are raw model output, so they are withheld from a user that
+    masking or row policies apply to on that model.
+    """
+    user = _require_permission(request, "read")
     from havn.engine.diff import diff_models
+    from havn.server.deps import _governed_relation
 
     config = _get_config()
     try:
@@ -302,16 +308,28 @@ def run_diff_endpoint(request: Request, req: DiffRequest, conn: DbConn) -> list[
                     }
                     for sc in r.schema_changes
                 ],
-                "sample_added": r.sample_added,
-                "sample_removed": r.sample_removed,
-                "sample_modified": r.sample_modified,
+                "sample_added": [] if withheld else r.sample_added,
+                "sample_removed": [] if withheld else r.sample_removed,
+                "sample_modified": [] if withheld else r.sample_modified,
+                "samples_withheld": withheld,
                 "skipped": r.skipped,
             }
             for r in results
+            for withheld in [_samples_withheld(user, conn, r.model, _governed_relation)]
         ]
     except Exception as e:
         logger.exception("Diff failed")
         raise HTTPException(400, f"Diff failed: {e}")
+
+
+def _samples_withheld(user: dict, conn, model: str, governed_relation) -> bool:
+    schema, _, name = (model or "").partition(".")
+    if not name:
+        return user.get("role") != "admin"
+    try:
+        return governed_relation(user, conn, schema, name)
+    except Exception:
+        return user.get("role") != "admin"
 
 
 # --- Lineage ---
@@ -488,7 +506,7 @@ def get_model_notebook_view(
     request: Request, model_name: str, conn: DbConnReadOnlyOptional = None
 ) -> dict:
     """Get a notebook-style view for a SQL model."""
-    _require_permission(request, "read")
+    user = _require_permission(request, "read")
     from havn.engine.transform import extract_column_lineage
 
     transform_dir = _get_project_dir() / "transform"
@@ -509,13 +527,16 @@ def get_model_notebook_view(
     sample_data = None
     if conn:
         try:
+            from havn.server.deps import _govern
+
             quoted = f'"{target.schema}"."{target.name}"'
-            result = conn.execute(f"SELECT * FROM {quoted} LIMIT 50")
+            governed = _govern(f"SELECT * FROM {quoted} LIMIT 50", user, conn)
+            result = conn.execute(governed.sql)
             columns = [desc[0] for desc in result.description]
-            rows = result.fetchall()
+            rows = [[_serialize(v) for v in row] for row in result.fetchall()]
             sample_data = {
                 "columns": columns,
-                "rows": [[_serialize(v) for v in row] for row in rows],
+                "rows": governed.post_mask(columns, rows, conn),
             }
         except Exception:
             sample_data = None
@@ -904,6 +925,10 @@ def run_validate(request: Request, conn_opt: DbConnReadOnlyOptional = None) -> d
         source_columns=source_columns,
         landing_schemas=landing_schemas,
     )
+    if conn_opt is not None:
+        from havn.engine.governance.report import governance_warnings
+
+        errors = list(errors) + governance_warnings(conn_opt, project_dir, config, models)
 
     error_count = sum(1 for e in errors if e.severity == "error")
 
@@ -946,9 +971,15 @@ def run_check(request: Request, conn_opt: DbConnReadOnlyOptional = None) -> dict
             source_columns[full] = {c.name for c in t.columns}
 
     conn = conn_opt
+    user = _require_permission(request, "read")
     errors = validate_models(
         conn, models, known_tables=known_tables, source_columns=source_columns
     )
+    if conn is not None:
+        from havn.engine.governance.report import governance_warnings
+
+        errors = list(errors) + governance_warnings(conn, project_dir, config, models)
+    from havn.server.deps import _governed_relation
 
     # Run inline assertions (-- assert: comments) against live data
     assertion_results: list[dict] = []
@@ -957,12 +988,16 @@ def run_check(request: Request, conn_opt: DbConnReadOnlyOptional = None) -> dict
             if model.assertions:
                 try:
                     results = run_assertions(conn, model)
+                    withheld = _samples_withheld(user, conn, model.full_name, _governed_relation)
                     for ar in results:
                         assertion_results.append({
                             "model": model.full_name,
                             "expression": ar.expression,
                             "passed": ar.passed,
-                            "detail": ar.detail,
+                            "detail": (
+                                "Details withheld: masking or row policies apply to you on this model."
+                                if withheld and ar.detail and not ar.passed else ar.detail
+                            ),
                         })
                 except Exception as e:
                     assertion_results.append({
