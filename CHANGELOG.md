@@ -4,6 +4,25 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **New raw data reaches tables without `--force`.** A `table` model that reads
+  a source such as `landing.*` directly is rebuilt when a successful ingest,
+  import, connector sync or seed was logged after its last build, and the
+  models below it follow in the same run. A `table` whose input model was
+  rebuilt in an earlier, narrower run (`havn transform silver.x`) is rebuilt
+  on the next run too; before, it was skipped as unchanged for good. Data
+  written into `landing` outside havn still needs `--force`.
+- **Interrupted deploys can be undone.** A deploy cut short by a server
+  restart now keeps its pre-deploy snapshot on the record. Home lists it under
+  **Needs attention** and Ship's deploy history marks it interrupted, both
+  with a **Restore** button (`POST /api/deploys/{id}/restore`). Nothing is
+  rolled back automatically at startup: a restart rewriting production on its
+  own is worse than a visible flag.
+- **One table list on the Query page.** The sidebar's Tables pane is hidden
+  on Data > Query, which has its own list (click to insert, columns, masking
+  marks). It stays on every other page.
+
 ## [0.2.28] - 2026-10-09
 
 Most of what dbt v2 offers (validation, modeling, selectors, defer, packages),

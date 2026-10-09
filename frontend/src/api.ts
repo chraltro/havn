@@ -1488,6 +1488,9 @@ export const api = {
   startDeploy: (data: { env: string; ref: string; pr_id?: string }) =>
     request<any>("/deploys", { method: "POST", body: JSON.stringify(data) }),
   getDeploy: (id: string) => request<any>(`/deploys/${encodeURIComponent(id)}`),
+  // Put an interrupted deploy's target back from its pre-deploy snapshot
+  restoreDeploy: (id: string) =>
+    request<any>(`/deploys/${encodeURIComponent(id)}/restore`, { method: "POST" }),
   listDeploys: (prId?: string) =>
     request<any[]>(`/deploys${prId ? `?pr_id=${encodeURIComponent(prId)}` : ""}`),
 

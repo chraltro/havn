@@ -34,7 +34,7 @@ router = APIRouter()
 _META_SCHEMAS = ("_havn", "information_schema", "main", "pg_catalog")
 _LAYER_ORDER = {"landing": 0, "bronze": 1, "silver": 2, "gold": 3}
 # Ranking for the attention queue: errors first, then by kind, newest first.
-_KIND_ORDER = {"build": 0, "assertion": 1, "contract": 2, "freshness": 3, "anomaly": 4}
+_KIND_ORDER = {"deploy": 0, "build": 1, "assertion": 2, "contract": 3, "freshness": 4, "anomaly": 5}
 ATTENTION_LIMIT = 25
 
 
@@ -287,6 +287,27 @@ def get_home(request: Request, conn: DbConnReadOnlyOptional = None) -> dict:
             "at": _ts(detected_at),
             "path": rel(model) if model is not None else None,
             "sql": None,
+        })
+
+    # --- Deploys a server restart cut short, with a snapshot to go back to --
+    from havn.engine.deploy import list_deploys
+
+    for d in list_deploys(conn, limit=50):
+        if not d.get("restorable"):
+            continue
+        attention.append({
+            "kind": "deploy",
+            "severity": "error",
+            "title": f"Deploy of {d['ref']} to {d['env']} was interrupted",
+            "subject": d["env"],
+            "detail": (
+                f"{len(d.get('models') or [])} model(s) may be half deployed. "
+                "Restore puts them back as they were before this deploy."
+            ),
+            "at": d.get("finished_at") or d.get("started_at"),
+            "path": None,
+            "sql": None,
+            "deploy_id": d["id"],
         })
 
     attention.sort(key=lambda a: a["at"] or "", reverse=True)

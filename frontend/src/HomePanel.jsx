@@ -55,7 +55,7 @@ const LAYER_PREVIEW = 8;
 
 export default function HomePanel({
   running, refreshKey, onNavigate, onOpenFile, onRunPipeline, onQuery, onClearSample,
-  onAttentionCount, firstRun,
+  onAttentionCount, firstRun, showConfirm,
 }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -70,6 +70,30 @@ export default function HomePanel({
       setError(e.message);
     }
   }, [onAttentionCount]);
+
+  const [restoring, setRestoring] = useState(null);
+  const [restoreError, setRestoreError] = useState(null);
+
+  async function restoreDeploy(item) {
+    const ok = showConfirm
+      ? await showConfirm(
+          `Restore ${item.subject}?`,
+          `${item.title}. Restoring puts the models it touched back as they were before it started. Data loaded into them since is replaced.`,
+          "Restore", true,
+        )
+      : window.confirm(`Restore ${item.subject} to how it was before this deploy?`);
+    if (!ok) return;
+    setRestoring(item.deploy_id);
+    setRestoreError(null);
+    try {
+      await api.restoreDeploy(item.deploy_id);
+      await load();
+    } catch (e) {
+      setRestoreError(`Restore failed: ${e.message}`);
+    } finally {
+      setRestoring(null);
+    }
+  }
 
   // Reload when a run finishes (the parent bumps refreshKey) or stops.
   useEffect(() => { if (!running) load(); }, [load, running, refreshKey]);
@@ -171,7 +195,8 @@ export default function HomePanel({
 
       <div style={s.grid2}>
         <Attention items={data.attention} total={data.attention_total || data.attention.length}
-                   onOpenFile={onOpenFile} onQuery={onQuery} onNavigate={onNavigate} />
+                   onOpenFile={onOpenFile} onQuery={onQuery} onNavigate={onNavigate}
+                   onRestoreDeploy={restoreDeploy} restoring={restoring} restoreError={restoreError} />
         <RunsChart runs={data.runs} onNavigate={onNavigate} />
       </div>
 
@@ -190,12 +215,13 @@ function Tile({ label, value, unit, detail, onClick }) {
   );
 }
 
-const KIND_ICON = { build: "!", assertion: "!", contract: "!", freshness: "⏱", anomaly: "~" };
+const KIND_ICON = { deploy: "↺", build: "!", assertion: "!", contract: "!", freshness: "⏱", anomaly: "~" };
 
-function Attention({ items, total, onOpenFile, onQuery, onNavigate }) {
+function Attention({ items, total, onOpenFile, onQuery, onNavigate, onRestoreDeploy, restoring, restoreError }) {
   return (
     <section aria-labelledby="havn-attention-h">
       <h2 id="havn-attention-h" style={s.h2}>Needs attention</h2>
+      {restoreError && <div role="alert" style={s.errorBox}>{restoreError}</div>}
       {items.length === 0 ? (
         <div style={{ ...s.card, ...s.empty }}>
           <span style={{ ...s.ok, fontSize: 18 }}>{"✓"}</span>
@@ -226,6 +252,18 @@ function Attention({ items, total, onOpenFile, onQuery, onNavigate }) {
                 </div>
                 <div style={s.acts}>
                   {a.sql && <button style={s.btnSm} onClick={() => onQuery(a.sql)}>See rows</button>}
+                  {a.kind === "deploy" && (
+                    <>
+                      <button style={s.btnSm} onClick={() => onNavigate("Ship")}>Ship</button>
+                      <button
+                        style={s.btnSmPrimary}
+                        disabled={restoring === a.deploy_id}
+                        onClick={() => onRestoreDeploy(a)}
+                      >
+                        {restoring === a.deploy_id ? "Restoring…" : "Restore"}
+                      </button>
+                    </>
+                  )}
                   {a.kind === "anomaly" && <button style={s.btnSm} onClick={() => onNavigate("Quality")}>Quality</button>}
                   {a.kind === "build" && !a.path && <button style={s.btnSm} onClick={() => onNavigate("Runs")}>Runs</button>}
                   {a.path && <button style={bad ? s.btnSmPrimary : s.btnSm} onClick={() => onOpenFile(a.path)}>Open</button>}

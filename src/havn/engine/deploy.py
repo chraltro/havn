@@ -96,23 +96,41 @@ def mark_interrupted_deploys(conn: duckdb.DuckDBPyConnection) -> int:
     kills it mid-way and nothing updates its record: the page would show
     "Deploying..." forever. Only one server holds a warehouse at a time, so
     at startup nothing can really still be running. Returns how many.
+
+    The target is not rolled back here. Deploy targets are usually
+    production, and a server restart quietly rewriting production is worse
+    than leaving it visibly flagged; the run may also have stopped while it
+    was still taking the snapshot. When the snapshot was taken, the record
+    keeps it and ``restore_interrupted_deploy`` puts the target back on
+    request (Home lists it under "Needs attention").
     """
     try:
-        n = conn.execute("SELECT COUNT(*) FROM _havn.deploys WHERE status = 'running'").fetchone()[0]
-        if n:
-            # Same timestamp format as every other record (_now(): ISO 8601 UTC).
-            # The target is left as the interrupted run left it -- there is no
-            # snapshot to roll back to from here -- so the message says so.
-            conn.execute(
-                "UPDATE _havn.deploys SET status = 'error', "
-                "error = 'Interrupted: the server stopped before this deploy finished. "
-                "The target may be partly deployed; deploy again to bring it to a known state.', "
-                "finished_at = ? WHERE status = 'running'",
-                [_now()],
-            )
-        return n
+        rows = conn.execute("SELECT id, detail FROM _havn.deploys WHERE status = 'running'").fetchall()
     except duckdb.CatalogException:
         return 0  # no deploy has ever run here
+    for deploy_id, detail in rows:
+        restorable = bool(_detail(detail).get("rollback"))
+        message = (
+            "Interrupted: the server stopped before this deploy finished, so the target may be "
+            "partly deployed. "
+            + ("Restore it to how it was before this deploy, or deploy again."
+               if restorable else "Deploy again to bring it to a known state.")
+        )
+        # Same timestamp format as every other record (_now(): ISO 8601 UTC).
+        conn.execute(
+            "UPDATE _havn.deploys SET status = 'error', error = ?, finished_at = ? WHERE id = ?",
+            [message, _now(), deploy_id],
+        )
+    return len(rows)
+
+
+def _detail(raw: Any) -> dict:
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw) or {}
+        except ValueError:
+            return {}
+    return raw or {}
 
 
 _RECORD_KEYS = ("models", "results", "failed", "version_id", "restored")
@@ -122,10 +140,15 @@ def _save(conn: duckdb.DuckDBPyConnection, rec: dict) -> None:
     """Insert or update in one statement, so a reader polling the record while
     a deploy runs never catches it missing (a delete-then-insert would)."""
     ensure_deploys_table(conn)
+    detail = {k: rec.get(k) for k in _RECORD_KEYS}
+    if rec.get("rollback"):
+        # What a restore needs while the deploy is in flight; dropped once it
+        # finishes (see run_deploy), so it only outlives an interrupted run.
+        detail["rollback"] = rec["rollback"]
     values = [
         rec["env"], rec["ref"], rec.get("commit"), rec.get("pr_id"),
         rec.get("deployed_by"), rec["status"], rec["started_at"], rec.get("finished_at"),
-        rec.get("duration_ms"), json.dumps({k: rec.get(k) for k in _RECORD_KEYS}), rec.get("error"),
+        rec.get("duration_ms"), json.dumps(detail, default=str), rec.get("error"),
     ]
     exists = conn.execute("SELECT 1 FROM _havn.deploys WHERE id = ?", [rec["id"]]).fetchone()
     if exists:
@@ -160,15 +183,45 @@ def list_deploys(
         rows = conn.execute(sql, [*params, limit]).fetchall()
     except duckdb.Error:
         return []  # no deploys yet (or a read-only connection before the first)
+    restorable = _restorable_ids(conn)
     out = []
     for r in rows:
-        detail = json.loads(r[10]) if isinstance(r[10], str) else (r[10] or {})
+        detail = _detail(r[10])
         out.append({
             "id": r[0], "env": r[1], "ref": r[2], "commit": r[3], "pr_id": r[4],
             "deployed_by": r[5], "status": r[6], "started_at": r[7], "finished_at": r[8],
             "duration_ms": r[9], "error": r[11], **{k: detail.get(k) for k in _RECORD_KEYS},
+            "restorable": r[0] in restorable,
         })
     return out
+
+
+# A later deploy in one of these states changed (or confirmed) the target, so an
+# older interrupted deploy's snapshot no longer describes "before the last change".
+_SETTLED = ("success", "up_to_date", "rolled_back")
+
+
+def _restorable_ids(conn: duckdb.DuckDBPyConnection) -> set[str]:
+    """Interrupted deploys whose pre-deploy snapshot can still be applied.
+
+    Only while nothing later has touched the same environment: after a
+    successful redeploy (or a later deploy that got as far as its own
+    snapshot), restoring the older snapshot would silently undo that work.
+    """
+    try:
+        rows = conn.execute("SELECT id, env, status, started_at, detail FROM _havn.deploys").fetchall()
+    except duckdb.Error:
+        return set()
+    latest_touch: dict[str, str] = {}
+    candidates = []
+    for deploy_id, env, status, started_at, raw in rows:
+        detail = _detail(raw)
+        if status in _SETTLED or detail.get("version_id") or detail.get("rollback"):
+            if (started_at or "") > latest_touch.get(env, ""):
+                latest_touch[env] = started_at or ""
+        if status == "error" and detail.get("rollback"):
+            candidates.append((deploy_id, env, started_at or ""))
+    return {d for d, env, started in candidates if latest_touch.get(env, "") <= started}
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +375,41 @@ def _snapshot(conn, project_dir: Path, names: list[str], label: str) -> dict:
 
 
 def _restore(conn, project_dir: Path, snap: dict) -> list[str]:
+    # Check every snapshot file first: dropping a table and then failing to
+    # read its Parquet (cleaned up by `havn version cleanup`, say) would leave
+    # it gone.
+    missing = [
+        full for full, before in snap["objects"].items()
+        if before["kind"] == "BASE TABLE"
+        and not (snap["parquet"].get(full) and (project_dir / snap["parquet"][full]).exists())
+    ]
+    if missing:
+        raise DeployError(
+            "The pre-deploy snapshot is incomplete (missing files for " + ", ".join(missing)
+            + "); nothing was restored. Deploy again to bring the target to a known state."
+        )
+    # One transaction where the connection allows it, so a failure part way
+    # leaves the target as it was rather than half restored.
+    try:
+        conn.execute("BEGIN TRANSACTION")
+        own_txn = True
+    except duckdb.Error:
+        own_txn = False  # already inside one
+    try:
+        restored = _restore_objects(conn, project_dir, snap)
+        if own_txn:
+            conn.execute("COMMIT")
+    except Exception:
+        if own_txn:
+            try:
+                conn.execute("ROLLBACK")
+            except duckdb.Error:
+                pass
+        raise
+    return restored
+
+
+def _restore_objects(conn, project_dir: Path, snap: dict) -> list[str]:
     restored = []
     for full, before in snap["objects"].items():
         schema, name = full.split(".", 1)
@@ -354,6 +442,111 @@ def _restore(conn, project_dir: Path, snap: dict) -> list[str]:
                 [list(r) for r in rows],
             )
     return restored
+
+
+def _rollback_payload(snap: dict, db_path: str | None = None, taken_at: str | None = None) -> dict:
+    """The parts of a snapshot a later restore needs, in JSON-safe form."""
+    return {
+        # On the target's own clock, as run_log.started_at is stored.
+        "taken_at": taken_at,
+        # Which warehouse file it belongs to, so a restore never lands in a
+        # different one if the environment's database.path has changed since.
+        "database": str(Path(db_path).resolve()) if db_path else None,
+        "objects": snap["objects"],
+        "parquet": snap["parquet"],
+        "meta": {
+            table: [list(cols), [list(r) for r in rows]]
+            for table in _ROLLBACK_META_TABLES
+            for cols, rows in [snap.get(table) or ([], [])]
+        },
+    }
+
+
+def _snap_from_payload(payload: dict) -> dict:
+    meta = payload.get("meta") or {}
+    return {
+        "objects": payload.get("objects") or {},
+        "parquet": payload.get("parquet") or {},
+        **{table: tuple(meta.get(table) or ([], [])) for table in _ROLLBACK_META_TABLES},
+    }
+
+
+def restore_interrupted_deploy(
+    record_conn: duckdb.DuckDBPyConnection,
+    target_conn: duckdb.DuckDBPyConnection,
+    project_dir: Path,
+    deploy_id: str,
+    *,
+    restored_by: str | None = None,
+    target_path: str | None = None,
+) -> dict:
+    """Put the target back as it was before an interrupted deploy; returns the record.
+
+    Only a deploy that ``mark_interrupted_deploys`` closed out with its
+    snapshot still on the record qualifies. ``record_conn`` holds the record,
+    ``target_conn`` the deployed warehouse (the same connection when the
+    deploy targeted the server's own warehouse).
+    """
+    try:
+        row = record_conn.execute(
+            "SELECT status, detail, error FROM _havn.deploys WHERE id = ?", [deploy_id]
+        ).fetchone()
+    except duckdb.CatalogException:
+        row = None
+    if row is None:
+        raise DeployError(f"Deploy '{deploy_id}' not found")
+    if not _deploy_lock.acquire(blocking=False):
+        raise DeployError("Another deploy is running; try again when it has finished")
+    try:
+        # Decided under the lock, so a deploy finishing in between is seen.
+        _status, raw_detail, error = record_conn.execute(
+            "SELECT status, detail, error FROM _havn.deploys WHERE id = ?", [deploy_id]
+        ).fetchone()
+        payload = _detail(raw_detail).get("rollback")
+        if deploy_id not in _restorable_ids(record_conn) or not payload:
+            raise DeployError(
+                f"Deploy '{deploy_id}' has nothing to restore"
+                + (" (a later deploy to the same environment has run since)" if payload else "")
+            )
+        saved_db = payload.get("database")
+        if saved_db and target_path and Path(saved_db) != Path(target_path).resolve():
+            raise DeployError(
+                f"This deploy went to {saved_db}, but the environment now points at "
+                f"{Path(target_path).resolve()}; restore refused."
+            )
+        # The deploy records alone can't rule out a later deploy: the CLI keeps
+        # its record in the target, the server in its own warehouse. Every
+        # build logs to the target's run_log, though, so anything built there
+        # since this snapshot (other than this deploy's own builds) means a
+        # restore would undo newer work.
+        if payload.get("taken_at"):
+            try:
+                later = target_conn.execute(
+                    "SELECT target FROM _havn.run_log WHERE run_type = 'transform' "
+                    "AND status <> 'skipped' AND started_at > CAST(? AS TIMESTAMP) "
+                    "AND coalesce(pipeline_run_id, '') <> ? LIMIT 1",
+                    [payload["taken_at"], deploy_id],
+                ).fetchone()
+            except duckdb.CatalogException:
+                later = None
+            if later:
+                raise DeployError(
+                    f"{later[0]} has been built in this environment since the interrupted deploy; "
+                    "restoring would undo that. Deploy again instead."
+                )
+        restored = _restore(target_conn, project_dir, _snap_from_payload(payload))
+        record = list_deploys(record_conn, limit=1, deploy_id=deploy_id)[0]
+        record.pop("restorable", None)
+        record.update(
+            status="rolled_back",
+            restored=restored,
+            error=(error or "").rstrip()
+            + f" Restored to the pre-deploy snapshot{f' by {restored_by}' if restored_by else ''}.",
+        )
+        _save(record_conn, record)  # no "rollback" key: the snapshot is spent
+        return list_deploys(record_conn, limit=1, deploy_id=deploy_id)[0]
+    finally:
+        _deploy_lock.release()
 
 
 # ---------------------------------------------------------------------------
@@ -433,6 +626,11 @@ def run_deploy(
             label = f"{record['ref']} {co.sha[:7]} to {record['env']}"
             snap = _snapshot(conn, project_dir, planned, label)
             record["version_id"] = snap["version_id"]
+            # Persist the snapshot before touching the target: if the server
+            # dies mid-build, this is what lets the deploy be undone later.
+            taken_at = str(conn.execute("SELECT CAST(current_timestamp AS TIMESTAMP)").fetchone()[0])
+            record["rollback"] = _rollback_payload(snap, db_path, taken_at)
+            _save(record_conn, record)
 
             results = run_transform(
                 conn, co.path / "transform", targets=planned,
@@ -477,6 +675,12 @@ def run_deploy(
                 logger.warning("deploy %s: restoring macros failed: %s", record["id"], e)
         if close_target:
             _close_quietly(conn, record["id"])
+        if record["status"] not in ("running", "error"):
+            # It finished cleanly (built, up to date, or rolled back): nothing
+            # is left to undo later. "running" means it was cut short (Ctrl+C
+            # in the CLI) and "error" that its own rollback failed; in both
+            # the snapshot stays so the target can still be restored.
+            record.pop("rollback", None)
         record["finished_at"] = _now()
         record["duration_ms"] = int((time.perf_counter() - start) * 1000)
         try:

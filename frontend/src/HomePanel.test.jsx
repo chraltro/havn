@@ -3,7 +3,8 @@ import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 const getHome = vi.fn();
-vi.mock("./api", () => ({ api: { getHome: (...a) => getHome(...a) } }));
+const restoreDeploy = vi.fn();
+vi.mock("./api", () => ({ api: { getHome: (...a) => getHome(...a), restoreDeploy: (...a) => restoreDeploy(...a) } }));
 
 const { default: HomePanel, fmtDuration, fmtBytes, runLabel } = await import("./HomePanel");
 
@@ -85,6 +86,41 @@ describe("HomePanel", () => {
     await screen.findByText("Pipeline health");
     fireEvent.click(screen.getByTitle(/silver\.orders · failing/));
     expect(h.onOpenFile).toHaveBeenCalledWith("transform/silver/orders.sql");
+  });
+
+  it("restores an interrupted deploy after confirming", async () => {
+    const DEPLOY = {
+      kind: "deploy", severity: "error", title: "Deploy of main to prod was interrupted", subject: "prod",
+      detail: "3 model(s) may be half deployed.", at: null, path: null, sql: null, deploy_id: "deploy-1",
+    };
+    getHome.mockResolvedValueOnce({ ...HOME, attention: [DEPLOY], attention_total: 1 });
+    restoreDeploy.mockResolvedValue({ status: "rolled_back" });
+    const showConfirm = vi.fn().mockResolvedValue(true);
+    renderHome({ showConfirm });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(restoreDeploy).toHaveBeenCalledWith("deploy-1"));
+    expect(showConfirm.mock.calls[0][0]).toBe("Restore prod?");
+    await waitFor(() => expect(getHome).toHaveBeenCalledTimes(2)); // reloaded afterwards
+  });
+
+  it("does nothing when the restore is not confirmed, and shows a failed one", async () => {
+    const DEPLOY = {
+      kind: "deploy", severity: "error", title: "Deploy of main to prod was interrupted", subject: "prod",
+      detail: "", at: null, path: null, sql: null, deploy_id: "deploy-1",
+    };
+    getHome.mockResolvedValue({ ...HOME, attention: [DEPLOY], attention_total: 1 });
+    restoreDeploy.mockReset();
+    const showConfirm = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    renderHome({ showConfirm });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(showConfirm).toHaveBeenCalledTimes(1));
+    expect(restoreDeploy).not.toHaveBeenCalled();
+
+    restoreDeploy.mockRejectedValue(new Error("Another deploy is running"));
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Restore failed: Another deploy is running");
   });
 
   it("says so when nothing needs attention", async () => {

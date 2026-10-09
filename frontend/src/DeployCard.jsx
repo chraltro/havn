@@ -58,6 +58,25 @@ export default function DeployCard({ refName, prId, showConfirm, onDeployed }) {
   }, [prId]);
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
+  // An interrupted deploy keeps its pre-deploy snapshot; this puts the target back.
+  const [restoreError, setRestoreError] = useState(null);
+  async function restore(h) {
+    const ok = await showConfirm(
+      `Restore ${h.env}?`,
+      `The deploy of ${h.ref} to ${h.env} was interrupted. Restoring puts the models it touched back as they were before it started.`,
+      "Restore", true,
+    );
+    if (!ok) return;
+    setRestoreError(null);
+    try {
+      await api.restoreDeploy(h.id);
+      loadHistory();
+      loadPlan();
+    } catch (e) {
+      setRestoreError(`Restore failed: ${e.message}`);
+    }
+  }
+
   // Poll the running deploy until it settles.
   useEffect(() => {
     if (deploy?.status !== "running") return;
@@ -161,10 +180,18 @@ export default function DeployCard({ refName, prId, showConfirm, onDeployed }) {
         <div style={s.history}>
           {history.slice(0, 4).map((h) => (
             <div key={h.id} style={s.histRow} title={h.error || ""}>
-              <span style={STATUS_STYLE[h.status] || s.dim}>{STATUS_LABEL[h.status] || h.status}</span>
-              <span style={s.dim}>{h.env} · {(h.commit || "").slice(0, 7)} · {h.deployed_by || ""}</span>
+              <span style={STATUS_STYLE[h.status] || s.dim}>
+                {h.restorable ? "⏸ interrupted" : (STATUS_LABEL[h.status] || h.status)}
+              </span>
+              <span style={s.dim}>
+                {h.env} · {(h.commit || "").slice(0, 7)} · {h.deployed_by || ""}
+                {h.restorable && (
+                  <button style={s.linkBtn} onClick={() => restore(h)}>Restore</button>
+                )}
+              </span>
             </div>
           ))}
+          {restoreError && <div style={s.bad} role="alert">{restoreError}</div>}
         </div>
       )}
     </div>
@@ -223,6 +250,7 @@ const s = {
   btnPrimary: { ...btn, background: "var(--havn-accent)", borderColor: "var(--havn-accent)", color: "#fff" },
   btnProd: { ...btn, background: "var(--havn-red)", borderColor: "var(--havn-red)", color: "#fff" },
   history: { marginTop: 12, borderTop: "1px solid var(--havn-border)", paddingTop: 8 },
+  linkBtn: { marginLeft: 8, padding: 0, background: "none", border: "none", color: "var(--havn-accent)", cursor: "pointer", fontSize: 12, textDecoration: "underline" },
   histRow: { display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, padding: "2px 0" },
 };
 

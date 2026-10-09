@@ -658,7 +658,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
     <div style={st.container}>
       <div style={st.main}>
         {/* Schema sidebar */}
-        <div data-havn-hint="query-sidebar" style={{ display: "flex", flexDirection: "column", width: sidebarWidth, flexShrink: 0 }}>
+        <div data-havn-hint="query-sidebar" data-havn-guide="query-tables" style={{ display: "flex", flexDirection: "column", width: sidebarWidth, flexShrink: 0 }}>
           <SchemaSidebar tables={tables} onInsert={insertAtCursor} maskingPolicies={maskingPolicies} onOpenModel={onOpenModel} />
         </div>
         <ResizeHandle direction="horizontal" onResize={onSidebarResize} onResizeStart={() => { hideCompletions(); onSidebarResizeStart(); }} />

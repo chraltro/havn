@@ -234,3 +234,34 @@ def get_deploy(deploy_id: str, request: Request, conn: DbConnReadOnly) -> dict:
     if not found:
         raise HTTPException(404, f"Deploy '{deploy_id}' not found")
     return found[0]
+
+
+@router.post("/api/deploys/{deploy_id}/restore")
+def restore_deploy(deploy_id: str, request: Request, conn: DbConn) -> dict:
+    """Undo an interrupted deploy: put its target back from the pre-deploy snapshot."""
+    user = _require_permission(request, "execute")
+    from havn.engine.database import open_warehouse
+    from havn.engine.deploy import DeployError, list_deploys, restore_interrupted_deploy
+    from havn.server.routes.pr import _actor
+
+    found = list_deploys(conn, limit=1, deploy_id=deploy_id)
+    if not found:
+        raise HTTPException(404, f"Deploy '{deploy_id}' not found")
+    if not found[0].get("restorable"):
+        raise HTTPException(409, "This deploy has nothing to restore")
+    project_dir = _get_project_dir()
+    cfg, path, is_active = _target(found[0]["env"])
+    target = None
+    try:
+        target = conn if is_active else open_warehouse(cfg, project_dir)
+        return restore_interrupted_deploy(
+            conn, target, project_dir, deploy_id, restored_by=_actor(user, None),
+            target_path=str(path),
+        )
+    except DeployError as e:
+        raise HTTPException(409, str(e))
+    except duckdb.IOException as e:
+        raise HTTPException(409, f"The {found[0]['env']} warehouse is busy: {e}")
+    finally:
+        if target is not None and target is not conn:
+            target.close()
