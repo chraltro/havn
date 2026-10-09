@@ -95,6 +95,16 @@ def promote_sql_to_model(
     return model_path
 
 
+def _model_cell(target) -> dict:
+    """The cell holding the model itself: its SQL, or for a Python model a
+    code cell that defines and runs its function."""
+    if getattr(target, "is_python", False):
+        from havn.engine.transform.python_models import notebook_cell
+
+        return notebook_cell(target)
+    return {"type": "sql", "source": target.sql, "outputs": []}
+
+
 def model_to_notebook(
     conn: duckdb.DuckDBPyConnection,
     model_full_name: str,
@@ -161,12 +171,7 @@ def model_to_notebook(
         "type": "markdown",
         "source": f"### Model SQL: `{model_full_name}`\n\nEdit and re-run to test changes:",
     })
-    cells.append({
-        "id": _make_cell_id(),
-        "type": "sql",
-        "source": target.sql,
-        "outputs": [],
-    })
+    cells.append({"id": _make_cell_id(), **_model_cell(target)})
 
     # Current output (if table exists)
     cells.append({

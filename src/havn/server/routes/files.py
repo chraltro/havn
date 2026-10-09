@@ -472,6 +472,22 @@ def _drop_db_object(full_path: Path, file_path: str) -> str | None:
                 schema = m.group(1)
         except Exception:
             pass
+    elif full_path.suffix == ".py" and normalized.startswith("transform/"):
+        # A Python model: its schema comes from @model(schema=...) or the
+        # folder, exactly as discovery reads it. A helper module is no model
+        # and drops nothing.
+        try:
+            from havn.engine.transform.python_models import build_python_model
+            from havn.textio import read_project_text
+
+            py_model = build_python_model(
+                full_path, read_project_text(full_path), full_path.parents[len(normalized.split("/")) - 2]
+            )
+        except Exception:
+            py_model = None
+        if py_model is None or full_path.name.startswith("_"):
+            return None
+        schema, name = py_model.schema, py_model.name
     elif full_path.suffix == ".csv" and normalized.startswith("seeds/"):
         schema = "seeds"
         name = full_path.stem

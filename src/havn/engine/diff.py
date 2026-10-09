@@ -396,6 +396,46 @@ def diff_model(
     )
 
 
+def _diff_python_model(
+    conn: duckdb.DuckDBPyConnection,
+    model,
+    all_models: list,
+    project_config,
+    full: bool,
+) -> DiffResult:
+    """Diff a Python model: run its function, then diff the staged result.
+
+    The function runs exactly as a SQL model's query does here, as a full
+    (non-incremental) build into a temp table; nothing is written to the
+    model's own table. The primary key comes from project.yml, else from
+    the model's ``unique_key``.
+    """
+    from havn.engine.transform.python_models import (
+        PythonModelError,
+        drop_staged,
+        run_python_model,
+    )
+
+    try:
+        staged = run_python_model(
+            conn, model,
+            model_map={m.full_name: m for m in all_models},
+            is_incremental=False,
+        )
+    except PythonModelError as e:
+        return DiffResult(model=model.full_name, error=f"Model function failed: {e}")
+    try:
+        pk = get_primary_key_from_config(project_config, model.full_name)
+        if pk is None and model.unique_key:
+            pk = [k.strip() for k in model.unique_key.split(",") if k.strip()]
+        return diff_model(
+            conn, f"SELECT * FROM {staged}", model.schema, model.name,
+            primary_key=pk, full=full,
+        )
+    finally:
+        drop_staged(conn, staged)
+
+
 def diff_models(
     conn: duckdb.DuckDBPyConnection,
     transform_dir,
@@ -455,6 +495,11 @@ def diff_models(
     for model in ordered:
         if changed_set is not None and model.full_name not in changed_set:
             results.append(DiffResult(model=model.full_name, skipped=True))
+            continue
+        if model.is_python:
+            results.append(
+                _diff_python_model(conn, model, all_models, project_config, full)
+            )
             continue
         pk = get_primary_key(model.sql, project_config, model.full_name)
         result = diff_model(

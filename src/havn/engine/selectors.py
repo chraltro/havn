@@ -244,6 +244,8 @@ _MODEL_CONFIG_ATTRS = frozenset({
     # Not a @config key, but `config.package:crm` matched it before this
     # allowlist existed and is documented alongside `package:`.
     "package",
+    # "sql" or "python": `config.language:python` selects the Python models.
+    "language",
 })
 
 
@@ -283,7 +285,8 @@ def _config_value(model: SQLModel, key: str) -> str | list[str] | None:
     """
     key = key.lower()
     value: Any = getattr(model, key, None) if key in _MODEL_CONFIG_ATTRS else None
-    if value is None:
+    if value is None and not getattr(model, "is_python", False):
+        # (A Python model has no @config header; its source is code.)
         from havn.engine.sql_analysis import parse_config
 
         raw = {k.lower(): v for k, v in parse_config(getattr(model, "sql", "") or "").items()}

@@ -28,6 +28,7 @@ def _extract_category(slug: str) -> str:
         "index": "Getting Started",
         "getting-started": "Getting Started",
         "transforms": "Core Concepts",
+        "python-models": "Core Concepts",
         "pipelines": "Core Concepts",
         "configuration": "Core Concepts",
         "environments": "Core Concepts",

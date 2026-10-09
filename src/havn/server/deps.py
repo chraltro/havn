@@ -111,7 +111,7 @@ def invalidate_config_cache() -> None:
 # Model discovery cache
 # ---------------------------------------------------------------------------
 
-_MODEL_CACHE_VERSION = 3
+_MODEL_CACHE_VERSION = 4
 _model_cache: dict[str, Any] = {
     "models": None,
     "mtime_map": None,
@@ -120,10 +120,19 @@ _model_cache: dict[str, Any] = {
 }
 
 
+def _model_files(transform_dir: Path) -> list[Path]:
+    """Every file under ``transform_dir`` whose edit can change the DAG."""
+    return [
+        *transform_dir.rglob("*.sql"),
+        *(p for p in transform_dir.rglob("*.py") if "__pycache__" not in p.parts),
+    ]
+
+
 def _discover_models_cached(transform_dir: Path):
     """Discover project and package models, with file-mtime-based caching.
 
-    The cache key covers every ``.sql`` file the DAG is built from, including
+    The cache key covers every ``.sql`` and ``.py`` file the DAG is built
+    from (Python models, and the helper modules they import), including
     each installed package's, every macro file, plus ``havn_packages.lock`` itself: installing
     or upgrading a package changes the model list without touching a single
     file under ``transform/``.
@@ -136,13 +145,13 @@ def _discover_models_cached(transform_dir: Path):
         return []
 
     current_mtimes = {}
-    for sql_file in sorted(transform_dir.rglob("*.sql")):
+    for sql_file in sorted(_model_files(transform_dir)):
         current_mtimes[str(sql_file)] = sql_file.stat().st_mtime
     lock = lock_path(project_dir)
     if lock.is_file():
         current_mtimes[str(lock)] = lock.stat().st_mtime
     for root in roots:
-        for sql_file in sorted(root.transform_dir.rglob("*.sql")):
+        for sql_file in sorted(_model_files(root.transform_dir)):
             current_mtimes[str(sql_file)] = sql_file.stat().st_mtime
     # A model's hash includes the macros it calls, so a macro edit changes
     # which models count as modified.

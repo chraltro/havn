@@ -140,8 +140,10 @@ def generate_docs(
 
             # SQL source if available
             if model:
-                lines.append("<details><summary>SQL Source</summary>\n")
-                lines.append("```sql")
+                is_py = getattr(model, "is_python", False)
+                source_label = "Python Source" if is_py else "SQL Source"
+                lines.append(f"<details><summary>{source_label}</summary>\n")
+                lines.append("```python" if is_py else "```sql")
                 lines.append(model.sql.strip())
                 lines.append("```")
                 lines.append("</details>\n")
@@ -297,6 +299,7 @@ def generate_structured_docs(
                 table_info["depends_on"] = model.depends_on
                 table_info["materialized"] = model.materialized
                 table_info["sql"] = model.sql.strip()
+                table_info["language"] = getattr(model, "language", "sql")
                 # Surface the new directive metadata so the SPA can
                 # render grain / owner / source-freshness contracts
                 # alongside the column list.

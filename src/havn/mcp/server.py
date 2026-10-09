@@ -570,6 +570,7 @@ class MCPServer:
                 {
                     "name": m.full_name,
                     "materialized": m.materialized,
+                    "language": getattr(m, "language", "sql"),
                     "depends_on": m.depends_on,
                     "description": m.description,
                     "tags": list(getattr(m, "tags", []) or []),
@@ -597,6 +598,7 @@ class MCPServer:
             "name": m.full_name,
             "path": m.path.relative_to(self.project_dir).as_posix(),
             "materialized": m.materialized,
+            "language": getattr(m, "language", "sql"),
             "depends_on": m.depends_on,
             "description": m.description,
             "assertions": m.assertions,

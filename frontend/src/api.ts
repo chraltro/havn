@@ -1210,11 +1210,24 @@ export const api = {
   // Everything the editor workbench shows for the model defined in `path`.
   getModelWorkbench: (path: string) => request(`/models/workbench?path=${encodeURIComponent(path)}`),
 
+  // Run a Python model's function on the editor buffer; returns its first rows.
+  previewPythonModel: (path: string, content: string, limit: number = 100) =>
+    request<{ model: string; columns: string[]; rows: unknown[][]; truncated: boolean; output: string }>(
+      "/models/preview-python",
+      { method: "POST", body: JSON.stringify({ path, content, limit }) },
+    ),
+
   // Create model
-  createModel: (name: string, schema_name: string = "bronze", materialized: string = "table", sql: string = "") =>
+  createModel: (
+    name: string,
+    schema_name: string = "bronze",
+    materialized: string = "table",
+    sql: string = "",
+    language: "sql" | "python" = "sql",
+  ) =>
     request("/models/create", {
       method: "POST",
-      body: JSON.stringify({ name, schema_name, materialized, sql }),
+      body: JSON.stringify({ name, schema_name, materialized, sql, language }),
     }),
 
   // Check (validation + assertions + contracts)

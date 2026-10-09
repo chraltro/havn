@@ -52,6 +52,7 @@ import { useAuth } from "./AuthContext";
 import { WarehouseProvider, useWarehouse } from "./WarehouseContext";
 import { isSystemSchema, schemaCompare } from "./schemaOrder";
 import { PipelineProvider, usePipeline } from "./PipelineContext";
+import { isModelFile, isPythonModelPath, modelNameFromPath, pythonModelTemplate } from "./modelFiles";
 
 
 /** Row cap for the editor preview pane (whole model and single CTE alike). */
@@ -699,8 +700,8 @@ function AppContent() {
       setActiveTab("Editor");
       return;
     }
-    if (path.endsWith(".sql") && path.startsWith("transform/") && opts.notebookView) {
-      const parts = path.replace("transform/", "").replace(".sql", "").split("/");
+    if ((path.endsWith(".sql") || isPythonModelPath(path)) && path.startsWith("transform/") && opts.notebookView) {
+      const parts = path.replace("transform/", "").replace(/\.(sql|py)$/, "").split("/");
       if (parts.length >= 2) {
         setModelNotebookName(`${parts[0]}.${parts[1]}`);
         return;
@@ -885,8 +886,8 @@ function AppContent() {
       // Run on save: rebuild this single model / re-run this single
       // script after a successful save, if the toggle is on.
       if (runAfter && runOnSave && !running) {
-        if (activeFile.includes("transform/") && activeFile.endsWith(".sql")) {
-          const modelName = activeFile.replace(/^transform\//, "").replace(/\.sql$/, "").replace(/\//g, ".");
+        if (isModelFile(activeFile, fileContent)) {
+          const modelName = modelNameFromPath(activeFile);
           runSingleModel(modelName).catch(e => addOutput("error", `Run on save failed: ${e.message}`));
         } else if ((activeFile.startsWith("ingest/") || activeFile.startsWith("export/")) && activeFile.endsWith(".py")) {
           runCurrentScript(activeFile).catch(e => addOutput("error", `Run on save failed: ${e.message}`));
@@ -902,7 +903,9 @@ function AppContent() {
   async function createFile(path) {
     path = path.replace(/\\/g, "/");
     if (!path.trim()) return;
-    const defaultContent = path.endsWith(".py")
+    const defaultContent = isPythonModelPath(path)
+      ? pythonModelTemplate(path)
+      : path.endsWith(".py")
       ? '# A DuckDB connection is available as `db`\n\n'
       : path.endsWith(".sql")
       ? `-- config: materialized=table\n\nSELECT 1\n`
@@ -920,14 +923,14 @@ function AppContent() {
   async function deleteFile(path) {
     path = path.replace(/\\/g, "/");
 
-    const isTransform = path.endsWith(".sql") && path.startsWith("transform/");
+    const isTransform = path.startsWith("transform/") && (path.endsWith(".sql") || isPythonModelPath(path));
     const isSeed = path.endsWith(".csv") && path.startsWith("seeds/");
     let dropObject = false;
 
     if (isTransform || isSeed) {
       const parts = path.split("/");
       const fileName = parts[parts.length - 1];
-      const name = fileName.replace(/\.(sql|csv)$/, "");
+      const name = fileName.replace(/\.(sql|csv|py)$/, "");
       const schema = isSeed ? "seeds" : (parts.length >= 3 ? parts[1] : "bronze");
       const choice = await new Promise((resolve) => {
         deleteResolveRef.current = resolve;
@@ -986,6 +989,11 @@ function AppContent() {
     if (dirty && !(await saveFile({ runAfter: false }))) return;
     if (activeFile.endsWith(".sql")) {
       await runTransformAll(false);
+    } else if (isModelFile(activeFile, fileContent)) {
+      await runSingleModel(modelNameFromPath(activeFile));
+    } else if (activeFile.endsWith(".py") && activeFile.startsWith("transform/")) {
+      // A helper module: it only runs inside the models that import it.
+      addOutput("warn", `${activeFile} is a helper module, not a model; build the models that import it.`);
     } else if (activeFile.endsWith(".py")) {
       await runCurrentScript(activeFile);
     } else if (activeFile.endsWith(".yml") && activeFile.startsWith("contracts/")) {
@@ -994,9 +1002,9 @@ function AppContent() {
   }
 
   async function handleRunSingleModel() {
-    if (!activeFile || !activeFile.includes("transform/") || !activeFile.endsWith(".sql")) return;
+    if (!activeFile || !isModelFile(activeFile, fileContent)) return;
     if (dirty && !(await saveFile({ runAfter: false }))) return;
-    const modelName = activeFile.replace(/^transform\//, "").replace(/\.sql$/, "").replace(/\//g, ".");
+    const modelName = modelNameFromPath(activeFile);
     await runSingleModel(modelName);
   }
 
@@ -1041,8 +1049,27 @@ function AppContent() {
   }
 
   async function previewCurrentFile() {
-    if (!activeFile || !activeFile.endsWith(".sql")) return;
+    if (!activeFile) return;
+    if (isPythonModelPath(activeFile)) return previewPythonModel();
+    if (!activeFile.endsWith(".sql")) return;
     await previewSql(stripModelDirectives(fileContent));
+  }
+
+  /** Run the Python model's function on the editor buffer and show its rows. */
+  async function previewPythonModel() {
+    setPreviewRunning(true);
+    setPreviewError(null);
+    setPreviewLabel("Model function");
+    try {
+      const data = await api.previewPythonModel(activeFile, fileContent, PREVIEW_LIMIT);
+      setPreview(data);
+      if (data.output && data.output.trim()) addOutput("info", data.output.trimEnd());
+    } catch (e) {
+      setPreviewError(e.message);
+      setPreview(null);
+    } finally {
+      setPreviewRunning(false);
+    }
   }
 
   function handleSelectTable(schema, name) {
@@ -1063,7 +1090,10 @@ function AppContent() {
     }
   }
 
-  const isTransformFile = activeFile && activeFile.includes("transform/") && activeFile.endsWith(".sql");
+  // SQL files under transform/ and the .py files there that define a model
+  // function; a helper module opens in the plain editor.
+  const isTransformFile = !!activeFile && isModelFile(activeFile, fileContent);
+  const isPythonModel = isTransformFile && activeFile.endsWith(".py");
   // Ctrl/Cmd+S saves only while a dirty file is open in the editor (notebooks
   // have their own save).
   saveShortcutRef.current = activeTab === "Editor" && activeFile && dirty && !activeFile.endsWith(".dpnb")
@@ -1091,7 +1121,7 @@ function AppContent() {
       onMount={(editor) => { editorRef.current = editor; setEditorInstance(editor); }}
       goToLine={goToLine}
       onFormat={activeFile?.endsWith(".sql") ? formatCurrentFile : undefined}
-      onPreview={activeFile?.endsWith(".sql") ? previewCurrentFile : undefined}
+      onPreview={activeFile?.endsWith(".sql") || isPythonModel ? previewCurrentFile : undefined}
       onStatus={setBindStatus}
       onOpenModel={(path, line, col) => openFileAtLine(path, line || 1, col || 1)}
       onPreviewCte={(sql, name) => previewSql(sql, name ? `CTE ${name}` : "CTE")}
@@ -1386,6 +1416,7 @@ function AppContent() {
                 {isTransformFile ? (
                 <ModelWorkbench
                   activeFile={activeFile}
+                  language={isPythonModel ? "python" : "sql"}
                   content={fileContent}
                   dirty={dirty}
                   running={running}

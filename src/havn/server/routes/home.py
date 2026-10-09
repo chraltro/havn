@@ -415,6 +415,7 @@ def _layers(models, state, changed, failing, rel, landing: list[str] | None = No
             "path": rel(m),
             "status": status,
             "materialized": m.materialized,
+            "language": getattr(m, "language", "sql"),
             "last_run_at": st["last_run_at"] if st else None,
             "row_count": st["row_count"] if st else None,
         })

@@ -1551,8 +1551,12 @@ def execute_model(
     force: bool = False,
     run_id: str | None = None,
     query_rewriter: Callable[[str], str] | None = None,
+    python_output: list[str] | None = None,
 ) -> tuple[int, int]:
     """Execute a single model. Returns (duration_ms, row_count).
+
+    ``python_output`` collects what a Python model's function printed, for
+    the run log. SQL models print nothing and leave it alone.
 
     ``actions`` collects human-readable schema-evolution lines ("added column
     region VARCHAR") when the caller wants them for the run log. Passing None
@@ -1583,7 +1587,14 @@ def execute_model(
     with manager.acquire_sync("transform", f"model:{model.full_name}", conn=conn):
         manager_task_register_cancel(manager, conn)
 
-        if model.materialized == "incremental":
+        if model.is_python:
+            duration_ms, row_count = _execute_python(
+                conn, model, actions, model_map,
+                snapshot_settings=snapshot_settings,
+                query_rewriter=query_rewriter,
+                python_output=python_output,
+            )
+        elif model.materialized == "incremental":
             duration_ms, row_count = _execute_incremental(
                 conn, model, actions, model_map,
                 batch_range=batch_range, force=force, run_id=run_id,
@@ -1620,6 +1631,48 @@ def execute_model(
         )
         ROWS_PROCESSED.labels(category="transform").inc(row_count)
         return duration_ms, row_count
+
+
+def _execute_python(
+    conn: duckdb.DuckDBPyConnection,
+    model: SQLModel,
+    actions: list[str] | None,
+    model_map: dict[str, SQLModel] | None,
+    *,
+    snapshot_settings: SnapshotSettings | None,
+    query_rewriter: Callable[[str], str] | None,
+    python_output: list[str] | None,
+) -> tuple[int, int]:
+    """Build a Python model: run its function, then write the result as SQL.
+
+    The function's result is staged into a TEMP table, and a SQL stand-in
+    selecting from it goes through the very writers a SQL model uses, so a
+    Python incremental gets the same strategies and on_schema_change rules.
+    Ephemeral inlining and defer redirects apply inside ``ref()`` rather
+    than to the stand-in, whose only input is the staged table.
+    """
+    from .python_models import drop_staged, run_python_model, staged_model
+
+    start = time.perf_counter()
+    conn.execute(f"CREATE SCHEMA IF NOT EXISTS {model.schema}")
+    staged = run_python_model(
+        conn, model, model_map=model_map, query_rewriter=query_rewriter,
+        output=python_output,
+    )
+    try:
+        stand_in = staged_model(model, staged)
+        if model.materialized == "incremental":
+            _execute_incremental(conn, stand_in, actions)
+        elif model.materialized == "snapshot":
+            _execute_snapshot(conn, stand_in, actions, None, snapshot_settings)
+        else:
+            _drop_conflicting(conn, model.schema, model.name, "table")
+            conn.execute(f"CREATE OR REPLACE TABLE {model.full_name} AS\n{stand_in.query}")
+    finally:
+        drop_staged(conn, staged)
+    duration_ms = int((time.perf_counter() - start) * 1000)
+    row = conn.execute(f"SELECT count(*) FROM {model.full_name}").fetchone()
+    return duration_ms, (row[0] if row else 0)
 
 
 def manager_task_register_cancel(manager, conn: duckdb.DuckDBPyConnection) -> None:
@@ -1668,8 +1721,12 @@ def _log_build(
     schema_changes: list[str],
     assertion_results: list[AssertionResult],
     pipeline_run_id: str | None = None,
+    output: str | None = None,
 ) -> None:
     """Record a finished build in the run log, after its assertions ran.
+
+    ``output`` is what a Python model printed while it ran; it follows the
+    schema-change lines in the run log's output column.
 
     A failed severity=error assertion logs the build as "error" (the model's
     descendants are blocked, so calling it a success would contradict the rest
@@ -1690,9 +1747,17 @@ def _log_build(
         conn, "transform", model.full_name, "error" if failed else "success",
         duration_ms, row_count,
         error=error,
-        log_output="; ".join(schema_changes) or None,
+        log_output=_join_output(schema_changes, output),
         pipeline_run_id=pipeline_run_id,
     )
+
+
+def _join_output(schema_changes: list[str], output: str | None) -> str | None:
+    """The run log's output text: schema changes, then printed output."""
+    parts = ["; ".join(schema_changes)] if schema_changes else []
+    if output and output.strip():
+        parts.append(output.rstrip())
+    return "\n".join(parts) or None
 
 
 def _execute_single_model(
@@ -1744,6 +1809,7 @@ def _execute_single_model(
             return model.full_name, ModelResult(status="skipped")
 
         schema_changes: list[str] = []
+        py_output: list[str] = []
         duration_ms, row_count = execute_model(
             conn, model, schema_changes, model_map,
             snapshot_settings=(
@@ -1755,6 +1821,7 @@ def _execute_single_model(
             force=force,
             run_id=pipeline_run_id,
             query_rewriter=query_rewriter,
+            python_output=py_output,
         )
         _update_state(conn, model, duration_ms, row_count)
 
@@ -1767,7 +1834,7 @@ def _execute_single_model(
             _save_assertions(conn, model, assertion_results)
         _log_build(
             conn, model, duration_ms, row_count, schema_changes,
-            assertion_results, pipeline_run_id,
+            assertion_results, pipeline_run_id, output="".join(py_output),
         )
         if assertion_results:
             failed_error = [
@@ -1803,7 +1870,11 @@ def _execute_single_model(
 
     except Exception as e:
         try:
-            log_run(conn, "transform", model.full_name, "error", error=str(e), pipeline_run_id=pipeline_run_id)
+            log_run(
+                conn, "transform", model.full_name, "error", error=str(e),
+                log_output=getattr(e, "output", None) or None,
+                pipeline_run_id=pipeline_run_id,
+            )
         except Exception as e2:
             logger.debug("Failed to log run error: %s", e2)
         return model.full_name, ModelResult(status="error", error=str(e))
