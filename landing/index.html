@@ -84,10 +84,10 @@ code { font-family: var(--mono); font-size: 0.9em; }
 
 /* Opening */
 .opening {
-  display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 3.5rem; align-items: end;
-  padding-top: 4.5rem; padding-bottom: 3rem;
+  display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 1.75rem 3.5rem; align-items: end;
+  padding-top: 3.5rem; padding-bottom: 2.5rem;
 }
-.opening h1 { font-size: clamp(2.3rem, 5vw, 3.6rem); line-height: 1.08; letter-spacing: -0.02em; margin-bottom: 1.25rem; }
+.opening h1 { grid-column: 1 / -1; font-size: clamp(2.6rem, 6.4vw, 5rem); line-height: 1.02; letter-spacing: -0.02em; max-width: 21ch; }
 .opening .lede { font-size: 1.2rem; max-width: 34em; }
 .opening .aside { font-size: 0.95rem; color: var(--muted); border-left: 2px solid var(--rule); padding-left: 1.25rem; }
 .opening .aside strong { color: var(--ink); font-weight: 600; }
@@ -109,6 +109,14 @@ code { font-family: var(--mono); font-size: 0.9em; }
 /* Screenshot */
 figure.shot { margin: 1rem 0 0; }
 .shot img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--term-bg); }
+.shot video { display: block; width: 100%; height: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--term-bg); }
+
+.facts { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 2.5rem; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.facts div { padding: 1.1rem 1.25rem 1.1rem 0; }
+.facts div + div { padding-left: 1.25rem; border-left: 1px solid var(--rule); }
+.facts dt { font-family: var(--serif); font-size: 1.6rem; font-weight: 600; color: var(--ink); line-height: 1.2; }
+.facts dd { font-size: 0.925rem; color: var(--muted); }
+
 .shot figcaption { font-size: 0.875rem; color: var(--muted); margin-top: 0.7rem; }
 
 section { padding: 5rem 0 0; }
@@ -173,6 +181,9 @@ footer a { color: var(--muted); }
   .contents td { display: block; border-top: none; padding-top: 0; }
   .contents td:last-child { width: auto; padding-bottom: 0.9rem; }
   section { padding-top: 3.5rem; }
+  .facts { grid-template-columns: 1fr 1fr; }
+  .facts div:nth-child(3) { padding-left: 0; border-left: none; }
+  .facts div:nth-child(n+3) { border-top: 1px solid var(--rule); }
 }
 @media (max-width: 600px) {
   .wrap { padding: 0 1rem; }
@@ -209,8 +220,8 @@ footer a { color: var(--muted); }
 <main>
 
 <div class="wrap opening">
+  <h1>A data platform that fits in one file.</h1>
   <div>
-    <h1>A data platform that fits in one file.</h1>
     <p class="lede">
       havn loads your data with Python, models it with plain SQL and serves it
       through a web UI. Everything runs on DuckDB, and the whole warehouse is a
@@ -230,13 +241,18 @@ footer a { color: var(--muted); }
 
 <div class="wrap">
   <figure class="shot">
-    <img src="./screenshots/home.webp"
-         srcset="./screenshots/home-1x.webp 1440w, ./screenshots/home.webp 2880w"
-         sizes="(max-width: 1080px) 100vw, 1080px"
-         width="2880" height="1800"
-         alt="havn Home page: pipeline health with nine models up to date, fifteen checks passing, recent runs, and the landing, bronze, silver and gold layers">
-    <figcaption>Home, after a run of the sample project: what was built, what passed, and anything that needs a look.</figcaption>
+    <video id="run-clip" src="./screenshots/run.mp4" poster="./screenshots/run-poster.webp"
+           width="1920" height="1200" muted loop playsinline preload="auto"
+           aria-label="Screen recording: the sample pipeline runs from the Home page in about three seconds, then a query on the Query page returns tonnage per port for Bergen, Stavanger, Ålesund and Tromsø"></video>
+    <figcaption>Recorded at real speed (typing sped up): the sample project runs from Home, then a query reads the gold table it just built.</figcaption>
   </figure>
+
+  <dl class="facts">
+    <div><dt>1 file</dt><dd>holds the whole warehouse</dd></div>
+    <div><dt>1 package</dt><dd>no services to run beside it</dd></div>
+    <div><dt>14 connectors</dt><dd>databases, SaaS APIs, files</dd></div>
+    <div><dt>~3 seconds</dt><dd>to load and build the sample project</dd></div>
+  </dl>
 </div>
 
 <section id="how">
@@ -409,6 +425,18 @@ document.querySelectorAll('[data-copy]').forEach(btn => {
     }).catch(() => {});
   });
 });
+// Play the clip only for people who have not asked for reduced motion;
+// they get the poster and the controls instead.
+(() => {
+  const clip = document.getElementById('run-clip');
+  if (!clip) return;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    clip.controls = true;
+  } else {
+    clip.autoplay = true;
+    clip.play().catch(() => { clip.controls = true; });
+  }
+})();
 fetch('https://pypi.org/pypi/havn/json')
   .then(r => r.ok ? r.json() : null)
   .then(d => { if (d && d.info && d.info.version) document.getElementById('version').textContent = d.info.version; })
