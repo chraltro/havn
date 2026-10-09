@@ -24,6 +24,7 @@ nav:
   - Getting Started: getting-started.md
   - Configuration: configuration.md
   - Transforms: transforms.md
+  - Python Models: python-models.md
   - Seeds: seeds.md
   - Sources: sources.md
   - Data Quality: quality.md
@@ -32,15 +33,23 @@ nav:
   - Macros: macros.md
   - Packages: packages.md
   - Semantic Layer: semantic-layer.md
+  - Ask: ask.md
   - Lineage: lineage.md
   - Masking: masking.md
+  - Governance: governance.md
+  - Dashboards and Sharing: dashboards-sharing.md
   - Notebooks: notebooks.md
   - Pipelines: pipelines.md
   - Scheduler: scheduler.md
   - Connectors: connectors.md
   - CDC: cdc.md
+  - Live Models: live-models.md
   - Versioning: versioning.md
   - Environments: environments.md
+  - Branches: branches.md
+  - Refactoring: refactoring.md
+  - Performance: performance.md
+  - Telemetry: telemetry.md
   - Auth: auth.md
   - MCP Server: mcp.md
   - What havn Supports: limitations.md

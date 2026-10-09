@@ -63,6 +63,61 @@ GROUP BY 1, 2
 
 havn picks up `silver.customers` and `silver.orders` as upstream models from the SQL itself. Add `@depends_on` only when you reference a dependency through a function or string that the parser can't see. Other directives: `@description`, `@assert <expr>` for data-quality assertions, `@col <name>: <doc>` for column-level docs.
 
+### Python Models
+A `.py` file in `transform/` with an `@model` function is a DAG node like a `.sql` file. It builds as a table, incremental or snapshot, with the same assertions, selectors, change detection and run log. `ref("schema.name")` declares dependencies, and `havn validate` checks the file without running it. See [Python models](docs/python-models.md).
+
+```python
+# transform/silver/customer_scores.py
+from havn import model
+
+@model(materialized="table", assertions=["unique(customer_id)"])
+def customer_scores(db, ref):
+    return ref("bronze.orders").aggregate("customer_id, sum(amount) AS score")
+```
+
+### Governance
+Row policies filter rows per role or user, using `havn_user()`, `havn_role()` and `havn_attr('key')`. Masking follows lineage: a column derived from a masked column is masked the same way, and `@pii` tags propagate downstream until `@declassify`. Python scripts started by a governed user run in a separate process whose `db` sends SQL to the server. Queries, dashboards, published links, reports and `havn ask` all go through the same governed read path. See [Governance](docs/governance.md).
+
+```bash
+havn rls add -t silver.customers -f "region = havn_attr('region')" --roles viewer
+havn pii                           # classifications, including inherited ones
+```
+
+### Branch Warehouses
+With `branches.enabled`, every git branch other than main gets its own warehouse that starts empty and reads any model it has not built from the base, read-only. `havn ci generate` writes workflows that post the data diff on each pull request. See [Branches](docs/branches.md).
+
+```bash
+havn branch build                  # build only what this branch changed
+havn branch diff                   # schema and row diff against the base
+```
+
+### Dashboards, Sharing and Reports
+Publish a dashboard as a read-only page at `/p/<key>` that works on a phone. Signed-in links run as the viewer; public links (admins only) run as a chosen user or role, can expire and be revoked. Scheduled reports send a dashboard or one widget by email and Slack on a cron schedule, with PDF, PNG and CSV attachments. See [Dashboards and sharing](docs/dashboards-sharing.md).
+
+```bash
+havn reports list
+havn reports send "Low stock" --force
+```
+
+### Ask and Verified Agent Changes
+`havn ask "revenue by region last quarter"` picks metrics, dimensions, grain and filters from `metrics/*.yml`; havn validates the choice, compiles it and runs it read-only, and shows the spec, SQL, lineage and freshness. It uses the Anthropic API or any OpenAI-compatible endpoint (Ollama, LM Studio), and sends only catalog metadata unless you opt in. Edits proposed by agents become change sets that are checked (validate, bind, unit tests, scratch build, data diff) before you apply them. See [Ask](docs/ask.md).
+
+```bash
+havn ask --eval                    # measure accuracy on your own catalog
+havn changes list
+```
+
+### Performance and Telemetry
+Every model build records its duration, rows, memory, spill and the plan DuckDB ran. `havn perf` lists slow models, regressions against a model's own history, advice with evidence, and the critical path of a run. Prometheus `/metrics`, OpenTelemetry traces (`havn[otel]`) and OpenLineage events are available and off by default. See [Performance](docs/performance.md) and [Telemetry](docs/telemetry.md).
+
+### Live Models
+`@config live=true` on an incremental model or view refreshes it within seconds of new data landing from a webhook, CDC or API-poll source, and the refresh follows downstream through live models. See [Live models](docs/live-models.md).
+
+```bash
+havn live status
+havn live pause silver.orders
+```
+
 ### Web UI
 Full-featured browser interface with Monaco code editor, interactive SQL runner, DAG visualization, data table browser, chart builder, and pipeline monitoring. Dark and light themes included.
 
@@ -249,7 +304,16 @@ The warehouse is a single DuckDB file. Copy it, back it up, version it - it's ju
 | `havn metrics` | List and query semantic-layer metrics (`metrics/*.yml`) |
 | `havn mcp` | Start the MCP stdio server for AI agents |
 | `havn context` | Generate project summary for AI assistants |
-| `havn ci generate` | Generate GitHub Actions workflow |
+| `havn ci generate` | Generate GitHub Actions workflows |
+| `havn branch build/diff/status` | Warehouse per git branch: build what the branch changed, diff against the base |
+| `havn rls list/add/remove` | Manage row-level security policies |
+| `havn pii` | Show PII classifications, including inherited ones |
+| `havn reports list/send/preview` | Scheduled dashboard reports |
+| `havn ask "<question>"` | Answer a question from `metrics/*.yml` |
+| `havn changes list/show/apply` | Verify and apply agent-proposed change sets |
+| `havn perf` | Slow models, regressions, advice, critical path |
+| `havn live status/pause/resume` | Live models: continuous refresh |
+| `havn ci comment` | Post the data diff to a pull request |
 | `havn secrets list/set/delete` | Manage .env secrets |
 | `havn users create/list/delete` | Manage platform users and roles |
 
@@ -278,6 +342,7 @@ For the feature-by-feature version of that answer - what works today, what works
 ## Documentation
 
 - **[CLAUDE.md](CLAUDE.md)** - Full technical reference (architecture, conventions, development workflow)
+- **[docs/](docs/index.md)** - User guides and the CLI and API references
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - How to contribute
 - Model docs are auto-generated from your warehouse schema and `@description` / `@col` directives, and are browsable in the web UI (`havn serve`)
 - `havn context` - Generate a project summary to paste into any AI assistant
