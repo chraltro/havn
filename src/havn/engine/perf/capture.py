@@ -56,19 +56,30 @@ class BuildCapture:
     full_refresh: bool | None = None
     extra: dict = field(default_factory=dict)
 
-    def absorb(self, profile: dict) -> None:
-        """Fold one statement's profile into the build's totals."""
+    def absorb(self, profile: dict, previous_marks: tuple[int, int] | None = None) -> None:
+        """Fold one statement's profile into the build's totals.
+
+        DuckDB's ``system_peak_buffer_memory`` and ``system_peak_temp_dir_size``
+        are high-water marks for the connection that never go down, not
+        per-query figures. They only describe this statement when it raised
+        them (``previous_marks`` are the marks seen before it; None when this
+        connection has not been profiled yet). Otherwise memory falls back to
+        the statement's own ``total_memory_allocated`` and spill to zero.
+        """
         self.statements += 1
         latency = _num(profile.get("latency"))
         self.latency_s += latency
         self.cpu_time_s += _num(profile.get("cpu_time"))
         self.rows_scanned += int(_num(profile.get("cumulative_rows_scanned")))
-        self.peak_memory_bytes = max(
-            self.peak_memory_bytes, int(_num(profile.get("system_peak_buffer_memory")))
-        )
-        self.spill_bytes = max(
-            self.spill_bytes, int(_num(profile.get("system_peak_temp_dir_size")))
-        )
+        prev_mem, prev_spill = previous_marks or (-1, -1)
+        peak = int(_num(profile.get("total_memory_allocated")))
+        system_peak = int(_num(profile.get("system_peak_buffer_memory")))
+        if system_peak > prev_mem:
+            peak = max(peak, system_peak)
+        self.peak_memory_bytes = max(self.peak_memory_bytes, peak)
+        spill = int(_num(profile.get("system_peak_temp_dir_size")))
+        if spill > prev_spill:
+            self.spill_bytes = max(self.spill_bytes, spill)
         self.bytes_read += int(_num(profile.get("total_bytes_read")))
         self.bytes_written += int(_num(profile.get("total_bytes_written")))
         plan = compact_plan(profile)
@@ -138,12 +149,29 @@ def run_build_statement(
             # The shared server connection is used from several threads; a
             # profile whose query is not ours belongs to someone else.
             if profile and _same_query(profile.get("query_name"), sql):
-                capture.absorb(profile)
+                key = id(conn)
+                capture.absorb(profile, _marks.get(key))
+                _remember_marks(key, profile)
         except Exception as e:  # a profile is a bonus, never a build failure
             logger.debug("Could not read the profile for %s: %s", capture.model, e)
         return result
     finally:
         _restore_profiling(conn, previous)
+
+
+# High-water marks last seen per connection, keyed by id(). A recycled id
+# carries over a higher mark, which only makes the next reading conservative
+# (it falls back to the statement's own allocation).
+_marks: dict[int, tuple[int, int]] = {}
+
+
+def _remember_marks(key: int, profile: dict) -> None:
+    if len(_marks) > 256:
+        _marks.clear()
+    _marks[key] = (
+        int(_num(profile.get("system_peak_buffer_memory"))),
+        int(_num(profile.get("system_peak_temp_dir_size"))),
+    )
 
 
 def _profiling_setting(conn: duckdb.DuckDBPyConnection) -> str | None:

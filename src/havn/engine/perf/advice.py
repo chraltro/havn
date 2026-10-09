@@ -173,6 +173,10 @@ def _ms(ms: Any) -> str:
     return f"{ms:.0f} ms"
 
 
+def _days(n: int) -> str:
+    return "a day" if n == 1 else f"{n} days"
+
+
 def _median(values: list[float]) -> float:
     from .regression import median
 
@@ -250,7 +254,9 @@ def rule_incremental_candidate(ctx: AdviceContext, model: Any) -> AdviceItem | N
     if not growth:
         return None
     mean_growth = sum(growth) / len(growth)
-    if mean_growth > cfg.append_growth:
+    # No growth at all means the input did not change between rebuilds, or
+    # changed in place: nothing an append-style incremental would pick up.
+    if mean_growth <= 0 or mean_growth > cfg.append_growth:
         return None
     keys = _key_candidates(ctx, model.full_name, latest)
     times = _time_candidates(ctx, model.full_name)
@@ -469,11 +475,11 @@ def rule_unused_table(ctx: AdviceContext, model: Any) -> AdviceItem | None:
         rule="unused_table",
         model=name,
         severity="low" if ms < ctx.cfg.min_duration_ms else "medium",
-        title=f"Nothing has read this {model.materialized} in {days} days",
+        title=f"Nothing has read this {model.materialized} in {_days(days)}",
         explanation=(
             f"{name} is rebuilt ({_ms(ms)} median, {_rows(rows)} rows) but no model reads it, no "
             f"exposure declares it, no dashboard or metric uses it, and no query in the audit or "
-            f"slow-query log has mentioned it in {days} days. Queries run from the CLI are not "
+            f"slow-query log has mentioned it in {_days(days)}. Queries run from the CLI are not "
             "audited, so check before deleting."
         ),
         suggestion=suggestion,
