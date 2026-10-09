@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import urllib.error
 import urllib.request
@@ -247,4 +248,92 @@ def provider_from_config(config: AIConfig) -> LLMProvider:
         return AnthropicProvider(config)
     if config.provider == "openai":
         return OpenAICompatibleProvider(config)
+    if config.provider == "agent":
+        return AgentCLIProvider(config)
     raise AIConfigError(f"unknown ai.provider {config.provider!r}")
+
+
+class AgentCLIProvider(LLMProvider):
+    """Ask through the agent CLI the sidebar uses (Claude Code, Codex, Gemini CLI).
+
+    The CLI is already signed in, so no API key is needed. It runs headless,
+    with no tools, in an empty temporary directory: it sees only the prompt
+    (catalog metadata, as with the API providers), not the project. The prompt
+    goes in on stdin, never through a shell.
+    """
+
+    name = "agent"
+
+    def __init__(self, config: AIConfig) -> None:
+        import shutil
+
+        from havn.engine.ai.config import AIConfigError
+
+        self.agent = config.agent or "claude"
+        self.model = config.model or self.agent
+        self._model_flag = config.model
+        self.timeout = config.timeout
+        if not shutil.which(self.agent):
+            raise AIConfigError(
+                f"ai.agent: the {self.agent} CLI is not on PATH (it is the same CLI the agent sidebar uses)"
+            )
+
+    def describe(self) -> str:
+        return f"agent:{self.agent}" + (f":{self._model_flag}" if self._model_flag else "")
+
+    def _command(self, workdir: str) -> tuple[list[str], str | None]:
+        """(argv, file the answer is written to, if not stdout)."""
+        if self.agent == "claude":
+            cmd = [
+                "claude", "-p", "--output-format", "text",
+                "--system-prompt", "You answer with exactly one JSON object and nothing else.",
+                "--tools", "", "--no-session-persistence", "--strict-mcp-config",
+            ]
+            if self._model_flag:
+                cmd += ["--model", self._model_flag]
+            return cmd, None
+        if self.agent == "codex":
+            out = os.path.join(workdir, "answer.txt")
+            cmd = ["codex", "exec", "--sandbox", "read-only", "--skip-git-repo-check",
+                   "--output-last-message", out]
+            if self._model_flag:
+                cmd += ["-m", self._model_flag]
+            return cmd + ["-"], out
+        cmd = ["gemini", "--approval-mode", "plan", "-p", "Answer the request given on stdin."]
+        if self._model_flag:
+            cmd += ["-m", self._model_flag]
+        return cmd, None
+
+    def complete_json(self, *, system, messages, schema=None) -> dict:
+        import subprocess
+        import tempfile
+
+        from havn.engine.agents.base import resolve_cli_command
+
+        parts = [system.strip(), ""]
+        if schema:
+            parts += ["Reply with one JSON object matching this JSON schema:", json.dumps(schema), ""]
+        for m in messages:
+            parts += [f"[{m['role']}]", m["content"], ""]
+        parts.append("Reply with the JSON object only: no prose, no code fences.")
+        prompt = "\n".join(parts)
+
+        with tempfile.TemporaryDirectory(prefix="havn-ask-") as workdir:
+            cmd, out_file = self._command(workdir)
+            try:
+                proc = subprocess.run(
+                    resolve_cli_command(cmd), input=prompt, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", cwd=workdir, timeout=self.timeout,
+                )
+            except subprocess.TimeoutExpired:
+                raise ProviderError(f"the {self.agent} CLI did not answer within {self.timeout:.0f}s") from None
+            except OSError as e:
+                raise ProviderError(f"could not start the {self.agent} CLI: {e}") from None
+            text = proc.stdout
+            if out_file and os.path.exists(out_file):
+                with open(out_file, encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+        if proc.returncode != 0 and not text.strip():
+            detail = (proc.stderr or "").strip().splitlines()[-1:] or ["no output"]
+            raise ProviderError(f"the {self.agent} CLI failed: {detail[0][:300]}")
+        return extract_json_object(text)

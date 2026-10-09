@@ -64,6 +64,10 @@ All notable changes to havn are documented in this file.
   (Ollama, LM Studio), configured under `ai:`. Only catalog metadata is sent
   to the model unless you opt in. `havn ask --eval` measures accuracy on your
   own catalog.
+- **Ask without an API key.** `ai: {provider: agent}` asks through the agent
+  sidebar's CLI (Claude Code, Codex or Gemini CLI), already signed in, run
+  headless with no tools. It is the default when no `ANTHROPIC_API_KEY` is set
+  and one of those CLIs is installed.
 - **Verified agent changes.** The agent sidebar's Review mode (now the
   default) and the `submit_change_set` MCP tool turn proposed edits into
   change sets that are checked before you apply them: read-only SQL check,

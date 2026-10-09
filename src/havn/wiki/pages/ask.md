@@ -82,6 +82,24 @@ ai:
 The key itself never goes in project.yml: put `ANTHROPIC_API_KEY=...` in
 `.env`.
 
+### The sidebar's agent: no API key
+
+With `provider: agent`, Ask sends its prompt through the same agent CLI the
+agent sidebar uses (Claude Code, Codex or Gemini CLI), which is already signed
+in, so no key is needed:
+
+```yaml
+ai:
+  provider: agent
+  agent: claude        # claude | codex | gemini; defaults to the first one installed
+  # model: sonnet      # passed to the CLI; its own default otherwise
+```
+
+The CLI runs headless, with no tools, in an empty temporary directory, so it
+sees only the prompt: the same catalog metadata the API providers get. Its
+vendor still receives that prompt. Without any `ai:` section, Ask uses the
+Anthropic API when `ANTHROPIC_API_KEY` is set and this provider otherwise.
+
 ### A local model: nothing leaves the machine
 
 Any server speaking the OpenAI `/chat/completions` API works: Ollama, LM

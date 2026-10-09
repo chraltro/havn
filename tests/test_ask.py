@@ -603,7 +603,8 @@ class TestProviders:
 
 
 class TestConfig:
-    def test_defaults(self):
+    def test_defaults(self, monkeypatch):
+        monkeypatch.setattr("havn.engine.ai.config.available_agent_cli", lambda: None)
         cfg = parse_ai_config(None)
         assert cfg.provider == "anthropic" and cfg.model == "claude-sonnet-5-5"
         assert cfg.api_key_env == "ANTHROPIC_API_KEY"
@@ -616,6 +617,38 @@ class TestConfig:
             parse_ai_config({"provider": "skynet"})
         with pytest.raises(AIConfigError):
             parse_ai_config({"base_url": "ftp://x"})
+
+    def test_default_uses_the_sidebar_agent_without_a_key(self, monkeypatch):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setattr("havn.engine.ai.config.available_agent_cli", lambda: "codex")
+        cfg = parse_ai_config(None)
+        assert cfg.provider == "agent" and cfg.agent == "codex" and not cfg.is_local
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
+        assert parse_ai_config(None).provider == "anthropic"
+        assert parse_ai_config({"provider": "claude"}).agent == "claude"
+        with pytest.raises(AIConfigError):
+            parse_ai_config({"provider": "agent", "agent": "skynet"})
+
+    def test_agent_provider_runs_the_cli_without_a_shell(self, monkeypatch, tmp_path):
+        import sys
+
+        from havn.engine.ai import providers
+
+        fake = tmp_path / "fake_cli.py"
+        fake.write_text(
+            "import sys, json\n"
+            "prompt = sys.stdin.read()\n"
+            "assert 'tonnes' in prompt\n"
+            "print('Sure: ' + json.dumps({'metric': 'tonnes_landed', 'argv': sys.argv[1:3]}))\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("shutil.which", lambda name: str(fake))
+        monkeypatch.setattr(
+            "havn.engine.agents.base.resolve_cli_command", lambda cmd: [sys.executable, str(fake), *cmd[1:]]
+        )
+        provider = providers.provider_from_config(parse_ai_config({"provider": "agent", "agent": "claude"}))
+        out = provider.complete_json(system="Pick a metric.", messages=[{"role": "user", "content": "total tonnes?"}])
+        assert out["metric"] == "tonnes_landed" and out["argv"] == ["-p", "--output-format"]
 
     def test_public_dict_hides_key(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-very-secret")

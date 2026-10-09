@@ -3,13 +3,18 @@
 .. code-block:: yaml
 
     ai:
-      provider: anthropic            # anthropic | openai (any OpenAI-compatible endpoint)
+      provider: anthropic            # anthropic | openai (any OpenAI-compatible endpoint) | agent
+      # agent: claude                # with provider: agent -- claude | codex | gemini (the sidebar's CLIs)
       model: claude-sonnet-5-5
       # base_url: http://localhost:11434/v1   # Ollama, LM Studio, vLLM, ...
       # api_key_env: ANTHROPIC_API_KEY        # name of the variable in .env
       exploratory_sql: false         # allow an unverified SQL fallback
       share_dimension_values: false  # send distinct dimension values to the model
       summarize_results: false       # send result rows to the model for a summary
+
+Without ``provider:``, Ask uses the Anthropic API when ``ANTHROPIC_API_KEY``
+is set, and otherwise the first agent CLI the sidebar can use (Claude Code,
+Codex, Gemini CLI), which is already signed in and needs no key.
 
 The API key is never written in project.yml: ``api_key_env`` names the
 variable (loaded from ``.env``) that holds it. Parsed here rather than in
@@ -23,22 +28,34 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-PROVIDERS = ("anthropic", "openai")
+PROVIDERS = ("anthropic", "openai", "agent")
+# Agent CLIs Ask can use, in the order the automatic default tries them.
+AGENT_CLIS = ("claude", "codex", "gemini")
 
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-5-5",
     "openai": "",  # no sensible default across OpenAI-compatible servers
+    "agent": "",  # the CLI's own default model
 }
 
 DEFAULT_BASE_URLS = {
     "anthropic": "https://api.anthropic.com",
     "openai": "https://api.openai.com/v1",
+    "agent": "",
 }
 
 DEFAULT_KEY_ENV = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
+    "agent": "",
 }
+
+
+def available_agent_cli() -> str | None:
+    """The first agent CLI on PATH, or None."""
+    import shutil
+
+    return next((name for name in AGENT_CLIS if shutil.which(name)), None)
 
 _LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0")
 
@@ -51,6 +68,8 @@ class AIConfigError(ValueError):
 class AIConfig:
     provider: str = "anthropic"
     model: str = DEFAULT_MODELS["anthropic"]
+    # provider: agent -- which CLI (claude | codex | gemini).
+    agent: str = ""
     base_url: str = DEFAULT_BASE_URLS["anthropic"]
     api_key_env: str = DEFAULT_KEY_ENV["anthropic"]
     timeout: float = 60.0
@@ -71,6 +90,8 @@ class AIConfig:
         """True when requests go to this machine (a local model server)."""
         from urllib.parse import urlparse
 
+        if self.provider == "agent":
+            return False  # the CLI sends the prompt to its own vendor
         host = (urlparse(self.base_url).hostname or "").lower()
         return host in _LOCAL_HOSTS or host.endswith(".local")
 
@@ -95,9 +116,18 @@ def parse_ai_config(raw: dict | None) -> AIConfig:
     raw = raw or {}
     if not isinstance(raw, dict):
         raise AIConfigError("ai: must be a mapping")
-    provider = str(raw.get("provider") or "anthropic").strip().lower()
+    provider = str(raw.get("provider") or "").strip().lower()
+    if not provider:
+        key_env = str(raw.get("api_key_env") or DEFAULT_KEY_ENV["anthropic"])
+        if os.environ.get(key_env) or raw.get("base_url") or not available_agent_cli():
+            provider = "anthropic"
+        else:
+            provider = "agent"
     if provider in ("openai-compatible", "openai_compatible", "ollama", "local"):
         provider = "openai"
+    if provider in AGENT_CLIS:  # provider: claude is shorthand for agent + claude
+        raw = {**raw, "agent": raw.get("agent") or provider}
+        provider = "agent"
     if provider not in PROVIDERS:
         raise AIConfigError(
             f"ai.provider: unknown provider {provider!r} (use one of: {', '.join(PROVIDERS)})"
@@ -110,11 +140,21 @@ def parse_ai_config(raw: dict | None) -> AIConfig:
         raise AIConfigError(f"ai: {e}")
     if timeout <= 0 or max_tokens <= 0 or max_rows <= 0:
         raise AIConfigError("ai: timeout, max_tokens and max_rows must be positive")
-    base_url = str(raw.get("base_url") or DEFAULT_BASE_URLS[provider]).rstrip("/")
-    if not base_url.startswith(("http://", "https://")):
-        raise AIConfigError(f"ai.base_url must be an http(s) URL, got {base_url!r}")
+    agent = ""
+    if provider == "agent":
+        agent = str(raw.get("agent") or available_agent_cli() or "claude").strip().lower()
+        if agent not in AGENT_CLIS:
+            raise AIConfigError(f"ai.agent: unknown agent {agent!r} (use one of: {', '.join(AGENT_CLIS)})")
+        if "timeout" not in raw:
+            timeout = 180.0  # a CLI starts up and may think for a while
+        base_url = ""
+    else:
+        base_url = str(raw.get("base_url") or DEFAULT_BASE_URLS[provider]).rstrip("/")
+        if not base_url.startswith(("http://", "https://")):
+            raise AIConfigError(f"ai.base_url must be an http(s) URL, got {base_url!r}")
     return AIConfig(
         provider=provider,
+        agent=agent,
         model=str(raw.get("model") or DEFAULT_MODELS[provider]),
         base_url=base_url,
         api_key_env=str(raw.get("api_key_env") or DEFAULT_KEY_ENV[provider]),

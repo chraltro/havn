@@ -289,7 +289,7 @@ export default function AskPanel() {
       </div>
       {status?.configured && (
         <div style={st.privacy}>
-          {status.provider}:{status.model} {local ? "(on this machine)" : `at ${status.base_url}`} receives catalog metadata only
+          {status.provider === "agent" ? `The ${status.agent} CLI (the same agent as the sidebar)` : `${status.provider}:${status.model} ${local ? "(on this machine)" : `at ${status.base_url}`}`} receives catalog metadata only
           {status.share_dimension_values ? " plus distinct dimension values" : ""}
           {status.summarize_results ? "; result rows only when you ask for a summary" : ", never row data"}.
         </div>
