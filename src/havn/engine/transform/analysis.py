@@ -640,6 +640,9 @@ def validate_models(
     errors.extend(_validate_tags(models))
     errors.extend(_validate_snapshot_config(models))
     errors.extend(_validate_microbatch_config(sql_models))
+    from havn.engine.live.graph import validate_live
+
+    errors.extend(validate_live(sql_models, {m.full_name: parse_config(m.sql) for m in sql_models}))
 
     # Default landing schemas if not provided
     _landing = {s.lower() for s in landing_schemas} if landing_schemas else {"landing"}
@@ -1124,13 +1127,33 @@ def check_freshness(
 
     # Build a model_path -> source_specs lookup if sources are requested.
     source_specs_by_model: dict[str, list[dict]] = {}
-    if include_sources and transform_dir is not None:
+    # Live models are judged by lag, not by when they last ran: one that has
+    # applied everything its sources hold is fresh however long ago that was,
+    # and one sitting on data older than live.max_lag is stale however
+    # recently it refreshed.
+    live_lags: dict[str, float] = {}
+    max_lag = 300.0
+    if transform_dir is not None:
         try:
             from .discovery import discover_all_models
 
-            for m in discover_all_models(Path(transform_dir).parent):
-                if m.source_freshness:
-                    source_specs_by_model[m.full_name] = m.source_freshness
+            project_root = Path(transform_dir).parent
+            all_models = discover_all_models(project_root)
+            if include_sources:
+                for m in all_models:
+                    if m.source_freshness:
+                        source_specs_by_model[m.full_name] = m.source_freshness
+            if any(m.live for m in all_models):
+                from havn.engine.live.settings import LiveSettings
+                from havn.engine.live.status import live_freshness
+
+                live_lags = live_freshness(conn, all_models)
+                try:
+                    from havn.config import load_project
+
+                    max_lag = LiveSettings.from_raw(load_project(project_root).live).max_lag
+                except Exception:
+                    pass
         except Exception as e:
             logger.debug("Couldn't load model source specs: %s", e)
 
@@ -1143,6 +1166,11 @@ def check_freshness(
             "is_stale": hours_since is not None and hours_since > max_age_hours,
             "row_count": row_count,
         }
+        if model_path in live_lags:
+            lag = live_lags[model_path]
+            entry["live"] = True
+            entry["lag_seconds"] = round(lag, 3)
+            entry["is_stale"] = lag > max_lag
         if include_sources:
             specs = source_specs_by_model.get(model_path, [])
             sources_out: list[dict] = []

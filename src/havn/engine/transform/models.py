@@ -186,6 +186,24 @@ class SQLModel:
     begin: str | None = None  # the first window's date or timestamp, UTC
     # How many already-done windows to reprocess on each run, for late arrivals.
     lookback: int = 1
+    # --- Live models (see havn.engine.live) ---
+    # @config live=true: refreshed by the live runner whenever an input
+    # advances. Deliberately left out of content_hash, like tags: turning a
+    # model live changes who triggers its build, not what the build writes.
+    live: bool = False
+    # @config live_interval=10s: the least time between two live refreshes of
+    # this model, in seconds. 0 means "as often as the runner cycles".
+    live_interval: float = 0.0
+    # --- CDC apply, for incremental merge / delete+insert models ---
+    # Column in the query output holding the change operation (I/U/D, or
+    # insert/update/delete), and the column that orders changes to one key
+    # (an LSN or another monotonically increasing sequence).
+    cdc_op: str | None = None
+    cdc_seq: str | None = None
+    # "hard" removes a deleted key's row (and remembers the delete in a
+    # tombstone table so a replayed older event cannot resurrect it); "soft"
+    # keeps the row with _havn_deleted = true so downstream models see it.
+    cdc_deletes: str = "hard"
     grain: list[str] = field(default_factory=list)  # @grain columns; auto-asserts uniqueness post-build
     owner: str = ""  # @owner label for alert routing
     # @config tags=daily,finance -- labels for `tag:` selectors. Deliberately
@@ -270,6 +288,14 @@ class SQLModel:
             parts.append(f"begin={self.begin}")
         if self.lookback != 1:
             parts.append(f"lookback={self.lookback}")
+        # CDC apply settings decide which version of a key survives and
+        # whether a delete removes the row, so changing them is a rebuild.
+        if self.cdc_op:
+            parts.append(f"cdc_op={self.cdc_op}")
+        if self.cdc_seq:
+            parts.append(f"cdc_seq={self.cdc_seq}")
+        if self.cdc_deletes != "hard":
+            parts.append(f"cdc_deletes={self.cdc_deletes}")
         # Assertions and @grain are stripped out of `query` by
         # strip_config_comments, so without folding them in here, adding an
         # @assert to a model that is already built leaves content_hash

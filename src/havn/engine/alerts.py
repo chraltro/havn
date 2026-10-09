@@ -107,6 +107,8 @@ def _send_slack(alert: Alert, config: AlertConfig) -> None:
         "assertion_failed": ":warning:",
         "stale_model": ":hourglass:",
         "anomaly": ":mag:",
+        "live_model_failed": ":x:",
+        "live_model_recovered": ":white_check_mark:",
     }.get(alert.alert_type, ":bell:")
 
     blocks = [

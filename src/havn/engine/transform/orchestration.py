@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable
@@ -298,6 +298,10 @@ class ModelOutcome:
     duration_ms: int = 0
     row_count: int = 0
     error: str | None = None
+    # The assertions evaluated on this build, passed or not. The live runner
+    # rolls a refresh back when an error assertion fails, which also rolls
+    # back their stored results, and saves them again from here.
+    assertion_results: list = field(default_factory=list)
 
 
 def _source_freshness_gate(
@@ -306,6 +310,9 @@ def _source_freshness_gate(
     results: dict[str, str],
     blocked: set[str],
     pipeline_run_id: str | None,
+    *,
+    log_runs: bool = True,
+    echo: bool = True,
 ) -> ModelOutcome | None:
     """The @source_freshness pre-check, shared by both runners.
 
@@ -324,7 +331,7 @@ def _source_freshness_gate(
         if r["is_stale"] and r.get("severity", "error") == "error"
     ]
     for r in sf_results:
-        if r["is_stale"]:
+        if r["is_stale"] and echo:
             age = (
                 f"{r['age_seconds']:.0f}s" if r.get("age_seconds") is not None else "n/a"
             )
@@ -338,14 +345,19 @@ def _source_freshness_gate(
     error = f"source stale: {', '.join(b['table'] for b in blocking)}"
     results[model.full_name] = "source_stale"
     blocked.add(model.full_name)
-    try:
-        log_run(
-            conn, "transform", model.full_name, "skipped",
-            0, 0, error=error, pipeline_run_id=pipeline_run_id,
-        )
-    except Exception:
-        pass
+    if log_runs:
+        try:
+            log_run(
+                conn, "transform", model.full_name, "skipped",
+                0, 0, error=error, pipeline_run_id=pipeline_run_id,
+            )
+        except Exception:
+            pass
     return ModelOutcome("source_stale", error=error)
+
+
+def _silent(*_args, **_kwargs) -> None:
+    return None
 
 
 def build_one_model(
@@ -363,6 +375,10 @@ def build_one_model(
     batch_range: BatchRange | None = None,
     query_rewriter: Callable[[str], str] | None = None,
     run_profiles: dict[str, object] | None = None,
+    log_runs: bool = True,
+    assertions: bool = True,
+    profile: bool = True,
+    echo: bool = True,
 ) -> ModelOutcome:
     """Build one model the way ``havn transform`` does.
 
@@ -374,8 +390,15 @@ def build_one_model(
     (see ``_hash_full_dag``). Profiles go into ``run_profiles`` for
     :func:`detect_run_anomalies` at the end of the run.
 
-    Shared by the sequential runner and job runs, which build step by step.
+    Shared by the sequential runner, job runs and the live runner. The live
+    runner refreshes a model every few seconds, so it turns down what would
+    flood the warehouse: ``log_runs=False`` writes nothing to ``run_log``
+    (it aggregates refreshes itself), ``assertions`` / ``profile`` are only
+    on when its intervals say they are due, and ``echo=False`` keeps the
+    console quiet. Everything else -- change detection, blocking, state --
+    is the same code path.
     """
+    say = console.print if echo else _silent
     if model.full_name in results:
         # Already handled (e.g. policy-denied before the run).
         return ModelOutcome(results[model.full_name])
@@ -390,21 +413,22 @@ def build_one_model(
     # source), skip this model with a clear reason.
     upstream_blocked = [d for d in model.depends_on if d in blocked]
     if upstream_blocked:
-        console.print(
+        say(
             f"  [yellow]skip[/yellow]  {label}: upstream blocked "
             f"({', '.join(upstream_blocked)})"
         )
         results[model.full_name] = "skipped_upstream_blocked"
         blocked.add(model.full_name)
-        try:
-            log_run(
-                conn, "transform", model.full_name, "skipped",
-                0, 0,
-                error=f"upstream blocked: {', '.join(upstream_blocked)}",
-                pipeline_run_id=pipeline_run_id,
-            )
-        except Exception:
-            pass
+        if log_runs:
+            try:
+                log_run(
+                    conn, "transform", model.full_name, "skipped",
+                    0, 0,
+                    error=f"upstream blocked: {', '.join(upstream_blocked)}",
+                    pipeline_run_id=pipeline_run_id,
+                )
+            except Exception:
+                pass
         return ModelOutcome("skipped_upstream_blocked",
                             error=f"upstream blocked: {', '.join(upstream_blocked)}")
 
@@ -412,22 +436,25 @@ def build_one_model(
     # as a CTE instead. Reported as "inlined" rather than "skipped", which
     # would read as "unchanged, the table on disk is current".
     if model.materialized == "ephemeral":
-        console.print(f"  [dim]inline[/dim]  {label}")
+        say(f"  [dim]inline[/dim]  {label}")
         results[model.full_name] = _record_ephemeral(
             conn, model, pipeline_run_id
         ).status
         return ModelOutcome(results[model.full_name])
 
     if not changed:
-        console.print(f"  [dim]skip[/dim]  {label}")
+        say(f"  [dim]skip[/dim]  {label}")
         results[model.full_name] = "skipped"
-        try:
-            log_run(conn, "transform", model.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
-        except Exception:
-            pass
+        if log_runs:
+            try:
+                log_run(conn, "transform", model.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
+            except Exception:
+                pass
         return ModelOutcome("skipped")
 
-    stale = _source_freshness_gate(conn, model, results, blocked, pipeline_run_id)
+    stale = _source_freshness_gate(
+        conn, model, results, blocked, pipeline_run_id, log_runs=log_runs, echo=echo
+    )
     if stale is not None:
         return stale
 
@@ -458,10 +485,11 @@ def build_one_model(
         _update_state(conn, model, duration_ms, row_count)
 
         suffix = f" ({row_count:,} rows, {duration_ms}ms)" if row_count else f" ({duration_ms}ms)"
-        console.print(f"  [green]done[/green]  {label}{suffix}")
+        say(f"  [green]done[/green]  {label}{suffix}")
         for change in schema_changes:
-            console.print(f"         [cyan]schema[/cyan]  {change}")
-        _print_python_output(py_output)
+            say(f"         [cyan]schema[/cyan]  {change}")
+        if echo:
+            _print_python_output(py_output)
 
         # Capture snapshot for Pipeline Rewind
         if project_dir and run_id:
@@ -483,22 +511,23 @@ def build_one_model(
         # Run data quality assertions (and the synthesised @grain check
         # if model.grain is set — both are evaluated by run_assertions).
         assertion_results = []
-        if model.assertions or model.grain:
+        if assertions and (model.assertions or model.grain):
             assertion_results = run_assertions(conn, model)
             _save_assertions(conn, model, assertion_results)
-        _log_build(
-            conn, model, duration_ms, row_count, schema_changes,
-            assertion_results, pipeline_run_id, output="".join(py_output),
-        )
+        if log_runs:
+            _log_build(
+                conn, model, duration_ms, row_count, schema_changes,
+                assertion_results, pipeline_run_id, output="".join(py_output),
+            )
         if assertion_results:
             for ar in assertion_results:
                 if ar.passed:
-                    console.print(f"         [green]pass[/green]  assert: {ar.expression}")
+                    say(f"         [green]pass[/green]  assert: {ar.expression}")
                 else:
                     sev = ar.severity or "error"
                     sev_color = "red" if sev == "error" else "yellow"
                     sev_label = "FAIL" if sev == "error" else "WARN"
-                    console.print(
+                    say(
                         f"         [{sev_color}]{sev_label}[/{sev_color}]  "
                         f"assert: {ar.expression} ({ar.detail})"
                     )
@@ -513,36 +542,39 @@ def build_one_model(
                 return ModelOutcome(
                     "assertion_failed", duration_ms, row_count,
                     error="; ".join(f"assert {ar.expression}: {ar.detail}" for ar in failed_error),
+                    assertion_results=assertion_results,
                 )
         _clear_block(conn, model)
 
         # Auto-profile for tables
-        if model.materialized in ("table", "incremental", "snapshot"):
-            profile = profile_model(conn, model)
-            _save_profile(conn, model, profile)
+        if profile and model.materialized in ("table", "incremental", "snapshot"):
+            prof = profile_model(conn, model)
+            _save_profile(conn, model, prof)
             if run_profiles is not None:
-                run_profiles[model.full_name] = profile
+                run_profiles[model.full_name] = prof
             null_alerts = [
-                col for col, pct in profile.null_percentages.items()
+                col for col, pct in prof.null_percentages.items()
                 if pct > 50.0
             ]
             if null_alerts:
-                console.print(
+                say(
                     f"         [yellow]warn[/yellow]  high nulls: "
-                    f"{', '.join(f'{c}({profile.null_percentages[c]}%)' for c in null_alerts)}"
+                    f"{', '.join(f'{c}({prof.null_percentages[c]}%)' for c in null_alerts)}"
                 )
 
         results[model.full_name] = "built"
-        return ModelOutcome("built", duration_ms, row_count)
+        return ModelOutcome("built", duration_ms, row_count, assertion_results=assertion_results)
 
     except Exception as e:
-        log_run(
-            conn, "transform", model.full_name, "error", error=str(e),
-            log_output=getattr(e, "output", None) or "".join(py_output) or None,
-            pipeline_run_id=pipeline_run_id,
-        )
-        console.print(f"  [red]fail[/red]  {label}: {escape(str(e))}")
-        _print_python_output(py_output)
+        if log_runs:
+            log_run(
+                conn, "transform", model.full_name, "error", error=str(e),
+                log_output=getattr(e, "output", None) or "".join(py_output) or None,
+                pipeline_run_id=pipeline_run_id,
+            )
+        say(f"  [red]fail[/red]  {label}: {escape(str(e))}")
+        if echo:
+            _print_python_output(py_output)
         results[model.full_name] = "error"
         blocked.add(model.full_name)
         return ModelOutcome("error", error=str(e))

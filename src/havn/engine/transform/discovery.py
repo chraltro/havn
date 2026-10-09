@@ -28,6 +28,7 @@ from havn.engine.sql_analysis import (
     parse_sql,
     strip_config_comments,
 )
+from havn.engine.live.settings import parse_duration, parse_live_flag
 from havn.engine.utils import validate_identifier
 
 from .columns import save_model_columns
@@ -168,6 +169,16 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
             lookback = int(raw_lookback) if raw_lookback is not None else 1
         except ValueError:
             lookback = 1
+        # Live settings. A malformed value is kept off the model (not live, no
+        # interval) and reported by `validate_models`, never a discovery crash.
+        live = parse_live_flag(config.get("live"))
+        try:
+            live_interval = parse_duration(config.get("live_interval") or 0)
+        except ValueError:
+            live_interval = 0.0
+        cdc_op = config.get("cdc_op") or None
+        cdc_seq = config.get("cdc_seq") or None
+        cdc_deletes = (config.get("cdc_deletes") or "hard").lower()
 
         model = SQLModel(
             path=sql_file,
@@ -196,6 +207,11 @@ def discover_models(transform_dir: Path) -> list[SQLModel]:
             batch_size=batch_size,
             begin=begin,
             lookback=lookback,
+            live=live,
+            live_interval=live_interval,
+            cdc_op=cdc_op,
+            cdc_seq=cdc_seq,
+            cdc_deletes=cdc_deletes,
             grain=grain,
             owner=owner,
             source_freshness=source_freshness,
@@ -885,7 +901,12 @@ def _update_state(
         row_count,
     ]
     if _is_ducklake_connection(conn):
-        conn.execute("BEGIN TRANSACTION")
+        # A live refresh builds inside one outer transaction (data, consumed
+        # watermarks and state commit together), so join it when one is
+        # open instead of failing on a nested BEGIN.
+        from havn.engine.utils import begin_transaction
+
+        owns_tx = begin_transaction(conn)
         try:
             conn.execute(
                 "DELETE FROM _havn.model_state WHERE model_path = ?",
@@ -899,9 +920,11 @@ def _update_state(
                 """,
                 params,
             )
-            conn.execute("COMMIT")
+            if owns_tx:
+                conn.execute("COMMIT")
         except Exception:
-            conn.execute("ROLLBACK")
+            if owns_tx:
+                conn.execute("ROLLBACK")
             raise
     else:
         conn.execute(

@@ -244,7 +244,9 @@ def sync_table_high_watermark(
             if not exists:
                 conn.execute(f"CREATE TABLE {target_table} AS {query}")
             else:
-                conn.execute(f"INSERT INTO {target_table} {query}")
+                # BY NAME so a _havn_seq column (added once a live model reads
+                # this table) does not shift every column one to the left.
+                conn.execute(f"INSERT INTO {target_table} BY NAME {query}")
 
             new_watermark_row = conn.execute(
                 f'SELECT MAX("{cdc_column}")::VARCHAR FROM {target_table}'
@@ -261,6 +263,17 @@ def sync_table_high_watermark(
                 conn, connector_name, table_name,
                 "high_watermark", watermark_after, rows_synced=rows_synced,
             )
+            if rows_synced:
+                # New rows are a live source commit: stamp them and wake the
+                # live runner (havn.engine.live).
+                try:
+                    from havn.engine.live.sources import advance_source
+
+                    advance_source(conn, f"{target_schema}.{table_name}")
+                except Exception as e:
+                    logger.warning(
+                        "live advance for %s.%s failed: %s", target_schema, table_name, e
+                    )
 
             duration_ms = int((time.perf_counter() - start) * 1000)
             return CDCSyncResult(

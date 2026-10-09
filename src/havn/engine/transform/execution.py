@@ -36,13 +36,17 @@ def _begin_transaction(conn: duckdb.DuckDBPyConnection) -> bool:
     transaction may already be active. In that case we join it instead of
     starting a second one, and the caller must not commit or roll back work
     that it does not own.
+
+    The check runs before any BEGIN is sent: DuckDB answers a nested BEGIN
+    with an error that also aborts the outer transaction, so "try BEGIN and
+    join on failure" left the outer one unusable.
     """
-    try:
-        conn.execute("BEGIN TRANSACTION")
-        return True
-    except duckdb.TransactionException as e:
-        logger.debug("Transaction already active, joining the outer one: %s", e)
-        return False
+    from havn.engine.utils import begin_transaction
+
+    owns = begin_transaction(conn)
+    if not owns:
+        logger.debug("Transaction already active, joining the outer one")
+    return owns
 
 
 class SchemaChangeError(ValueError):
@@ -1246,6 +1250,15 @@ def resolve_query(
     return query_rewriter(query) if query_rewriter is not None else query
 
 
+def _substitute(sql: str | None, placeholders: dict[str, str] | None) -> str | None:
+    """Replace each placeholder token in ``sql`` with its value."""
+    if not sql or not placeholders:
+        return sql
+    for token, value in placeholders.items():
+        sql = sql.replace(token, value)
+    return sql
+
+
 def _execute_incremental(
     conn: duckdb.DuckDBPyConnection,
     model: SQLModel,
@@ -1256,8 +1269,13 @@ def _execute_incremental(
     force: bool = False,
     run_id: str | None = None,
     query_rewriter: Callable[[str], str] | None = None,
+    placeholders: dict[str, str] | None = None,
 ) -> tuple[int, int]:
     """Execute an incremental model.
+
+    ``placeholders`` maps literal tokens (a live model's ``{watermark}``) to
+    the SQL text that replaces them in both the query and the
+    incremental_filter; see :mod:`havn.engine.live.refresh`.
 
     Strategies:
         delete+insert (default): Delete matching rows by unique_key, insert new.
@@ -1304,8 +1322,8 @@ def _execute_incremental(
     # silently lost forever; the dedup on unique_key absorbs the re-read. For
     # append-only loads there is no dedup, so we keep strict ``>`` to avoid
     # inserting duplicates of the boundary rows.
-    query = resolve_query(model, model_map, query_rewriter)
-    incremental_filter = model.incremental_filter
+    query = _substitute(resolve_query(model, model_map, query_rewriter), placeholders)
+    incremental_filter = _substitute(model.incremental_filter, placeholders)
     if model.watermark and not incremental_filter:
         wm = model.watermark.strip()
         validate_identifier(wm, "watermark column")
@@ -1318,7 +1336,18 @@ def _execute_incremental(
             f"WHERE (SELECT MAX({wm}) FROM {{this}}) IS NULL "
             f"OR {wm} {cmp} (SELECT MAX({wm}) FROM {{this}})"
         )
-    if exists and incremental_filter:
+    # A live build (placeholders given) keeps its filter on the first load as
+    # well, unless it needs {this}: with {watermark} at 0 the filter is what
+    # keeps out rows committed to landing but not yet stamped with a
+    # _havn_seq. Reading those in the full load and again once stamped would
+    # apply them twice.
+    first_load_filter = (
+        placeholders is not None
+        and bool(incremental_filter)
+        and "{this}" not in (model.incremental_filter or "")
+        and not model.watermark
+    )
+    if (exists or first_load_filter) and incremental_filter:
         # Replace {this} with the target table name. Wrap the user query in
         # a subquery so trailing clauses (GROUP BY / ORDER BY / LIMIT / ;)
         # don't produce malformed SQL when the filter is appended.
@@ -1336,7 +1365,13 @@ def _execute_incremental(
 
     strategy = model.incremental_strategy
 
-    if not exists:
+    if model.cdc_op:
+        # Change events, not rows: dedupe per key by sequence, skip stale and
+        # duplicate events, apply deletes. See cdc_apply for the rules.
+        from .cdc_apply import execute_cdc
+
+        execute_cdc(conn, model, query, exists, actions)
+    elif not exists:
         # First run — full load
         ddl = f"CREATE TABLE {model.full_name} AS\n{query}"
         run_build_statement(conn, ddl, full_refresh=True)
@@ -1593,8 +1628,14 @@ def execute_model(
         _drop_conflicting(conn, model.schema, model.name, "ephemeral")
         return 0, 0
 
+    from .locks import model_lock
+
     manager = get_resource_manager()
-    with manager.acquire_sync("transform", f"model:{model.full_name}", conn=conn):
+    # One build per model at a time across batch runs, jobs and the live
+    # runner (see transform/locks.py).
+    with model_lock(model.full_name), manager.acquire_sync(
+        "transform", f"model:{model.full_name}", conn=conn
+    ):
         manager_task_register_cancel(manager, conn)
 
         if model.is_python:
@@ -1603,6 +1644,21 @@ def execute_model(
                 snapshot_settings=snapshot_settings,
                 query_rewriter=query_rewriter,
                 python_output=python_output,
+            )
+        elif model.materialized == "incremental" and model.live:
+            # A live model consumes source watermarks. Every builder -- this
+            # batch run, a job, the live runner -- goes through the same
+            # bookkeeping, so whoever gets here first applies the pending
+            # batch and the next finds nothing left (havn.engine.live.refresh).
+            from havn.engine.live.refresh import build_live
+
+            duration_ms, row_count = build_live(
+                conn, model, model_map,
+                lambda placeholders: _execute_incremental(
+                    conn, model, actions, model_map,
+                    batch_range=batch_range, force=force, run_id=run_id,
+                    query_rewriter=query_rewriter, placeholders=placeholders,
+                ),
             )
         elif model.materialized == "incremental":
             duration_ms, row_count = _execute_incremental(

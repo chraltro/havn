@@ -406,6 +406,8 @@ class ProjectConfig(BaseModel):
     streaming: dict[str, Any] = Field(default_factory=dict)
     performance: PerformanceConfig = Field(default_factory=PerformanceConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    # Raw `live:` section; read through havn.engine.live.settings.LiveSettings.
+    live: dict[str, Any] = Field(default_factory=dict)
     project_dir: Path = Field(default_factory=Path.cwd)
     _raw: dict[str, Any] = PrivateAttr(default_factory=dict)
 
@@ -777,6 +779,7 @@ def load_project(
         packages=packages,
         performance=PerformanceConfig(**(raw.get("performance") or {})),
         telemetry=TelemetryConfig(**(raw.get("telemetry") or {})),
+        live=raw.get("live") if isinstance(raw.get("live"), dict) else {},
         project_dir=project_dir,
     )
     config._raw = raw
