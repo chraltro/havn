@@ -19,12 +19,25 @@ pytest tests/
 
 # Lint SQL
 havn lint                       # check
-havn lint --fix                 # auto-fix
+havn lint --fix                 # auto-fix (refused inside havn_packages/)
 
 # Common commands
 havn init my-project            # scaffold new project
+havn validate                   # structure, DAG, bind pass + contract columns
+havn validate --no-bind         # skip the bind pass
+havn validate --schema-drift    # also warn when a model's output shape moved
 havn transform                  # build all SQL models
 havn transform --force          # force rebuild (ignore cache)
+havn transform +gold.orders     # graph selectors: +x, x+, +x+, n+x, x+n, @x
+havn transform 'gold.fct_*'     # fnmatch wildcards (quote them)
+havn transform tag:daily        # tag:, path:, config.<key>:, state:modified
+havn transform state:modified+  # what changed, plus downstream
+havn transform -s tag:daily -x tag:expensive   # --select / --exclude
+havn transform gold.events --event-time-start 2024-01-01 --event-time-end 2024-03-01  # microbatch backfill
+havn transform gold.orders --defer   # read unbuilt upstreams from the environment's defer target
+havn transform gold.orders --defer-snapshot   # same, via a copy, when the target is open for writing
+havn ls '+gold.orders'          # dry-run a selector (schema, materialization, tags)
+havn ls state:modified+ --names # bare names, one per line, for piping
 havn query "SELECT 1"           # ad-hoc SQL
 havn tables                     # list warehouse objects
 havn serve                      # start web UI on :3000
@@ -34,10 +47,25 @@ havn jobs run full-refresh      # run full pipeline
 havn history                    # show run log
 havn env use prod               # switch environment
 havn env list                   # show all environments
+havn deploy prod --plan         # what deploying main to prod would rebuild
+havn deploy prod                # deploy main to prod (rolls back on failure)
+havn env show                   # active environment, defer target and whether it is readable
 havn diff gold.orders           # diff a single model
 havn diff                       # diff changed models + downstream
 havn diff --full                # show all changed rows, not just samples
+havn rename-column silver.customers customer_id cust_id   # rename across downstream models
+havn rename-column silver.customers customer_id cust_id --dry-run  # list the sites, write nothing
+havn rename-column silver.customers customer_id cust_id --force    # rename past the blockers
 havn macros                     # list registered SQL macros
+havn packages install           # install packages: from project.yml into havn_packages/
+havn packages install --upgrade # re-resolve each rev instead of using the lock
+havn packages list              # installed packages: rev, commit, model + macro counts
+havn packages remove crm        # delete a package checkout and its lock entry
+havn ls package:crm             # package: selector (package: alone = your own models)
+havn test                       # run model unit tests (tests/unit/*.yml)
+havn test --model silver.customers -v   # one model, with row diffs
+havn check                      # validate + assertions + contracts + unit tests
+havn contracts                  # run contracts/*.yml (assertions + declared columns)
 havn metrics                    # list semantic-layer metrics (metrics/*.yml)
 havn metrics query revenue --by region --grain month   # query a metric
 havn mcp                        # start MCP stdio server for AI agents
@@ -57,11 +85,17 @@ src/havn/                       # Python package (the platform itself)
   engine/
     database.py               # DuckDB connection, metadata tables
     transform/                # SQL DAG engine with change detection
+                              #   bind.py: shadow-catalog bind pass (DuckDB binder)
+                              #   ctes.py: CTE enumeration + preview slicing
+                              #   columns.py: persisted per-model column schemas
     runner.py                 # Python script executor (ingest/export)
     macros.py                 # Python SQL macros (@macro → DuckDB UDFs)
     explain.py                # Query plan parsing (EXPLAIN/EXPLAIN ANALYZE)
     anomaly.py                # Statistical anomaly detection
     diff.py                   # 3-mode diff engine (single/changed/all)
+    selectors.py              # Graph selectors (+x, x+, @x, tag:, state:modified)
+    rename.py                 # Column rename: reference index, edit plan, atomic multi-file write
+    defer.py                  # Defer: attach another environment read-only, rewrite unbuilt refs
     auth.py                   # Token auth, RBAC (admin/editor/viewer)
     secrets.py                # .env secrets management
     scheduler.py              # Cron scheduler (SchedulerThread) + file watcher
@@ -71,6 +105,9 @@ src/havn/                       # Python package (the platform itself)
     query_governor.py         # Query timeout enforcement via DuckDB interrupt()
     backup.py                 # Verified backup/restore with integrity checks
     semantic.py               # Semantic layer (metrics/*.yml → SQL compiler)
+    packages.py               # Package install/lock (havn_packages/, havn_packages.lock)
+    unit_tests.py             # Model unit tests (tests/unit/*.yml loader + runner)
+    sql_rewrite.py            # Table-reference rewriter (mocks, ephemeral, defer)
     sql_safety.py             # Shared read-only SQL validation
     notebook/                 # .dpnb notebook execution
     docs.py                   # Markdown doc generator
@@ -110,7 +147,13 @@ tests/                        # pytest test suite
   test_e2e_api.py             # End-to-end API tests
   test_connectors_warehouse.py # Warehouse migration connectors
   test_semantic.py            # Semantic layer (metrics)
+  test_unit_tests.py          # Model unit tests (loader, runner, CLI, API)
+  test_sql_rewrite.py         # Table-reference rewriter
+  test_defer.py               # Defer (two warehouses, the file lock, snapshot mode)
   test_mcp_server.py          # MCP server
+  test_selectors.py           # Graph selectors + @config tags
+  test_rename.py              # Column rename index, plan, apply, CLI and API
+  test_packages.py            # Packages: install, lock, namespacing, macros, CLI, API
 ```
 
 ## Architecture
@@ -126,7 +169,10 @@ User project layout (created by `havn init`):
   notebooks/      .dpnb interactive notebooks
   macros/         Python SQL macros (auto-registered as DuckDB UDFs)
   metrics/        Semantic-layer metric definitions (YAML)
-  project.yml     Config: connections, lint, alerts
+  tests/unit/     Model unit tests (fixture rows in, expected rows out)
+  havn_packages/  Installed packages (gitignored; rebuilt by `havn packages install`)
+  project.yml     Config: connections, lint, alerts, packages
+  havn_packages.lock  Resolved commit per package (committed)
   .env            Secrets (never committed)
   .havn-env       Active environment (local, not committed)
   warehouse.duckdb   Single-file DuckDB database
@@ -157,7 +203,7 @@ LEFT JOIN bronze.orders o ON c.customer_id = o.customer_id
 GROUP BY 1, 2
 ```
 
-- `@config` sets materialization (`view` / `table` / `incremental`) and schema. Other useful keys: `unique_key`, `incremental_strategy` (`delete+insert` / `merge` / `append`), `incremental_filter`, `partition_by`.
+- `@config` sets materialization (`view` / `table` / `incremental` / `ephemeral` / `snapshot`) and schema. Other useful keys: `unique_key`, `incremental_strategy` (`delete+insert` / `merge` / `append` / `microbatch`), `incremental_filter`, `partition_by`, `on_schema_change` (`append_new_columns` / `ignore` / `fail` / `sync_all_columns`), `tags` (comma list, for `tag:` selectors; deliberately not hashed, so retagging does not rebuild). Snapshot models (SCD2 row history) add `strategy` (`check` / `timestamp`), `updated_at`, `check_cols`, `hard_deletes` (`ignore` / `invalidate` / `new_record`); these are row-history models and are unrelated to `havn snapshot` / `havn rewind`, which are whole-warehouse restore points. `incremental_strategy=microbatch` adds `event_time`, `batch_size` (`hour` / `day` / `month` / `year`), `begin` and `lookback`; the model filters itself on the `{start}` and `{end}` placeholders, each window is its own transaction, and per-window state lives in `_havn.batch_state`.
 - Dependencies are auto-extracted from `FROM` and `JOIN` clauses via `sqlglot`. You only need `@depends_on` when the parser can't see the reference (e.g. a model name passed through a function or constructed in a string).
 - Folder name is the default schema (e.g., `transform/bronze/` → `schema=bronze`); override with `schema=` in `@config`.
 - Other directives: `@description <text>` for model docs, `@assert <expr>` for data-quality assertions (one per line, runs after build), `@col <name>: <text>` for column-level docs.
@@ -213,6 +259,41 @@ SELECT * FROM active_users('active')
 - `schema=` declares output columns and DuckDB types -- required (or inferred from first row)
 - Each dict in the returned list is one row; keys are column names
 - No pyarrow required -- uses DuckDB's native SQL TABLE MACRO + json_each internally
+
+### Packages
+
+Shared models and macros are installed from a git repo or a local directory:
+
+```yaml
+# project.yml
+packages:
+  - name: crm
+    git: https://github.com/example/havn-crm.git
+    rev: v1.4.0        # tag, commit or branch; a branch warns (it is not a pin)
+```
+
+- `havn packages install` clones into `havn_packages/<name>/` and writes
+  `havn_packages.lock` (the resolved commit per package). The lock is committed;
+  `havn_packages/` is gitignored. A later install uses the lock unless `--upgrade`.
+- A package's schemas are prefixed: `silver.customers` in package `crm` becomes
+  `crm_silver.customers`. References inside the package to its own models are
+  rewritten at discovery time; references to anything else are left as written.
+  Project models reference the namespaced name.
+- A package may ship `havn_package.yml` at its root (`name`, `version`,
+  `requires_havn`, and `schemas:` to override the prefix per schema).
+- `discover_all_models(project_dir, config)` in `engine/transform/discovery.py`
+  is the multi-root entry point; `discover_models(transform_dir)` remains the
+  single-directory primitive. Anything that lists or builds the DAG for the
+  whole project uses the former, including sentinel, Pipeline Rewind, both
+  notebook paths, unit tests and `check_freshness(include_sources=True)`.
+  The primitive is right only where one directory is genuinely meant, such as
+  `engine/pr.py` diffing two checkouts.
+- `havn lint` does not walk `havn_packages/`, and `--fix` pointed inside one
+  is refused: the next install would overwrite it.
+- Package macros register between the stdlib and the project, under module names
+  `havn_macros.<pkg>.<stem>`.
+
+See `docs/packages.md`.
 
 ### Python Script Convention
 

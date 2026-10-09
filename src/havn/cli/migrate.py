@@ -90,7 +90,8 @@ def migrate(
         for schema in _MIGRATE_SCHEMAS:
             rows = src_conn.execute(
                 "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema = ? AND table_type = 'BASE TABLE' "
+                "WHERE table_catalog = current_database() "
+                "AND table_schema = ? AND table_type = 'BASE TABLE' "
                 "ORDER BY table_name",
                 [schema],
             ).fetchall()
@@ -171,7 +172,7 @@ def _rewrite_project_yml(project_dir: Path, dest_config) -> None:
     else:
         raw["database"].pop("path", None)
     tmp = yml_path.with_suffix(".yml.tmp")
-    tmp.write_text(yaml.safe_dump(raw, sort_keys=False))
+    tmp.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     tmp.replace(yml_path)  # atomic on POSIX; os.replace semantics on Windows
 
 

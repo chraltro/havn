@@ -38,6 +38,174 @@ export interface ColumnInfo {
   nullable?: boolean;
 }
 
+/** One declared model unit test, from GET /api/unit-tests. */
+export interface UnitTestInfo {
+  name: string;
+  model: string;
+  description?: string;
+  source_path?: string;
+  given?: { ref: string; columns: Record<string, string>; row_count: number }[];
+  expected_row_count?: number;
+  ordered?: boolean;
+}
+
+/** One test outcome from POST /api/unit-tests/run. */
+export interface UnitTestResult {
+  name: string;
+  model: string;
+  status: "pass" | "fail" | "error";
+  duration_ms: number;
+  message: string;
+  source_path?: string;
+  columns: string[];
+  missing_rows: Record<string, unknown>[];
+  unexpected_rows: Record<string, unknown>[];
+  missing_count: number;
+  unexpected_count: number;
+  warnings: string[];
+}
+
+export interface UnitTestRunResult {
+  results: UnitTestResult[];
+  load_errors: string[];
+  duration_ms: number;
+  passed: number;
+  failed: number;
+  errored: number;
+  ok: boolean;
+}
+
+/** A model as listed by GET /api/models. */
+export interface ModelInfo {
+  name: string;
+  schema: string;
+  full_name: string;
+  materialized?: string;
+  depends_on?: string[];
+  path?: string;
+}
+
+/** One diagnostic from POST /api/bind. Coordinates are 1-based file positions. */
+export interface BindError {
+  severity: "error" | "warning";
+  message: string;
+  /** null means the diagnostic applies to the whole file. */
+  line: number | null;
+  col: number | null;
+  end_line: number | null;
+  end_col: number | null;
+  source: "bind" | "validate";
+}
+
+/** Result of a shadow bind of an unsaved buffer against the warehouse catalog. */
+export interface BindResult {
+  model: string | null;
+  ok: boolean;
+  errors: BindError[];
+  /** Inferred output schema of the model. */
+  columns: ColumnInfo[];
+  /** Schema of each upstream relation, keyed by "schema.table". */
+  upstream: Record<string, ColumnInfo[]>;
+  duration_ms: number;
+}
+
+/**
+ * One place a column is written, from the rename index.
+ *
+ * `start` and `end` are 0-based character offsets into the file, `end`
+ * exclusive, so `content.slice(start, end)` is the identifier.
+ */
+export interface RenameSite {
+  /** Model full_name, or "" for a YAML site that belongs to no model. */
+  model: string;
+  path: string;
+  line: number;
+  col: number;
+  start: number;
+  end: number;
+  /** select, where, join, group, order, having, qualify, window or yaml. */
+  clause: string;
+  /** definition, reference, alias or yaml. */
+  kind: string;
+  /** False when the index could not attribute the mention to one relation. */
+  resolved: boolean;
+  text: string;
+  needs_alias: boolean;
+}
+
+/** Something the rename index saw and refuses to rename around. */
+export interface RenameBlocker {
+  reason: string;
+  model: string;
+  path: string;
+  message: string;
+  line: number | null;
+}
+
+export interface RenameReferences {
+  model: string;
+  column: string;
+  sites: RenameSite[];
+  blocked: RenameBlocker[];
+  models: string[];
+}
+
+/** One splice: replace `old_text` at [start, end) with `new_text`. */
+export interface RenameEdit {
+  path: string;
+  start: number;
+  end: number;
+  old_text: string;
+  new_text: string;
+  kind: string;
+  model: string;
+  line: number;
+}
+
+/** A file the rename touches, with the content it would get. */
+export interface RenameFileContent {
+  path: string;
+  content: string;
+  /** Hash of what is on disk now, handed back to /apply as the conflict check. */
+  file_hash: string;
+}
+
+export interface RenamePlan {
+  model: string;
+  column: string;
+  new_name: string;
+  sites: RenameSite[];
+  blocked: RenameBlocker[];
+  edits: RenameEdit[];
+  files: RenameFileContent[];
+  /** Set when the rename was refused; `edits` is then empty. */
+  error?: string;
+}
+
+export interface RenameApplyResult {
+  status: string;
+  model: string;
+  column: string;
+  new_name: string;
+  blocked: RenameBlocker[];
+  files: { path: string; file_hash: string }[];
+}
+
+/** One CTE found in a buffer by POST /api/sql/ctes. */
+export interface CteInfo {
+  name: string;
+  start_line: number;
+  end_line: number;
+  /** Complete "WITH ... SELECT * FROM <name>" query, without a LIMIT. */
+  preview_sql: string;
+}
+
+export interface CteListResult {
+  ctes: CteInfo[];
+  /** Index into `ctes` of the CTE containing the requested line, if any. */
+  active: number | null;
+}
+
 export interface QueryResult {
   columns: string[];
   rows: unknown[][];
@@ -452,7 +620,7 @@ interface RequestOptions extends RequestInit {
 }
 
 /** Endpoints that need a longer timeout (e.g. diff can scan many models). */
-const LONG_TIMEOUT_PATHS = ["/diff", "/transform", "/stream/", "/query", "/contracts", "/docs/"];
+const LONG_TIMEOUT_PATHS = ["/diff", "/transform", "/stream/", "/query", "/contracts", "/docs/", "/unit-tests"];
 
 function getTimeoutForPath(path: string): number {
   if (LONG_TIMEOUT_PATHS.some((p) => path.startsWith(p) || path === p)) {
@@ -607,8 +775,62 @@ export const api = {
     request(`/files/${source}/move`, { method: "POST", body: JSON.stringify({ destination }) }),
 
   // Models
-  listModels: () => request("/models"),
+  /**
+   * List models, optionally narrowed by a graph selector (`+gold.orders`,
+   * `tag:daily`, `state:modified+`, ...). The selector is resolved server
+   * side by the same code `havn ls` uses.
+   */
+  listModels: (select?: string) =>
+    request<ModelInfo[]>(
+      select ? `/models?select=${encodeURIComponent(select)}` : "/models",
+    ),
 
+  // Editor diagnostics
+  /** Shadow-bind an unsaved buffer: diagnostics plus inferred output/upstream schemas. */
+  bindSql: (path: string | null, content: string, signal?: AbortSignal) =>
+    request<BindResult>("/bind", {
+      method: "POST",
+      body: JSON.stringify({ path, content }),
+      signal,
+    }),
+  /** Enumerate the CTEs in a buffer, flagging the one containing `line`. */
+  listCtes: (content: string, line: number | null = null, signal?: AbortSignal) =>
+    request<CteListResult>("/sql/ctes", {
+      method: "POST",
+      body: JSON.stringify({ content, line }),
+      signal,
+    }),
+
+  // Column rename
+  /** Every place a model's column is written, plus what could not be seen. */
+  columnReferences: (model: string, column: string, signal?: AbortSignal) =>
+    request<RenameReferences>(
+      `/rename/references?model=${encodeURIComponent(model)}&column=${encodeURIComponent(column)}`,
+      { signal },
+    ),
+  /** The splices a rename would make. Writes nothing. */
+  planColumnRename: (model: string, column: string, newName: string, force = false) =>
+    request<RenamePlan>("/rename/plan", {
+      method: "POST",
+      body: JSON.stringify({ model, column, new_name: newName, force }),
+    }),
+  /**
+   * Apply a rename to every file it touches, or to none of them.
+   *
+   * `hashes` maps each path to the hash the plan reported; a file that moved
+   * since then comes back as a 409 rather than being overwritten.
+   */
+  applyColumnRename: (
+    model: string,
+    column: string,
+    newName: string,
+    hashes: Record<string, string>,
+    force = false,
+  ) =>
+    request<RenameApplyResult>("/rename/apply", {
+      method: "POST",
+      body: JSON.stringify({ model, column, new_name: newName, force, hashes }),
+    }),
   // Transform
   runTransform: (targets: string[] | null = null, force: boolean = false) =>
     request<TransformResult>("/transform", {
@@ -776,6 +998,8 @@ export const api = {
 
   // Overview
   getOverview: () => request("/overview"),
+  // Home page: health tiles, attention queue, last-24h runs, layers.
+  getHome: () => request<any>("/home"),
   clearSampleProject: () => request("/project/clear-sample", { method: "POST" }),
 
   // Connector health
@@ -966,6 +1190,8 @@ export const api = {
 
   // Model notebook view
   getModelNotebookView: (modelName: string) => request(`/models/${modelName}/notebook-view`),
+  // Everything the editor workbench shows for the model defined in `path`.
+  getModelWorkbench: (path: string) => request(`/models/workbench?path=${encodeURIComponent(path)}`),
 
   // Create model
   createModel: (name: string, schema_name: string = "bronze", materialized: string = "table", sql: string = "") =>
@@ -976,6 +1202,15 @@ export const api = {
 
   // Check (validation + assertions + contracts)
   runCheck: () => request("/check", { method: "POST" }),
+
+  // Unit tests (tests/unit/*.yml)
+  getUnitTests: () =>
+    request<{ tests: UnitTestInfo[]; errors: string[] }>("/unit-tests"),
+  runUnitTests: (model: string | null = null) =>
+    request<UnitTestRunResult>("/unit-tests/run", {
+      method: "POST",
+      body: JSON.stringify(model ? { model } : {}),
+    }),
 
   // Contracts
   runContracts: () => request("/contracts/run", { method: "POST" }),
@@ -1242,7 +1477,19 @@ export const api = {
     request<{ changed: string[]; impacted: string[] }>(
       `/prs/${encodeURIComponent(id)}/lineage-impact`,
     ),
+  // Ship page: the change, its impact graph, build, and merge gate in one call.
+  getPrReview: (id: string) => request<any>(`/prs/${encodeURIComponent(id)}/review`),
   getPrStateStatus: () => request<PrStateStatus>("/prs/state-status"),
+
+  // Deploy a git ref to an environment (with rollback on failure)
+  getDeployTargets: () => request<any>("/deploy/targets"),
+  getDeployPlan: (env: string, ref: string) =>
+    request<any>(`/deploy/plan?env=${encodeURIComponent(env)}&ref=${encodeURIComponent(ref)}`),
+  startDeploy: (data: { env: string; ref: string; pr_id?: string }) =>
+    request<any>("/deploys", { method: "POST", body: JSON.stringify(data) }),
+  getDeploy: (id: string) => request<any>(`/deploys/${encodeURIComponent(id)}`),
+  listDeploys: (prId?: string) =>
+    request<any[]>(`/deploys${prId ? `?pr_id=${encodeURIComponent(prId)}` : ""}`),
 
   // Resources
   getResources: () => request<ResourceSnapshot>("/resources"),

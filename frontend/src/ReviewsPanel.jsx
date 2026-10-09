@@ -102,7 +102,7 @@ export default function ReviewsPanel({ showConfirm }) {
     const c = { open: 0, merged: 0, closed: 0, needs_review: 0 };
     for (const p of prs) {
       if (p.status in c) c[p.status] += 1;
-      if (p.status === "open" && p.approvers.length === 0 && p.change_requesters.length === 0) {
+      if (p.status === "open" && (p.current_approvers ?? p.approvers).length === 0 && p.change_requesters.length === 0) {
         c.needs_review += 1;
       }
     }
@@ -228,13 +228,13 @@ export default function ReviewsPanel({ showConfirm }) {
         <div style={s.toolbar}>
           <input
             style={s.filterInput}
-            placeholder="Filter by title, author, or branch\u2026"
+            placeholder="Filter by title, author, or branch…"
             aria-label="Filter pull requests"
             value={filterText}
             onChange={(e) => setFilterText(e.target.value)}
           />
           <button style={s.btn} onClick={loadPrs} disabled={loading}>
-            {loading ? "Loading\u2026" : "Refresh"}
+            {loading ? "Loading…" : "Refresh"}
           </button>
           <button style={s.btnPrimary} onClick={() => setCreating(true)}>+ New PR</button>
           <span style={s.count}>{filteredPrs.length} of {prs.length}</span>
@@ -250,7 +250,7 @@ export default function ReviewsPanel({ showConfirm }) {
 
         {loading && prs.length === 0 ? (
           <div style={s.emptyState}>
-            <div style={s.emptyText}>Loading pull requests\u2026</div>
+            <div style={s.emptyText}>Loading pull requests…</div>
           </div>
         ) : filteredPrs.length === 0 ? (
           <div style={s.emptyState}>
@@ -281,25 +281,25 @@ export default function ReviewsPanel({ showConfirm }) {
                   <td style={s.td}>
                     <div style={{ fontWeight: 500 }}>{pr.title}</div>
                     {pr.description && (
-                      <div style={s.descPreview}>{pr.description.slice(0, 80)}{pr.description.length > 80 ? "\u2026" : ""}</div>
+                      <div style={s.descPreview}>{pr.description.slice(0, 80)}{pr.description.length > 80 ? "…" : ""}</div>
                     )}
                   </td>
                   <td style={s.td}>
                     <code style={s.codeSm}>{pr.head_ref}</code>
-                    <span style={{ color: "var(--havn-text-dim)" }}> \u2192 </span>
+                    <span style={{ color: "var(--havn-text-dim)" }}> → </span>
                     <code style={s.codeSm}>{pr.base_ref}</code>
                   </td>
                   <td style={s.td}>{pr.author}</td>
                   <td style={s.td}>
-                    {pr.approvers.length > 0 && (
-                      <span style={{ color: "var(--havn-green)" }}>\u2713 {pr.approvers.length}</span>
+                    {(pr.current_approvers ?? pr.approvers).length > 0 && (
+                      <span style={{ color: "var(--havn-green)" }}>✓ {(pr.current_approvers ?? pr.approvers).length}</span>
                     )}
                     {pr.change_requesters.length > 0 && (
                       <span style={{ color: "var(--havn-red)", marginLeft: 6 }}>
-                        \u2717 {pr.change_requesters.length}
+                        ✗ {pr.change_requesters.length}
                       </span>
                     )}
-                    {pr.approvers.length === 0 && pr.change_requesters.length === 0 && (
+                    {(pr.current_approvers ?? pr.approvers).length === 0 && pr.change_requesters.length === 0 && (
                       <span style={{ color: "var(--havn-text-dim)" }}>-</span>
                     )}
                   </td>
@@ -414,7 +414,7 @@ function CreatePrRow({ onCancel, onCreated, onError }) {
       <div style={s.formActions}>
         <button style={s.btn} onClick={onCancel}>Cancel</button>
         <button style={s.btnPrimary} onClick={handleSave} disabled={saving}>
-          {saving ? "Creating\u2026" : "Create PR"}
+          {saving ? "Creating…" : "Create PR"}
         </button>
       </div>
     </div>
@@ -593,23 +593,23 @@ function PrDetail({ prId, onBack, showConfirm }) {
     return (
       <div style={s.container}>
         <div style={s.header}>
-          <button style={s.btn} onClick={onBack}>\u2190 Back</button>
+          <button style={s.btn} onClick={onBack}>← Back</button>
         </div>
         <div style={s.content}>
-          <div style={s.emptyState}>{error || "Loading\u2026"}</div>
+          <div style={s.emptyState}>{error || "Loading…"}</div>
         </div>
       </div>
     );
   }
 
-  const canMerge = pr.status === "open" && (!pr.require_approval || pr.approvers.length > 0) && pr.change_requesters.length === 0;
+  const canMerge = pr.status === "open" && (!pr.require_approval || (pr.current_approvers ?? pr.approvers).length > 0) && pr.change_requesters.length === 0;
 
   return (
     <div style={s.container}>
       <div style={s.header}>
         <div style={s.headerRow}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button style={s.btn} onClick={onBack}>\u2190 Back</button>
+            <button style={s.btn} onClick={onBack}>← Back</button>
             <div>
               <div style={{ ...s.title, display: "flex", alignItems: "center", gap: 8 }}>
                 <code style={s.codeSm}>{pr.id}</code>
@@ -617,7 +617,7 @@ function PrDetail({ prId, onBack, showConfirm }) {
                 <StatusBadge status={pr.status} />
               </div>
               <div style={s.subtitle}>
-                {pr.author} \u00b7 <code style={s.codeSm}>{pr.head_ref}</code> \u2192 <code style={s.codeSm}>{pr.base_ref}</code> \u00b7 {timeAgo(pr.created_at)}
+                {pr.author} · <code style={s.codeSm}>{pr.head_ref}</code> → <code style={s.codeSm}>{pr.base_ref}</code> · {timeAgo(pr.created_at)}
               </div>
             </div>
           </div>
@@ -625,13 +625,13 @@ function PrDetail({ prId, onBack, showConfirm }) {
             {pr.status === "open" && (
               <>
                 <button style={s.btn} onClick={handleBuild} disabled={action === "building"}>
-                  {action === "building" ? "Building\u2026" : "Build & Diff"}
+                  {action === "building" ? "Building…" : "Build & Diff"}
                 </button>
                 <button style={s.btn} onClick={handleAiReview}>AI Review</button>
                 <button style={s.btn} onClick={() => setShowChangeRequestForm((v) => !v)} disabled={action != null}>Request Changes</button>
                 <button style={s.btn} onClick={handleApprove} disabled={action != null}>Approve</button>
                 <button style={s.btnPrimary} onClick={handleMerge} disabled={!canMerge || action != null}>
-                  {action === "merging" ? "Merging\u2026" : "Merge"}
+                  {action === "merging" ? "Merging…" : "Merge"}
                 </button>
                 <button style={s.btnDanger} onClick={handleClose} disabled={action != null}>Close</button>
               </>
@@ -667,7 +667,7 @@ function PrDetail({ prId, onBack, showConfirm }) {
                 Cancel
               </button>
               <button style={s.btnPrimary} onClick={handleRequestChanges} disabled={action != null}>
-                {action === "requesting" ? "Submitting\u2026" : "Request Changes"}
+                {action === "requesting" ? "Submitting…" : "Request Changes"}
               </button>
             </div>
           </div>
@@ -729,13 +729,13 @@ function DataImpactTab({ build, onBuild, building }) {
           Run "Build &amp; Diff" to clone the warehouse into an isolated worktree, build the PR branch's models, and compare every table to main.
         </div>
         <button style={{ ...s.btnPrimary, marginTop: 16 }} onClick={onBuild} disabled={building}>
-          {building ? "Building\u2026" : "Build & Diff"}
+          {building ? "Building…" : "Build & Diff"}
         </button>
       </div>
     );
   }
   if (build.status === "running") {
-    return <div style={s.emptyState}>Build in progress\u2026</div>;
+    return <div style={s.emptyState}>Build in progress…</div>;
   }
   if (build.status === "error") {
     return (
@@ -804,7 +804,7 @@ function DataImpactTab({ build, onBuild, building }) {
                             <div key={i}>
                               {sc.type === "added" && <span style={{ color: "var(--havn-green)" }}>+ {sc.column} ({sc.data_type})</span>}
                               {sc.type === "removed" && <span style={{ color: "var(--havn-red)" }}>- {sc.column}</span>}
-                              {sc.type === "type_changed" && <span style={{ color: "var(--havn-yellow, #eab308)" }}>~ {sc.column}: {sc.from} \u2192 {sc.to}</span>}
+                              {sc.type === "type_changed" && <span style={{ color: "var(--havn-yellow, #eab308)" }}>~ {sc.column}: {sc.from} → {sc.to}</span>}
                             </div>
                           ))}
                         </div>
@@ -823,7 +823,7 @@ function DataImpactTab({ build, onBuild, building }) {
 /* --- Lineage tab --- */
 function LineageTab({ lineage }) {
   if (!lineage) {
-    return <div style={s.emptyState}>Loading lineage\u2026</div>;
+    return <div style={s.emptyState}>Loading lineage…</div>;
   }
   const { changed = [], impacted = [] } = lineage;
   if (changed.length === 0 && impacted.length === 0) {
@@ -877,7 +877,7 @@ function CommentsTab({ pr, commentDraft, setCommentDraft, onAddComment }) {
             style={{ ...s.input, minHeight: 60, fontFamily: "inherit" }}
             value={commentDraft}
             onChange={(e) => setCommentDraft(e.target.value)}
-            placeholder="Leave a comment\u2026"
+            placeholder="Leave a comment…"
           />
           <button style={s.btnPrimary} onClick={onAddComment} disabled={!commentDraft.trim()}>
             Post comment

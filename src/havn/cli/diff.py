@@ -65,7 +65,7 @@ def diff(
         changed_files = diff_files_between(project_dir, against, "HEAD")
         # Map changed .sql files to model targets
         models = _discover(transform_dir)
-        model_by_path = {str(m.path.relative_to(project_dir)): m.full_name for m in models}
+        model_by_path = {m.path.relative_to(project_dir).as_posix(): m.full_name for m in models}
         filter_targets = []
         for f in changed_files:
             if f in model_by_path:

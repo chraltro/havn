@@ -166,7 +166,7 @@ This creates `notebooks/debug_silver_customers.dpnb` pre-populated with:
 
 1. A transform fails: `havn transform` shows `silver.customers: ERROR`
 2. Generate a debug notebook: `havn debug silver.customers`
-3. Open in the web UI: navigate to the notebook in the Develop tab
+3. Open in the web UI: open the notebook from the file tree under Build
 4. Execute cells interactively to identify the issue
 5. Fix the SQL model and re-run: `havn transform`
 

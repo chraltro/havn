@@ -99,6 +99,10 @@ class EnvironmentConfig(BaseModel):
 
     database: dict[str, Any] = Field(default_factory=dict)  # {"path": "dev.duckdb"}
     connections: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # Name of another environment whose warehouse supplies the models this one
+    # has not built. Read at transform time only (see engine/defer.py); it
+    # never changes what is written, which is always this environment's file.
+    defer: str | None = None
 
 
 class SourceColumn(BaseModel):
@@ -184,11 +188,68 @@ class DenyRule(BaseModel):
     reason: str = ""
 
 
+class SnapshotsConfig(BaseModel):
+    """Project-wide shape of the meta columns a `materialized=snapshot` model writes.
+
+    ``meta_columns`` renames any of ``valid_from``, ``valid_to``,
+    ``is_current``, ``row_hash`` and ``is_deleted`` -- the point is that a
+    project migrating from dbt can keep reading ``dbt_valid_from`` without
+    rewriting every downstream model. ``valid_to_current`` is a SQL literal
+    written into the open row's ``valid_to`` instead of NULL, because most BI
+    tools filter a sentinel date more comfortably than a NULL.
+    """
+
+    meta_columns: dict[str, str] = Field(default_factory=dict)
+    valid_to_current: str | None = None
+
+
 class PoliciesConfig(BaseModel):
     """Project-level policy framework, declared under ``policies:`` in ``project.yml``."""
     model_config = ConfigDict(extra="ignore")
 
     deny: list[DenyRule] = Field(default_factory=list)
+
+
+class ValidationConfig(BaseModel):
+    """What `havn validate` reports beyond errors, declared under ``validation:``."""
+    model_config = ConfigDict(extra="ignore")
+
+    schema_drift: str = "off"  # "warn" | "off"
+class PackageConfig(BaseModel):
+    """One entry under ``packages:`` in ``project.yml``.
+
+    Either a git source (``git`` plus a required ``rev``) or a local directory
+    (``path``). ``rev`` is required for git sources because an unpinned clone
+    makes a build unreproducible; a branch name is accepted but warned about,
+    since a branch moves under you.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str
+    git: str | None = None
+    rev: str | None = None
+    path: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_source(self) -> "PackageConfig":
+        from havn.engine.utils import validate_identifier
+
+        validate_identifier(self.name, "package name")
+        if self.git and self.path:
+            raise ValueError(
+                f"package '{self.name}': set either 'git' or 'path', not both"
+            )
+        if not self.git and not self.path:
+            raise ValueError(
+                f"package '{self.name}': needs a 'git' URL or a local 'path'"
+            )
+        if self.git and not self.rev:
+            raise ValueError(
+                f"package '{self.name}': git packages need a 'rev' "
+                "(tag, branch or commit) so installs are reproducible"
+            )
+        return self
 
 
 class ProjectConfig(BaseModel):
@@ -206,10 +267,13 @@ class ProjectConfig(BaseModel):
     rewind: RewindConfig = Field(default_factory=RewindConfig)
     sentinel: SentinelConfig = Field(default_factory=SentinelConfig)
     policies: PoliciesConfig = Field(default_factory=PoliciesConfig)
+    validation: ValidationConfig = Field(default_factory=ValidationConfig)
+    snapshots: SnapshotsConfig = Field(default_factory=SnapshotsConfig)
     environments: dict[str, EnvironmentConfig] = Field(default_factory=dict)
     active_environment: str | None = None
     sources: list[SourceConfig] = Field(default_factory=list)
     exposures: list[ExposureConfig] = Field(default_factory=list)
+    packages: list[PackageConfig] = Field(default_factory=list)
     resources: dict[str, dict[str, Any]] = Field(default_factory=dict)
     streaming: dict[str, Any] = Field(default_factory=dict)
     project_dir: Path = Field(default_factory=Path.cwd)
@@ -271,6 +335,29 @@ def _parse_sources(project_dir: Path) -> list[SourceConfig]:
             connection=src_raw.get("connection"),
         ))
     return sources
+
+
+def _parse_packages(raw: dict[str, Any]) -> list[PackageConfig]:
+    """Parse and validate the ``packages:`` block of ``project.yml``.
+
+    Raises ValueError on a malformed entry or a duplicate name: two packages
+    sharing a name would fight over the same ``havn_packages/<name>/``
+    directory and the same schema prefix, and neither answer is right.
+    """
+    entries = raw.get("packages", []) or []
+    if not isinstance(entries, list):
+        raise ValueError("'packages' must be a list of {name, git, rev} entries")
+    packages: list[PackageConfig] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(f"'packages' entry must be a mapping, got {entry!r}")
+        pkg = PackageConfig(**entry)
+        if pkg.name in seen:
+            raise ValueError(f"Duplicate package name '{pkg.name}' in packages:")
+        seen.add(pkg.name)
+        packages.append(pkg)
+    return packages
 
 
 def _parse_exposures(project_dir: Path) -> list[ExposureConfig]:
@@ -379,6 +466,20 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
         ))
     policies = PoliciesConfig(deny=deny_rules)
 
+    # Snapshot meta columns
+    snapshots_raw = raw.get("snapshots", {}) or {}
+    snapshots = SnapshotsConfig(
+        meta_columns={
+            str(k): str(v)
+            for k, v in (snapshots_raw.get("meta_columns", {}) or {}).items()
+        },
+        valid_to_current=(
+            str(snapshots_raw["valid_to_current"])
+            if snapshots_raw.get("valid_to_current") is not None
+            else None
+        ),
+    )
+
     # Quality (anomaly detection)
     quality_raw = raw.get("quality", {})
     anomaly_raw = quality_raw.get("anomaly_detection", {})
@@ -410,7 +511,31 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
         environments[env_name] = EnvironmentConfig(
             database=env_raw.get("database", {}),
             connections=env_raw.get("connections", {}),
+            defer=env_raw.get("defer"),
         )
+
+    # A defer target must name another environment. Both mistakes are caught
+    # here rather than at transform time: an unknown name would otherwise
+    # surface as a missing-file ATTACH error, and an environment deferring to
+    # itself would attach its own warehouse a second time and fail on DuckDB's
+    # unique-file-handle rule. Every environment is checked, not only the
+    # active one, so a typo in a colleague's environment is reported on the
+    # next config load rather than on their next run.
+    for env_name, env_cfg in environments.items():
+        target = env_cfg.defer
+        if target is None:
+            continue
+        if target == env_name:
+            raise ValueError(
+                f"environments.{env_name}.defer points at itself; "
+                "defer must name a different environment"
+            )
+        if target not in environments:
+            known = ", ".join(sorted(n for n in environments if n != env_name))
+            raise ValueError(
+                f"environments.{env_name}.defer: unknown environment "
+                f"'{target}'." + (f" Defined environments: {known}" if known else "")
+            )
 
     # Apply environment overrides
     active_env = env
@@ -438,9 +563,10 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
                 conn_type = params.pop("type", "")
                 connections[conn_name] = ConnectionConfig(type=conn_type, params=params)
 
-    # Sources and exposures
+    # Sources, exposures and packages
     sources = _parse_sources(project_dir)
     exposures = _parse_exposures(project_dir)
+    packages = _parse_packages(raw)
 
     config = ProjectConfig(
         name=raw.get("name", project_dir.name),
@@ -455,10 +581,13 @@ def load_project(project_dir: Path | None = None, env: str | None = None) -> Pro
         rewind=rewind,
         sentinel=sentinel,
         policies=policies,
+        validation=ValidationConfig(schema_drift=str((raw.get("validation") or {}).get("schema_drift", "off") or "off")),
+        snapshots=snapshots,
         environments=environments,
         active_environment=active_env if active_env and active_env in environments else None,
         sources=sources,
         exposures=exposures,
+        packages=packages,
         project_dir=project_dir,
     )
     config._raw = raw
@@ -483,4 +612,5 @@ from havn.templates import (  # noqa: E402, F401
     SAMPLE_SEED_CSV,
     SAMPLE_SILVER_DAILY_SQL,
     SAMPLE_SILVER_EVENTS_SQL,
+    SAMPLE_UNIT_TEST_YML,
 )

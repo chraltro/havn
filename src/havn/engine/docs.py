@@ -27,20 +27,21 @@ def generate_docs(
     - sources.yml declarations
     - exposures.yml declarations
     """
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
     lines: list[str] = []
     lines.append("# Data Warehouse Documentation\n")
 
     # Discover models for dependency info
-    models = discover_models(transform_dir) if transform_dir.exists() else []
+    models = discover_all_models(transform_dir.parent) if transform_dir.exists() else []
     model_map = {m.full_name: m for m in models}
 
     # Get all schemas (excluding internal)
     schemas = conn.execute("""
         SELECT DISTINCT table_schema
         FROM information_schema.tables
-        WHERE table_schema NOT IN ('information_schema', '_havn')
+        WHERE table_catalog = current_database()
+          AND table_schema NOT IN ('information_schema', '_havn')
         ORDER BY
             CASE table_schema
                 WHEN 'landing' THEN 1
@@ -61,7 +62,7 @@ def generate_docs(
         tables = conn.execute("""
             SELECT table_name, table_type
             FROM information_schema.tables
-            WHERE table_schema = ?
+            WHERE table_catalog = current_database() AND table_schema = ?
             ORDER BY table_name
         """, [schema_name]).fetchall()
         lines.append(f"### {schema_name}\n")
@@ -78,7 +79,7 @@ def generate_docs(
         tables = conn.execute("""
             SELECT table_name, table_type
             FROM information_schema.tables
-            WHERE table_schema = ?
+            WHERE table_catalog = current_database() AND table_schema = ?
             ORDER BY table_name
         """, [schema_name]).fetchall()
 
@@ -114,7 +115,8 @@ def generate_docs(
             cols = conn.execute("""
                 SELECT column_name, data_type, is_nullable, column_default
                 FROM information_schema.columns
-                WHERE table_schema = ? AND table_name = ?
+                WHERE table_catalog = current_database()
+                  AND table_schema = ? AND table_name = ?
                 ORDER BY ordinal_position
             """, [schema_name, table_name]).fetchall()
 
@@ -211,16 +213,17 @@ def generate_structured_docs(
     Returns a JSON-serializable dict with schema/table metadata
     for a two-pane UI layout.
     """
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
-    models = discover_models(transform_dir) if transform_dir.exists() else []
+    models = discover_all_models(transform_dir.parent) if transform_dir.exists() else []
     model_map = {m.full_name: m for m in models}
 
     # Get all schemas (excluding internal)
     schemas_raw = conn.execute("""
         SELECT DISTINCT table_schema
         FROM information_schema.tables
-        WHERE table_schema NOT IN ('information_schema', '_havn')
+        WHERE table_catalog = current_database()
+          AND table_schema NOT IN ('information_schema', '_havn')
         ORDER BY
             CASE table_schema
                 WHEN 'landing' THEN 1
@@ -239,7 +242,7 @@ def generate_structured_docs(
         tables_raw = conn.execute("""
             SELECT table_name, table_type
             FROM information_schema.tables
-            WHERE table_schema = ?
+            WHERE table_catalog = current_database() AND table_schema = ?
             ORDER BY table_name
         """, [schema_name]).fetchall()
 
@@ -266,7 +269,8 @@ def generate_structured_docs(
             cols_raw = conn.execute("""
                 SELECT column_name, data_type, is_nullable
                 FROM information_schema.columns
-                WHERE table_schema = ? AND table_name = ?
+                WHERE table_catalog = current_database()
+                  AND table_schema = ? AND table_name = ?
                 ORDER BY ordinal_position
             """, [schema_name, table_name]).fetchall()
 

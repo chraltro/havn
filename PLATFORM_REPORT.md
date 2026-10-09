@@ -1,6 +1,6 @@
 # havn -- Platform Summary Report
 
-> **Version:** 0.2.19
+> **Version:** 0.2.24
 > **Classification:** Self-hosted data platform (open-source alternative to Databricks / Snowflake)
 
 ---
@@ -60,9 +60,10 @@ Both backends share the same engine, the same metadata schema, and the same
 
 ### Connectors (`src/havn/connectors/`)
 
-Ten built-in connectors: Postgres, MySQL, REST API, Google Sheets, CSV, S3/GCS,
-Stripe, HubSpot, Shopify, Webhook. Each generates an ingest script and
-optionally registers a CDC watermark column.
+Fourteen built-in connectors: Postgres, MySQL, BigQuery, Snowflake, Redshift,
+Databricks, REST API, Google Sheets, CSV, S3/GCS, Stripe, HubSpot, Shopify,
+Webhook. Each generates an ingest script and optionally registers a CDC
+watermark column.
 
 ### Python SQL macros (`src/havn/engine/macros.py`)
 
@@ -81,7 +82,7 @@ role-based exemption.
 
 ### Server (`src/havn/server/`)
 
-FastAPI app with 21 route modules and 150+ endpoints. Shared DuckDB connection
+FastAPI app with 32 route modules and 251 endpoints. Shared DuckDB connection
 singleton with per-thread cursors (Windows file-lock constraint). Pipeline
 runs in a background worker thread; SSE listeners are pushed via a
 `threading.Condition`. WebSockets for collaboration and the agent sidebar.
@@ -96,7 +97,7 @@ visualization with rewind timeline, dashboard designer, query plan tree,
 
 ### CLI (`src/havn/cli/`)
 
-50+ commands across project lifecycle (init, validate, status, checkpoint,
+47 commands across project lifecycle (init, validate, status, checkpoint,
 context, backup, restore), pipeline (transform, jobs, run, watch, schedule,
 lint, seed), model analysis (validate, promote, debug, impact, lineage,
 explain), querying (query, tables, shell, history), data quality (check,

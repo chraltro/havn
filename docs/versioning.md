@@ -2,6 +2,8 @@
 
 havn provides two versioning systems: **snapshots** for lightweight project state comparison, and **versions** for full data time travel with Parquet-backed table recovery.
 
+Both are about the warehouse as a whole. They are unrelated to **snapshot models** (`@config materialized=snapshot`), which keep row-level SCD2 history of a single table inside the warehouse and are documented in [transforms.md](transforms.md#snapshot-models-scd2). This page is the undo button; a snapshot model is a modeling pattern.
+
 ## Snapshots
 
 Snapshots capture a fingerprint of the current project and data state. They are fast to create and useful for comparing changes over time.

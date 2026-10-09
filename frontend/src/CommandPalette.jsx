@@ -53,13 +53,26 @@ export default function CommandPalette({ isOpen, onClose, files, tables, streams
   const inputRef = useRef(null);
   const listRef = useRef(null);
 
-  // Reset on open
+  // Reset on open, and put the caret in the search field. A single deferred
+  // focus() was not enough: when the palette opened while the code editor had
+  // focus, the editor could take it back a moment later, leaving the palette
+  // open with typing still going into the editor. Focus now, and re-assert it
+  // over the next frames until the field holds it.
   useEffect(() => {
-    if (isOpen) {
-      setQuery("");
-      setSelectedIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 0);
-    }
+    if (!isOpen) return;
+    setQuery("");
+    setSelectedIndex(0);
+    let frame = 0;
+    let tries = 0;
+    const claim = () => {
+      const input = inputRef.current;
+      if (!input) return;
+      if (document.activeElement !== input) input.focus({ preventScroll: true });
+      tries += 1;
+      if (tries < 5) frame = requestAnimationFrame(claim);
+    };
+    claim();
+    return () => cancelAnimationFrame(frame);
   }, [isOpen]);
 
   // Build all searchable items
@@ -112,6 +125,8 @@ export default function CommandPalette({ isOpen, onClose, files, tables, streams
 
     // Commands
     const commands = [
+      { name: "Home", secondary: "Pipeline health and what needs attention", icon: "\u2302", action: () => { onNavigate("Overview"); onClose(); } },
+      { name: "Ship", secondary: "Review and merge changes", icon: "\u21E1", action: () => { onNavigate("Ship"); onClose(); } },
       { name: "Run Transform", secondary: "Build all SQL models", icon: "\u25B6", action: () => { onNavigate("Editor"); onClose(); } },
       { name: "Run Diff", secondary: "Preview transform changes", icon: "\u0394", action: () => { onNavigate("Diff"); onClose(); } },
       { name: "Query Table", secondary: "Open SQL query runner", icon: "Q", action: () => { onNavigate("Query"); onClose(); } },
@@ -239,6 +254,7 @@ export default function CommandPalette({ isOpen, onClose, files, tables, streams
             placeholder="Search files, tables, commands..."
             style={cpStyles.input}
             aria-label="Command palette search"
+            autoFocus
           />
           <kbd style={cpStyles.kbd}>esc</kbd>
         </div>

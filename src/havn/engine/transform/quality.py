@@ -212,6 +212,24 @@ def _evaluate_assertion(
             detail = f"{dup_count:,} duplicate(s) — {distinct:,} distinct out of {total:,} rows"
         return AssertionResult(expression=expr, passed=passed, detail=detail)
 
+    # unique(a, b) / no_nulls(a, b) -- a composite uniqueness check is spelled
+    # `@grain a, b`, which has its own evaluator. Without this branch the
+    # expression falls through to the generic-SQL path and surfaces as a
+    # DuckDB parser error, which says nothing about what to write instead.
+    m = re.match(r"(unique|no_nulls)\(\s*(\w+(?:\s*,\s*\w+)+)\s*\)\s*$", expr)
+    if m:
+        helper, cols = m.group(1), ", ".join(c.strip() for c in m.group(2).split(","))
+        if helper == "unique":
+            hint = f"declare the grain instead: `@grain {cols}`"
+        else:
+            singles = " / ".join(f"no_nulls({c.strip()})" for c in cols.split(","))
+            hint = f"write one assertion per column: {singles}"
+        return AssertionResult(
+            expression=expr,
+            passed=False,
+            detail=f"{helper}() takes a single column; {hint}",
+        )
+
     # accepted_values(column, ['val1', 'val2'])
     m = re.match(r"accepted_values\((\w+),\s*\[(.+)\]\)\s*$", expr)
     if m:
@@ -259,7 +277,9 @@ def _evaluate_assertion(
     if re.search(r"\brow_count\b", expr):
         has_col = conn.execute(
             "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = ? AND table_name = ? AND lower(column_name) = 'row_count'",
+            "WHERE table_catalog = current_database() "
+            "AND table_schema = ? AND table_name = ? "
+            "AND lower(column_name) = 'row_count'",
             [model.schema, model.name],
         ).fetchone()[0]
         if not has_col:
@@ -290,6 +310,61 @@ def _evaluate_assertion(
         return AssertionResult(expression=expr, passed=passed, detail=detail)
 
 
+def failing_rows_sql(model: SQLModel, expr: str) -> str | None:
+    """SQL that returns the rows of ``model`` violating assertion ``expr``.
+
+    Mirrors the branches of ``_evaluate_assertion`` so "show failing rows" in
+    the UI lists exactly the rows the assertion counted. Returns None for
+    table-level checks (``row_count``) that have no offending rows to show.
+    A generic expression that turns out to be an aggregate is still returned;
+    it fails when run, the same way the evaluator's counting form does.
+    """
+    table = model.full_name
+    expr = expr.strip()
+
+    if re.search(r"\brow_count\b", expr):
+        return None
+
+    m = re.match(r"no_nulls\((\w+)\)\s*$", expr)
+    if m:
+        return f'SELECT * FROM {table} WHERE "{m.group(1)}" IS NULL'
+
+    m = re.match(r"unique\((\w+)\)\s*$", expr)
+    if m:
+        col = m.group(1)
+        return (
+            f'SELECT * FROM {table} WHERE "{col}" IN ('
+            f'SELECT "{col}" FROM {table} GROUP BY "{col}" HAVING COUNT(*) > 1'
+            f') ORDER BY "{col}"'
+        )
+
+    m = re.match(r"accepted_values\((\w+),\s*\[(.+)\]\)\s*$", expr)
+    if m:
+        col = m.group(1)
+        values = [v.strip().strip("'\"") for v in m.group(2).split(",")]
+        placeholders = ", ".join("'" + v.replace("'", "''") + "'" for v in values)
+        return (
+            f'SELECT * FROM {table} WHERE "{col}" IS NOT NULL '
+            f'AND "{col}"::VARCHAR NOT IN ({placeholders})'
+        )
+
+    # Mirrors the evaluator's rejection of the multi-column spelling: the
+    # assertion never ran, so there are no rows to show.
+    if re.match(r"(unique|no_nulls)\(\s*\w+(?:\s*,\s*\w+)+\s*\)\s*$", expr):
+        return None
+
+    m = re.match(r"grain\((.+)\)\s*$", expr)
+    if m:
+        cols = ", ".join(f'"{c.strip()}"' for c in m.group(1).split(","))
+        return (
+            f"SELECT * FROM {table} WHERE ({cols}) IN ("
+            f"SELECT ({cols}) FROM {table} GROUP BY {cols} HAVING COUNT(*) > 1"
+            f") ORDER BY {cols}"
+        )
+
+    return f"SELECT * FROM {table} WHERE NOT ({expr})"
+
+
 def profile_model(
     conn: duckdb.DuckDBPyConnection,
     model: SQLModel,
@@ -298,9 +373,15 @@ def profile_model(
     table = model.full_name
 
     row_count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    # Scoped to the current database: information_schema spans every attached
+    # one, and a deferred run has the defer target attached. Without the
+    # filter a model the target also holds was profiled with both catalogs'
+    # columns (twice the column_count), or with a column that exists only
+    # there, which then failed the profile of a model that built fine.
     cols = conn.execute(
         "SELECT column_name FROM information_schema.columns "
-        "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+        "WHERE table_catalog = current_database() "
+        "AND table_schema = ? AND table_name = ? ORDER BY ordinal_position",
         [model.schema, model.name],
     ).fetchall()
     column_names = [c[0] for c in cols]
@@ -435,3 +516,47 @@ def _save_source_freshness(
             )
         except Exception:
             pass
+
+
+def declared_checks(model: SQLModel) -> set[str]:
+    """The assertion expressions a model declares right now, as they are stored."""
+    declared = {e for e, _ in model.assertion_specs} | set(model.assertions)
+    if model.grain:
+        declared.add(f"grain({', '.join(model.grain)})")
+    return declared
+
+
+def current_assertion_results(
+    conn: duckdb.DuckDBPyConnection,
+    models: list[SQLModel],
+) -> list[tuple]:
+    """Latest result of every check the models still declare.
+
+    _havn.assertion_results is an append-only history: every run adds a row
+    per check, and a check that was edited or deleted keeps its old rows. A
+    pass rate over that history counts the same check many times, and keeps
+    counting failures of checks that no longer exist. This is the one place
+    "the current state of the checks" is defined, so every page that shows
+    it agrees.
+
+    Returns ``(model_path, expression, passed, detail, severity, checked_at)``
+    rows, severity defaulting to ``"error"``.
+    """
+    by_name = {m.full_name: m for m in models}
+    rows = conn.execute(
+        """
+        SELECT model_path, expression, passed, detail, COALESCE(severity, 'error'), checked_at
+        FROM _havn.assertion_results
+        QUALIFY row_number() OVER (
+            PARTITION BY model_path, expression ORDER BY checked_at DESC
+        ) = 1
+        ORDER BY model_path, expression
+        """
+    ).fetchall()
+    current = []
+    for row in rows:
+        model = by_name.get(row[0])
+        if model is None or row[1] not in declared_checks(model):
+            continue  # model, or this check on it, has since been removed or edited
+        current.append(row)
+    return current

@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>havn Model Workbench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Tokens mirror frontend/src/themes.js (havn-dark / havn-light) */
+:root {
+  --bg: #0C1014; --bg2: #111A1E; --bg3: #090D10;
+  --border: #1A2B2E; --border-l: #243B3E;
+  --text: #D2DCD8; --text2: #6A8580; --dim: #4A625D;
+  --accent: #3ECFB4; --accent-soft: rgba(62,207,180,.12);
+  --green: #34D399; --red: #F87171; --red-soft: rgba(248,113,113,.12);
+  --yellow: #FBBF24; --yellow-soft: rgba(251,191,36,.12); --purple: #7C8CF5;
+  --r: 6px; --r-lg: 10px;
+  --font: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #F4F6F8; --bg2: #E8ECF0; --bg3: #FFFFFF;
+    --border: #D0D7DF; --border-l: #BCC5D0;
+    --text: #0B0E14; --text2: #5A6878; --dim: #8592A2;
+    --accent: #2BA88E; --accent-soft: rgba(43,168,142,.12);
+    --green: #22A06B; --red: #DC2626; --red-soft: rgba(220,38,38,.08);
+    --yellow: #B45309; --yellow-soft: rgba(180,83,9,.1); --purple: #5B6AD0;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #F4F6F8; --bg2: #E8ECF0; --bg3: #FFFFFF;
+  --border: #D0D7DF; --border-l: #BCC5D0;
+  --text: #0B0E14; --text2: #5A6878; --dim: #8592A2;
+  --accent: #2BA88E; --accent-soft: rgba(43,168,142,.12);
+  --green: #22A06B; --red: #DC2626; --red-soft: rgba(220,38,38,.08);
+  --yellow: #B45309; --yellow-soft: rgba(180,83,9,.1); --purple: #5B6AD0;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 14px/1.45 var(--font); }
+.mono { font-family: var(--mono); }
+button { font: inherit; color: inherit; cursor: pointer; }
+
+/* ---------- Shell ---------- */
+.app { display: grid; grid-template-columns: 64px 1fr; grid-template-rows: 48px 1fr; height: 100vh; }
+.rail { grid-row: 1 / 3; background: var(--bg3); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 4px; }
+.rail .logo { width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: var(--bg3); display: grid; place-items: center; font-weight: 600; margin-bottom: 12px; }
+.rail a { width: 52px; padding: 7px 0 5px; border-radius: var(--r); display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--text2); text-decoration: none; font-size: 10.5px; position: relative; }
+.rail a svg { width: 18px; height: 18px; }
+.rail a:hover { background: var(--bg2); color: var(--text); }
+.rail a.on { color: var(--accent); background: var(--accent-soft); }
+.rail a .badge { position: absolute; top: 3px; right: 9px; min-width: 15px; height: 15px; border-radius: 8px; background: var(--red); color: #fff; font-size: 9.5px; display: grid; place-items: center; padding: 0 3px; }
+.rail .spacer { flex: 1; }
+.avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--purple); color: #fff; display: grid; place-items: center; font-size: 11px; font-weight: 600; margin-top: 6px; }
+
+.top { display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--border); background: var(--bg); min-width: 0; }
+.crumb { color: var(--text2); font-size: 13px; white-space: nowrap; }
+.crumb b { color: var(--text); font-weight: 500; }
+.omni { flex: 1; max-width: 520px; margin: 0 auto; display: flex; align-items: center; gap: 8px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 6px 10px; color: var(--dim); font-size: 13px; min-width: 0; }
+.omni span:first-of-type { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--border-l); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--text2); background: var(--bg3); }
+.env { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-l); border-radius: 20px; padding: 3px 10px 3px 8px; font-size: 12px; white-space: nowrap; background: none; }
+.env i { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+.btn { border: 1px solid var(--border-l); background: var(--bg2); border-radius: var(--r); padding: 5px 12px; font-size: 13px; white-space: nowrap; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #062019; font-weight: 500; }
+.split { display: inline-flex; }
+.split .btn:first-child { border-radius: var(--r) 0 0 var(--r); }
+.split .btn:last-child { border-radius: 0 var(--r) var(--r) 0; border-left: 1px solid rgba(0,0,0,.2); padding: 5px 8px; }
+main { overflow: hidden; display: grid; grid-template-rows: auto auto 1fr auto; min-height: 0; }
+.ok { color: var(--green); } .warn { color: var(--yellow); } .bad { color: var(--red); }
+
+/* File tabs */
+.ftabs { display: flex; border-bottom: 1px solid var(--border); background: var(--bg3); overflow-x: auto; }
+.ftab { display: flex; align-items: center; gap: 8px; padding: 9px 14px; font: 12.5px var(--mono); color: var(--text2); border-right: 1px solid var(--border); white-space: nowrap; }
+.ftab.on { color: var(--text); background: var(--bg); box-shadow: inset 0 2px 0 var(--accent); }
+.ftab .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text2); }
+.ftab .x { color: var(--dim); }
+
+/* Lineage strip */
+.lineage { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--border); overflow-x: auto; font-size: 12px; }
+.lineage .lbl { color: var(--dim); text-transform: uppercase; letter-spacing: .06em; font-size: 10.5px; margin-right: 2px; }
+.node { font-family: var(--mono); padding: 4px 9px; border: 1px solid var(--border-l); border-radius: 20px; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; color: var(--text2); }
+.node i { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.node.cur { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 500; }
+.node.cur i { background: var(--red); }
+.node.rb { border-style: dashed; }
+.node.rb i { background: var(--yellow); }
+.arrow { color: var(--dim); }
+.lineage .more { color: var(--accent); white-space: nowrap; margin-left: auto; }
+
+/* Split */
+.split2 { display: grid; grid-template-columns: minmax(0, 1.1fr) 6px minmax(0, 1fr); min-height: 0; }
+.gutter { background: var(--border); cursor: col-resize; }
+.code { overflow: auto; background: var(--bg3); font: 13px/1.7 var(--mono); padding: 12px 0; }
+.ln { display: grid; grid-template-columns: 44px 1fr; }
+.ln > span:first-child { color: var(--dim); text-align: right; padding-right: 14px; user-select: none; }
+.ln > span:last-child { white-space: pre; padding-right: 16px; }
+.ln.err { background: var(--red-soft); }
+.kw { color: var(--purple); } .dir { color: var(--accent); } .str { color: var(--yellow); } .cm { color: var(--dim); font-style: italic; } .ref { color: var(--accent); text-decoration: underline dotted; text-underline-offset: 3px; }
+.squig { text-decoration: underline wavy var(--red); text-underline-offset: 3px; }
+.diag { margin: 2px 16px 6px 44px; padding: 8px 10px; border-left: 2px solid var(--red); background: var(--bg2); border-radius: 0 var(--r) var(--r) 0; font: 12px/1.5 var(--font); color: var(--text2); }
+.diag b { color: var(--red); font-weight: 500; }
+.diag a { color: var(--accent); margin-right: 12px; text-decoration: none; }
+.ghost { color: var(--dim); }
+
+.insp { display: grid; grid-template-rows: auto 1fr; min-height: 0; background: var(--bg); }
+.itabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--border); }
+.itabs button { background: none; border: 0; padding: 10px 10px; font-size: 13px; color: var(--text2); border-bottom: 2px solid transparent; }
+.itabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+.itabs .n { font-family: var(--mono); font-size: 11px; color: var(--dim); margin-left: 3px; }
+.itabs .n.bad { color: var(--red); }
+.ibody { overflow: auto; padding: 12px 14px; }
+.pane { display: none; } .pane.on { display: block; }
+.meta { display: flex; gap: 14px; font-size: 12px; color: var(--text2); margin-bottom: 10px; flex-wrap: wrap; }
+.meta b { color: var(--text); font-weight: 500; }
+table { border-collapse: collapse; width: 100%; font: 12px var(--mono); }
+th { text-align: left; font-weight: 500; color: var(--text2); padding: 6px 8px; border-bottom: 1px solid var(--border-l); white-space: nowrap; position: sticky; top: 0; background: var(--bg); }
+th small { display: block; color: var(--dim); font-weight: 400; font-size: 10.5px; }
+td { padding: 5px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+td.null { color: var(--red); font-style: italic; }
+tr.hl td { background: var(--red-soft); }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.filter-note { font-size: 12px; color: var(--text2); background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 6px 10px; margin-bottom: 10px; display: flex; justify-content: space-between; gap: 8px; }
+.check { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.check .mono { font-size: 12px; }
+.check small { display: block; color: var(--text2); font-size: 12px; }
+.col { display: grid; grid-template-columns: 140px 90px 1fr; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.col .mono { color: var(--text); }
+.col .t { color: var(--purple); font-family: var(--mono); font-size: 11.5px; }
+.col .d { color: var(--text2); }
+.col .d.missing { color: var(--dim); font-style: italic; }
+
+/* Action bar */
+.actions { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-top: 1px solid var(--border); background: var(--bg3); font-size: 12.5px; flex-wrap: wrap; }
+.actions .status { color: var(--text2); display: flex; align-items: center; gap: 8px; margin-right: auto; }
+.actions .status i { width: 7px; height: 7px; border-radius: 50%; background: var(--yellow); }
+.actions .btn kbd { margin-left: 6px; }
+.btn.primary kbd { background: rgba(0,0,0,.15); border-color: rgba(0,0,0,.2); color: inherit; }
+
+/* Design notes */
+.pin { display: none; position: absolute; width: 20px; height: 20px; border-radius: 50%; background: var(--purple); color: #fff; font: 600 11px/20px var(--font); text-align: center; box-shadow: 0 0 0 3px var(--bg); z-index: 5; }
+body.notes .pin { display: block; }
+.rel { position: relative; }
+.notes-toggle { position: fixed; right: 16px; bottom: 60px; z-index: 20; border-radius: 20px; background: var(--purple); color: #fff; border: 0; padding: 8px 14px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+.notes-panel { display: none; position: fixed; right: 16px; bottom: 104px; width: min(360px, calc(100vw - 32px)); max-height: 65vh; overflow: auto; z-index: 20; background: var(--bg3); border: 1px solid var(--border-l); border-radius: var(--r-lg); padding: 16px 18px; box-shadow: 0 12px 40px rgba(0,0,0,.35); font-size: 13px; }
+body.notes .notes-panel { display: block; }
+.notes-panel h4 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+.notes-panel ol { padding-left: 18px; margin: 10px 0 0; }
+.notes-panel li { margin-bottom: 8px; color: var(--text2); }
+.notes-panel li b { color: var(--text); font-weight: 500; }
+
+@media (max-width: 980px) {
+  main { overflow: auto; grid-template-rows: auto auto auto auto; }
+  .split2 { grid-template-columns: 1fr; }
+  .gutter { display: none; }
+  .code { max-height: 55vh; }
+  .insp { border-top: 1px solid var(--border); }
+}
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: 48px 1fr 58px; }
+  .rail { grid-row: 3; flex-direction: row; justify-content: space-around; border-right: 0; border-top: 1px solid var(--border); padding: 0 4px; }
+  .rail .logo, .rail .spacer, .rail .avatar, .rail a.secondary { display: none; }
+  .crumb, .split, .top .btn { display: none; }
+  .notes-toggle { bottom: 72px; } .notes-panel { bottom: 116px; }
+  .col { grid-template-columns: 1fr auto; } .col .d { grid-column: 1 / -1; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="rail" aria-label="Main">
+    <div class="logo">h</div>
+    <a href="01-harbour-home.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</a>
+    <a class="on" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 6l-6 6 6 6M16 6l6 6-6 6"/></svg>Build</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>Data</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Observe<span class="badge">3</span></a>
+    <a href="03-change-review.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7M8.3 6.8c5 .5 7.4 2.3 7.7 3.4"/></svg>Ship</a>
+    <div class="spacer"></div>
+    <a class="secondary" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l2.2 4.8L19 9l-3.5 3.6.9 5.4-4.4-2.5-4.4 2.5.9-5.4L5 9l4.8-1.2z"/></svg>Agent</a>
+    <div class="avatar" title="Christian · admin">CD</div>
+  </nav>
+
+  <header class="top">
+    <span class="crumb">Build / silver / <b>orders_enriched</b></span>
+    <div class="omni">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="5"/><path d="M10.5 10.5l4 4"/></svg>
+      <span>Jump to model, table, run or command…</span>
+      <kbd>⌘K</kbd>
+    </div>
+    <button class="env"><i></i>dev<span style="color:var(--dim)">▾</span></button>
+  </header>
+
+  <main>
+    <div class="ftabs">
+      <div class="ftab on"><span class="dot" style="background:var(--yellow)"></span>silver/orders_enriched.sql<span class="x">×</span></div>
+      <div class="ftab"><span class="dot"></span>gold/daily_revenue.sql<span class="x">×</span></div>
+      <div class="ftab"><span class="dot"></span>ingest/orders.py<span class="x">×</span></div>
+    </div>
+
+    <div class="lineage rel">
+      <span class="pin" style="left:4px;top:4px">1</span>
+      <span class="lbl">Lineage</span>
+      <span class="node"><i></i>bronze.orders</span>
+      <span class="node"><i></i>bronze.customers</span>
+      <span class="arrow">→</span>
+      <span class="node cur"><i></i>silver.orders_enriched</span>
+      <span class="arrow">→</span>
+      <span class="node rb" title="Will rebuild"><i></i>gold.daily_revenue</span>
+      <span class="node rb" title="Will rebuild"><i></i>gold.customer_360</span>
+      <span class="node rb" title="Will rebuild"><i></i>gold.region_sales</span>
+      <a class="more" href="#">Open full DAG ↗</a>
+    </div>
+
+    <div class="split2">
+      <div class="code rel" aria-label="SQL editor">
+        <span class="pin" style="right:12px;top:150px">2</span>
+        <div class="ln"><span>1</span><span><span class="dir">@config</span> materialized=<span class="str">table</span>, schema=<span class="str">silver</span></span></div>
+        <div class="ln"><span>2</span><span><span class="dir">@description</span> <span class="cm">Orders joined with customer attributes</span></span></div>
+        <div class="ln err"><span>3</span><span><span class="dir">@assert</span> customer_id <span class="kw">IS NOT NULL</span></span></div>
+        <div class="diag"><b>✗ 14 rows fail this assertion</b> in the last build. All have <span class="mono">bronze.orders.customer_ref</span> values not present in <span class="mono">bronze.customers</span>.<br><a href="#">Show failing rows</a><a href="#">Change to INNER JOIN</a><a href="#">Ask agent</a></div>
+        <div class="ln"><span>4</span><span></span></div>
+        <div class="ln"><span>5</span><span><span class="kw">SELECT</span></span></div>
+        <div class="ln"><span>6</span><span>    o.order_id,</span></div>
+        <div class="ln"><span>7</span><span>    o.order_date,</span></div>
+        <div class="ln"><span>8</span><span>    c.customer_id,</span></div>
+        <div class="ln"><span>9</span><span>    c.segment,</span></div>
+        <div class="ln"><span>10</span><span>    mask_email(c.email) <span class="kw">AS</span> email,</span></div>
+        <div class="ln"><span>11</span><span>    o.amount,</span></div>
+        <div class="ln"><span>12</span><span>    o.amount - <span class="kw">COALESCE</span>(o.refund, 0) <span class="kw">AS</span> net_amount</span></div>
+        <div class="ln"><span>13</span><span><span class="kw">FROM</span> <span class="ref">bronze.orders</span> o</span></div>
+        <div class="ln"><span>14</span><span><span class="kw">LEFT JOIN</span> <span class="ref">bronze.customers</span> c</span></div>
+        <div class="ln"><span>15</span><span>    <span class="kw">ON</span> <span class="squig">o.customer_ref = c.customer_id</span></span></div>
+        <div class="ln"><span>16</span><span><span class="kw">WHERE</span> o.status <span class="kw">!=</span> <span class="str">'cancelled'</span></span></div>
+        <div class="ln"><span>17</span><span class="ghost">                                          <span class="cm">-- ⌘↵ previews this query against dev</span></span></div>
+      </div>
+
+      <div class="gutter" aria-hidden="true"></div>
+
+      <div class="insp rel">
+        <span class="pin" style="right:10px;top:10px">3</span>
+        <div class="itabs" role="tablist">
+          <button class="on" data-p="preview">Preview</button>
+          <button data-p="checks">Checks<span class="n bad">1</span></button>
+          <button data-p="cols">Columns<span class="n">8</span></button>
+          <button data-p="runs">Runs</button>
+        </div>
+        <div class="ibody">
+          <div class="pane on" id="preview">
+            <div class="meta"><span><b>1,204</b> rows</span><span>38 ms</span><span>unsaved SQL · dev</span><span class="bad">14 rows fail @assert</span></div>
+            <div class="filter-note rel"><span class="pin" style="left:-10px;top:-10px">4</span><span>Showing failing rows first</span><a href="#" style="color:var(--accent);text-decoration:none">Show all</a></div>
+            <table>
+              <thead><tr><th>order_id<small>INTEGER</small></th><th>order_date<small>DATE</small></th><th>customer_id<small>INTEGER</small></th><th>segment<small>VARCHAR</small></th><th class="num">net_amount<small>DECIMAL</small></th></tr></thead>
+              <tbody>
+                <tr class="hl"><td>100231</td><td>2026-09-24</td><td class="null">NULL</td><td class="null">NULL</td><td class="num">412.00</td></tr>
+                <tr class="hl"><td>100229</td><td>2026-09-24</td><td class="null">NULL</td><td class="null">NULL</td><td class="num">89.50</td></tr>
+                <tr class="hl"><td>100204</td><td>2026-09-23</td><td class="null">NULL</td><td class="null">NULL</td><td class="num">1,240.00</td></tr>
+                <tr><td>100230</td><td>2026-09-24</td><td>5521</td><td>enterprise</td><td class="num">3,900.00</td></tr>
+                <tr><td>100228</td><td>2026-09-24</td><td>1180</td><td>smb</td><td class="num">220.00</td></tr>
+                <tr><td>100227</td><td>2026-09-24</td><td>2043</td><td>smb</td><td class="num">64.90</td></tr>
+                <tr><td>100226</td><td>2026-09-23</td><td>5521</td><td>enterprise</td><td class="num">780.00</td></tr>
+                <tr><td>100225</td><td>2026-09-23</td><td>3317</td><td>consumer</td><td class="num">19.99</td></tr>
+                <tr><td>100224</td><td>2026-09-23</td><td>4410</td><td>consumer</td><td class="num">42.00</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pane" id="checks">
+            <div class="check"><span class="bad">✗</span><div><span class="mono">customer_id IS NOT NULL</span><small>@assert · 14 failing rows</small></div><a href="#" style="color:var(--accent);font-size:12px">rows</a></div>
+            <div class="check"><span class="ok">✓</span><div><span class="mono">unique(order_id)</span><small>contract · 1,204 distinct</small></div><span></span></div>
+            <div class="check"><span class="ok">✓</span><div><span class="mono">net_amount &gt;= 0</span><small>@assert</small></div><span></span></div>
+            <div class="check"><span class="ok">✓</span><div>email masked for viewer role<small>masking policy pii_email</small></div><span></span></div>
+            <div class="check"><span class="warn">!</span><div>Lint: trailing whitespace line 12<small>sqlfluff · auto-fixable</small></div><a href="#" style="color:var(--accent);font-size:12px">fix</a></div>
+          </div>
+          <div class="pane" id="cols">
+            <div class="col"><span class="mono">order_id</span><span class="t">INTEGER</span><span class="d">Primary key from source system</span></div>
+            <div class="col"><span class="mono">order_date</span><span class="t">DATE</span><span class="d">Local date the order was placed</span></div>
+            <div class="col"><span class="mono">customer_id</span><span class="t">INTEGER</span><span class="d">FK to silver.dim_customer</span></div>
+            <div class="col"><span class="mono">segment</span><span class="t">VARCHAR</span><span class="d missing">No description · add @col</span></div>
+            <div class="col"><span class="mono">email</span><span class="t">VARCHAR</span><span class="d">Masked via mask_email() · PII</span></div>
+            <div class="col"><span class="mono">amount</span><span class="t">DECIMAL</span><span class="d">Gross order amount, NOK</span></div>
+            <div class="col"><span class="mono">net_amount</span><span class="t">DECIMAL</span><span class="d missing">No description · add @col</span></div>
+          </div>
+          <div class="pane" id="runs">
+            <div class="check"><span class="bad">✗</span><div>#421 full-refresh<small>12 min ago · 0.9s · assertion failed</small></div><span></span></div>
+            <div class="check"><span class="ok">✓</span><div>#419 full-refresh<small>6h ago · 0.8s · 1,190 rows</small></div><span></span></div>
+            <div class="check"><span class="ok">✓</span><div>#417 silver.* · Christian<small>yesterday · 0.8s · 1,188 rows</small></div><span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="actions rel">
+      <span class="pin" style="left:4px;top:-10px">5</span>
+      <span class="status"><i></i>Unsaved · SQL hash changed · 3 downstream models will rebuild</span>
+      <button class="btn">Save<kbd>⌘S</kbd></button>
+      <button class="btn">Preview<kbd>⌘↵</kbd></button>
+      <button class="btn">Build model</button>
+      <button class="btn primary">Build + downstream (3)<kbd>⇧⌘↵</kbd></button>
+    </div>
+  </main>
+</div>
+
+<button class="notes-toggle" onclick="document.body.classList.toggle('notes')">Design notes</button>
+<aside class="notes-panel">
+  <h4>Mockup 2 · Model Workbench</h4>
+  <div style="color:var(--text2)">Everything about one model on one screen. Today, fixing a failed assertion means hopping between Editor, Query, Quality, DAG and Runs.</div>
+  <ol>
+    <li><b>Lineage strip.</b> Upstream and downstream models sit above the code. Dashed nodes are the ones your edit will rebuild. Click one to open it in a new tab.</li>
+    <li><b>Failures show up where you fix them.</b> A failed <span class="mono">@assert</span> shows its row count inline, points at the likely join, and offers the fix. Model references are clickable.</li>
+    <li><b>The inspector replaces tab-hopping.</b> Preview, Checks, Columns and Runs for this model sit next to the code. Columns flags missing <span class="mono">@col</span> docs.</li>
+    <li><b>Preview puts failing rows first.</b> ⌘↵ runs the unsaved SQL against dev, with violating rows highlighted at the top.</li>
+    <li><b>Clear blast radius.</b> The action bar spells out what a build will touch, using the existing hash-based change detection, before you press anything.</li>
+  </ol>
+</aside>
+<script>
+document.querySelectorAll('.itabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.itabs button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === b.dataset.p));
+}));
+</script>
+</body>
+</html>

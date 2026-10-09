@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>havn Change Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Tokens mirror frontend/src/themes.js (havn-dark / havn-light) */
+:root {
+  --bg: #0C1014; --bg2: #111A1E; --bg3: #090D10;
+  --border: #1A2B2E; --border-l: #243B3E;
+  --text: #D2DCD8; --text2: #6A8580; --dim: #4A625D;
+  --accent: #3ECFB4; --accent-soft: rgba(62,207,180,.12);
+  --green: #34D399; --red: #F87171; --red-soft: rgba(248,113,113,.12);
+  --yellow: #FBBF24; --yellow-soft: rgba(251,191,36,.12); --purple: #7C8CF5;
+  --r: 6px; --r-lg: 10px;
+  --font: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #F4F6F8; --bg2: #E8ECF0; --bg3: #FFFFFF;
+    --border: #D0D7DF; --border-l: #BCC5D0;
+    --text: #0B0E14; --text2: #5A6878; --dim: #8592A2;
+    --accent: #2BA88E; --accent-soft: rgba(43,168,142,.12);
+    --green: #22A06B; --red: #DC2626; --red-soft: rgba(220,38,38,.08);
+    --yellow: #B45309; --yellow-soft: rgba(180,83,9,.1); --purple: #5B6AD0;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #F4F6F8; --bg2: #E8ECF0; --bg3: #FFFFFF;
+  --border: #D0D7DF; --border-l: #BCC5D0;
+  --text: #0B0E14; --text2: #5A6878; --dim: #8592A2;
+  --accent: #2BA88E; --accent-soft: rgba(43,168,142,.12);
+  --green: #22A06B; --red: #DC2626; --red-soft: rgba(220,38,38,.08);
+  --yellow: #B45309; --yellow-soft: rgba(180,83,9,.1); --purple: #5B6AD0;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 14px/1.45 var(--font); }
+.mono { font-family: var(--mono); }
+button { font: inherit; color: inherit; cursor: pointer; }
+
+/* ---------- Shell ---------- */
+.app { display: grid; grid-template-columns: 64px 1fr; grid-template-rows: 48px 1fr; height: 100vh; }
+.rail { grid-row: 1 / 3; background: var(--bg3); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 4px; }
+.rail .logo { width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: var(--bg3); display: grid; place-items: center; font-weight: 600; margin-bottom: 12px; }
+.rail a { width: 52px; padding: 7px 0 5px; border-radius: var(--r); display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--text2); text-decoration: none; font-size: 10.5px; position: relative; }
+.rail a svg { width: 18px; height: 18px; }
+.rail a:hover { background: var(--bg2); color: var(--text); }
+.rail a.on { color: var(--accent); background: var(--accent-soft); }
+.rail a .badge { position: absolute; top: 3px; right: 9px; min-width: 15px; height: 15px; border-radius: 8px; background: var(--red); color: #fff; font-size: 9.5px; display: grid; place-items: center; padding: 0 3px; }
+.rail .spacer { flex: 1; }
+.avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--purple); color: #fff; display: grid; place-items: center; font-size: 11px; font-weight: 600; margin-top: 6px; }
+
+.top { display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--border); background: var(--bg); min-width: 0; }
+.crumb { color: var(--text2); font-size: 13px; white-space: nowrap; }
+.crumb b { color: var(--text); font-weight: 500; }
+.omni { flex: 1; max-width: 520px; margin: 0 auto; display: flex; align-items: center; gap: 8px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 6px 10px; color: var(--dim); font-size: 13px; min-width: 0; }
+.omni span:first-of-type { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--border-l); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--text2); background: var(--bg3); }
+.env { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-l); border-radius: 20px; padding: 3px 10px 3px 8px; font-size: 12px; white-space: nowrap; background: none; }
+.env i { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+.btn { border: 1px solid var(--border-l); background: var(--bg2); border-radius: var(--r); padding: 5px 12px; font-size: 13px; white-space: nowrap; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #062019; font-weight: 500; }
+.split { display: inline-flex; }
+.split .btn:first-child { border-radius: var(--r) 0 0 var(--r); }
+.split .btn:last-child { border-radius: 0 var(--r) var(--r) 0; border-left: 1px solid rgba(0,0,0,.2); padding: 5px 8px; }
+main { overflow: auto; min-height: 0; }
+.ok { color: var(--green); } .warn { color: var(--yellow); } .bad { color: var(--red); }
+h1 { font-size: 20px; font-weight: 500; margin: 0; }
+h2 { font-size: 13px; font-weight: 500; color: var(--text2); text-transform: uppercase; letter-spacing: .06em; margin: 0 0 10px; }
+.card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r-lg); }
+
+.hero { padding: 20px 28px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.promo { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 13px; color: var(--text2); flex-wrap: wrap; }
+.envtag { font-family: var(--mono); font-size: 12px; padding: 2px 9px; border-radius: 20px; border: 1px solid; }
+.envtag.dev { color: var(--green); border-color: var(--green); }
+.envtag.prod { color: var(--red); border-color: var(--red); }
+
+.layout { display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; min-height: calc(100% - 96px); }
+.list { border-right: 1px solid var(--border); padding: 16px 12px; }
+.list h2 { padding-left: 6px; }
+.item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--r); font: 12.5px var(--mono); color: var(--text2); cursor: pointer; }
+.item:hover { background: var(--bg2); }
+.item.on { background: var(--accent-soft); color: var(--text); }
+.item .tag { font: 600 10px var(--font); width: 16px; height: 16px; border-radius: 4px; display: grid; place-items: center; flex: none; }
+.tag.m { background: var(--yellow-soft); color: var(--yellow); }
+.tag.a { background: var(--accent-soft); color: var(--green); }
+.tag.i { background: var(--bg2); color: var(--dim); border: 1px solid var(--border-l); }
+.item em { white-space: nowrap; margin-left: auto; font-style: normal; font-size: 11px; color: var(--dim); }
+.list .grp { margin-bottom: 18px; }
+
+.center { padding: 20px 24px 40px; min-width: 0; }
+.impact { padding: 14px; margin-bottom: 20px; }
+.impact svg { width: 100%; height: auto; display: block; }
+.impact text { font-family: var(--mono); font-size: 11px; fill: var(--text2); }
+.impact .cur text { fill: var(--text); }
+.g-edge { stroke: var(--border-l); stroke-width: 1.5; fill: none; }
+.g-edge.hot { stroke: var(--accent); }
+.g-node rect { fill: var(--bg); stroke: var(--border-l); }
+.g-node.mod rect { stroke: var(--yellow); }
+.g-node.new rect { stroke: var(--green); }
+.g-node.aff rect { stroke-dasharray: 4 3; }
+
+.mhead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.mhead .n { font: 500 16px var(--mono); }
+.mhead .s { font-size: 12.5px; color: var(--text2); }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+.stat { padding: 10px 12px; }
+.stat .k { font-size: 11.5px; color: var(--text2); }
+.stat .v { font: 500 18px var(--font); font-variant-numeric: tabular-nums; }
+.schema { margin-bottom: 16px; padding: 10px 14px; font: 12.5px/1.9 var(--mono); }
+.schema .add { color: var(--green); } .schema .chg { color: var(--yellow); }
+.schema .c { color: var(--dim); }
+.metric { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 16px; font-size: 13px; flex-wrap: wrap; }
+.metric .big { font: 500 18px var(--font); }
+.metric .spark { flex: 1; min-width: 120px; height: 32px; }
+table { border-collapse: collapse; width: 100%; font: 12px var(--mono); }
+.twrap { overflow-x: auto; }
+th { text-align: left; font-weight: 500; color: var(--text2); padding: 7px 10px; border-bottom: 1px solid var(--border-l); white-space: nowrap; }
+td { padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+del { color: var(--red); text-decoration: line-through; opacity: .8; margin-right: 6px; }
+ins { color: var(--green); text-decoration: none; }
+
+.gate { border-left: 1px solid var(--border); padding: 20px 18px; background: var(--bg3); }
+.gi { display: grid; grid-template-columns: 20px 1fr; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.gi small { display: block; color: var(--text2); font-size: 12px; margin-top: 1px; }
+.gi .ic { font-size: 13px; line-height: 1.4; }
+.reviewers { display: flex; gap: 6px; margin-top: 6px; }
+.rv { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 600; color: #fff; }
+.promote { width: 100%; margin-top: 18px; padding: 10px; border-radius: var(--r); border: 1px dashed var(--border-l); background: none; color: var(--dim); font-size: 14px; cursor: not-allowed; }
+.why { font-size: 12px; color: var(--text2); margin-top: 8px; text-align: center; }
+.plan { margin-top: 18px; font: 12.5px/1.7 var(--font); color: var(--text2); background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 10px 12px; }
+.plan b { color: var(--text); font-weight: 500; }
+
+/* Design notes */
+.pin { display: none; position: absolute; width: 20px; height: 20px; border-radius: 50%; background: var(--purple); color: #fff; font: 600 11px/20px var(--font); text-align: center; box-shadow: 0 0 0 3px var(--bg); z-index: 5; }
+body.notes .pin { display: block; }
+.rel { position: relative; }
+.notes-toggle { position: fixed; right: 16px; bottom: 16px; z-index: 20; border-radius: 20px; background: var(--purple); color: #fff; border: 0; padding: 8px 14px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+.notes-panel { display: none; position: fixed; right: 16px; bottom: 60px; width: min(360px, calc(100vw - 32px)); max-height: 70vh; overflow: auto; z-index: 20; background: var(--bg3); border: 1px solid var(--border-l); border-radius: var(--r-lg); padding: 16px 18px; box-shadow: 0 12px 40px rgba(0,0,0,.35); font-size: 13px; }
+body.notes .notes-panel { display: block; }
+.notes-panel h4 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+.notes-panel ol { padding-left: 18px; margin: 10px 0 0; }
+.notes-panel li { margin-bottom: 8px; color: var(--text2); }
+.notes-panel li b { color: var(--text); font-weight: 500; }
+
+@media (max-width: 1200px) {
+  .layout { grid-template-columns: 220px minmax(0, 1fr); }
+  .gate { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--border); }
+}
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: 48px 1fr 58px; }
+  .rail { grid-row: 3; flex-direction: row; justify-content: space-around; border-right: 0; border-top: 1px solid var(--border); padding: 0 4px; }
+  .rail .logo, .rail .spacer, .rail .avatar, .rail a.secondary { display: none; }
+  .crumb, .split, .top .btn { display: none; }
+  .notes-toggle { bottom: 72px; } .notes-panel { bottom: 116px; }
+  .hero { padding: 16px; }
+  .layout { grid-template-columns: 1fr; }
+  .list { border-right: 0; border-bottom: 1px solid var(--border); }
+  .center { padding: 16px; }
+  .stats { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="rail" aria-label="Main">
+    <div class="logo">h</div>
+    <a href="01-harbour-home.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</a>
+    <a href="02-model-workbench.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 6l-6 6 6 6M16 6l6 6-6 6"/></svg>Build</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>Data</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Observe<span class="badge">3</span></a>
+    <a class="on" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7M8.3 6.8c5 .5 7.4 2.3 7.7 3.4"/></svg>Ship</a>
+    <div class="spacer"></div>
+    <a class="secondary" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l2.2 4.8L19 9l-3.5 3.6.9 5.4-4.4-2.5-4.4 2.5.9-5.4L5 9l4.8-1.2z"/></svg>Agent</a>
+    <div class="avatar" title="Christian · admin">CD</div>
+  </nav>
+
+  <header class="top">
+    <span class="crumb">Ship / <b>net-revenue-refunds</b></span>
+    <div class="omni">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="5"/><path d="M10.5 10.5l4 4"/></svg>
+      <span>Jump to model, table, run or command…</span>
+      <kbd>⌘K</kbd>
+    </div>
+    <button class="env"><i></i>dev<span style="color:var(--dim)">▾</span></button>
+  </header>
+
+  <main>
+    <div class="hero rel">
+      <span class="pin" style="left:8px;top:8px">1</span>
+      <div>
+        <h1>Subtract refunds from revenue</h1>
+        <div class="promo"><span class="envtag dev">dev</span><span>→</span><span class="envtag prod">prod</span><span>· branch <span class="mono">feature/net-revenue</span> · 2 models changed, 3 downstream · opened by Christian 40 min ago</span></div>
+      </div>
+      <div style="display:flex;gap:8px"><button class="btn">Rebuild in dev</button><button class="btn">Open in Build</button></div>
+    </div>
+
+    <div class="layout">
+      <aside class="list rel">
+        <span class="pin" style="left:4px;top:8px">2</span>
+        <div class="grp">
+          <h2>Changed</h2>
+          <div class="item"><span class="tag m">M</span>silver.orders_enriched<em>+3 −1</em></div>
+          <div class="item on"><span class="tag m">M</span>gold.daily_revenue<em>+6 −2</em></div>
+          <div class="item"><span class="tag a">A</span>macros/refunds.py<em>new</em></div>
+        </div>
+        <div class="grp">
+          <h2>Affected downstream</h2>
+          <div class="item"><span class="tag i">↳</span>gold.customer_360</div>
+          <div class="item"><span class="tag i">↳</span>gold.region_sales</div>
+          <div class="item"><span class="tag i">↳</span>dash: Revenue weekly</div>
+        </div>
+        <div class="grp">
+          <h2>Unchanged</h2>
+          <div class="item" style="color:var(--dim)">39 models skipped by hash</div>
+        </div>
+      </aside>
+
+      <section class="center">
+        <div class="card impact rel">
+          <span class="pin" style="left:-8px;top:-8px">3</span>
+          <svg viewBox="0 0 640 150" role="img" aria-label="Impact graph">
+            <path class="g-edge" d="M145 40 C170 40 170 75 195 75"/>
+            <path class="g-edge" d="M145 110 C170 110 170 75 195 75"/>
+            <path class="g-edge hot" d="M370 75 L405 75"/>
+            <path class="g-edge hot" d="M370 75 C390 75 385 25 405 25"/>
+            <path class="g-edge hot" d="M370 75 C390 75 385 125 405 125"/>
+            <path class="g-edge hot" d="M555 75 L575 75"/>
+            <g class="g-node"><rect x="8" y="26" width="137" height="28" rx="6"/><text x="20" y="44">bronze.orders</text></g>
+            <g class="g-node"><rect x="8" y="96" width="137" height="28" rx="6"/><text x="20" y="114">bronze.customers</text></g>
+            <g class="g-node mod cur"><rect x="195" y="61" width="175" height="28" rx="6"/><text x="207" y="79">silver.orders_enriched</text></g>
+            <g class="g-node mod cur"><rect x="405" y="61" width="150" height="28" rx="6"/><text x="417" y="79">gold.daily_revenue</text></g>
+            <g class="g-node aff"><rect x="405" y="11" width="150" height="28" rx="6"/><text x="417" y="29">gold.customer_360</text></g>
+            <g class="g-node aff"><rect x="405" y="111" width="150" height="28" rx="6"/><text x="417" y="129">gold.region_sales</text></g>
+            <g class="g-node aff"><rect x="575" y="61" width="60" height="28" rx="6"/><text x="587" y="79">dash</text></g>
+          </svg>
+        </div>
+
+        <div class="mhead">
+          <span class="n">gold.daily_revenue</span>
+          <span class="s">table · compared dev vs prod on <span class="mono">order_date</span> · 365 keys</span>
+        </div>
+
+        <div class="stats rel">
+          <span class="pin" style="left:-8px;top:-8px">4</span>
+          <div class="card stat"><div class="k">Rows added</div><div class="v">0</div></div>
+          <div class="card stat"><div class="k">Rows removed</div><div class="v">0</div></div>
+          <div class="card stat"><div class="k">Rows modified</div><div class="v warn">312</div></div>
+          <div class="card stat"><div class="k">Columns</div><div class="v">+1 <span style="font-size:12px;color:var(--text2)">0 dropped</span></div></div>
+        </div>
+
+        <div class="card schema">
+          <div><span class="add">+ net_revenue</span>  <span class="c">DECIMAL(18,2)  new column</span></div>
+          <div><span class="chg">~ revenue</span>      <span class="c">DECIMAL(18,2)  values changed in 312 rows</span></div>
+          <div><span class="c">  order_date, order_count, avg_order_value  unchanged</span></div>
+        </div>
+
+        <div class="card metric rel">
+          <span class="pin" style="left:-8px;top:-8px">5</span>
+          <div><div style="font-size:12px;color:var(--text2)">metric <span class="mono">revenue</span> · last 90 days</div><div class="big">41.2M <span class="bad" style="font-size:14px">−2.4%</span></div></div>
+          <svg class="spark" viewBox="0 0 200 32" preserveAspectRatio="none" aria-hidden="true">
+            <polyline fill="none" stroke="var(--text2)" stroke-width="1.5" stroke-dasharray="3 3" points="0,20 20,18 40,21 60,14 80,16 100,12 120,15 140,10 160,12 180,8 200,9"/>
+            <polyline fill="none" stroke="var(--accent)" stroke-width="1.8" points="0,22 20,20 40,23 60,16 80,18 100,14 120,17 140,12 160,14 180,10 200,11"/>
+          </svg>
+          <div style="font-size:12px;color:var(--text2)"><span style="color:var(--text2)">- - prod</span> · <span style="color:var(--accent)">— dev</span></div>
+        </div>
+
+        <h2>Sample of modified rows</h2>
+        <div class="card twrap">
+          <table>
+            <thead><tr><th>order_date</th><th class="num">revenue</th><th class="num">net_revenue</th><th class="num">order_count</th></tr></thead>
+            <tbody>
+              <tr><td>2026-09-24</td><td class="num"><del>184,220</del><ins>179,905</ins></td><td class="num"><ins>179,905</ins></td><td class="num">412</td></tr>
+              <tr><td>2026-09-23</td><td class="num"><del>201,090</del><ins>197,410</ins></td><td class="num"><ins>197,410</ins></td><td class="num">455</td></tr>
+              <tr><td>2026-09-22</td><td class="num"><del>167,300</del><ins>163,020</ins></td><td class="num"><ins>163,020</ins></td><td class="num">388</td></tr>
+              <tr><td>2026-09-21</td><td class="num"><del>98,450</del><ins>96,880</ins></td><td class="num"><ins>96,880</ins></td><td class="num">240</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <aside class="gate rel">
+        <span class="pin" style="left:6px;top:8px">6</span>
+        <h2>Ready to ship?</h2>
+        <div class="gi"><span class="ic ok">✓</span><div>Built in dev<small>5 models · 2.3s · from hash cache for 39</small></div></div>
+        <div class="gi"><span class="ic ok">✓</span><div>Assertions 121 / 121<small>including new <span class="mono">net_revenue &lt;= revenue</span></small></div></div>
+        <div class="gi"><span class="ic ok">✓</span><div>Contracts<small>gold.daily_revenue adds a column (non-breaking)</small></div></div>
+        <div class="gi"><span class="ic ok">✓</span><div>Masking<small>no new PII columns exposed</small></div></div>
+        <div class="gi"><span class="ic warn">!</span><div>Lint · 1 warning<small>trailing whitespace, auto-fixable</small></div></div>
+        <div class="gi"><span class="ic" style="color:var(--dim)">○</span><div>Review · 0 / 1 approvals<small>requires an editor other than the author</small>
+          <div class="reviewers"><span class="rv" style="background:#5B6AD0">IK</span><span class="rv" style="background:#2BA88E">MS</span><span style="font-size:12px;color:var(--accent);align-self:center">request</span></div></div></div>
+        <button class="promote" disabled>Promote to prod</button>
+        <div class="why">Waiting on 1 approval</div>
+        <div class="plan">
+          <b>On promote</b><br>
+          1. backup prod warehouse<br>
+          2. build 2 changed + 3 downstream<br>
+          3. run assertions, roll back on fail<br>
+          4. notify #data-platform
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+
+<button class="notes-toggle" onclick="document.body.classList.toggle('notes')">Design notes</button>
+<aside class="notes-panel">
+  <h4>Mockup 3 · Change Review</h4>
+  <div style="color:var(--text2)">Diff, Git, Quality, Masking and environments already exist as separate tabs. This joins them into one "should this go to prod?" flow.</div>
+  <ol>
+    <li><b>A change is a thing.</b> Branch + environment pair + description, so the question is "promote this change", not "run diff and eyeball it".</li>
+    <li><b>Grouped by impact.</b> Changed files first, then downstream models and dashboards that will move, then what the hash cache skips.</li>
+    <li><b>Impact graph.</b> Just the affected subgraph, not the whole DAG. Solid = edited, dashed = rebuilt as a consequence.</li>
+    <li><b>Data diff, not only a code diff.</b> Row add/remove/modify counts and schema changes from the existing 3-mode diff engine.</li>
+    <li><b>Business impact.</b> If a semantic-layer metric reads the model, show how it moves in dev vs prod. "−2.4% revenue" gets a reviewer's attention in a way "312 rows modified" doesn't.</li>
+    <li><b>An explicit gate.</b> Every check in one list. The disabled button says exactly why, and the promote plan (backup, build, assert, rollback) is spelled out before anyone clicks.</li>
+  </ol>
+</aside>
+</body>
+</html>

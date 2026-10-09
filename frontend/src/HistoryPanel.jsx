@@ -188,7 +188,12 @@ export default function HistoryPanel({ onOpenFile }) {
   const filteredRuns = runs.filter((run) => {
     if (statusFilter === "success" && run.status !== "success") return false;
     if (statusFilter === "failed" && run.status !== "error" && run.status !== "failed") return false;
-    if (targetFilter && !(run.target || "").toLowerCase().includes(targetFilter.toLowerCase())) return false;
+    if (targetFilter) {
+      // A run's label names only its first model; search every model it built.
+      const needle = targetFilter.toLowerCase();
+      const names = run.targets && run.targets.length ? run.targets : [run.target || ""];
+      if (!names.some((n) => (n || "").toLowerCase().includes(needle))) return false;
+    }
     return true;
   });
 
@@ -347,9 +352,9 @@ export default function HistoryPanel({ onOpenFile }) {
                   }}>
                     {statusIcon(run.status)} {run.status}
                   </span>
-                  {hasErrors && (
-                    <span style={styles.errorCount}>{run.error_count} err</span>
-                  )}
+                  {/* Always rendered, so the columns line up whether or not
+                      a run has errors. */}
+                  <span style={styles.errorCount}>{hasErrors ? `${run.error_count} err` : ""}</span>
                   <span
                     style={styles.timeAgo}
                     title={run.started_at ? run.started_at.slice(0, 19).replace("T", " ") : ""}
@@ -605,7 +610,7 @@ const styles = {
   runModels: { flex: "0 0 70px", color: "var(--havn-text-secondary)", fontSize: "11px", whiteSpace: "nowrap" },
   runDuration: { flex: "0 0 70px", fontFamily: "var(--havn-font-mono)", color: "var(--havn-text-secondary)", fontSize: "11px" },
   statusBadge: { flex: "0 0 80px", padding: "2px 8px", borderRadius: "var(--havn-radius)", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap", boxSizing: "border-box" },
-  errorCount: { fontSize: "11px", color: "var(--havn-red)", fontWeight: 600, flexShrink: 0 },
+  errorCount: { fontSize: "11px", color: "var(--havn-red)", fontWeight: 600, flexShrink: 0, width: "44px" },
   timeAgo: { flex: "0 0 80px", textAlign: "right", color: "var(--havn-text-dim)", fontSize: "11px", whiteSpace: "nowrap" },
 
   // Expanded detail rows

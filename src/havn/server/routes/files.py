@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from havn.engine.packages import PACKAGES_DIRNAME
 from havn.server.deps import _detect_language, _get_project_dir, _require_permission
 
 import logging
@@ -47,6 +48,10 @@ class FileInfo(BaseModel):
     path: str
     type: str  # "file" or "dir"
     children: list[FileInfo] | None = None
+    # Name of the havn package this path belongs to, or None for the
+    # project's own files. Set for everything under havn_packages/, which
+    # the UI marks so nobody edits a file the next install will overwrite.
+    package: str | None = None
 
 
 class SaveFileRequest(BaseModel):
@@ -56,6 +61,16 @@ class SaveFileRequest(BaseModel):
 
 class MoveFileRequest(BaseModel):
     destination: str
+
+
+class BatchFileWrite(BaseModel):
+    path: str = Field(..., max_length=1000)
+    content: str = Field(..., max_length=5_000_000)
+    expected_hash: str | None = None
+
+
+class BatchSaveRequest(BaseModel):
+    files: list[BatchFileWrite] = Field(..., max_length=500)
 
 
 # --- Helpers ---
@@ -92,6 +107,19 @@ def _safe_project_path(project_dir: Path, rel_path: str) -> Path:
     return full
 
 
+def _package_of(rel_path: str) -> str | None:
+    """The package a project-relative path belongs to, or None.
+
+    ``havn_packages/crm/transform/x.sql`` -> ``crm``; ``havn_packages`` itself
+    -> ``""``, which is falsy but still marks the directory as not the
+    project's own.
+    """
+    parts = Path(rel_path).parts
+    if not parts or parts[0] != PACKAGES_DIRNAME:
+        return None
+    return parts[1] if len(parts) > 1 else ""
+
+
 def _scan_dir(base: Path, rel: Path | None = None) -> list[FileInfo]:
     """Scan a directory and return file tree."""
     target = base / rel if rel else base
@@ -104,7 +132,8 @@ def _scan_dir(base: Path, rel: Path | None = None) -> list[FileInfo]:
         # Skip DuckDB temp/WAL dirs and binary artifacts
         if ".duckdb" in entry.name:
             continue
-        rel_path = str(entry.relative_to(base))
+        rel_path = entry.relative_to(base).as_posix()
+        package = _package_of(rel_path)
         if entry.is_dir():
             items.append(
                 FileInfo(
@@ -112,10 +141,13 @@ def _scan_dir(base: Path, rel: Path | None = None) -> list[FileInfo]:
                     path=rel_path,
                     type="dir",
                     children=_scan_dir(base, entry.relative_to(base)),
+                    package=package,
                 )
             )
         elif entry.suffix in (".sql", ".py", ".yml", ".yaml", ".dpnb", ".csv"):
-            items.append(FileInfo(name=entry.name, path=rel_path, type="file"))
+            items.append(
+                FileInfo(name=entry.name, path=rel_path, type="file", package=package)
+            )
     return items
 
 
@@ -128,6 +160,95 @@ def list_files(request: Request) -> list[FileInfo]:
     _require_permission(request, "read")
     project_dir = _get_project_dir()
     return _scan_dir(project_dir)
+
+
+WRITABLE_SUFFIXES = (
+    ".sql", ".py", ".yml", ".yaml", ".dpnb", ".sqlfluff", ".csv", ".md",
+)
+
+
+def check_write_conflicts(
+    project_dir: Path, items: list[BatchFileWrite]
+) -> tuple[list[Path], dict[str, str]]:
+    """Resolve and vet a batch of writes before any of them happens.
+
+    Returns the resolved paths and, when a file on disk no longer hashes to
+    what the caller last saw, the current hashes keyed by path. A caller that
+    gets a non-empty conflict map must not write.
+    """
+    resolved: list[Path] = []
+    conflicts: dict[str, str] = {}
+    for item in items:
+        full = _safe_project_path(project_dir, item.path)
+        if full.suffix not in WRITABLE_SUFFIXES:
+            raise HTTPException(400, f"Unsupported file type: {full.suffix}")
+        resolved.append(full)
+        if not item.expected_hash or not full.exists():
+            continue
+        try:
+            current = full.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            current = full.read_text(encoding="latin-1")
+        current_hash = _file_hash(current)
+        if current_hash != item.expected_hash:
+            conflicts[item.path] = current_hash
+    return resolved, conflicts
+
+
+@router.put("/api/files")
+def save_files(request: Request, req: BatchSaveRequest) -> dict:
+    """Save several files as one unit: all of them land, or none do.
+
+    A refactor that spans files (a column rename, say) leaves a project that
+    does not build if half its edits reach disk. Every file is hash-checked
+    first, then written through a temporary neighbour, and anything already
+    written is put back if a later write fails.
+    """
+    user = _require_permission(request, "write")
+    project_dir = _get_project_dir()
+    if not req.files:
+        return {"status": "saved", "files": []}
+
+    # Two spellings of one file are still one file: `a/b.sql` and `a/./b.sql`
+    # both passed a raw-string check, and the batch then wrote the same path
+    # twice, so whichever landed last silently won and its hash check was made
+    # against content the other write had already replaced.
+    seen: dict[Path, str] = {}
+    for item in req.files:
+        resolved = _safe_project_path(project_dir, item.path)
+        first = seen.get(resolved)
+        if first is not None:
+            detail = f"Duplicate path in batch: {item.path}"
+            if first != item.path:
+                detail += f" (same file as {first})"
+            raise HTTPException(400, detail)
+        seen[resolved] = item.path
+
+    _resolved, conflicts = check_write_conflicts(project_dir, req.files)
+    if conflicts:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "conflict": True,
+                "message": "Files were modified by another user or process",
+                "stale": sorted(conflicts),
+                "current_hashes": conflicts,
+            },
+        )
+
+    from havn.engine.rename import RenameError, write_files_atomically
+
+    contents = {item.path: item.content for item in req.files}
+    try:
+        write_files_atomically(project_dir, contents)
+    except RenameError as e:
+        raise HTTPException(500, str(e))
+
+    written = []
+    for item in req.files:
+        _audit_file_action(request, user, "file_edit", item.path)
+        written.append({"path": item.path, "file_hash": _file_hash(item.content)})
+    return {"status": "saved", "files": written}
 
 
 @router.get("/api/files/{file_path:path}")
@@ -298,7 +419,8 @@ def _drop_db_object(full_path: Path, file_path: str) -> str | None:
         # Look up the object type in information_schema
         rows = conn.execute(
             "SELECT table_type FROM information_schema.tables "
-            "WHERE table_schema = ? AND table_name = ?",
+            "WHERE table_catalog = current_database() "
+            "AND table_schema = ? AND table_name = ?",
             [schema, name],
         ).fetchall()
 

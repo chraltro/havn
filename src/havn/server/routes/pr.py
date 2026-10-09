@@ -64,7 +64,32 @@ class CloseRequest(BaseModel):
 
 
 def _pr_to_dict(pr) -> dict:
-    return pr.to_dict()
+    """The PR record, plus which approvals count for the branch's current commit.
+
+    ``approvers`` lists everyone who ever approved; only ``current_approvers``
+    vouch for the code as it is now. Clients that counted ``approvers``
+    offered Merge for a change the server then refused.
+    """
+    from havn.engine.pr import independent_approvers, pr_head_sha, stale_approvers
+
+    data = pr.to_dict()
+    head = pr_head_sha(_get_project_dir(), pr)
+    data["current_approvers"] = independent_approvers(pr, head)
+    data["stale_approvers"] = stale_approvers(pr, head)
+    return data
+
+
+def _actor(user: dict, claimed: str | None) -> str:
+    """Who is acting: the signed-in user when auth is on, never a client claim.
+
+    With auth off everyone is "local" and there is no identity to check, so
+    the name the client sends is kept (it is only a label then).
+    """
+    from havn.server.deps import _get_auth_enabled
+
+    if _get_auth_enabled():
+        return user["username"]
+    return (claimed or "local").strip() or "local"
 
 
 # --- PR lifecycle ---
@@ -97,8 +122,14 @@ def list_prs_endpoint(
 
 @router.post("/api/prs")
 def create_pr_endpoint(req: CreatePrRequest, request: Request):
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
     from havn.engine.pr import create_pr
+
+    # Same rule as update_pr_endpoint: waiving review lets the change merge
+    # unreviewed, so only an admin may do it. Without this, an editor could
+    # skip the admin check by opening the PR with approval already off.
+    if req.require_approval is False:
+        _require_permission(request, "manage_users")
 
     project_dir = _get_project_dir()
     try:
@@ -108,7 +139,7 @@ def create_pr_endpoint(req: CreatePrRequest, request: Request):
             description=req.description,
             base_ref=req.base_ref,
             head_ref=req.head_ref,
-            author=req.author,
+            author=_actor(user, req.author),
             require_approval=req.require_approval,
         )
     except ValueError as e:
@@ -133,6 +164,11 @@ def update_pr_endpoint(pr_id: str, req: UpdatePrRequest, request: Request):
     _require_permission(request, "write")
     from havn.engine.pr import update_pr
 
+    # Turning approval off lets a change merge unreviewed, so with auth on only
+    # an admin may do it (an author could otherwise waive their own review).
+    if req.require_approval is False:
+        _require_permission(request, "manage_users")
+
     project_dir = _get_project_dir()
     try:
         pr = update_pr(
@@ -149,12 +185,12 @@ def update_pr_endpoint(pr_id: str, req: UpdatePrRequest, request: Request):
 
 @router.post("/api/prs/{pr_id}/close")
 def close_pr_endpoint(pr_id: str, req: CloseRequest, request: Request):
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
     from havn.engine.pr import close_pr
 
     project_dir = _get_project_dir()
     try:
-        pr = close_pr(project_dir, pr_id, req.user)
+        pr = close_pr(project_dir, pr_id, _actor(user, req.user))
     except ValueError as e:
         raise HTTPException(400, str(e))
     return _pr_to_dict(pr)
@@ -175,9 +211,27 @@ def list_comments_endpoint(pr_id: str, request: Request):
     return [c.to_dict() for c in pr.comments]
 
 
+def _comment_author(user: dict, req) -> str:
+    """Who a comment is shown as.
+
+    A human comment is by whoever is signed in. An AI review keeps its label
+    (the agent's name), but with auth on it also names the account that
+    posted it: the label was free text, so any writer could post a comment
+    under any name, a colleague's included.
+    """
+    from havn.server.deps import _get_auth_enabled
+
+    if req.comment_type != "ai_review":
+        return _actor(user, req.author)
+    label = (req.author or "AI review").strip() or "AI review"
+    if _get_auth_enabled():
+        return f"{label} via {user['username']}"
+    return label
+
+
 @router.post("/api/prs/{pr_id}/comments")
 def add_comment_endpoint(pr_id: str, req: CommentRequest, request: Request):
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
     from havn.engine.pr import add_comment
 
     project_dir = _get_project_dir()
@@ -185,7 +239,7 @@ def add_comment_endpoint(pr_id: str, req: CommentRequest, request: Request):
         comment = add_comment(
             project_dir,
             pr_id,
-            author=req.author,
+            author=_comment_author(user, req),
             body=req.body,
             comment_type=req.comment_type,
             file=req.file,
@@ -198,12 +252,12 @@ def add_comment_endpoint(pr_id: str, req: CommentRequest, request: Request):
 
 @router.post("/api/prs/{pr_id}/approve")
 def approve_pr_endpoint(pr_id: str, req: ReviewerActionRequest, request: Request):
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
     from havn.engine.pr import approve_pr
 
     project_dir = _get_project_dir()
     try:
-        pr = approve_pr(project_dir, pr_id, req.reviewer)
+        pr = approve_pr(project_dir, pr_id, _actor(user, req.reviewer))
     except ValueError as e:
         raise HTTPException(400, str(e))
     return _pr_to_dict(pr)
@@ -211,12 +265,12 @@ def approve_pr_endpoint(pr_id: str, req: ReviewerActionRequest, request: Request
 
 @router.post("/api/prs/{pr_id}/request-changes")
 def request_changes_endpoint(pr_id: str, req: ReviewerActionRequest, request: Request):
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
     from havn.engine.pr import request_changes
 
     project_dir = _get_project_dir()
     try:
-        pr = request_changes(project_dir, pr_id, req.reviewer, reason=req.reason)
+        pr = request_changes(project_dir, pr_id, _actor(user, req.reviewer), reason=req.reason)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return _pr_to_dict(pr)
@@ -274,11 +328,11 @@ def get_latest_build_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly
 
 @router.post("/api/prs/{pr_id}/merge")
 def merge_pr_endpoint(pr_id: str, req: MergeRequest, request: Request, conn: DbConn):
-    _require_permission(request, "execute")
+    user = _require_permission(request, "execute")
     from havn.engine.pr import merge_pr
 
     project_dir = _get_project_dir()
-    result = merge_pr(project_dir, pr_id, req.user, conn)
+    result = merge_pr(project_dir, pr_id, _actor(user, req.user), conn)
     if not result.get("success"):
         raise HTTPException(400, result.get("error", "merge failed"))
     return result
@@ -315,28 +369,193 @@ def review_prompt_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
 @router.get("/api/prs/{pr_id}/diff")
 def pr_diff_endpoint(pr_id: str, request: Request):
     _require_permission(request, "read")
-    from havn.engine.git import diff_files_between
+    from havn.engine.pr import pr_changed_files
     from havn.engine.pr import get_pr
 
     project_dir = _get_project_dir()
     pr = get_pr(project_dir, pr_id)
     if pr is None:
         raise HTTPException(404, f"PR '{pr_id}' not found")
-    files = diff_files_between(project_dir, pr.base_ref, pr.head_ref)
+    files = pr_changed_files(project_dir, pr)
     return {"files": files, "base_ref": pr.base_ref, "head_ref": pr.head_ref}
 
 
 @router.get("/api/prs/{pr_id}/lineage-impact")
 def pr_lineage_impact_endpoint(pr_id: str, request: Request):
     _require_permission(request, "read")
-    from havn.engine.git import diff_files_between
+    from havn.engine.pr import pr_changed_files
     from havn.engine.pr import _compute_lineage_impact, get_pr
-    from havn.engine.transform.discovery import build_dag, discover_models
+    from havn.engine.transform.discovery import build_dag, discover_all_models
 
     project_dir = _get_project_dir()
     pr = get_pr(project_dir, pr_id)
     if pr is None:
         raise HTTPException(404, f"PR '{pr_id}' not found")
-    files = diff_files_between(project_dir, pr.base_ref, pr.head_ref)
-    dag = build_dag(discover_models(project_dir / "transform"))
+    files = pr_changed_files(project_dir, pr)
+    # Packages are part of the DAG, so a package model that reads a changed
+    # project model is part of the impact.
+    dag = build_dag(discover_all_models(project_dir))
     return _compute_lineage_impact(files, dag, project_dir)
+
+
+# --- Ship: one review of a change, with its merge gate ---
+
+
+@router.get("/api/prs/{pr_id}/review")
+def pr_review_endpoint(pr_id: str, request: Request, conn: DbConnReadOnly):
+    """Everything the Ship page shows for one change, in one call.
+
+    Combines the PR, its changed files, the lineage impact (with the edges
+    between the affected models so the page can draw them), the latest build
+    and its data diff, and a gate: the checks ``merge_pr`` enforces, marked
+    ``required``, plus whether a build of the branch's current head passed.
+    """
+    _require_permission(request, "read")
+    from havn.engine.pr import pr_changed_files
+    from havn.engine.pr import (
+        _compute_lineage_impact,
+        _run_git,
+        can_merge,
+        ensure_pr_builds_table,
+        get_latest_build,
+        get_pr,
+        independent_approvers,
+        pr_head_sha,
+        stale_approval_message,
+        stale_approvers,
+        is_dirty,
+        merge_ignored_paths,
+    )
+    from havn.engine.transform.discovery import discover_all_models
+
+    project_dir = _get_project_dir()
+    pr = get_pr(project_dir, pr_id)
+    if pr is None:
+        raise HTTPException(404, f"PR '{pr_id}' not found")
+
+    files = pr_changed_files(project_dir, pr)
+    models = discover_all_models(project_dir)
+    by_name = {m.full_name: m for m in models}
+
+    ensure_pr_builds_table(conn)
+    build = get_latest_build(conn, pr_id)
+
+    # A finished build knows the PR branch's own DAG (new models included);
+    # without one, compute the impact from the base checkout.
+    impact = (build or {}).get("lineage_impact") or _compute_lineage_impact(
+        files, models, project_dir
+    )
+    changed = list(impact.get("changed") or [])
+    impacted = list(impact.get("impacted") or [])
+    upstream = sorted({
+        dep
+        for name in changed
+        for dep in (by_name[name].depends_on if name in by_name else [])
+        if dep not in changed and dep not in impacted
+    })
+    in_graph = set(changed) | set(impacted) | set(upstream)
+    edges = sorted({
+        (dep, m.full_name)
+        for m in models
+        if m.full_name in in_graph
+        for dep in m.depends_on
+        if dep in in_graph and m.full_name not in upstream
+    })
+
+    def rel(name: str) -> str | None:
+        m = by_name.get(name)
+        if m is None:
+            return None
+        try:
+            return m.path.relative_to(project_dir).as_posix()
+        except ValueError:
+            return None
+
+    nodes = (
+        [{"name": n, "role": "upstream", "path": rel(n)} for n in upstream]
+        + [{"name": n, "role": "changed", "path": rel(n)} for n in changed]
+        + [{"name": n, "role": "impacted", "path": rel(n)} for n in impacted]
+    )
+
+    head_sha = None
+    res = _run_git(project_dir, "rev-parse", pr.head_ref)
+    if res.returncode == 0:
+        head_sha = res.stdout.strip() or None
+
+    gate: list[dict] = []
+
+    def check(key: str, label: str, state: str, detail: str, required: bool) -> None:
+        gate.append({"key": key, "label": label, "state": state, "detail": detail, "required": required})
+
+    # Build: advisory (merge does not require it) but shown first.
+    if build is None:
+        check("build", "Built and checked", "pending",
+              "Not built yet. A build runs every model on the branch and its checks.", False)
+    elif build.get("status") == "running":
+        check("build", "Built and checked", "pending", "Build running…", False)
+    elif build.get("status") == "error":
+        check("build", "Built and checked", "fail", build.get("error") or "Build failed", False)
+    elif head_sha and build.get("branch_head") and build["branch_head"] != head_sha:
+        check("build", "Built and checked", "warn",
+              f"Built {build['branch_head'][:7]}; the branch is now at {head_sha[:7]}. Rebuild to check the latest commit.",
+              False)
+    else:
+        check("build", "Built and checked", "pass",
+              f"Every model built and every error-level check passed ({build.get('duration_ms') or 0} ms).",
+              False)
+
+    if pr.status != "open":
+        check("open", "Open", "fail", f"This change is {pr.status}.", True)
+
+    if pr.change_requesters:
+        check("changes", "No changes requested", "fail",
+              f"Changes requested by {', '.join(pr.change_requesters)}.", True)
+    else:
+        check("changes", "No changes requested", "pass", "No reviewer has requested changes.", True)
+
+    head_sha = pr_head_sha(project_dir, pr)
+    approvals = independent_approvers(pr, head_sha)
+    stale = stale_approvers(pr, head_sha)
+    if not pr.require_approval:
+        check("approval", "Approved", "pass", "This change does not require approval.", True)
+    elif approvals:
+        check("approval", "Approved", "pass", f"Approved by {', '.join(approvals)}.", True)
+    elif stale:
+        msg = stale_approval_message(pr, stale)
+        check("approval", "Approved", "pending", msg[0].upper() + msg[1:], True)
+    else:
+        check("approval", "Approved", "pending",
+              f"Needs an approval from someone other than {pr.author}.", True)
+
+    mc = can_merge(project_dir, pr) if pr.status == "open" else {"can_merge": False, "reason": None}
+    if pr.status == "open":
+        if mc.get("can_merge"):
+            check("conflicts", "Merges cleanly", "pass", f"No conflicts with {pr.base_ref}.", True)
+        else:
+            check("conflicts", "Merges cleanly", "fail", mc.get("reason") or "Cannot merge.", True)
+
+    dirty = is_dirty(project_dir, ignore=merge_ignored_paths(project_dir))
+    check("clean", "Working tree clean", "fail" if dirty else "pass",
+          "Commit or stash local changes first; merging checks out the base branch."
+          if dirty else "No uncommitted changes.", True)
+
+    ready = all(g["state"] == "pass" for g in gate if g["required"])
+
+    return {
+        "pr": pr.to_dict(),
+        "files": files,
+        "head_sha": head_sha,
+        "impact": {"nodes": nodes, "edges": [list(e) for e in edges]},
+        "build": build,
+        "gate": gate,
+        "ready": ready,
+        "build_current": gate[0]["state"] == "pass",
+        # What POST /api/prs/{id}/merge does, in order, and what it leaves to you.
+        "plan": [
+            "Snapshot the warehouse (undo with `havn version restore`)",
+            f"Check out {pr.base_ref} and merge {pr.head_ref} with --no-ff",
+            "Mark the change merged and switch back to your branch",
+        ],
+        "after_merge": "Merging changes the code, not the data: deploy "
+                       f"{pr.base_ref} to an environment to rebuild the changed models there.",
+    }

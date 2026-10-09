@@ -19,6 +19,13 @@
         -moz-osx-font-smoothing: grayscale;
       }
 
+      /* Show text exactly as it is. The mono fonts (JetBrains Mono, Fira Code)
+         draw ***, !=, ->, <=, == and www as ligatures, so a query result
+         holding "***@gmail.com" displayed as something else and SQL showed
+         != as a not-equal sign. Data, identifiers and SQL must render
+         literally; the UI fonts lose nothing visible. */
+      body, body * { font-variant-ligatures: none; }
+
       /* Smooth theme transitions */
       body, body * {
         transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;

@@ -2,6 +2,423 @@
 
 All notable changes to havn are documented in this file.
 
+## [Unreleased]
+
+The dbt v2 gap work. Every item below came out of a research pass over the
+current code against dbt v2.0 (GA 2026-09-16); the plan and its evidence live
+in `docs/internal/dbt-v2-gap-plan.md`.
+
+### Validation and types
+
+- **Bind pass.** `havn validate` now resolves every model's SQL through the
+  DuckDB binder against a throwaway in-memory shadow catalog, reporting bind
+  errors with line and column: wrong arity, unknown functions, operator
+  overload failures, missing columns (including on upstreams that have never
+  been built), missing struct keys, ambiguous references, aggregation without
+  `GROUP BY`, set-operation arity mismatches. Reads no rows, writes nothing,
+  about 3 ms per model. `--no-bind` opts out.
+- **Validation reflects the file, not the last build.** A model's fresh SQL
+  shadows its stale built table, so a rename or retype upstream is caught
+  before the build rather than during it.
+- **The pre-build gate no longer skips runs that include ingest.** It runs
+  after ingest and before the first transform.
+- **Known boundary, stated plainly:** the binder does not catch value
+  conversions. `CAST(some_varchar AS INTEGER)` binds clean and fails at run
+  time. dbt v2 has the same boundary.
+- **Column contracts.** Contract YAML takes a `columns:` block (name, type,
+  optional `nullable` and `description`) plus `strict:` and `on_widen:`.
+  Declarations are checked before the build against the bind pass, so a
+  break is caught on a warehouse where the table does not exist yet, and
+  again after the build against the live table.
+- **`havn validate --schema-drift`** (or `validation.schema_drift: warn`)
+  reports a model whose output shape moved since its last build, contract or
+  no contract. Off by default.
+- **`havn check` rejects unknown `@config` keys and unsupported
+  `materialized` values** with a did-you-mean. `materialised=table` used to
+  build a view in silence.
+- **Two SQL files resolving to the same `schema.name` now fail discovery**
+  naming both paths, instead of one being dropped from the DAG.
+- New `_havn.model_columns` table records each model's columns at build time;
+  `GET /api/models/{name}/columns` reads it.
+
+### Web UI
+
+- **New navigation.** A rail down the left edge with five destinations: Home,
+  Build, Data, Observe and Ship, plus Agent and Settings at the bottom. It
+  becomes a bottom bar on a phone. The 17 tabs are grouped under them.
+  `Alt+1`–`Alt+6` still jump between sections. Old URLs (`/develop`, `/explore`,
+  `/configure`, `/develop/data-sources`) still work and are rewritten to the new
+  ones.
+- **Omnibox.** The top bar's search box opens the command palette
+  (`Ctrl/Cmd+K`), which finds models, tables, files and commands.
+- **Environment pill.** Shows the active environment and turns red for
+  `prod`, `production`, `prd` or `live`.
+- **Home** replaces Overview once the warehouse has data:
+  - health tiles for models, checks, the last run and the warehouse with its
+    last backup;
+  - a ranked **Needs attention** list covering failed builds, failed checks
+    (with **See rows**), broken contracts, late sources and anomalies from the
+    last 7 days;
+  - the last 24 hours of runs;
+  - every model per layer marked fresh, changed, not built, failing or blocked.
+
+  The Observe item in the rail shows a badge with the number of errors. Backed
+  by `GET /api/home`.
+- **Ship** reviews a change (a havn PR) before it merges:
+  - the models it changes plus their upstream and downstream, as a graph;
+  - **Build**, which runs the branch in an isolated copy of the warehouse and
+    shows which tables' data and schemas differ;
+  - approve and request changes;
+  - a merge gate matching exactly what merge enforces (approval, no requested
+    changes, no conflicts, clean tree), plus a recommended passing build of the
+    latest commit. Merging without a current build asks for confirmation.
+
+  Backed by `GET /api/prs/{id}/review`.
+- **Metric delta.** A PR build evaluates every semantic-layer metric whose
+  model the change affects, on the base warehouse and on the build. Ship shows
+  the base value, the branch value, the change, and a 12-month sparkline of
+  both.
+- **Deploy.** `havn deploy <env>`, `POST /api/deploys`, and Ship after a merge
+  all build a git ref in an environment's warehouse. The code comes from a
+  worktree of that commit, and only models that differ there are rebuilt
+  (`state:modified+`). Those models are snapshotted first: data, views,
+  missing objects and build state. If any fails, every one of them is
+  restored, so a failed deploy leaves the environment exactly as it was.
+  Every deploy is recorded in `_havn.deploys`.
+- **Independent approval.** The author of a PR can't approve it, and merge
+  counts only other people's approvals. With auth on, the PR routes take the
+  author, reviewer and merging user from the session instead of the request
+  body, which previously let anyone approve as anyone. Only admins can turn off
+  a PR's approval requirement.
+- `Ctrl/Cmd+S` saves the open file.
+
+### Editor
+
+- **Live error markers** in `transform/*.sql`: bind diagnostics 400 ms after a
+  keystroke, SQLFluff warnings on save and after 1.5 s idle, with a count in
+  the toolbar. Backed by the new `POST /api/bind`, which returns positioned
+  diagnostics plus the inferred output and upstream schemas.
+- **Hover shows inferred column types**, for the model's own output columns
+  and `alias.column` references into upstream models.
+- **`F12` or Ctrl/Cmd+Click on a `schema.model` reference opens the file that
+  declares it**, resolved through the model's real path so `@config schema=`
+  overrides are followed (the old `transform/{schema}/{name}.sql` guess is
+  gone from every jump).
+- **Preview a single CTE** from a `Preview` link above it or Ctrl/Cmd+Shift+
+  Enter at the cursor, via the new `POST /api/sql/ctes`. Recursive CTEs are
+  refused.
+- **`F2` renames a column across files**, in the model that defines it and
+  every downstream model that reads it, including references that only appear
+  in `WHERE`, `JOIN`, `GROUP BY`, `ORDER BY`, `HAVING` or `QUALIFY`. A
+  downstream `SELECT *`, `COLUMNS(...)`, `UNION BY NAME` or a YAML mention is
+  reported as a blocker before anything is written. Right-click offers
+  **Find column references**. Also `havn rename-column MODEL COLUMN NEW`.
+- `PUT /api/files` takes a batch of files and writes all or none, with per-file
+  hash checks and rollback.
+- Fixed: the whole-model preview sent no row limit and shipped mid-file
+  `@assert` lines to DuckDB as SQL.
+- Fixed: the editor's column cache never expired, so a rebuilt model kept
+  offering its old columns for the rest of the session.
+- Fixed: lint violations were reported at the wrong line for every model with
+  a modern `@config` header; a directive below the SQL also produced a
+  spurious "unparsable section".
+- `POST /api/lint/file` needs only `read` when `fix` is false.
+- **Model workbench.** Opening a `transform/*.sql` file wraps the editor in a
+  workbench: a lineage strip (upstream and downstream models, one click to
+  open), an inspector beside the code with Preview, Checks, Columns and Runs,
+  and an action bar that says whether the model is unsaved, changed since its
+  last build or failing checks, and how many downstream models depend on it.
+  **Build + downstream** runs the `model+` selector after saving. Failed
+  `@assert` lines are highlighted in the editor with the failure inline;
+  **Show rows** previews exactly the rows a failed check counted, and
+  **+ add @col** starts a doc line for an undocumented column. Backed by the new
+  `GET /api/models/workbench?path=`. The toolbar's Save / Run Model / Run
+  buttons moved into the action bar for model files.
+
+### Testing
+
+- **Model unit tests.** Declare fixture rows for a model's upstreams and the
+  rows it should produce in `tests/unit/*.yml`. Each test runs on a throwaway
+  in-memory DuckDB with your macros registered and reads nothing from the
+  warehouse, so a test cannot pass because of what happens to be built. Row
+  comparison is type-drift proof and order-insensitive by default.
+- `havn test` runs the suite (`--model`, `-v`), `havn check` includes it,
+  `GET /api/unit-tests` and `POST /api/unit-tests/run`, a `run_unit_tests`
+  MCP tool, and an Observe > Unit Tests panel. `havn init` scaffolds
+  `tests/unit/` with an example.
+
+### Modeling
+
+- **`@config on_schema_change=append_new_columns|ignore|fail|sync_all_columns`**
+  for incremental models. Staging and target are compared on name and type,
+  both directions, before any write. The default now refuses a removed column
+  (which used to diverge silently) and a retyped column (which used to round
+  a `DOUBLE` 20.5 into an `INTEGER` 21). Schema actions are recorded in the
+  run log.
+- **Incremental writes are transactional.** The ALTER, DELETE, UPDATE and
+  INSERT of a `delete+insert` or `merge` run commit together or not at all.
+  Previously a failing INSERT left the target missing the rows it had just
+  deleted.
+- **`@config materialized=ephemeral`.** Never built; every consumer gets the
+  query prepended as a `__havn_`-prefixed CTE with references rewritten.
+  Chains and the ephemeral's own CTEs are hoisted in dependency order. Runs
+  report it as `inlined`.
+- **Snapshot models (SCD2).** `@config materialized=snapshot, unique_key=...`
+  keeps row-level history with `valid_from`, `valid_to`, `is_current` and
+  `row_hash`. `strategy=check` (optionally `check_cols=`) or
+  `strategy=timestamp, updated_at=`; `hard_deletes=ignore|invalidate|
+  new_record`. Config names and values match dbt's. Meta column names and a
+  `valid_to_current` sentinel are configurable under `snapshots:` in
+  `project.yml`. Runs are idempotent; a duplicate key in the query fails
+  before any write; `--force` never drops history. This is row history, not
+  the whole-warehouse restore points of `havn snapshot` / `havn rewind`.
+- **Microbatch incremental strategy.** `incremental_strategy=microbatch` with
+  `event_time`, `batch_size` (`hour`/`day`/`month`/`year`), `begin` and
+  `lookback` cuts a run into UTC windows; the model filters on `{start}` and
+  `{end}`. Each window commits in its own transaction and is recorded in
+  `_havn.batch_state`, so a failure at window 17 of 30 leaves sixteen
+  committed and the next run resumes. `havn transform --event-time-start/
+  --event-time-end` backfills a range.
+
+### Running
+
+- **Graph selectors on `havn transform`:** `+x`, `x+`, `+x+`, `n+x`, `x+n`,
+  `@x`, fnmatch wildcards (`gold.fct_*`), `tag:`, `path:`, `config.<key>:`,
+  `state:modified`, comma for intersection, `--select/-s` and `--exclude/-x`.
+  `havn ls` dry-runs a selector. Jobs gain `exclude:`. `POST /api/transform`
+  and the MCP tools take the same grammar.
+- **`@config tags=daily,finance`** for `tag:` selectors. Tags are not part of
+  the content hash, so retagging does not rebuild.
+- Fixed: targeted runs (`havn transform gold.orders`) wrote an empty upstream
+  hash to `model_state`, so the next full run spuriously rebuilt the model.
+- Fixed: `gold.fct_*` and any other partial wildcard silently matched no
+  models in job targets.
+- Fixed: `havn diff` in changed mode compared against an empty upstream hash
+  and reported nearly every model as changed.
+- **Defer.** `havn transform --defer` builds in the active environment while
+  reading every model it has not built from the environment's `defer:`
+  target (`environments.<name>.defer: <other env>` in `project.yml`). Writes
+  always land locally. What is redirected is decided by the live DuckDB
+  catalogs, so `landing` tables, seeds and sources fall through with no
+  declaration. The limitation is DuckDB's file lock: the attach fails while
+  another process holds the target open for writing, so `--defer-snapshot`
+  defers to a consistent copy instead (`COPY FROM DATABASE` when the target
+  is free, the newest verified backup when it is locked). `havn env show`
+  and `GET /api/environment` report the target and whether it can be opened
+  right now. No manifest or `--state`; havn needs the other environment's
+  file.
+- Model existence and column probes are scoped to the current database, so
+  an attached second warehouse cannot be mistaken for the local one.
+
+### Lineage and performance
+
+- **Column lineage rewritten on `sqlglot.lineage`** with a conformance suite
+  that uses DuckDB `DESCRIBE` as ground truth. Nested subqueries, every
+  UNION branch, `SELECT * EXCLUDE/REPLACE`, `UNPIVOT` and `ASOF JOIN` are now
+  exact; `PIVOT`, `LATERAL` and struct field access are documented as
+  approximate. `docs/lineage.md` matches the suite.
+- **Impact analysis reports downstream models that only filter, join, group
+  or order on a column**, with the clause named.
+- **Full-project lineage on 1000 models drops from about 20 s to about 150
+  ms.** The catalog was read once per dependency; it is now read once per
+  pass. Each model's SQL is also parsed once per pass instead of four times.
+- New `benchmarks/bench_parse.py`.
+- The `sqlglot` floor is now 26.17, the first version carrying token
+  positions.
+
+### Reuse
+
+- **Packages.** Share models and macros between projects. Declare them under
+  `packages:` in `project.yml` as `{name, git, rev}` or `{name, path}`, then
+  `havn packages install`. Sources are cloned into `havn_packages/` and
+  pinned by `havn_packages.lock`, which is committed; a later install
+  reproduces the locked commit unless you pass `--upgrade`. A branch `rev`
+  is accepted but warns, because it is not a pin.
+- **Package namespacing.** A package's schemas become `<pkg>_<schema>` and
+  its references to its own models are rewritten to match, so a package
+  author writes plain `silver.customers` and a host project can never lose a
+  name to one. Override per schema in the package's `havn_package.yml`; a
+  real collision raises `DuplicateModelError`.
+- **Package macros** register between the built-in library and the project,
+  so project macros win, with package-scoped module names so two packages
+  can both ship `macros/utils.py`.
+- `havn packages install|list|remove`, a `package:` selector, `GET
+  /api/packages`, `POST /api/packages/install`; package models are labelled
+  in the DAG panel and the file tree, and the editor warns that the next
+  install overwrites edits to an installed file. Package models are visible
+  to every command and endpoint that lists or builds the DAG, including
+  sentinel, Pipeline Rewind, the notebook paths, promote-to-model, unit
+  tests and freshness reporting. `havn lint --fix` refuses a path inside
+  `havn_packages/`.
+- The DAG panel takes a graph selector: Preview highlights the matching
+  nodes, Run selection builds exactly that set. The header shows the active
+  environment's defer target with a green or amber dot for whether it can be
+  attached right now.
+
+### Security
+
+The four items below were found by a review of this branch before release;
+none of them shipped in a released version.
+
+- `POST /api/bind` no longer executes caller-supplied SQL against the
+  warehouse. The bind pass builds its shadow catalog in a private in-memory
+  DuckDB database with no attachment to the warehouse, seeded with empty
+  typed tables from `information_schema`, so a buffer cannot write to, read
+  from or escape into the real catalog. The shadow turns off
+  `enable_external_access` and locks its configuration before any model SQL
+  runs, so `read_csv`, `read_text`, `glob`, `COPY ... TO`, `ATTACH`,
+  `INSTALL` and `LOAD` all fail inside it. Buffers sent to `/api/bind` and
+  to the MCP `bind_model` tool go through the shared read-only validator
+  first and are never bound if they fail. The route takes a read-pool
+  connection, not a writable handle.
+- Package `git:` sources are restricted to `https://`, `ssh://` and
+  `git@host:path`. `ext::`, `file://`, bare local paths, `git://` and
+  `http://` are refused; a package on this machine belongs under `path:`.
+  Installing a package imports and registers its Python macros, and the docs
+  now say so.
+- The in-memory connection `havn test` runs model SQL on has external access
+  disabled and its configuration locked.
+
+### Fixed before release
+
+- A build whose severity=error assertion failed was logged as `success` in the
+  run log. It is now `error`, with the failing checks in the message, on every
+  build path.
+- A PR created, approved or commented on in the web UI could never merge. Those
+  actions write `.havn/prs/<id>.json`, and `havn serve` holds
+  `.havn/serve.json`, so the merge's dirty-tree check always refused. It now
+  ignores havn's own PR records and runtime files. New projects also gitignore
+  `.havn/serve.json`.
+- Polling a PR build or a deploy could briefly see no record, because each
+  save deleted the row and then re-inserted it. Saves now update in place.
+- Merge also ignores every environment's warehouse file, and new projects
+  gitignore `*.duckdb` rather than only `warehouse.duckdb`. Adding a `prod`
+  environment used to leave an untracked `prod.duckdb` that blocked every merge.
+- The offline starter data had 3 earthquakes, not the 25 its notebook
+  promises, so `gold.region_risk` built empty and failed its own check on every
+  offline first run.
+
+- F2 column rename corrupted the open file when it had unsaved changes. The
+  rename is refused until the file is saved, and afterwards the buffer is
+  reloaded from disk instead of being patched with disk offsets.
+- F2 on a CTE's own alias could silently rename a same-named column of an
+  upstream model. A rename whose target is not the model on screen now asks
+  first, naming the model, the column and the number of files.
+- Hover types and F2 did not resolve upstream columns when the model spelt
+  a table in mixed case or quoted it.
+- A bind result could overwrite a fresher column lookup with a narrower list
+  from the last build, hiding a real column from completion.
+- The editor kept one Monaco model per file ever opened, kept the previous
+  file's error count after a switch, and claimed Monaco's own `inmemory:`
+  buffers in its file opener.
+- Microbatch models with an ephemeral upstream could never build: inlining
+  round-tripped the SQL through sqlglot and turned `{start}` into
+  `{'start': start}`. Placeholder masking now wraps every round trip of
+  model SQL, inlining and defer alike.
+- Catalog probes across the engine, CLI, MCP server and API describe only
+  the current database. Under `--defer`, a model the target also holds was
+  profiled with both warehouses' columns, `havn diff` reported columns that
+  were never local, and unit-test mocks were typed from the other
+  environment.
+- A microbatch backfill with `--event-time-end` in the future stranded the
+  model: future windows were recorded as done and later runs found no
+  window to process. The range is clamped to now, future windows are never
+  recorded, and the resume cursor reads only closed windows.
+- `havn rename-column` left `@assert`, `@col` and `@grain` lines untouched,
+  so the next build failed its own assertion. Directive lines are renamed
+  too.
+- `incremental_strategy=append` bypassed `on_schema_change` and inserted
+  positionally, so a reordered projection wrote every value into its
+  neighbour's column and reported success.
+- A built snapshot could not switch `hard_deletes` to `new_record`; the
+  required `is_deleted` column is now added and backfilled.
+- Two concurrent transform runs in one process could interfere through the
+  defer rewriter: a run started without defer had another run's redirects
+  applied, and a short deferred run detached the target out from under a
+  longer one. The rewriter is scoped to the run and the attach is
+  refcounted; two runs deferring to different environments coexist.
+- `havn rename-column` did not see installed package models from the CLI
+  and, from the API, wrote edits into `havn_packages/` which the next
+  install deleted. Package sites are now blockers on both paths.
+- `POST /api/lint/file` let a viewer read `.sql` files in a sibling
+  directory through a prefix-based containment check, and returned file
+  contents on a check. Fixed, and `POST /api/bind` got the same
+  containment fix.
+- A `path:` package that was the project directory or an ancestor of
+  `havn_packages/` copied itself recursively; a failed copy escaped as a
+  traceback and left a partial checkout. Both refused or contained now, and
+  install removes checkouts the lock names but `packages:` no longer
+  declares.
+- `havn env show` crashed on an empty `environments:` block; `havn ls
+  state:modified` on a project with no warehouse listed nothing; `POST
+  /api/transform` returned 200 with empty results for a mistyped selector
+  (now 400 with the warnings); `havn lint --fix` prepended a blank line to
+  headerless files; a batch file write naming one file two ways wrote it
+  twice; `--defer-snapshot` leaked a warehouse copy in the temp directory
+  when the attach failed.
+
+- A failed severity=error assertion stopped its descendants once, but a plain
+  rerun skipped the rejected model as unchanged and built everything below it
+  on the rejected data. A rejected build is now remembered and keeps blocking
+  -- on every build path (transform, jobs, the web pipeline) and for children
+  built on their own -- until its checks pass.
+- Snapshot and incremental models (microbatch included) were skipped on every
+  run once built, because only their SQL was compared: scheduled runs recorded
+  no new history and loaded no new windows. Snapshots and every incremental
+  that is safe to re-run now run each time (a plain `append` with no
+  `incremental_filter` would duplicate rows, so it keeps the old rule), and a
+  model whose parent was rebuilt in the same run is rebuilt too, so new data
+  reaches the tables below it.
+- A rolled-back deploy left the microbatch windows it had processed marked
+  done, so the next run skipped past rows the rollback had removed. Rollback
+  now restores that progress too.
+- A snapshot with `strategy=timestamp` and a NULL `updated_at` added another
+  current row for its key on every run. It is now refused before anything is
+  written.
+- An approval now counts only for the commit it was given on, and merge merges
+  that commit. Commits pushed after an approval used to merge unreviewed.
+- Opening a change with approval already waived needs an admin, as editing one
+  already did.
+- With sign-in on, only an admin can deploy code that is not yet merged into
+  the base branch to a production environment.
+- A crafted package name in `havn_packages.lock` could make
+  `havn packages install` delete a directory outside the project. Lock names
+  are validated and deletes stay inside `havn_packages/`.
+- A package upgrade that failed (offline, the remote moved, or a local copy
+  that stopped part way) deleted the working checkout. The new revision is now
+  cloned or copied beside it and swapped in only when complete.
+- Column lineage came back empty on sqlglot 29, with the error logged only at
+  debug level. It works again, a total failure is logged as a warning, and
+  sqlglot is capped below 30.
+- On Windows: API and MCP paths came back with backslashes (the workbench and
+  Home answered 404), `havn diff` could not match changed files,
+  `rename-column` turned LF files into CRLF, package removal failed on
+  read-only git objects, and a deploy could report success while it still held
+  the target warehouse open.
+- The Quality page's pass rate counted every past run of every check,
+  including checks since deleted, so it disagreed with Home. It now shows the
+  latest result of each check the project still declares.
+- Query results drew `***`, `!=` and `->` as font ligatures. Data now renders
+  exactly as stored.
+- Ctrl+K opens the command palette from inside the code editor too, with
+  the caret in the search field.
+- Query-box autocomplete kept eating the qualifier: picking a column for
+  `c.cus` left `customer_id` with the `c.` gone. It now replaces only the
+  word being typed, and also completes `schema.table.column`, unaliased
+  table names (`orders.id`) and unqualified tables in `FROM`. The list floats
+  under the caret instead of pushing the Run toolbar down, accepting a
+  suggestion can be undone with Ctrl+Z, Enter after a finished word makes a
+  new line, and nothing pops up inside strings, comments or numbers.
+
+### First impression
+
+- README leads with `pip install havn`; the clone-and-npm chain moved to the
+  from-source section. The wheel ships the built web UI.
+- README shows a screenshot of the web UI instead of a commented-out
+  placeholder.
+- New docs page, **What havn Supports** (`docs/limitations.md`): per-area
+  tables of supported, partial, not supported and planned.
+
 ## [0.2.27] - 2026-08-04
 
 ### Security

@@ -102,7 +102,7 @@ def preview(
     """Preview the resolved execution plan for a job."""
     from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.orchestration import _find_job, preview_plan
-    from havn.engine.transform.discovery import build_dag, discover_models
+    from havn.engine.transform.discovery import build_dag, discover_all_models
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir)
@@ -111,7 +111,7 @@ def preview(
         console.print(f"[red]Job '{name}' not found[/red]")
         raise typer.Exit(1)
 
-    models = discover_models(project_dir / "transform")
+    models = discover_all_models(project_dir, config)
     dag = build_dag(models)
     conn = None
     if _warehouse_exists(config, project_dir):
@@ -119,7 +119,8 @@ def preview(
         ensure_meta_table(conn)
     try:
         plan = preview_plan(
-            job.targets or [job.target], dag, project_dir, conn=conn, resolve=job.resolve
+            job.targets or [job.target], dag, project_dir, conn=conn,
+            resolve=job.resolve, exclude=job.exclude or None,
         )
     finally:
         if conn:
@@ -155,7 +156,7 @@ def run(
         execute_job,
         resolve_execution_plan,
     )
-    from havn.engine.transform.discovery import build_dag, discover_models
+    from havn.engine.transform.discovery import build_dag, discover_all_models
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir)
@@ -168,10 +169,11 @@ def run(
     ensure_meta_table(conn)
     ensure_job_runs_table(conn)
     try:
-        models = discover_models(project_dir / "transform")
+        models = discover_all_models(project_dir, config)
         dag = build_dag(models)
         plan = resolve_execution_plan(
-            job.targets or [job.target], dag, project_dir, conn=conn, resolve=job.resolve
+            job.targets or [job.target], dag, project_dir, conn=conn,
+            resolve=job.resolve, exclude=job.exclude or None,
         )
         console.print(f"[bold]Running {job.name}[/bold] \u2014 {len(plan.steps)} steps")
         result = execute_job(job, plan, conn, project_dir, trigger="manual")
@@ -278,5 +280,5 @@ def _toggle_enabled(name: str, enabled: bool, project_dir: Path | None) -> None:
         raise typer.Exit(1)
     data = yaml.safe_load(job.file_path.read_text())
     data["enabled"] = enabled
-    job.file_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+    job.file_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False), encoding="utf-8")
     console.print(f"Job '{name}' {'enabled' if enabled else 'disabled'}")

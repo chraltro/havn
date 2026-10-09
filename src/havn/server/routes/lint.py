@@ -44,32 +44,49 @@ def lint_endpoint(request: Request, fix: bool = False) -> dict:
 
 @router.post("/api/lint/file")
 def lint_file_endpoint(request: Request, req: LintFileRequest) -> dict:
-    """Run SQLFluff on a single SQL file."""
-    _require_permission(request, "execute")
+    """Run SQLFluff on a single SQL file.
+
+    Linting a buffer reads it and returns violations, which is no more than a
+    viewer can already do by opening the file, so a plain check needs only
+    read. Auto-fix rewrites the file and needs write. The editor polls this
+    for diagnostics on an idle debounce and would otherwise be closed to every
+    viewer in the project.
+    """
+    _require_permission(request, "write" if req.fix else "read")
     from havn.lint.linter import lint_file
+    from havn.server.routes.files import _safe_project_path
 
     project_dir = _get_project_dir()
     config = _get_config()
-    file_path = (project_dir / req.path).resolve()
-    # Security: must be inside project dir
-    if not str(file_path).startswith(str(project_dir.resolve())):
-        raise HTTPException(status_code=400, detail="Path outside project directory")
+    # Containment is by path parts, not by string prefix: `/proj-backup`
+    # starts with `/proj`, and a plain `startswith` let a viewer read a `.sql`
+    # file in a sibling directory through this endpoint.
+    file_path = _safe_project_path(project_dir, req.path)
     if file_path.suffix != ".sql":
         raise HTTPException(status_code=400, detail="Not a SQL file")
 
-    count, violations, fixed, new_content = lint_file(
-        file_path,
-        project_dir=project_dir,
-        fix=req.fix,
-        dialect=config.lint.dialect,
-        rules=config.lint.rules or None,
-        content=req.content,
-    )
+    from havn.lint.linter import LintRefused
+
+    try:
+        count, violations, fixed, new_content = lint_file(
+            file_path,
+            project_dir=project_dir,
+            fix=req.fix,
+            dialect=config.lint.dialect,
+            rules=config.lint.rules or None,
+            content=req.content,
+        )
+    except LintRefused as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # A check returns violations only. `new_content` is the whole file, and
+    # returning it on a read-permission call would hand a viewer the contents
+    # of any .sql file in the project through what is meant to be a
+    # diagnostics poll. Only a fix, which needs write, returns content.
     return {
         "count": count,
         "violations": violations,
         "fixed": fixed,
-        "content": new_content,
+        "content": new_content if req.fix else None,
     }
 
 
@@ -126,7 +143,7 @@ def save_lint_config(request: Request, req: LintConfigRequest) -> dict:
     """Save the .sqlfluff config file."""
     _require_permission(request, "write")
     sqlfluff_path = _get_project_dir() / ".sqlfluff"
-    sqlfluff_path.write_text(req.content)
+    sqlfluff_path.write_text(req.content, encoding="utf-8")
     return {"status": "saved"}
 
 

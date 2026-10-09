@@ -71,7 +71,8 @@ def _build_table_signatures(conn: duckdb.DuckDBPyConnection) -> dict[str, dict]:
         tables = conn.execute(
             "SELECT table_schema, table_name, table_type "
             "FROM information_schema.tables "
-            "WHERE table_schema NOT IN ('information_schema', '_havn')"
+            "WHERE table_catalog = current_database() "
+            "AND table_schema NOT IN ('information_schema', '_havn')"
         ).fetchall()
     except Exception as e:
         logger.debug("Could not enumerate tables for snapshot: %s", e)
@@ -93,7 +94,8 @@ def _build_table_signatures(conn: duckdb.DuckDBPyConnection) -> dict[str, dict]:
         try:
             cols = conn.execute(
                 "SELECT column_name, data_type FROM information_schema.columns "
-                "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+                "WHERE table_catalog = current_database() "
+                "AND table_schema = ? AND table_name = ? ORDER BY ordinal_position",
                 [schema, table],
             ).fetchall()
             col_str = "|".join(f"{c[0]}:{c[1]}" for c in cols)

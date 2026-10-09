@@ -750,3 +750,678 @@ class TestContractsSecurity:
         assert result.passed is False
         assert "Invalid" in result.error
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Column Contracts
+# ---------------------------------------------------------------------------
+
+
+def _write_contract(tmp_path: Path, body: str) -> Path:
+    """Write a single contract file and return the contracts directory."""
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir(exist_ok=True)
+    (contracts_dir / "shape.yml").write_text(body)
+    return contracts_dir
+
+
+class TestColumnDeclarationParsing:
+    """The `columns:` block, and what happens when it is wrong."""
+
+    def test_valid_declaration(self, tmp_path: Path):
+        from havn.engine.contracts import discover_contracts
+
+        contracts_dir = _write_contract(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    strict: true
+    on_widen: error
+    columns:
+      - name: order_id
+        type: BIGINT
+        nullable: false
+        description: Surrogate key
+      - name: total
+        type: decimal(38,2)
+""")
+        contract = discover_contracts(contracts_dir)[0]
+        assert contract.errors == []
+        assert contract.strict is True
+        assert contract.on_widen == "error"
+        assert [(c.name, c.type) for c in contract.columns] == [
+            ("order_id", "BIGINT"),
+            # DuckDB itself canonicalizes the type text.
+            ("total", "DECIMAL(38,2)"),
+        ]
+        assert contract.columns[0].nullable is False
+        assert contract.columns[0].description == "Surrogate key"
+        assert contract.columns[1].nullable is None
+
+    def test_declaration_is_optional(self, tmp_path: Path):
+        """Every contract written before columns existed still loads."""
+        from havn.engine.contracts import discover_contracts
+
+        contracts_dir = _write_contract(tmp_path, """
+contracts:
+  - name: legacy
+    model: gold.orders
+    assertions:
+      - row_count > 0
+""")
+        contract = discover_contracts(contracts_dir)[0]
+        assert contract.columns == []
+        assert contract.strict is False
+        assert contract.on_widen == "warn"
+        assert contract.errors == []
+
+    def test_invalid_type_is_collected_not_raised(self, tmp_path: Path):
+        from havn.engine.contracts import discover_contracts
+
+        contracts_dir = _write_contract(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    columns:
+      - name: good
+        type: VARCHAR
+      - name: bad
+        type: NOTATYPE
+""")
+        contract = discover_contracts(contracts_dir)[0]
+        # The good column still loads: one typo must not disable the check.
+        assert [c.name for c in contract.columns] == ["good"]
+        assert len(contract.errors) == 1
+        assert "NOTATYPE" in contract.errors[0]
+
+    def test_type_text_that_is_not_a_type_never_reaches_duckdb(self, tmp_path: Path):
+        from havn.engine.contracts import discover_contracts
+
+        contracts_dir = _write_contract(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    columns:
+      - name: inj
+        type: "INTEGER); DROP TABLE x; --"
+""")
+        contract = discover_contracts(contracts_dir)[0]
+        assert contract.columns == []
+        assert "not a type name" in contract.errors[0]
+
+    def test_invalid_identifier(self, tmp_path: Path):
+        from havn.engine.contracts import discover_contracts
+
+        contracts_dir = _write_contract(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    columns:
+      - name: 9lives
+        type: INTEGER
+      - name: "order id"
+        type: INTEGER
+""")
+        contract = discover_contracts(contracts_dir)[0]
+        assert contract.columns == []
+        assert len(contract.errors) == 2
+        assert all("not a valid column name" in e for e in contract.errors)
+
+    def test_duplicate_columns(self, tmp_path: Path):
+        from havn.engine.contracts import discover_contracts
+
+        contracts_dir = _write_contract(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    columns:
+      - name: order_id
+        type: INTEGER
+      - name: ORDER_ID
+        type: BIGINT
+""")
+        contract = discover_contracts(contracts_dir)[0]
+        assert len(contract.columns) == 1
+        assert "duplicate column" in contract.errors[0]
+
+    def test_unknown_on_widen_falls_back_to_warn(self, tmp_path: Path):
+        from havn.engine.contracts import discover_contracts
+
+        contracts_dir = _write_contract(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    on_widen: explode
+    columns:
+      - name: order_id
+        type: INTEGER
+""")
+        contract = discover_contracts(contracts_dir)[0]
+        assert contract.on_widen == "warn"
+        assert "unknown on_widen" in contract.errors[0]
+
+
+class TestCheckContractSchema:
+    """Each finding kind, from the same (column, type) list every caller passes."""
+
+    def _contract(self, **kwargs):
+        from havn.engine.contracts import Contract, ContractColumn
+
+        columns = [
+            ContractColumn(name=name, type=ctype, nullable=nullable)
+            for name, ctype, nullable in kwargs.pop("columns", [])
+        ]
+        return Contract(
+            name="shape", model="gold.orders", columns=columns, **kwargs
+        )
+
+    def test_match_produces_nothing(self):
+        from havn.engine.contracts import check_contract_schema
+
+        contract = self._contract(columns=[("order_id", "BIGINT", None)])
+        assert check_contract_schema(contract, [("order_id", "BIGINT")]) == []
+
+    def test_parameter_change_within_a_type_is_not_a_finding(self):
+        """DECIMAL(10,2) to DECIMAL(38,2) is the same type, differently sized."""
+        from havn.engine.contracts import check_contract_schema
+
+        contract = self._contract(columns=[("total", "DECIMAL(10,2)", None)])
+        assert check_contract_schema(contract, [("total", "DECIMAL(38,2)")]) == []
+
+    def test_missing_column_is_an_error(self):
+        from havn.engine.contracts import check_contract_schema
+
+        contract = self._contract(columns=[("order_id", "BIGINT", None)])
+        findings = check_contract_schema(contract, [("other", "BIGINT")])
+        missing = [f for f in findings if f.kind == "missing_column"]
+        assert len(missing) == 1
+        assert missing[0].severity == "error"
+        assert missing[0].column == "order_id"
+
+    def test_extra_column_is_informational_by_default(self):
+        from havn.engine.contracts import check_contract_schema
+
+        contract = self._contract(columns=[("order_id", "BIGINT", None)])
+        findings = check_contract_schema(
+            contract, [("order_id", "BIGINT"), ("note", "VARCHAR")]
+        )
+        assert [(f.kind, f.severity) for f in findings] == [("extra_column", "info")]
+
+    def test_extra_column_is_an_error_when_strict(self):
+        from havn.engine.contracts import check_contract_schema
+
+        contract = self._contract(strict=True, columns=[("order_id", "BIGINT", None)])
+        findings = check_contract_schema(
+            contract, [("order_id", "BIGINT"), ("note", "VARCHAR")]
+        )
+        assert [(f.kind, f.severity) for f in findings] == [("extra_column", "error")]
+
+    def test_widening_warns_by_default(self):
+        from havn.engine.contracts import check_contract_schema
+
+        contract = self._contract(columns=[("order_id", "INTEGER", None)])
+        findings = check_contract_schema(contract, [("order_id", "BIGINT")])
+        assert [(f.kind, f.severity) for f in findings] == [
+            ("type_widened", "warning")
+        ]
+
+    def test_double_to_decimal_is_a_widening(self):
+        """The shape a SUM of a DOUBLE resolves to must not read as a break."""
+        from havn.engine.contracts import check_contract_schema
+
+        contract = self._contract(columns=[("total", "DOUBLE", None)])
+        findings = check_contract_schema(contract, [("total", "DECIMAL(38,1)")])
+        assert [f.kind for f in findings] == ["type_widened"]
+
+    def test_on_widen_error(self):
+        from havn.engine.contracts import check_contract_schema
+
+        contract = self._contract(
+            on_widen="error", columns=[("order_id", "INTEGER", None)]
+        )
+        findings = check_contract_schema(contract, [("order_id", "BIGINT")])
+        assert [(f.kind, f.severity) for f in findings] == [("type_widened", "error")]
+
+    def test_on_widen_ignore(self):
+        from havn.engine.contracts import check_contract_schema
+
+        contract = self._contract(
+            on_widen="ignore", columns=[("order_id", "INTEGER", None)]
+        )
+        assert check_contract_schema(contract, [("order_id", "BIGINT")]) == []
+
+    def test_narrowing_is_an_error(self):
+        from havn.engine.contracts import check_contract_schema
+
+        contract = self._contract(columns=[("order_id", "BIGINT", None)])
+        findings = check_contract_schema(contract, [("order_id", "SMALLINT")])
+        assert [(f.kind, f.severity) for f in findings] == [
+            ("type_narrowed", "error")
+        ]
+
+    def test_category_change_is_an_error(self):
+        from havn.engine.contracts import check_contract_schema
+
+        contract = self._contract(columns=[("order_id", "BIGINT", None)])
+        findings = check_contract_schema(contract, [("order_id", "VARCHAR")])
+        assert [(f.kind, f.severity) for f in findings] == [
+            ("type_changed", "error")
+        ]
+
+    def test_list_of_a_type_is_not_the_type(self):
+        from havn.engine.contracts import check_contract_schema
+
+        contract = self._contract(columns=[("tags", "VARCHAR", None)])
+        findings = check_contract_schema(contract, [("tags", "VARCHAR[]")])
+        assert [f.kind for f in findings] == ["type_changed"]
+
+    def test_nullability_is_skipped_when_unknown(self):
+        from havn.engine.contracts import check_contract_schema
+
+        contract = self._contract(columns=[("order_id", "BIGINT", False)])
+        assert check_contract_schema(contract, [("order_id", "BIGINT")]) == []
+
+    def test_nullability_error_when_the_source_distinguishes(self):
+        from havn.engine.contracts import check_contract_schema
+
+        contract = self._contract(columns=[("order_id", "BIGINT", False)])
+        findings = check_contract_schema(
+            contract, [("order_id", "BIGINT")], nullability={"order_id": True}
+        )
+        assert [(f.kind, f.severity) for f in findings] == [
+            ("not_null_violated", "error")
+        ]
+
+    def test_no_declaration_means_no_findings(self):
+        from havn.engine.contracts import check_contract_schema
+
+        contract = self._contract(columns=[])
+        assert check_contract_schema(contract, [("anything", "VARCHAR")]) == []
+
+
+class TestDescribeWithNullability:
+    """A CTAS table reports every column nullable, which is no answer at all."""
+
+    def test_all_nullable_is_treated_as_no_information(self):
+        from havn.engine.contracts import describe_with_nullability
+
+        conn = duckdb.connect(":memory:")
+        conn.execute("CREATE SCHEMA gold")
+        conn.execute("CREATE TABLE gold.orders AS SELECT 1 AS id, 'x' AS note")
+        columns, nullability = describe_with_nullability(conn, "gold.orders")
+        assert [c[0] for c in columns] == ["id", "note"]
+        assert nullability == {}
+        conn.close()
+
+    def test_a_not_null_constraint_makes_the_map_meaningful(self):
+        from havn.engine.contracts import describe_with_nullability
+
+        conn = duckdb.connect(":memory:")
+        conn.execute("CREATE SCHEMA gold")
+        conn.execute(
+            "CREATE TABLE gold.orders (id INTEGER NOT NULL, note VARCHAR)"
+        )
+        _, nullability = describe_with_nullability(conn, "gold.orders")
+        assert nullability == {"id": False, "note": True}
+        conn.close()
+
+
+class TestContractSchemaBeforeTheBuild:
+    """The point of the whole feature: a break caught on an empty warehouse."""
+
+    def _project(self, tmp_path: Path, contract_body: str, query: str):
+        from havn.engine.database import ensure_meta_table
+        from havn.engine.transform import SQLModel
+
+        _write_contract(tmp_path, contract_body)
+        (tmp_path / "transform" / "gold").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "project.yml").write_text("name: p\n")
+        conn = duckdb.connect(str(tmp_path / "w.duckdb"))
+        ensure_meta_table(conn)
+        conn.execute("CREATE SCHEMA IF NOT EXISTS landing")
+        conn.execute(
+            "CREATE TABLE landing.raw AS "
+            "SELECT 1::BIGINT AS order_id, 2.0::DOUBLE AS total, 'x' AS note"
+        )
+        model = SQLModel(
+            path=tmp_path / "transform" / "gold" / "orders.sql",
+            name="orders",
+            schema="gold",
+            full_name="gold.orders",
+            sql="",
+            query=query,
+            materialized="table",
+            depends_on=["landing.raw"],
+        )
+        return conn, model
+
+    def test_break_is_caught_before_any_table_exists(self, tmp_path: Path):
+        from havn.engine.transform import validate_models
+
+        conn, model = self._project(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    columns:
+      - name: order_id
+        type: BIGINT
+      - name: gone
+        type: VARCHAR
+""", "SELECT order_id, total FROM landing.raw")
+        try:
+            # gold.orders has never been built.
+            assert conn.execute(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'gold'"
+            ).fetchone()[0] == 0
+
+            errors = validate_models(conn, [model], bind=True, project_dir=tmp_path)
+            messages = [e.message for e in errors if e.severity == "error"]
+            assert any("does not have the declared column 'gone'" in m for m in messages)
+        finally:
+            conn.close()
+
+    def test_a_clean_declaration_reports_nothing(self, tmp_path: Path):
+        from havn.engine.transform import validate_models
+
+        conn, model = self._project(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    strict: true
+    columns:
+      - name: order_id
+        type: BIGINT
+      - name: total
+        type: DOUBLE
+""", "SELECT order_id, total FROM landing.raw")
+        try:
+            errors = validate_models(conn, [model], bind=True, project_dir=tmp_path)
+            assert [e.message for e in errors] == []
+        finally:
+            conn.close()
+
+    def test_a_widening_is_a_warning_not_a_break(self, tmp_path: Path):
+        from havn.engine.transform import validate_models
+
+        conn, model = self._project(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    columns:
+      - name: order_id
+        type: INTEGER
+""", "SELECT order_id FROM landing.raw")
+        try:
+            errors = validate_models(conn, [model], bind=True, project_dir=tmp_path)
+            assert [e.severity for e in errors] == ["warning"]
+            assert "widened" in errors[0].message
+        finally:
+            conn.close()
+
+    def test_declaration_errors_are_reported_at_validate_time(self, tmp_path: Path):
+        from havn.engine.transform import validate_models
+
+        conn, model = self._project(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    columns:
+      - name: order_id
+        type: NOTATYPE
+""", "SELECT order_id, total FROM landing.raw")
+        try:
+            errors = validate_models(conn, [model], bind=True, project_dir=tmp_path)
+            assert any(
+                "NOTATYPE" in e.message and e.severity == "error" for e in errors
+            )
+        finally:
+            conn.close()
+
+    def test_undeclared_column_is_quiet_unless_strict(self, tmp_path: Path):
+        from havn.engine.transform import validate_models
+
+        conn, model = self._project(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    columns:
+      - name: order_id
+        type: BIGINT
+""", "SELECT order_id, total, note FROM landing.raw")
+        try:
+            errors = validate_models(conn, [model], bind=True, project_dir=tmp_path)
+            assert [e.message for e in errors] == []
+        finally:
+            conn.close()
+
+    def test_strict_rejects_an_undeclared_column(self, tmp_path: Path):
+        from havn.engine.transform import validate_models
+
+        conn, model = self._project(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    strict: true
+    columns:
+      - name: order_id
+        type: BIGINT
+""", "SELECT order_id, note FROM landing.raw")
+        try:
+            errors = validate_models(conn, [model], bind=True, project_dir=tmp_path)
+            assert [e.severity for e in errors] == ["error"]
+            assert "undeclared column 'note'" in errors[0].message
+        finally:
+            conn.close()
+
+    def test_persisted_columns_are_the_fallback(self, tmp_path: Path):
+        """A contract on a model outside the bound set still gets checked."""
+        from havn.engine.transform import SQLModel, validate_models
+        from havn.engine.transform.columns import save_model_columns
+
+        conn, model = self._project(tmp_path, """
+contracts:
+  - name: other_shape
+    model: gold.other
+    columns:
+      - name: missing_everywhere
+        type: VARCHAR
+""", "SELECT order_id FROM landing.raw")
+        try:
+            other = SQLModel(
+                path=tmp_path / "transform" / "gold" / "other.sql",
+                name="other", schema="gold", full_name="gold.other",
+                sql="", query="SELECT 1 AS id", materialized="table",
+            )
+            save_model_columns(conn, other, [("id", "INTEGER")])
+
+            # gold.other is not in the model list, so the bind pass never
+            # sees it; the schema recorded at its last build is used instead.
+            errors = validate_models(conn, [model], bind=True, project_dir=tmp_path)
+            assert any(
+                "missing_everywhere" in e.message and e.severity == "error"
+                for e in errors
+            )
+        finally:
+            conn.close()
+
+
+class TestContractSchemaAfterTheBuild:
+    """The same check against the live table, so the report is complete."""
+
+    def _run(self, tmp_path: Path, contract_body: str):
+        from havn.engine.contracts import discover_contracts, evaluate_contract
+        from havn.engine.database import ensure_meta_table
+
+        contracts_dir = _write_contract(tmp_path, contract_body)
+        conn = duckdb.connect(":memory:")
+        ensure_meta_table(conn)
+        conn.execute("CREATE SCHEMA gold")
+        conn.execute(
+            "CREATE TABLE gold.orders AS "
+            "SELECT 1::BIGINT AS order_id, 'x' AS note"
+        )
+        contract = discover_contracts(contracts_dir)[0]
+        try:
+            return evaluate_contract(conn, contract)
+        finally:
+            conn.close()
+
+    def test_post_build_break_fails_the_contract(self, tmp_path: Path):
+        result = self._run(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    columns:
+      - name: order_id
+        type: VARCHAR
+    assertions:
+      - row_count > 0
+""")
+        assert result.passed is False
+        # `note` is undeclared, which on a non-strict contract is information.
+        assert [f.kind for f in result.schema_findings] == [
+            "type_changed", "extra_column"
+        ]
+        assert any("type_changed" in r["expression"] for r in result.results)
+
+    def test_post_build_clean_declaration_passes(self, tmp_path: Path):
+        result = self._run(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    strict: true
+    columns:
+      - name: order_id
+        type: BIGINT
+      - name: note
+        type: VARCHAR
+    assertions:
+      - row_count > 0
+""")
+        assert result.passed is True
+        assert result.schema_findings == []
+
+    def test_informational_findings_do_not_fail_the_contract(self, tmp_path: Path):
+        result = self._run(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    columns:
+      - name: order_id
+        type: BIGINT
+    assertions:
+      - row_count > 0
+""")
+        assert result.passed is True
+        assert [f.severity for f in result.schema_findings] == ["info"]
+        # An informational finding stays out of the pass/fail rule list.
+        assert all("extra_column" not in r["expression"] for r in result.results)
+
+    def test_declaration_errors_fail_the_contract(self, tmp_path: Path):
+        result = self._run(tmp_path, """
+contracts:
+  - name: orders_shape
+    model: gold.orders
+    columns:
+      - name: order_id
+        type: NOTATYPE
+    assertions:
+      - row_count > 0
+""")
+        assert result.passed is False
+
+
+class TestSchemaDriftWarning:
+    """The contract check without a contract, off until it has been tuned."""
+
+    def _project(self, tmp_path: Path, project_yml: str = "name: p\n"):
+        from havn.engine.database import ensure_meta_table
+        from havn.engine.transform import SQLModel
+        from havn.engine.transform.columns import save_model_columns
+
+        (tmp_path / "transform" / "gold").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "project.yml").write_text(project_yml)
+        conn = duckdb.connect(str(tmp_path / "w.duckdb"))
+        ensure_meta_table(conn)
+        conn.execute("CREATE SCHEMA IF NOT EXISTS landing")
+        conn.execute(
+            "CREATE TABLE landing.raw AS "
+            "SELECT 1::BIGINT AS order_id, 'x' AS note"
+        )
+        model = SQLModel(
+            path=tmp_path / "transform" / "gold" / "orders.sql",
+            name="orders", schema="gold", full_name="gold.orders", sql="",
+            query="SELECT order_id, note FROM landing.raw",
+            materialized="table", depends_on=["landing.raw"],
+        )
+        save_model_columns(
+            conn, model, [("order_id", "INTEGER"), ("dropped", "DATE")]
+        )
+        return conn, model
+
+    def test_off_by_default(self, tmp_path: Path):
+        from havn.engine.transform import validate_models
+
+        conn, model = self._project(tmp_path)
+        try:
+            errors = validate_models(conn, [model], bind=True, project_dir=tmp_path)
+            assert [e.message for e in errors] == []
+        finally:
+            conn.close()
+
+    def test_on_by_argument(self, tmp_path: Path):
+        from havn.engine.transform import validate_models
+
+        conn, model = self._project(tmp_path)
+        try:
+            errors = validate_models(
+                conn, [model], bind=True, project_dir=tmp_path, schema_drift=True
+            )
+            assert len(errors) == 1
+            assert errors[0].severity == "warning"
+            message = errors[0].message
+            assert message.startswith("output schema of gold.orders changes:")
+            assert "added note" in message
+            assert "removed dropped" in message
+            assert "retyped order_id INTEGER -> BIGINT" in message
+        finally:
+            conn.close()
+
+    def test_on_by_project_setting(self, tmp_path: Path):
+        from havn.engine.transform import validate_models
+
+        conn, model = self._project(
+            tmp_path, "name: p\nvalidation:\n  schema_drift: warn\n"
+        )
+        try:
+            errors = validate_models(conn, [model], bind=True, project_dir=tmp_path)
+            assert len(errors) == 1
+            assert errors[0].severity == "warning"
+        finally:
+            conn.close()
+
+    def test_an_unbuilt_model_has_not_drifted(self, tmp_path: Path):
+        """No baseline means no drift, not drift from nothing."""
+        from havn.engine.database import ensure_meta_table
+        from havn.engine.transform import SQLModel, validate_models
+
+        (tmp_path / "transform" / "gold").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "project.yml").write_text("name: p\n")
+        conn = duckdb.connect(str(tmp_path / "w.duckdb"))
+        ensure_meta_table(conn)
+        conn.execute("CREATE SCHEMA IF NOT EXISTS landing")
+        conn.execute("CREATE TABLE landing.raw AS SELECT 1 AS order_id")
+        model = SQLModel(
+            path=tmp_path / "transform" / "gold" / "orders.sql",
+            name="orders", schema="gold", full_name="gold.orders", sql="",
+            query="SELECT order_id FROM landing.raw",
+            materialized="table", depends_on=["landing.raw"],
+        )
+        try:
+            errors = validate_models(
+                conn, [model], bind=True, project_dir=tmp_path, schema_drift=True
+            )
+            assert [e.message for e in errors] == []
+        finally:
+            conn.close()

@@ -41,6 +41,7 @@ def macros(
     _KIND_STYLES = {"scalar": "green", "table": "magenta", "sql": "cyan"}
 
     stdlib_count = 0
+    package_count = 0
     user_count = 0
     for m in items:
         params_str = ", ".join(
@@ -58,10 +59,15 @@ def macros(
         style = _KIND_STYLES.get(kind, "")
         kind_cell = f"[{style}]{label}[/{style}]" if style else label
         is_stdlib = bool(m.get("is_stdlib"))
-        origin = "[blue]stdlib[/blue]" if is_stdlib else "user"
+        pkg = m.get("package", "") or ""
         if is_stdlib:
+            origin = "[blue]stdlib[/blue]"
             stdlib_count += 1
+        elif pkg:
+            origin = f"[magenta]{pkg}[/magenta]"
+            package_count += 1
         else:
+            origin = "user"
             user_count += 1
         table.add_row(
             m["name"],
@@ -75,6 +81,6 @@ def macros(
 
     console.print(table)
     summary = f"{len(items)} macro(s)"
-    if stdlib_count or user_count:
-        summary += f" — {stdlib_count} stdlib, {user_count} user"
+    if stdlib_count or user_count or package_count:
+        summary += f" \u2014 {stdlib_count} stdlib, {package_count} package, {user_count} user"
     console.print(f"[dim]{summary}[/dim]")

@@ -96,7 +96,8 @@ def _get_column_info(
     try:
         rows = conn.execute(
             "SELECT column_name, data_type FROM information_schema.columns "
-            "WHERE table_schema = ? AND table_name = ? "
+            "WHERE table_catalog = current_database() "
+            "AND table_schema = ? AND table_name = ? "
             "ORDER BY ordinal_position",
             [schema, table],
         ).fetchall()
@@ -174,11 +175,16 @@ def _serialize(value):
 
 
 def _table_exists(conn: duckdb.DuckDBPyConnection, schema: str, table: str) -> bool:
-    """Check if a table/view exists in the warehouse."""
+    """Check if a table/view exists in this warehouse.
+
+    Scoped to the current database: information_schema spans every attached
+    one, so a model only the defer target holds looked present here.
+    """
     try:
         result = conn.execute(
             "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = ? AND table_name = ?",
+            "WHERE table_catalog = current_database() "
+            "AND table_schema = ? AND table_name = ?",
             [schema, table],
         ).fetchone()
         return result[0] > 0 if result else False
@@ -402,10 +408,9 @@ def diff_models(
     Returns:
         List of DiffResult objects
     """
-    from havn.engine.transform import build_dag, discover_models
-    from havn.engine.transform.discovery import _has_changed
+    from havn.engine.transform import build_dag, discover_all_models
 
-    all_models = discover_models(transform_dir)
+    all_models = discover_all_models(transform_dir.parent)
     if not all_models:
         return []
 
@@ -423,21 +428,17 @@ def diff_models(
     # Sort by DAG order
     ordered = build_dag(models)
 
-    # Changed mode: only diff models whose SQL or upstream changed
+    # Changed mode: only diff models whose SQL or upstream changed, plus
+    # everything downstream of them. That is exactly ``state:modified+``, so
+    # it goes through the shared selector rather than a fourth hand-rolled
+    # downstream closure.
     changed_set = None
     if mode == "changed" and not targets:
-        changed_set = set()
-        model_map = {m.full_name: m for m in ordered}
-        for model in ordered:
-            if _has_changed(conn, model):
-                changed_set.add(model.full_name)
-        # Include downstream of changed models
-        downstream = set()
-        for model in ordered:
-            for dep in model.depends_on:
-                if dep in changed_set or dep in downstream:
-                    downstream.add(model.full_name)
-        changed_set.update(downstream)
+        from havn.engine.selectors import select_models
+
+        changed_set = set(
+            select_models(["state:modified+"], ordered, conn=conn).selected
+        )
 
     results: list[DiffResult] = []
     for model in ordered:

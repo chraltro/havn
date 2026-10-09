@@ -102,9 +102,9 @@ def generate_workflow(project_dir: Path) -> dict:
     workflows_dir.mkdir(parents=True, exist_ok=True)
 
     workflow_path = workflows_dir / "havn-ci.yml"
-    workflow_path.write_text(WORKFLOW_TEMPLATE)
+    workflow_path.write_text(WORKFLOW_TEMPLATE, encoding="utf-8")
 
-    return {"path": str(workflow_path.relative_to(project_dir))}
+    return {"path": workflow_path.relative_to(project_dir).as_posix()}
 
 
 def _format_diff_comment(diff_data: list[dict] | dict) -> str:

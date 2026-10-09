@@ -355,7 +355,7 @@ def setup_connector(
     ingest_dir = project_dir / "ingest"
     ingest_dir.mkdir(parents=True, exist_ok=True)
     script_path = ingest_dir / script_filename
-    script_path.write_text(script_content)
+    script_path.write_text(script_content, encoding="utf-8")
 
     # 6. Write secrets to .env
     if secret_params:
@@ -377,7 +377,7 @@ def setup_connector(
         "status": "success",
         "connection_name": connection_name,
         "connector_type": connector_type,
-        "script_path": str(script_path.relative_to(project_dir)),
+        "script_path": script_path.relative_to(project_dir).as_posix(),
         "tables": tables,
         "schedule": schedule or connector.default_schedule,
     }
@@ -522,13 +522,13 @@ def regenerate_connector(
     script_filename = f"connector_{safe_name}.py"
     script_path = project_dir / "ingest" / script_filename
     script_path.parent.mkdir(parents=True, exist_ok=True)
-    script_path.write_text(script_content)
+    script_path.write_text(script_content, encoding="utf-8")
 
     return {
         "status": "success",
         "connection_name": connection_name,
         "connector_type": connector_type,
-        "script_path": str(script_path.relative_to(project_dir)),
+        "script_path": script_path.relative_to(project_dir).as_posix(),
         "tables": tables,
     }
 
@@ -615,7 +615,7 @@ def _update_project_yml(
         "schedule": schedule,
     }
 
-    config_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False))
+    config_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False), encoding="utf-8")
 
 
 def _remove_from_project_yml(project_dir: Path, connection_name: str) -> bool:
@@ -641,6 +641,6 @@ def _remove_from_project_yml(project_dir: Path, connection_name: str) -> bool:
         removed = True
 
     if removed:
-        config_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False))
+        config_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False), encoding="utf-8")
 
     return removed

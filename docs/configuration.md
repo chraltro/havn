@@ -158,6 +158,7 @@ environments:
   dev:
     database:
       path: dev_warehouse.duckdb
+    defer: prod            # read models dev has not built from prod
   prod:
     database:
       path: prod_warehouse.duckdb
@@ -165,6 +166,12 @@ environments:
     database:
       path: ":memory:"
 ```
+
+`defer:` names another environment whose warehouse supplies the models this
+one has not built. It is read-only and applies to `havn transform`; writes
+always land in this environment. The target's file must not be open for
+writing elsewhere, or the run needs `--defer-snapshot`. See
+[Environments: Defer](environments#defer).
 
 Switch environments with `--env`:
 
@@ -217,6 +224,24 @@ connectors:
 
 See [CDC](cdc) for details.
 
+### packages
+
+Shared models and macros installed from git or a local directory:
+
+```yaml
+packages:
+  - name: crm
+    git: https://github.com/example/havn-crm.git
+    rev: v1.4.0          # tag, commit or branch; required for git sources
+  - name: shared
+    path: ../shared-models
+```
+
+`name` must be a valid identifier and unique, because it becomes a SQL schema
+prefix. A git source needs a `rev`; a branch is accepted but warned about,
+since it moves. `havn packages install` writes `havn_packages.lock`, which is
+committed, while `havn_packages/` is gitignored. See [Packages](packages).
+
 ## Environment Variable Expansion
 
 Any value in `project.yml` can reference environment variables using `${VAR}` syntax:
@@ -263,4 +288,5 @@ curl -X POST http://localhost:3000/api/secrets \
 - [Pipelines](pipelines) -- Stream configuration details
 - [Environments](environments) -- Multi-environment support
 - [Connectors](connectors) -- Connection types and parameters
+- [Packages](packages) -- Sharing models and macros between projects
 - [Scheduler](scheduler) -- Cron scheduling reference

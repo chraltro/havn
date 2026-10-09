@@ -64,6 +64,8 @@ def git_project(tmp_path):
     )
     (tmp_path / ".havn" / "prs").mkdir(parents=True)
     (tmp_path / ".havn" / "prs" / ".gitkeep").write_text("")
+    # What `havn init` writes: the warehouse is never committed.
+    (tmp_path / ".gitignore").write_text("warehouse.duckdb\nwarehouse.duckdb.wal\n.havn/pr-build/\n")
 
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-m", "initial")
@@ -304,11 +306,12 @@ def test_merge_refuses_closed_pr(git_project, conn):
 def test_merge_happy_path(git_project, conn):
     pr = create_pr(git_project, "T", "", "main", "feature/enrich", "alice")
     approve_pr(git_project, pr.id, "bob")
+    # Creating and approving the PR wrote .havn/prs/<id>.json; that must not
+    # count as a dirty tree, or no PR made in the UI could ever merge.
     result = merge_pr(git_project, pr.id, "alice", conn)
-    if not result["success"]:
-        pytest.skip(
-            f"git merge-tree unsupported on this git version: {result.get('error')}"
-        )
+    if not result["success"] and "merge-tree" in (result.get("error") or ""):
+        pytest.skip(f"git merge-tree unsupported on this git version: {result['error']}")
+    assert result["success"], result.get("error")
     assert result["merge_commit"]
     # Current branch should be main
     head = _git(git_project, "rev-parse", "--abbrev-ref", "HEAD")
@@ -419,3 +422,62 @@ def test_pr_state_status(git_project):
     create_pr(git_project, "T", "", "main", "feature/enrich", "a")
     status_after = pr_state_status(git_project)
     assert status_after["dirty"] is True
+
+
+def test_is_dirty_ignores_pr_state(git_project):
+    from havn.engine.git import is_dirty
+    from havn.engine.pr import MERGE_IGNORED_PATHS
+
+    (git_project / ".havn" / "prs" / "pr-123.json").write_text("{}")
+    assert is_dirty(git_project) is True
+    assert is_dirty(git_project, ignore=MERGE_IGNORED_PATHS) is False
+    # The `havn serve` lockfile is runtime state, not a change.
+    (git_project / ".havn" / "serve.json").write_text("{}")
+    assert is_dirty(git_project, ignore=MERGE_IGNORED_PATHS) is False
+    (git_project / "transform" / "bronze" / "customers.sql").write_text("SELECT 2\n")
+    assert is_dirty(git_project, ignore=MERGE_IGNORED_PATHS) is True
+
+
+def test_author_cannot_approve_own_pr(git_project):
+    pr = create_pr(git_project, "T", "", "main", "feature/enrich", "alice")
+    with pytest.raises(ValueError, match="someone else has to approve"):
+        approve_pr(git_project, pr.id, "Alice")  # case-insensitive
+    assert get_pr(git_project, pr.id).approvers == []
+
+
+def test_merge_ignores_environment_warehouses(git_project):
+    from havn.engine.git import is_dirty
+    from havn.engine.pr import merge_ignored_paths
+
+    (git_project / "project.yml").write_text(
+        "name: test\ndatabase:\n  path: warehouse.duckdb\n"
+        "environments:\n  prod:\n    database:\n      path: data/prod.duckdb\n"
+    )
+    _git(git_project, "commit", "-qam", "envs")
+    (git_project / "data").mkdir()
+    (git_project / "data" / "prod.duckdb").write_bytes(b"x")
+    (git_project / "data" / "prod.duckdb.wal").write_bytes(b"x")
+    ignored = merge_ignored_paths(git_project)
+    assert "data/prod.duckdb" in ignored
+    assert is_dirty(git_project, ignore=ignored) is False
+
+
+def test_lineage_impact_finds_models_only_on_the_pr_branch(tmp_path):
+    """A model the PR adds lives in the build's worktree, not the project root.
+
+    Matching against the project root alone never matched it, so a PR that
+    only added models showed no impact and no metric diff.
+    """
+    from havn.engine.pr import _compute_lineage_impact
+    from havn.engine.transform.models import SQLModel
+
+    project, worktree = tmp_path / "proj", tmp_path / "proj" / ".havn" / "pr-build" / "pr-1"
+    (worktree / "transform" / "gold").mkdir(parents=True)
+
+    def model(root, name, deps):
+        return SQLModel(path=root / "transform" / "gold" / f"{name}.sql", name=name, schema="gold",
+                        full_name=f"gold.{name}", sql="", query="", materialized="table", depends_on=deps)
+
+    dag = [model(worktree, "new", []), model(worktree, "downstream", ["gold.new"])]
+    impact = _compute_lineage_impact(["transform/gold/new.sql"], dag, project, extra_roots=[worktree])
+    assert impact == {"changed": ["gold.new"], "impacted": ["gold.downstream"]}

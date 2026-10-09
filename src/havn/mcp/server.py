@@ -305,8 +305,20 @@ class MCPServer:
             ),
             (
                 "list_models",
-                "List all SQL transform models with materialization, schema, and dependencies.",
-                {"type": "object", "properties": {}},
+                "List SQL transform models with materialization, schema, tags and "
+                "dependencies. Pass a graph selector to narrow the list.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "select": {
+                            "type": "string",
+                            "description": (
+                                "Optional graph selector, e.g. 'tag:daily', "
+                                "'+gold.orders', 'gold.fct_*', 'path:transform/gold/'"
+                            ),
+                        },
+                    },
+                },
                 self._tool_list_models,
             ),
             (
@@ -333,6 +345,34 @@ class MCPServer:
                     "required": ["name"],
                 },
                 self._tool_model_lineage,
+            ),
+            (
+                "bind_model",
+                "Resolve a model's SQL through the DuckDB binder without "
+                "building it: returns the inferred output columns and any bind "
+                "errors with line numbers. Catches wrong arity, unknown "
+                "functions, operator overload failures and missing columns, "
+                "including on upstream models that have never been built. Does "
+                "not catch value conversions such as CAST of a non-numeric "
+                "string, which only fail at run time.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Model name, e.g. silver.customers",
+                        },
+                        "sql": {
+                            "type": "string",
+                            "description": (
+                                "SQL to bind instead of a saved model, including "
+                                "any @config lines. Pair with name to bind it in "
+                                "that model's place."
+                            ),
+                        },
+                    },
+                },
+                self._tool_bind_model,
             ),
             (
                 "run_history",
@@ -376,6 +416,22 @@ class MCPServer:
                 },
                 self._tool_query_metric,
             ),
+            (
+                "run_unit_tests",
+                "Run model unit tests from tests/unit/*.yml. Each test runs "
+                "the model against declared fixture rows on a throwaway "
+                "in-memory database, so it reads nothing from the warehouse.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "model": {
+                            "type": "string",
+                            "description": "Only run tests for this model, e.g. silver.customers",
+                        },
+                    },
+                },
+                self._tool_run_unit_tests,
+            ),
         ]
         if not self.read_only:
             tools.append(
@@ -389,7 +445,20 @@ class MCPServer:
                         "properties": {
                             "select": {
                                 "type": "string",
-                                "description": "Build only this model (and its upstreams)",
+                                "description": (
+                                    "Graph selector for what to build. 'gold.orders' is "
+                                    "that model alone; '+gold.orders' adds its upstreams, "
+                                    "'gold.orders+' its downstream, '@x' both directions, "
+                                    "'gold.fct_*' a wildcard, 'tag:daily' a tag, "
+                                    "'path:transform/gold/' a path, "
+                                    "'config.materialized:incremental' a config key, "
+                                    "'state:modified+' what changed plus downstream, and "
+                                    "a comma intersects. Omit to build everything."
+                                ),
+                            },
+                            "exclude": {
+                                "type": "string",
+                                "description": "Selector whose matches are removed from the selection",
                             },
                             "force": {"type": "boolean", "description": "Rebuild even if unchanged"},
                         },
@@ -451,7 +520,8 @@ class MCPServer:
         cols = self._execute_readonly(
             "SELECT column_name, data_type, is_nullable "
             "FROM information_schema.columns "
-            f"WHERE table_schema = '{schema}' AND table_name = '{name}' "
+            "WHERE table_catalog = current_database() "
+            f"AND table_schema = '{schema}' AND table_name = '{name}' "
             "ORDER BY ordinal_position",
             max_rows=_MAX_QUERY_ROWS,
         )
@@ -468,11 +538,22 @@ class MCPServer:
         }
 
     def _models(self):
-        from havn.engine.transform import discover_models
+        from havn.engine.transform import discover_all_models
 
-        return discover_models(self.project_dir / "transform")
+        return discover_all_models(self.project_dir)
 
     def _tool_list_models(self, args: dict) -> dict:
+        models = self._models()
+        select = args.get("select")
+        if select:
+            from havn.engine.selectors import select_models
+
+            chosen = set(
+                select_models(
+                    [str(select)], models, project_dir=self.project_dir
+                ).selected
+            )
+            models = [m for m in models if m.full_name in chosen]
         return {
             "models": [
                 {
@@ -480,9 +561,14 @@ class MCPServer:
                     "materialized": m.materialized,
                     "depends_on": m.depends_on,
                     "description": m.description,
-                    "path": str(m.path.relative_to(self.project_dir)),
+                    "tags": list(getattr(m, "tags", []) or []),
+                    # None for the project's own models; the package name for
+                    # a model that came from havn_packages/, which an agent
+                    # needs before it suggests editing the file.
+                    "package": getattr(m, "package", None),
+                    "path": m.path.relative_to(self.project_dir).as_posix(),
                 }
-                for m in self._models()
+                for m in models
             ]
         }
 
@@ -498,7 +584,7 @@ class MCPServer:
         m = self._find_model(str(args.get("name") or ""))
         return {
             "name": m.full_name,
-            "path": str(m.path.relative_to(self.project_dir)),
+            "path": m.path.relative_to(self.project_dir).as_posix(),
             "materialized": m.materialized,
             "depends_on": m.depends_on,
             "description": m.description,
@@ -542,6 +628,114 @@ class MCPServer:
             ),
         }
 
+    def _tool_bind_model(self, args: dict) -> dict:
+        """Bind one model (saved or supplied as SQL) and report its schema."""
+        from havn.engine.database import open_warehouse
+        from havn.engine.transform.bind import (
+            ancestor_closure,
+            as_validation_message,
+            bind_models,
+            model_from_buffer,
+            read_only_rejection,
+        )
+
+        name = str(args.get("name") or "").strip()
+        sql = args.get("sql")
+        if not name and not sql:
+            raise _InvalidParams("bind_model needs a name or sql")
+
+        models = list(self._models())
+        if sql:
+            # Agent-supplied SQL, not a file the user wrote: validate it
+            # before any binder sees it, and never bind a buffer that fails.
+            rejection = read_only_rejection(str(sql))
+            if rejection is not None:
+                return {
+                    "model": name or None,
+                    "ok": False,
+                    "available": True,
+                    "errors": [
+                        {
+                            "message": rejection,
+                            "line": None,
+                            "col": None,
+                            "kind": "bind",
+                        }
+                    ],
+                    "columns": [],
+                }
+            path = None
+            if name:
+                existing = self._find_model(name)
+                path = existing.path
+                models = [m for m in models if m.full_name != existing.full_name]
+            target = model_from_buffer(
+                str(sql), path=path, transform_dir=self.project_dir / "transform"
+            )
+            models.append(target)
+        else:
+            target = self._find_model(name)
+
+        chain = ancestor_closure(models, [target.full_name])
+
+        # The bind pass builds its shadow in its own in-memory database and
+        # uses this connection only to read base table column types, so a
+        # read-only handle is enough. A project whose warehouse does not exist
+        # yet cannot be opened read-only at all; fall back so binding still
+        # works before the first build.
+        config = self._config()
+        try:
+            conn = open_warehouse(config, self.project_dir, read_only=True)
+        except Exception:
+            try:
+                conn = open_warehouse(config, self.project_dir)
+            except Exception as e:
+                raise ToolError(
+                    "Could not open the warehouse for binding "
+                    f"(a running `havn serve` holds the lock): {e}"
+                )
+        try:
+            result = bind_models(conn, chain, project_dir=self.project_dir)
+        except Exception as e:
+            raise ToolError(f"bind failed: {e}")
+        finally:
+            conn.close()
+
+        if not result.available:
+            return {
+                "model": target.full_name,
+                "ok": False,
+                "available": False,
+                "errors": [w.message for w in result.warnings],
+                "columns": [],
+            }
+
+        own = result.errors.get(target.full_name, [])
+        return {
+            "model": target.full_name,
+            "ok": not own,
+            "available": True,
+            "errors": [
+                {
+                    "message": as_validation_message(e),
+                    "line": e.line,
+                    "col": e.col,
+                    "kind": e.kind,
+                }
+                for e in own
+            ],
+            "columns": [
+                {"name": n, "type": t}
+                for n, t in result.schemas.get(target.full_name, [])
+            ],
+            "upstream_errors": {
+                other: [as_validation_message(e) for e in errs]
+                for other, errs in result.errors.items()
+                if other != target.full_name
+            },
+            "duration_ms": result.duration_ms,
+        }
+
     def _tool_run_history(self, args: dict) -> dict:
         limit = max(1, min(int(args.get("limit") or 20), 500))
         result = self._execute_readonly(
@@ -552,6 +746,30 @@ class MCPServer:
         )
         keys = ["run_type", "target", "status", "started_at", "duration_ms", "rows_affected", "error"]
         return {"runs": [dict(zip(keys, row)) for row in result["rows"]]}
+
+    def _tool_run_unit_tests(self, args: dict) -> dict:
+        from havn.engine.unit_tests import (
+            CATALOG_SQL,
+            catalog_from_rows,
+            run_unit_tests,
+        )
+
+        model = args.get("model")
+        if model is not None and not isinstance(model, str):
+            raise _InvalidParams("model must be a string")
+
+        # Column types for mocks that don't declare them. A warehouse that
+        # isn't there, or is locked by `havn serve`, just means no catalog —
+        # the tests themselves run entirely in memory either way.
+        catalog: dict = {}
+        try:
+            rows = self._execute_readonly(CATALOG_SQL, max_rows=_MAX_QUERY_ROWS)["rows"]
+            catalog = catalog_from_rows(rows)
+        except Exception as e:
+            logger.debug("No catalog available for unit tests: %s", e)
+
+        result = run_unit_tests(self.project_dir, model=model, catalog=catalog)
+        return result.to_dict()
 
     def _tool_list_metrics(self, args: dict) -> dict:
         from havn.engine.semantic import load_metrics
@@ -596,8 +814,10 @@ class MCPServer:
 
         config = self._config()
         select = args.get("select")
+        exclude = args.get("exclude")
         force = bool(args.get("force", False))
         targets = [str(select)] if select else None
+        exclusions = [str(exclude)] if exclude else None
 
         run_id = None
         if config.rewind.enabled:
@@ -611,6 +831,7 @@ class MCPServer:
                 conn,
                 self.project_dir / "transform",
                 targets=targets,
+                exclude=exclusions,
                 force=force,
                 project_dir=self.project_dir,
                 db_config=config.database,
@@ -635,6 +856,7 @@ class MCPServer:
         summary = {
             "built": sum(1 for s in results.values() if s == "built"),
             "skipped": sum(1 for s in results.values() if str(s).startswith("skipped")),
+            "inlined": sum(1 for s in results.values() if s == "inlined"),
             "errors": sum(1 for s in results.values() if s == "error"),
         }
         return {"summary": summary, "results": results}

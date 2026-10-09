@@ -7,6 +7,8 @@ Shared dependencies (DB injection, auth, caching) live in havn.server.deps.
 
 from __future__ import annotations
 
+import logging
+
 from pathlib import Path
 
 from contextlib import asynccontextmanager
@@ -36,6 +38,31 @@ ACTIVE_ENV: str | None = None  # Set by CLI --env flag
 _maintenance = None
 
 
+logger = logging.getLogger("havn.server")
+
+
+def _close_out_interrupted_work() -> None:
+    """Mark builds and deploys a previous server left "running" as interrupted."""
+    try:
+        from havn.engine.deploy import mark_interrupted_deploys
+        from havn.engine.pr import mark_interrupted_builds
+        from havn.engine.write_queue import cursor_for
+        from havn.server.deps import _get_shared_conn
+
+        cur = cursor_for(_get_shared_conn())
+        try:
+            builds, deploys = mark_interrupted_builds(cur), mark_interrupted_deploys(cur)
+        finally:
+            cur.close()
+        if builds or deploys:
+            logger.warning(
+                "Marked %d build(s) and %d deploy(s) as interrupted by the last shutdown", builds, deploys
+            )
+    except Exception as e:
+        # No warehouse yet, or read-only: nothing to close out.
+        logger.debug("Skipped closing out interrupted work: %s", e)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Server lifecycle hooks.
@@ -46,6 +73,7 @@ async def _lifespan(app: FastAPI):
     On shutdown, stop the streaming flush worker and the maintenance loop.
     """
     global _maintenance
+    _close_out_interrupted_work()
     try:
         from havn.engine.streaming.maintenance import MaintenanceScheduler
         from havn.engine.write_queue import cursor_for
@@ -151,6 +179,8 @@ from havn.server.routes.connectors import router as connectors_router  # noqa: E
 from havn.server.routes.pipeline import router as pipeline_router  # noqa: E402
 from havn.server.routes.quality import router as quality_router  # noqa: E402
 from havn.server.routes.catalog import router as catalog_router  # noqa: E402
+from havn.server.routes.home import router as home_router  # noqa: E402
+from havn.server.routes.deploy import router as deploy_router  # noqa: E402
 from havn.server.routes.collaboration import (  # noqa: E402
     register_websocket,
     router as collaboration_router,
@@ -169,6 +199,7 @@ from havn.server.routes.agent import (  # noqa: E402
 from havn.server.routes.circuits import router as circuits_router  # noqa: E402
 from havn.server.routes.git import router as git_router  # noqa: E402
 from havn.server.routes.macros import router as macros_router  # noqa: E402
+from havn.server.routes.packages import router as packages_router  # noqa: E402
 from havn.server.routes.dashboards import router as dashboards_router  # noqa: E402
 from havn.server.routes.jobs import router as jobs_router  # noqa: E402
 from havn.server.routes.pr import router as pr_router  # noqa: E402
@@ -179,10 +210,15 @@ from havn.server.routes.semantic import router as semantic_router  # noqa: E402
 from havn.server.routes.sql_api import router as sql_api_router  # noqa: E402
 from havn.server.routes.export import router as export_router  # noqa: E402
 from havn.server.routes.streaming import router as streaming_router  # noqa: E402
+from havn.server.routes.unit_tests import router as unit_tests_router  # noqa: E402
+from havn.server.routes.bind import router as bind_router  # noqa: E402
+from havn.server.routes.rename import router as rename_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(files_router)
 app.include_router(models_router)
+app.include_router(bind_router)
+app.include_router(rename_router)
 app.include_router(dag_router)
 app.include_router(query_router)
 app.include_router(notebooks_router)
@@ -190,6 +226,8 @@ app.include_router(connectors_router)
 app.include_router(pipeline_router)
 app.include_router(quality_router)
 app.include_router(catalog_router)
+app.include_router(home_router)
+app.include_router(deploy_router)
 app.include_router(collaboration_router)
 app.include_router(lint_router)
 app.include_router(masking_router)
@@ -202,6 +240,7 @@ app.include_router(audit_router)
 app.include_router(circuits_router)
 app.include_router(git_router)
 app.include_router(macros_router)
+app.include_router(packages_router)
 app.include_router(dashboards_router)
 app.include_router(jobs_router)
 app.include_router(pr_router)
@@ -212,6 +251,7 @@ app.include_router(semantic_router)
 app.include_router(sql_api_router)
 app.include_router(export_router)
 app.include_router(streaming_router)
+app.include_router(unit_tests_router)
 
 # Register WebSocket endpoints (can't use APIRouter for WebSocket)
 register_websocket(app)

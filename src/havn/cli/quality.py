@@ -14,25 +14,26 @@ from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, con
 @app.command()
 def check(
     targets: Annotated[Optional[list[str]], typer.Argument(help="Specific models to check")] = None,
+    unit_tests: Annotated[bool, typer.Option("--unit-tests/--no-unit-tests", help="Also run model unit tests from tests/unit/")] = True,
     env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use")] = None,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
-    """Validate SQL models, run inline assertions, and run YAML contracts.
+    """Validate SQL models, run inline assertions, contracts, and unit tests.
 
     Checks that SQL parses correctly, referenced tables exist in the DAG,
     sources.yml, the DuckDB catalog, or seeds. Validates column references
     against upstream tables. Then runs inline -- assert: assertions and
-    YAML contracts from contracts/ against live data. Reports all errors.
+    YAML contracts from contracts/ against live data, and finally the unit
+    tests in tests/unit/ (skip them with --no-unit-tests). Reports all errors.
     """
     from havn.engine.database import ensure_meta_table, open_warehouse
     from havn.engine.seeds import discover_seeds
-    from havn.engine.transform import discover_models, run_assertions, validate_models
+    from havn.engine.transform import discover_all_models, run_assertions, validate_models
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir, env)
-    transform_dir = project_dir / "transform"
     seeds_dir = project_dir / "seeds"
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir, config)
     if not models:
         console.print("[yellow]No SQL models found in transform/[/yellow]")
         return
@@ -127,6 +128,8 @@ def check(
                         for ar in cr.results:
                             if not ar["passed"]:
                                 console.print(f"         [red]FAIL[/red]  {ar['expression']} ({ar['detail']})")
+                            elif ar.get("severity") == "warning":
+                                console.print(f"         [yellow]warn[/yellow]  {ar['expression']} ({ar['detail']})")
                         if not cr.passed:
                             contract_failures += 1
                     except Exception as e:
@@ -134,6 +137,16 @@ def check(
                         contract_failures += 1
                 if contract_failures:
                     has_failure = True
+
+        # Unit tests last: they need no warehouse, so they still run (and
+        # still fail the command) on a project that has never been built.
+        if unit_tests:
+            from havn.cli.unit_tests import run_and_report
+
+            console.print()
+            console.print("[bold]Running unit tests...[/bold]")
+            if not run_and_report(project_dir, config, quiet_when_empty=True, conn=conn):
+                has_failure = True
 
         if has_failure:
             raise typer.Exit(1)
@@ -383,7 +396,11 @@ def contracts(
               - unique(order_id)
     """
     from havn.config import load_project
-    from havn.engine.contracts import get_contract_history, run_contracts
+    from havn.engine.contracts import (
+        discover_contracts,
+        get_contract_history,
+        run_contracts,
+    )
     from havn.engine.database import open_warehouse
 
     project_dir = _resolve_project(project_dir)
@@ -423,6 +440,15 @@ def contracts(
             console.print("[yellow]No contracts found.[/yellow]")
             return
 
+        # The declared shape is part of the contract, so show it next to the
+        # result rather than making the reader open the YAML to find out what
+        # was promised.
+        declared = {
+            c.name: c
+            for c in discover_contracts(contracts_dir)
+            if c.columns or c.errors
+        }
+
         console.print(f"[bold]Running {len(results)} contract(s)...[/bold]")
         console.print()
 
@@ -430,11 +456,23 @@ def contracts(
         for cr in results:
             status = "[green]PASS[/green]" if cr.passed else "[red]FAIL[/red]"
             console.print(f"  {status}  [bold]{cr.contract_name}[/bold] ({cr.model}) [{cr.duration_ms}ms]")
+            contract = declared.get(cr.contract_name)
+            if contract is not None and contract.columns:
+                strict = " [dim](strict)[/dim]" if contract.strict else ""
+                console.print(f"         [dim]columns:[/dim]{strict}")
+                for col in contract.columns:
+                    null_note = "" if col.nullable is None else (
+                        " NULL" if col.nullable else " NOT NULL"
+                    )
+                    desc = f"  [dim]{col.description}[/dim]" if col.description else ""
+                    console.print(f"           {col.name} {col.type}{null_note}{desc}")
             for ar in cr.results:
-                if ar["passed"]:
-                    console.print(f"         [green]pass[/green]  {ar['expression']}")
-                else:
+                if not ar["passed"]:
                     console.print(f"         [red]FAIL[/red]  {ar['expression']} ({ar['detail']})")
+                elif ar.get("severity") == "warning":
+                    console.print(f"         [yellow]warn[/yellow]  {ar['expression']} ({ar['detail']})")
+                else:
+                    console.print(f"         [green]pass[/green]  {ar['expression']}")
             if not cr.passed:
                 all_passed = False
             if cr.error:

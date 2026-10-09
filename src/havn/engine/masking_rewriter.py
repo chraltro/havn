@@ -292,7 +292,8 @@ def _expand_star(
     try:
         rows = conn.execute(
             "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+            "WHERE table_catalog = current_database() "
+            "AND table_schema = ? AND table_name = ? ORDER BY ordinal_position",
             [schema, table],
         ).fetchall()
         return [r[0] for r in rows] if rows else None

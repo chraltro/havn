@@ -44,7 +44,7 @@ def _scan_ingest_targets(project_dir: Path) -> dict[str, list[str]]:
             continue
         for match in pattern.finditer(text):
             table_ref = match.group(1).lower()
-            rel_path = str(script_file.relative_to(project_dir))
+            rel_path = script_file.relative_to(project_dir).as_posix()
             if table_ref not in targets:
                 targets[table_ref] = []
             if rel_path not in targets[table_ref]:
@@ -151,7 +151,10 @@ def get_dag(request: Request) -> dict:
                 "label": m.path.name,
                 "schema": m.schema,
                 "type": m.materialized,
-                "path": str(m.path.relative_to(project_dir)),
+                "path": m.path.relative_to(project_dir).as_posix(),
+                # None for project models. The panel labels the rest so a
+                # node that cannot be edited here is visibly not yours.
+                "package": getattr(m, "package", None),
             }
         )
 
@@ -282,7 +285,7 @@ def get_orchestration_dag(request: Request) -> dict:
             "schema": m.schema,
             "materialized": m.materialized,
             "depends_on": list(m.depends_on or []),
-            "path": str(m.path.relative_to(project_dir)) if m.path else None,
+            "path": m.path.relative_to(project_dir).as_posix() if m.path else None,
             "row_count": state.get("row_count"),
             "last_run_at": state.get("last_run_at"),
             "duration_ms": state.get("duration_ms"),
@@ -407,7 +410,8 @@ def get_full_dag(request: Request) -> dict:
                 "label": m.path.name,
                 "schema": m.schema,
                 "type": m.materialized,
-                "path": str(m.path.relative_to(project_dir)),
+                "path": m.path.relative_to(project_dir).as_posix(),
+                "package": getattr(m, "package", None),
             }
         )
 

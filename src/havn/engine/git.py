@@ -90,12 +90,26 @@ def current_branch(project_dir: Path) -> str | None:
     return branch if branch else None
 
 
-def is_dirty(project_dir: Path) -> bool:
-    """Check if there are uncommitted changes."""
+def is_dirty(project_dir: Path, ignore: tuple[str, ...] = ()) -> bool:
+    """Check if there are uncommitted changes.
+
+    ``ignore`` is a tuple of path prefixes (posix, relative to the repo root)
+    whose changes do not count, e.g. ``(".havn/prs/",)``.
+    """
     if not is_git_repo(project_dir):
         return False
-    result = _run_git(project_dir, "status", "--porcelain")
-    return bool(result.stdout.strip())
+    # -uall lists untracked files one by one; without it git collapses a new
+    # directory to "?? .havn/", which no prefix below .havn/ would match.
+    args = ["status", "--porcelain"] + (["--untracked-files=all"] if ignore else [])
+    result = _run_git(project_dir, *args)
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        # "XY path" or "XY old -> new" for renames; paths may be quoted.
+        paths = [p.strip().strip('"') for p in line[3:].split(" -> ")]
+        if not ignore or not all(p.startswith(ignore) for p in paths):
+            return True
+    return False
 
 
 def changed_files(project_dir: Path, ref: str = "HEAD") -> list[str]:

@@ -90,7 +90,7 @@ def promote_sql_to_model(
             f"Use overwrite=True to replace it."
         )
 
-    model_path.write_text(content)
+    model_path.write_text(content, encoding="utf-8")
 
     return model_path
 
@@ -118,9 +118,9 @@ def model_to_notebook(
     Returns:
         The notebook dict
     """
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
-    models = discover_models(transform_dir)
+    models = discover_all_models(transform_dir.parent)
     model_map = {m.full_name: m for m in models}
 
     target = model_map.get(model_full_name)

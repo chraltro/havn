@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from havn.server.deps import (
@@ -18,7 +18,6 @@ from havn.server.deps import (
     _require_permission,
     _serialize,
     build_dag,
-    discover_models,
     ensure_meta_table,
     run_transform,
 )
@@ -32,8 +31,21 @@ router = APIRouter()
 
 
 class TransformRequest(BaseModel):
+    # Graph selectors, same grammar as `havn transform`. A plain
+    # ``schema.name`` still means exactly that model, which is what the UI's
+    # "run model" button sends.
     targets: list[str] | None = Field(default=None, max_length=500)
+    exclude: list[str] | None = Field(default=None, max_length=500)
     force: bool = False
+    # Explicit event-time backfill range for microbatch models, mirroring
+    # `havn transform --event-time-start/--event-time-end`. UTC.
+    event_time_start: str | None = Field(default=None, max_length=64)
+    event_time_end: str | None = Field(default=None, max_length=64)
+    # Tri-state, like `havn transform --defer/--no-defer`: null defers when
+    # the active environment declares a target, true insists on it, false
+    # builds against this warehouse alone.
+    defer: bool | None = None
+    defer_snapshot: bool = False
 
 
 class DiffRequest(BaseModel):
@@ -58,11 +70,31 @@ class CreateModelRequest(BaseModel):
 
 
 @router.get("/api/models")
-def list_models(request: Request) -> list[dict]:
-    """List all SQL transformation models."""
+def list_models(
+    request: Request,
+    select: str | None = Query(
+        default=None,
+        max_length=1000,
+        description=(
+            "Graph selector filtering the list, e.g. 'tag:daily', '+gold.orders', "
+            "'gold.fct_*'. Omit to list everything."
+        ),
+    ),
+) -> list[dict]:
+    """List SQL transformation models, optionally filtered by a graph selector."""
     _require_permission(request, "read")
-    transform_dir = _get_project_dir() / "transform"
+    project_dir = _get_project_dir()
+    transform_dir = project_dir / "transform"
     models = _discover_models_cached(transform_dir)
+    if select:
+        from havn.engine.selectors import select_models as _select_models
+
+        # No connection is passed: ``state:`` needs write-ish access to the
+        # warehouse and this is a read-only listing endpoint.
+        chosen = set(
+            _select_models([select], models, project_dir=project_dir).selected
+        )
+        models = [m for m in models if m.full_name in chosen]
     return [
         {
             "name": m.name,
@@ -70,8 +102,9 @@ def list_models(request: Request) -> list[dict]:
             "full_name": m.full_name,
             "materialized": m.materialized,
             "depends_on": m.depends_on,
-            "path": str(m.path.relative_to(_get_project_dir())),
+            "path": m.path.relative_to(project_dir).as_posix(),
             "content_hash": m.content_hash,
+            "tags": list(getattr(m, "tags", []) or []),
         }
         for m in models
     ]
@@ -88,21 +121,108 @@ def run_transform_endpoint(
 ) -> dict:
     """Run the SQL transformation pipeline.
 
-    Body is optional — POSTing with no body runs all models without --force.
+    ``targets`` and ``exclude`` are graph selectors (``+x``, ``x+``, ``@x``,
+    ``gold.fct_*``, ``tag:daily``, ``state:modified`` and so on). Body is
+    optional: POSTing with no body runs all models without --force.
     """
     _require_permission(request, "execute")
-    logger.info("Transform requested: targets=%s force=%s", req.targets, req.force)
+    logger.info(
+        "Transform requested: targets=%s exclude=%s force=%s",
+        req.targets, req.exclude, req.force,
+    )
+    from havn.engine.transform import BatchRange, parse_event_time
+
+    batch_range = None
+    if req.event_time_start or req.event_time_end:
+        try:
+            batch_range = BatchRange(
+                start=parse_event_time(req.event_time_start, "event_time_start")
+                if req.event_time_start else None,
+                end=parse_event_time(req.event_time_end, "event_time_end")
+                if req.event_time_end else None,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+    # Defer is resolved here rather than inside run_transform because it is a
+    # project-config question (which environment, which file), and the
+    # config is a server dependency.
+    from havn.engine.defer import DeferError, resolve_defer
+
+    try:
+        defer_spec = resolve_defer(
+            _get_config(), _get_project_dir(),
+            enabled=req.defer, snapshot=req.defer_snapshot,
+        )
+    except DeferError as e:
+        raise HTTPException(400, str(e)) from e
+
+    # Resolve the selection here so a mistyped selector is an error rather
+    # than an empty success. `run_transform` prints its warnings to the
+    # server's console and returns {}, which reached the caller as 200 with
+    # no results: indistinguishable from "everything was already up to date".
+    warnings = _selection_warnings(conn, req)
+    if warnings is not None and warnings["selected"] == 0:
+        reasons = "; ".join(warnings["warnings"])
+        raise HTTPException(
+            400,
+            f"No models matched: {reasons}" if reasons
+            else "No models matched the given selectors.",
+        )
+
     try:
         results = run_transform(
             conn,
             _get_project_dir() / "transform",
             targets=req.targets,
+            exclude=req.exclude,
             force=req.force,
+            batch_range=batch_range,
+            defer=defer_spec,
         )
-        return {"results": results}
     except Exception as e:
         logger.exception("Transform failed")
         raise HTTPException(400, f"Transform failed: {e}")
+
+    body: dict = {"results": results}
+    if warnings and warnings["warnings"]:
+        # Some selectors matched and some did not. The run went ahead, and the
+        # caller is told which of its selectors did nothing.
+        body["warnings"] = warnings["warnings"]
+    return body
+
+
+def _selection_warnings(conn, req: TransformRequest) -> dict | None:
+    """Resolve this request's selectors, or None when it selects everything.
+
+    Returns ``{"selected": <count>, "warnings": [...]}``. A failure to resolve
+    is reported as no information rather than as an error: the run itself is
+    the authority, and this check exists only to turn a silent empty result
+    into a 400.
+    """
+    if not req.targets and not req.exclude:
+        return None
+    if req.targets and list(req.targets) == ["all"]:
+        return None
+    from havn.engine.selectors import select_models
+
+    project_dir = _get_project_dir()
+    try:
+        models = _discover_models_cached(project_dir / "transform")
+        selection = select_models(
+            req.targets or ["all"],
+            models,
+            conn=conn,
+            project_dir=project_dir,
+            exclude=list(req.exclude) if req.exclude else None,
+        )
+    except Exception as e:
+        logger.debug("Could not pre-resolve the transform selection: %s", e)
+        return None
+    return {
+        "selected": len(selection.selected),
+        "warnings": list(selection.warnings),
+    }
 
 
 # --- Diff ---
@@ -194,14 +314,19 @@ def get_all_lineage(
 ) -> list[dict]:
     """Get column-level lineage for all models."""
     _require_permission(request, "read")
+    from havn.engine.sql_analysis import fetch_column_catalog
     from havn.engine.transform import extract_column_lineage
 
     transform_dir = _get_project_dir() / "transform"
     models = _discover_models_cached(transform_dir)
 
+    # Read the column catalog once for the whole project rather than once per
+    # model (and, before that, once per dependency of every model).
+    catalog = fetch_column_catalog(conn) if conn else None
+
     results = []
     for model in models:
-        lineage = extract_column_lineage(model, conn)
+        lineage = extract_column_lineage(model, conn, column_catalog=catalog)
         results.append(
             {
                 "model": model.full_name,
@@ -224,10 +349,9 @@ def get_impact(
 ) -> dict:
     """Analyze downstream impact of changing a model or column."""
     _require_permission(request, "read")
-    from havn.engine.transform import discover_models, impact_analysis
+    from havn.engine.transform import discover_all_models, impact_analysis
 
-    transform_dir = _get_project_dir() / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(_get_project_dir())
     model_map = {m.full_name: m for m in models}
 
     if model_name not in model_map:
@@ -262,10 +386,9 @@ def get_explain(
         explain_query,
         plan_to_dict,
     )
-    from havn.engine.transform import discover_models
+    from havn.engine.transform import discover_all_models
 
-    transform_dir = _get_project_dir() / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(_get_project_dir())
 
     target = next((m for m in models if m.full_name == model_name), None) or next(
         (m for m in models if m.name == model_name), None
@@ -339,7 +462,7 @@ def get_model_notebook_view(
             raise HTTPException(404, f"Model '{model_name}' not found")
 
     sql_source = target.path.read_text()
-    rel_path = str(target.path.relative_to(_get_project_dir()))
+    rel_path = target.path.relative_to(_get_project_dir()).as_posix()
 
     sample_data = None
     if conn:
@@ -379,6 +502,196 @@ def get_model_notebook_view(
     }
 
 
+# --- Model workbench ---
+
+
+@router.get("/api/models/workbench")
+def get_model_workbench(
+    request: Request,
+    path: str = Query(..., min_length=1, max_length=1000),
+    conn: DbConnReadOnlyOptional = None,
+) -> dict:
+    """Everything the editor's workbench shows for one SQL model, in one call.
+
+    ``path`` is the project-relative file path the editor has open. It is only
+    compared against discovered models, never read from disk directly.
+    """
+    _require_permission(request, "read")
+    from havn.engine.transform import failing_rows_sql
+    from havn.engine.transform.columns import load_model_columns
+
+    project_dir = _get_project_dir()
+    models = _discover_models_cached(project_dir / "transform")
+
+    def rel(m) -> str | None:
+        try:
+            # as_posix so this compares against `wanted` on Windows too,
+            # where str() of a relative path uses backslashes.
+            return m.path.relative_to(project_dir).as_posix()
+        except ValueError:
+            return None
+
+    wanted = path.replace("\\", "/").lstrip("./")
+    target = next((m for m in models if rel(m) == wanted), None)
+    if target is None:
+        raise HTTPException(404, f"No model is defined in '{path}'")
+
+    by_name = {m.full_name: m for m in models}
+    children: dict[str, list[str]] = {}
+    for m in models:
+        for dep in m.depends_on:
+            children.setdefault(dep, []).append(m.full_name)
+
+    # Transitive downstream, breadth-first so nearer models come first.
+    downstream_all: list[str] = []
+    seen = {target.full_name}
+    queue = list(children.get(target.full_name, []))
+    while queue:
+        name = queue.pop(0)
+        if name in seen:
+            continue
+        seen.add(name)
+        downstream_all.append(name)
+        queue.extend(children.get(name, []))
+
+    upstream = [
+        {"name": d, "path": rel(by_name[d]) if d in by_name else None}
+        for d in target.depends_on
+    ]
+    downstream = [
+        {"name": d, "path": rel(by_name[d])}
+        for d in sorted(set(children.get(target.full_name, [])))
+    ]
+
+    specs = list(target.assertion_specs) or [(e, "error") for e in target.assertions]
+    if target.grain:
+        specs.append((f"grain({', '.join(target.grain)})", "error"))
+
+    columns: list[dict] = []
+    state = {
+        "built": False,
+        "last_run_at": None,
+        "row_count": None,
+        "run_duration_ms": None,
+        "changed_since_build": None,
+    }
+    latest: dict[str, dict] = {}
+    runs: list[dict] = []
+
+    if conn is not None:
+        ensure_meta_table(conn)
+        row = conn.execute(
+            "SELECT content_hash, last_run_at, row_count, run_duration_ms "
+            "FROM _havn.model_state WHERE model_path = ?",
+            [target.full_name],
+        ).fetchone()
+        if row:
+            state = {
+                "built": True,
+                "last_run_at": str(row[1]) if row[1] else None,
+                "row_count": row[2],
+                "run_duration_ms": row[3],
+                "changed_since_build": row[0] != target.content_hash,
+            }
+
+        for r in conn.execute(
+            """
+            SELECT expression, passed, detail, checked_at
+            FROM _havn.assertion_results
+            WHERE model_path = ?
+            QUALIFY row_number() OVER (PARTITION BY expression ORDER BY checked_at DESC) = 1
+            """,
+            [target.full_name],
+        ).fetchall():
+            latest[r[0]] = {
+                "passed": r[1],
+                "detail": r[2],
+                "checked_at": str(r[3]) if r[3] else None,
+            }
+
+        runs = [
+            {
+                "status": r[0],
+                "started_at": str(r[1]) if r[1] else None,
+                "duration_ms": r[2],
+                "rows_affected": r[3],
+                "error": r[4],
+            }
+            for r in conn.execute(
+                """
+                SELECT status, started_at, duration_ms, rows_affected, error
+                FROM _havn.run_log
+                WHERE target = ? AND run_type = 'transform'
+                ORDER BY started_at DESC
+                LIMIT 10
+                """,
+                [target.full_name],
+            ).fetchall()
+        ]
+
+        columns = load_model_columns(conn, target.full_name)
+        if not columns:
+            try:
+                columns = [
+                    {"name": r[0], "type": r[1]}
+                    for r in conn.execute(
+                        "SELECT column_name, data_type FROM information_schema.columns "
+                        "WHERE table_catalog = current_database() "
+                        "AND table_schema = ? AND table_name = ? "
+                        "ORDER BY ordinal_position",
+                        [target.schema, target.name],
+                    ).fetchall()
+                ]
+            except Exception:
+                columns = []
+
+    # Documented columns the warehouse has not seen yet still get a row, so
+    # the Columns tab reflects the file and not only the last build.
+    known = {c["name"].lower() for c in columns}
+    docs = {k.lower(): v for k, v in target.column_docs.items()}
+    col_rows = [
+        {"name": c["name"], "type": c["type"], "description": docs.get(c["name"].lower(), "")}
+        for c in columns
+    ]
+    col_rows += [
+        {"name": name, "type": None, "description": text}
+        for name, text in target.column_docs.items()
+        if name.lower() not in known
+    ]
+
+    checks = []
+    for expr, severity in specs:
+        result = latest.get(expr, {})
+        checks.append(
+            {
+                "expression": expr,
+                "severity": severity,
+                "passed": result.get("passed"),
+                "detail": result.get("detail"),
+                "checked_at": result.get("checked_at"),
+                "failing_sql": failing_rows_sql(target, expr),
+            }
+        )
+
+    return {
+        "model": target.full_name,
+        "path": rel(target),
+        "schema": target.schema,
+        "name": target.name,
+        "materialized": target.materialized,
+        "description": target.description,
+        "owner": target.owner,
+        "tags": list(target.tags),
+        "upstream": upstream,
+        "downstream": downstream,
+        "downstream_all": downstream_all,
+        "columns": col_rows,
+        "checks": checks,
+        "runs": runs,
+        "state": state,
+    }
+
+
 # --- Create new model ---
 
 
@@ -411,11 +724,11 @@ def create_model_endpoint(request: Request, req: CreateModelRequest) -> dict:
     if not has_config:
         sql_content = f"@config materialized={req.materialized}, schema={req.schema_name}\n\n{sql_content}"
 
-    model_path.write_text(sql_content)
+    model_path.write_text(sql_content, encoding="utf-8")
 
     return {
         "status": "created",
-        "path": str(model_path.relative_to(project_dir)),
+        "path": model_path.relative_to(project_dir).as_posix(),
         "full_name": f"{req.schema_name}.{req.name}",
     }
 
@@ -431,11 +744,10 @@ def run_validate(request: Request, conn_opt: DbConnReadOnlyOptional = None) -> d
     """
     _require_permission(request, "read")
     from havn.engine.seeds import discover_seeds
-    from havn.engine.transform import discover_models, validate_models
+    from havn.engine.transform import discover_all_models, validate_models
 
     project_dir = _get_project_dir()
-    transform_dir = project_dir / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir)
     config = _get_config()
 
     known_tables: set[str] = set()
@@ -483,11 +795,10 @@ def run_check(request: Request, conn_opt: DbConnReadOnlyOptional = None) -> dict
     """Validate SQL models, run inline assertions, and run YAML contracts."""
     _require_permission(request, "read")
     from havn.engine.seeds import discover_seeds
-    from havn.engine.transform import discover_models, run_assertions, validate_models
+    from havn.engine.transform import discover_all_models, run_assertions, validate_models
 
     project_dir = _get_project_dir()
-    transform_dir = project_dir / "transform"
-    models = discover_models(transform_dir)
+    models = discover_all_models(project_dir)
     config = _get_config()
 
     known_tables: set[str] = set()

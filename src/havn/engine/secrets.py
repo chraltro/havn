@@ -83,7 +83,7 @@ def set_secret(project_dir: Path, key: str, value: str) -> None:
     if not found:
         lines.append(f'{key}="{value}"')
 
-    env_path.write_text("\n".join(lines) + "\n")
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     # Restrict file permissions to owner-only (no effect on Windows)
     try:
         os.chmod(env_path, 0o600)
@@ -110,7 +110,7 @@ def delete_secret(project_dir: Path, key: str) -> bool:
         lines.append(line)
 
     if found:
-        env_path.write_text("\n".join(lines) + "\n")
+        env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         os.environ.pop(key, None)
 
     return found

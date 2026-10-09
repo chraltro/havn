@@ -52,7 +52,7 @@ def list_seeds_endpoint(request: Request) -> list[dict]:
             "name": s["name"],
             "full_name": s["full_name"],
             "schema": s["schema"],
-            "path": str(s["path"].relative_to(_get_project_dir())),
+            "path": s["path"].relative_to(_get_project_dir()).as_posix(),
         }
         for s in seeds
     ]
@@ -237,7 +237,7 @@ def update_database_config(request: Request, body: DatabaseConfigUpdate) -> dict
         elif "threads" in raw["database"]:
             del raw["database"]["threads"]
 
-    yml_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False))
+    yml_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False), encoding="utf-8")
 
     # Reset shared connection so new settings take effect
     from havn.server.deps import reset_shared_conn, _clear_config_cache
@@ -256,6 +256,35 @@ def get_environment(request: Request) -> dict:
         "active": config.active_environment,
         "available": list(config.environments.keys()),
         "database_path": config.database.path,
+        "defer": _defer_status(config),
+    }
+
+
+def _defer_status(config) -> dict | None:
+    """The active environment's defer target, and whether it can be read now.
+
+    ``lockable`` is what decides whether the next deferred run starts at all:
+    DuckDB refuses a read-only attach while any process holds that file open
+    for writing. It is probed by opening and closing the file, so it
+    describes this instant and not the one after it.
+    """
+    from havn.engine.defer import defer_target_path, target_lockable
+
+    env_name = config.active_environment
+    env_cfg = config.environments.get(env_name) if env_name else None
+    target = getattr(env_cfg, "defer", None) if env_cfg is not None else None
+    if not target:
+        return None
+    path = defer_target_path(config, target)
+    resolved = None
+    if path is not None:
+        resolved = path if path.is_absolute() else (config.project_dir / path)
+    lockable, reason = (False, "no database path") if resolved is None else target_lockable(resolved)
+    return {
+        "target": target,
+        "path": str(path) if path is not None else None,
+        "lockable": lockable,
+        "reason": reason,
     }
 
 
@@ -484,8 +513,7 @@ def clear_sample_project(request: Request) -> dict:
     from havn.templates import PROJECT_YML_EMPTY_TEMPLATE
 
     (project_dir / "project.yml").write_text(
-        PROJECT_YML_EMPTY_TEMPLATE.format(name=config.name)
-    )
+        PROJECT_YML_EMPTY_TEMPLATE.format(name=config.name), encoding="utf-8")
 
     # Invalidate caches
     invalidate_config_cache()

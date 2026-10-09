@@ -13,6 +13,7 @@ import pytest
 
 from havn.engine.sql_analysis import (
     extract_column_lineage,
+    extract_column_references,
     extract_table_refs,
     parse_assertions,
     parse_column_docs,
@@ -160,6 +161,42 @@ def test_strip_config_comments_at_syntax():
     assert "@col" not in result
     assert "@assert" not in result
     assert "SELECT id FROM bronze.customers" in result
+
+
+def test_strip_config_comments_preserves_line_numbers():
+    """Directives are blanked in place so line N stays line N.
+
+    They used to be deleted, which shifted everything below them by a
+    non-constant amount and broke every mapping from a parser's line number
+    back to a line of the file.
+    """
+    sql = textwrap.dedent("""\
+        @config materialized=table, schema=gold
+        @description A model
+
+        SELECT
+            id
+        FROM bronze.customers
+        @assert row_count > 0
+    """)
+    result = strip_config_comments(sql)
+    original = sql.split("\n")
+    stripped = result.split("\n")
+
+    assert len(stripped) == len(original)
+    for i, line in enumerate(original):
+        if line.strip().startswith("@"):
+            assert stripped[i] == ""
+        else:
+            assert stripped[i] == line
+
+    # The SELECT is on line 4 of the file and stays on line 4.
+    assert stripped[3] == "SELECT"
+
+
+def test_strip_config_comments_keeps_leading_blanks():
+    sql = "@config materialized=view\n\nSELECT 1"
+    assert strip_config_comments(sql) == "\n\nSELECT 1"
 
 
 # ===========================================================================
@@ -505,3 +542,145 @@ class TestExtractColumnLineage:
         assert any(s["source_table"] == "bronze.customers" for s in lineage["customer_id"])
         assert "order_count" in lineage
         assert any(s["source_table"] == "bronze.orders" for s in lineage["order_count"])
+
+
+# ===========================================================================
+# extract_column_references
+# ===========================================================================
+
+
+class TestExtractColumnReferences:
+    """The reference index: every mention of a column, with its position."""
+
+    SQL = textwrap.dedent("""\
+        SELECT
+            o.order_id,
+            c.name AS customer_name
+        FROM bronze.orders o
+        JOIN bronze.customers c ON c.customer_id = o.customer_id
+        WHERE o.status = 'ok'
+        GROUP BY o.order_id, c.name
+        HAVING COUNT(o.amount) > 1
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY o.customer_id) = 1
+        ORDER BY c.name""")
+
+    def test_clauses(self):
+        refs = extract_column_references(self.SQL, ["bronze.orders", "bronze.customers"])
+        by_clause: dict[str, set[str]] = {}
+        for ref in refs:
+            by_clause.setdefault(ref.clause, set()).add(ref.column)
+        assert by_clause["select"] == {"order_id", "name"}
+        assert by_clause["join"] == {"customer_id"}
+        assert by_clause["where"] == {"status"}
+        assert by_clause["group"] == {"order_id", "name"}
+        assert by_clause["having"] == {"amount"}
+        assert by_clause["window"] == {"customer_id"}
+        assert by_clause["order"] == {"name"}
+
+    def test_tables_are_resolved_through_aliases(self):
+        refs = extract_column_references(self.SQL, ["bronze.orders", "bronze.customers"])
+        status = next(r for r in refs if r.column == "status")
+        assert status.table == "bronze.orders"
+        name = next(r for r in refs if r.column == "name")
+        assert name.table == "bronze.customers"
+
+    def test_positions_point_at_the_identifier(self):
+        """start/end splice the query; line/col land on the identifier's end."""
+        lines = self.SQL.split("\n")
+        refs = extract_column_references(self.SQL, ["bronze.orders"])
+        assert refs
+        for ref in refs:
+            assert self.SQL[ref.start : ref.end + 1] == ref.column
+            line = lines[ref.line - 1]
+            assert line[ref.col - len(ref.column) : ref.col] == ref.column
+
+    def test_references_come_back_in_source_order(self):
+        refs = extract_column_references(self.SQL, ["bronze.orders"])
+        assert [r.start for r in refs] == sorted(r.start for r in refs)
+        assert refs[0].column == "order_id"
+
+    def test_filter_only_column_is_indexed(self):
+        """The whole point: a column no output column depends on."""
+        refs = extract_column_references(
+            "SELECT customer_id FROM bronze.orders WHERE status = 'ok'",
+            ["bronze.orders"],
+        )
+        status = next(r for r in refs if r.column == "status")
+        assert (status.table, status.clause) == ("bronze.orders", "where")
+
+    def test_cte_qualified_reference_reports_the_cte(self):
+        sql = textwrap.dedent("""\
+            WITH recent AS (SELECT id, amount FROM bronze.orders)
+            SELECT r.id, r.amount FROM recent r""")
+        refs = extract_column_references(sql, ["bronze.orders"])
+        outer = [r for r in refs if r.line == 2]
+        assert {r.table for r in outer} == {"recent"}
+        inner = [r for r in refs if r.line == 1]
+        assert {r.table for r in inner} == {"bronze.orders"}
+
+    def test_unqualified_column_uses_the_single_source_in_scope(self):
+        refs = extract_column_references(
+            "SELECT id, amount FROM bronze.orders", ["bronze.orders"]
+        )
+        assert {r.table for r in refs} == {"bronze.orders"}
+
+    def test_unqualified_column_resolved_by_schema_when_ambiguous(self):
+        sql = (
+            "SELECT id, region FROM bronze.orders "
+            "JOIN bronze.customers ON bronze.orders.id = bronze.customers.id"
+        )
+        refs = extract_column_references(
+            sql,
+            ["bronze.orders", "bronze.customers"],
+            schema={
+                "bronze.orders": [("id", "INTEGER"), ("amount", "DOUBLE")],
+                "bronze.customers": [("id", "INTEGER"), ("region", "VARCHAR")],
+            },
+        )
+        region = next(r for r in refs if r.column == "region" and r.clause == "select")
+        assert region.table == "bronze.customers"
+
+    def test_unresolvable_column_has_an_empty_table(self):
+        refs = extract_column_references(
+            "SELECT id FROM bronze.a JOIN bronze.b ON bronze.a.x = bronze.b.x",
+            ["bronze.a", "bronze.b"],
+        )
+        bare = next(r for r in refs if r.clause == "select")
+        assert bare.table == ""
+
+    def test_star_is_not_a_reference(self):
+        assert extract_column_references("SELECT * FROM bronze.orders", ["bronze.orders"]) == []
+
+    def test_unparseable_sql_returns_nothing(self):
+        assert extract_column_references("SELECT FROM ((( WHERE") == []
+
+
+def test_lineage_warns_once_when_every_column_fails(monkeypatch, caplog):
+    """A broken tracer must not look like a model with no lineage.
+
+    A sqlglot release removed arguments the tracer passed; every column then
+    failed, each failure was logged at debug, and lineage came back empty
+    everywhere with nothing at a visible level.
+    """
+    import logging
+
+    import sqlglot.lineage
+
+    from havn.engine.sql_analysis import clear_lineage_cache, extract_column_lineage
+
+    def broken(*args, **kwargs):
+        raise TypeError("to_node() got an unexpected keyword argument")
+
+    monkeypatch.setattr(sqlglot.lineage, "to_node", broken)
+    clear_lineage_cache()
+    with caplog.at_level(logging.WARNING, logger="havn.sql_analysis"):
+        lineage = extract_column_lineage(
+            "SELECT c.customer_id, c.name FROM bronze.customers c",
+            depends_on=["bronze.customers"],
+        )
+    clear_lineage_cache()
+
+    assert lineage == {"customer_id": [], "name": []}
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "all 2 columns" in warnings[0].getMessage()
