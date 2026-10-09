@@ -11,7 +11,7 @@ import { useDashboard } from "./DashboardContext";
 const _optionsSqlCache = new Map();
 
 export default function DashboardFilterBar() {
-  const { dashboard, globalFilters, setFilter, parameters, setParameter, clearCrossFilter, crossFilter, savedViews, saveView, loadView, deleteView } = useDashboard();
+  const { dashboard, globalFilters, setFilter, parameters, setParameter, clearCrossFilter, crossFilter, savedViews, saveView, loadView, deleteView, readOnly, loadFilterOptions } = useDashboard();
 
   const filters = dashboard?.filters || [];
   const params = dashboard?.settings?.parameters || [];
@@ -36,7 +36,7 @@ export default function DashboardFilterBar() {
     <div style={st.bar}>
       {/* Global filters */}
       {filters.map(f => (
-        <FilterControl key={f.id} filter={f} value={globalFilters[f.column] ?? null} onChange={(val) => setFilter(f.column, val)} />
+        <FilterControl key={f.id} filter={f} value={globalFilters[f.column] ?? null} onChange={(val) => setFilter(f.column, val)} loadOptions={loadFilterOptions} />
       ))}
 
       {/* Parameters */}
@@ -62,7 +62,7 @@ export default function DashboardFilterBar() {
       )}
 
       {/* Saved views */}
-      {(hasActiveFilters || (savedViews && savedViews.length > 0)) && (
+      {!readOnly && (hasActiveFilters || (savedViews && savedViews.length > 0)) && (
         <SavedViewsDropdown savedViews={savedViews || []} onSave={saveView} onLoad={loadView} onDelete={deleteView} />
       )}
     </div>
@@ -183,12 +183,19 @@ const DATE_PRESETS = [
 
 // ---------- Filter Controls ----------
 
-function FilterControl({ filter, value, onChange }) {
+function FilterControl({ filter, value, onChange, loadOptions }) {
   const [options, setOptions] = useState([]);
   const cacheRef = useRef(_optionsSqlCache);
 
-  // Load options from SQL (cached) or static list
+  // Load options from SQL (cached) or static list. A published view has no
+  // SQL: it asks the server to run the filter's saved options query.
   useEffect(() => {
+    if (loadOptions) {
+      if (!filter.has_options && !filter.options) return undefined;
+      let cancelled = false;
+      loadOptions(filter).then(opts => { if (!cancelled) setOptions(opts || []); }).catch(() => {});
+      return () => { cancelled = true; };
+    }
     if (filter.options_sql) {
       const cached = cacheRef.current.get(filter.options_sql);
       if (cached) {
@@ -205,7 +212,7 @@ function FilterControl({ filter, value, onChange }) {
     } else if (filter.options) {
       setOptions(filter.options);
     }
-  }, [filter.options_sql, filter.options]);
+  }, [filter.options_sql, filter.options, filter.id, filter.has_options, loadOptions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   switch (filter.type) {
     case "dropdown":

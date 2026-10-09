@@ -553,7 +553,9 @@ def evaluate_condition(condition: dict | None, data: dict) -> tuple[bool, str | 
     }[op]
     from havn.engine.report_render import format_number
 
-    return met, f"{col} is {format_number(actual)} ({CONDITION_OPS[op]} {format_number(target)})"
+    word = {"gt": "above", "gte": "at least", "lt": "below", "lte": "at most", "eq": "equal to", "ne": "other than"}[op]
+    verdict = word if met else f"not {word}"
+    return met, f"{col} is {format_number(actual)}, {verdict} {format_number(target)}"
 
 
 def _dashboard_link(conn: duckdb.DuckDBPyConnection, dashboard_id: str, base_url: str | None) -> str | None:

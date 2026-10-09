@@ -4,6 +4,7 @@ import { useDashboard } from "./DashboardContext";
 import DashboardWidget from "./DashboardWidget";
 import DashboardFilterManager from "./DashboardFilterManager";
 import DashboardFilterBar from "./DashboardFilterBar";
+import ShareDialog from "./ShareDialog";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -77,8 +78,7 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
   const [showSettings, setShowSettings] = useState(false);
   const [settingsDesc, setSettingsDesc] = useState("");
   const [showRefreshMenu, setShowRefreshMenu] = useState(false);
-  const [showEmbedModal, setShowEmbedModal] = useState(false);
-  const [embedCopied, setEmbedCopied] = useState(false);
+  const [showShareDialog, setShowShareDialog] = useState(false);
   const [temporalColumns, setTemporalColumns] = useState([]);
   const [activePageId, setActivePageId] = useState(null);
   const [pageContextMenu, setPageContextMenu] = useState(null);
@@ -216,20 +216,6 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
     } else {
       document.documentElement.requestFullscreen?.();
     }
-  }
-
-  // Embed helpers
-  function getEmbedUrl() {
-    return `${window.location.origin}/#embed=true&dashboard=${dashboard?.id || ""}`;
-  }
-  function getEmbedSnippet() {
-    return `<iframe src="${getEmbedUrl()}" width="100%" height="600" frameborder="0"></iframe>`;
-  }
-  function copyEmbedSnippet() {
-    navigator.clipboard.writeText(getEmbedSnippet()).then(() => {
-      setEmbedCopied(true);
-      setTimeout(() => setEmbedCopied(false), 2000);
-    });
   }
 
   // Page management
@@ -595,8 +581,8 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
             </>
           )}
 
-          <button style={st.toolBtn} onClick={() => setShowEmbedModal(true)} title="Embed this dashboard">
-            Embed
+          <button style={st.toolBtn} onClick={() => setShowShareDialog(true)} title="Publish, share links, embed and scheduled reports">
+            Share
           </button>
 
           <button style={st.toolBtn} onClick={toggleFullscreen} title="Fullscreen (F)">
@@ -842,35 +828,9 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
         </div>
       )}
 
-      {/* Embed modal */}
-      {showEmbedModal && (
-        <div style={st.settingsOverlay} onClick={(e) => e.target === e.currentTarget && setShowEmbedModal(false)}>
-          <div style={st.settingsPanel}>
-            <div style={st.settingsHeader}>
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--havn-text)" }}>Embed Dashboard</h3>
-              <button style={{ background: "none", border: "none", color: "var(--havn-text-secondary)", fontSize: 20, cursor: "pointer" }} onClick={() => setShowEmbedModal(false)}>×</button>
-            </div>
-            <div style={st.settingsBody}>
-              <label style={st.settingsLabel}>Embed URL</label>
-              <input style={st.settingsInput} readOnly value={getEmbedUrl()} onClick={(e) => e.target.select()} />
-
-              <label style={{ ...st.settingsLabel, marginTop: 16 }}>iframe Snippet</label>
-              <textarea
-                style={{ ...st.settingsInput, minHeight: 60, resize: "vertical", fontFamily: "var(--havn-font-mono)", fontSize: 12 }}
-                readOnly
-                value={getEmbedSnippet()}
-                onClick={(e) => e.target.select()}
-              />
-
-              <button
-                style={{ ...st.addBtn, marginTop: 12, width: "100%", textAlign: "center" }}
-                onClick={copyEmbedSnippet}
-              >
-                {embedCopied ? "Copied!" : "Copy iframe snippet"}
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Share: published links, embed snippet, reports */}
+      {showShareDialog && (
+        <ShareDialog dashboard={dashboard} onClose={() => setShowShareDialog(false)} />
       )}
     </div>
   );

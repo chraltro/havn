@@ -305,6 +305,124 @@ export interface WidgetQueryResult {
   error?: string;
 }
 
+/** A published-dashboard link (GET/POST /api/dashboards/{id}/shares). */
+export interface DashboardShare {
+  id: string;
+  dashboard_id: string;
+  dashboard_name?: string | null;
+  mode: "signed_in" | "public";
+  label: string;
+  token_hint?: string | null;
+  view_as_user?: string | null;
+  view_as_role?: string | null;
+  expires_at?: string | null;
+  revoked_at?: string | null;
+  created_by: string;
+  created_at?: string | null;
+  last_viewed_at?: string | null;
+  view_count: number;
+  status: "active" | "expired" | "revoked";
+  /** Path of the published page; only known for signed-in links and at public-link creation. */
+  path?: string | null;
+  url?: string;
+  /** Present once, in the response that creates a public link. */
+  token?: string;
+  embed_html?: string;
+}
+
+export interface ShareCreate {
+  mode: "signed_in" | "public";
+  label?: string;
+  expires_in_days?: number;
+  view_as_user?: string;
+  view_as_role?: "viewer" | "editor" | "admin";
+}
+
+export interface Freshness {
+  as_of: string | null;
+  newest: string | null;
+  models: { name: string; last_built_at: string | null }[];
+  unknown: string[];
+  model_count?: number;
+}
+
+/** The SQL-free definition a published page renders. */
+export interface PublishedDashboard {
+  dashboard: {
+    id: string;
+    name: string;
+    description: string;
+    layout: Record<string, unknown>;
+    filters: { id: string; label: string; type: string; column: string; has_options?: boolean; options?: string[] }[];
+    settings: { parameters: { name: string; label?: string; type?: string; default?: unknown }[] };
+    widgets: { id: string; widget_type: string; chart_type?: string; title: string; config: Record<string, unknown>; position: Record<string, number>; sort_order: number; has_query: boolean }[];
+  };
+  share: { mode: "signed_in" | "public"; label: string; expires_at: string | null };
+  viewer: { username: string | null };
+  freshness: Freshness;
+}
+
+export interface ReportCondition {
+  widget_id: string;
+  op: "gt" | "gte" | "lt" | "lte" | "eq" | "ne" | "has_rows" | "no_rows";
+  column?: string;
+  value?: number;
+}
+
+export interface Report {
+  id: string;
+  name: string;
+  dashboard_id: string;
+  dashboard_name?: string | null;
+  widget_id?: string | null;
+  schedule?: string | null;
+  enabled: boolean;
+  owner: string;
+  recipients: { email: string[]; slack: string[] };
+  formats: ("pdf" | "png" | "csv")[];
+  filters: Record<string, unknown>;
+  parameters: Record<string, unknown>;
+  condition?: ReportCondition | null;
+  subject: string;
+  message: string;
+  last_run_at?: string | null;
+  last_status?: "sent" | "skipped" | "failed" | "partial" | null;
+  last_error?: string | null;
+  next_run_at?: string | null;
+}
+
+export interface ReportDelivery {
+  id: string;
+  report_id: string;
+  trigger: string;
+  status: "sent" | "skipped" | "failed" | "partial";
+  condition_met: boolean | null;
+  channels: { channel: string; target: string; status: string; error?: string }[];
+  summary: { kpis?: { label: string; display: string }[]; condition?: string | null };
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface ReportPreview {
+  subject: string;
+  html: string;
+  text: string;
+  condition_met: boolean;
+  condition: { met: boolean; description: string } | null;
+  attachments: { filename: string; type: string; bytes: number }[];
+  notes: string[];
+}
+
+export interface ReportCapabilities {
+  charts: boolean;
+  email_configured: boolean;
+  slack_default_configured: boolean;
+  base_url: string | null;
+  allowed_recipient_domains: string[];
+  formats: string[];
+}
+
 export interface FileEntry {
   path: string;
   type: string;
@@ -1377,6 +1495,55 @@ export const api = {
     }),
   clearDashboardCache: (dashboardId: string) =>
     request(`/dashboards/${dashboardId}/cache`, { method: "DELETE" }),
+
+  // Published dashboards: share links (management needs an account)
+  listDashboardShares: (dashboardId: string) =>
+    request<DashboardShare[]>(`/dashboards/${dashboardId}/shares`),
+  createDashboardShare: (dashboardId: string, body: ShareCreate) =>
+    request<DashboardShare>(`/dashboards/${dashboardId}/shares`, { method: "POST", body: JSON.stringify(body) }),
+  updateDashboardShare: (shareId: string, body: { expires_in_days?: number; expires_at?: string; clear_expiry?: boolean }) =>
+    request<DashboardShare>(`/shares/${encodeURIComponent(shareId)}`, { method: "PATCH", body: JSON.stringify(body) }),
+  revokeDashboardShare: (shareId: string) =>
+    request<DashboardShare>(`/shares/${encodeURIComponent(shareId)}`, { method: "DELETE" }),
+
+  // Published dashboards: the read-only API behind /p/<key>
+  getPublished: (key: string) => request<PublishedDashboard>(`/published/${encodeURIComponent(key)}`),
+  queryPublished: (key: string, filters: Record<string, unknown> = {}, parameters: Record<string, unknown> = {}, widgetIds?: string[]) =>
+    request<{ results: Record<string, WidgetQueryResult>; freshness: Freshness }>(`/published/${encodeURIComponent(key)}/query`, {
+      method: "POST",
+      body: JSON.stringify({ filters, parameters, ...(widgetIds ? { widget_ids: widgetIds } : {}) }),
+      retryable: true,
+    }),
+  publishedFilterOptions: (key: string, filterId: string) =>
+    request<{ options: string[] }>(`/published/${encodeURIComponent(key)}/filters/${encodeURIComponent(filterId)}/options`, {
+      method: "POST",
+      retryable: true,
+    }),
+
+  // Scheduled reports
+  reportCapabilities: () => request<ReportCapabilities>("/reports/capabilities"),
+  listReports: () => request<Report[]>("/reports"),
+  getReport: (id: string) => request<Report & { deliveries: ReportDelivery[] }>(`/reports/${encodeURIComponent(id)}`),
+  createReport: (body: Partial<Report>) =>
+    request<Report>("/reports", { method: "POST", body: JSON.stringify(body) }),
+  updateReport: (id: string, body: Partial<Report>) =>
+    request<Report>(`/reports/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteReport: (id: string) => request(`/reports/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  sendReport: (id: string, force = false) =>
+    request<ReportDelivery>(`/reports/${encodeURIComponent(id)}/send?force=${force ? "true" : "false"}`, { method: "POST" }),
+  previewReport: (id: string) =>
+    request<ReportPreview>(`/reports/${encodeURIComponent(id)}/preview`, { method: "POST" }),
+  downloadReport: async (id: string, format: "pdf" | "png" | "html") => {
+    const headers: Record<string, string> = {};
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+    const res = await fetch(`${BASE}/reports/${encodeURIComponent(id)}/render?format=${format}`, { headers });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try { detail = (await res.json()).detail || detail; } catch { /* not JSON */ }
+      throw new Error(detail);
+    }
+    return res.blob();
+  },
 
   // Orchestration Jobs
   listJobs: () => request<OrchestrationJob[]>("/jobs"),

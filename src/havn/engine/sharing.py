@@ -407,7 +407,14 @@ def viewer_definition(dashboard: dict) -> dict:
         "description": dashboard.get("description") or "",
         "layout": dashboard.get("layout") or {},
         "filters": filters,
-        "settings": {"parameters": params},
+        "settings": {
+            "parameters": params,
+            "pages": [
+                {"id": str(p.get("id")), "name": str(p.get("name") or "")}
+                for p in settings.get("pages") or []
+                if isinstance(p, dict) and p.get("id")
+            ],
+        },
         "widgets": widgets,
     }
 

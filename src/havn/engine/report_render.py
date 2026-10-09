@@ -423,6 +423,10 @@ def _draw_chart(ax, w: dict) -> bool:
                 ax.barh(pos, values, height=width * 0.92, color=SERIES_COLORS[i], label=name)
             else:
                 ax.bar(pos, values, width=width * 0.92, color=SERIES_COLORS[i], label=name)
+    from matplotlib.ticker import FuncFormatter
+
+    value_axis = ax.xaxis if ctype == "horizontal_bar" else ax.yaxis
+    value_axis.set_major_formatter(FuncFormatter(lambda v, _pos: format_number(v).replace(".0K", "K").replace(".0M", "M")))
     if ctype != "horizontal_bar":
         step = max(1, len(labels) // 12)
         ax.set_xticks(x[::step])
