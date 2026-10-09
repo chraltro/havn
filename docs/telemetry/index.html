@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://chraltro.github.io/havn/docs/macros/">
+        <link rel="canonical" href="https://chraltro.github.io/havn/docs/telemetry/">
       
       
-        <link rel="prev" href="../contracts/">
+        <link rel="prev" href="../performance/">
       
       
-        <link rel="next" href="../packages/">
+        <link rel="next" href="../auth/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Macros - havn</title>
+        <title>Telemetry - havn</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#python-sql-macros" class="md-skip">
+        <a href="#telemetry-prometheus-opentelemetry-openlineage" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Macros
+              Telemetry
             
           </span>
         </div>
@@ -399,11 +399,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../macros/" class="md-tabs__link">
         
   
   
@@ -762,9 +760,11 @@
   
   
   
+    
   
-    <li class="md-tabs__item">
-      <a href="../telemetry/" class="md-tabs__link">
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
         
   
   
@@ -1191,37 +1191,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Macros
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../macros/" class="md-nav__link">
         
   
   
@@ -1237,103 +1210,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#quick-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Quick Start
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#how-it-works" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        How It Works
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#type-mapping" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Type Mapping
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sql-macros" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SQL Macros
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#listing-macros" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Listing Macros
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#conventions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Conventions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#related-pages" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Related Pages
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1828,10 +1704,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../telemetry/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1847,6 +1750,59 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prometheus-get-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prometheus: GET /metrics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#opentelemetry-traces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenTelemetry traces
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#openlineage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenLineage
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2013,10 +1969,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#quick-start" class="md-nav__link">
+  <a href="#prometheus-get-metrics" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Quick Start
+        Prometheus: GET /metrics
       
     </span>
   </a>
@@ -2024,10 +1980,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-it-works" class="md-nav__link">
+  <a href="#opentelemetry-traces" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How It Works
+        OpenTelemetry traces
       
     </span>
   </a>
@@ -2035,54 +1991,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#type-mapping" class="md-nav__link">
+  <a href="#openlineage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Type Mapping
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sql-macros" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SQL Macros
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#listing-macros" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Listing Macros
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#conventions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Conventions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#related-pages" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Related Pages
+        OpenLineage
       
     </span>
   </a>
@@ -2109,119 +2021,186 @@
   
 
 
-<h1 id="python-sql-macros">Python SQL Macros<a class="headerlink" href="#python-sql-macros" title="Permanent link">&para;</a></h1>
-<p>havn lets you write Python functions that are callable directly in SQL. No Jinja templating -- just Python functions registered as DuckDB UDFs. "Why template SQL when you have Python right there?"</p>
-<h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
-<p>Create a Python file in the <code>macros/</code> directory with <code>@macro</code>-decorated functions:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># macros/utils.py</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">havn</span><span class="w"> </span><span class="kn">import</span> <span class="n">macro</span>
-
-<span class="nd">@macro</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">mask_email</span><span class="p">(</span><span class="n">email</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<span class="w">    </span><span class="sd">"""Mask the local part of an email, keep domain."""</span>
-    <span class="k">if</span> <span class="ow">not</span> <span class="n">email</span> <span class="ow">or</span> <span class="s2">"@"</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">email</span><span class="p">:</span>
-        <span class="k">return</span> <span class="s2">"***"</span>
-    <span class="n">local</span><span class="p">,</span> <span class="n">domain</span> <span class="o">=</span> <span class="n">email</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"@"</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
-    <span class="k">return</span> <span class="sa">f</span><span class="s2">"***@</span><span class="si">{</span><span class="n">domain</span><span class="si">}</span><span class="s2">"</span>
-
-<span class="nd">@macro</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">fiscal_quarter</span><span class="p">(</span><span class="n">d</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-<span class="w">    </span><span class="sd">"""Return fiscal quarter (FY starts April)."""</span>
-    <span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
-    <span class="n">month</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">fromisoformat</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="o">.</span><span class="n">month</span>
-    <span class="k">return</span> <span class="p">((</span><span class="n">month</span> <span class="o">-</span> <span class="mi">4</span><span class="p">)</span> <span class="o">%</span> <span class="mi">12</span><span class="p">)</span> <span class="o">//</span> <span class="mi">3</span> <span class="o">+</span> <span class="mi">1</span>
+<h1 id="telemetry-prometheus-opentelemetry-openlineage">Telemetry: Prometheus, OpenTelemetry, OpenLineage<a class="headerlink" href="#telemetry-prometheus-opentelemetry-openlineage" title="Permanent link">&para;</a></h1>
+<p>havn can export what it does to the tools you already run. Every exporter is
+<strong>off</strong> until you turn it on under <code>telemetry:</code> in <code>project.yml</code>, and none of
+them can fail a build: delivery problems are logged and dropped.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">telemetry</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">prometheus</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">token</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${HAVN_METRICS_TOKEN}</span><span class="w">      </span><span class="c1"># optional scrape token (keep it in .env)</span>
+<span class="w">    </span><span class="nt">allow_unauthenticated</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">localhost</span><span class="w">  </span><span class="c1"># false | localhost | true</span>
+<span class="w">    </span><span class="nt">include_models</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">              </span><span class="c1"># per-model series</span>
+<span class="w">  </span><span class="nt">opentelemetry</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">endpoint</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://localhost:4318/v1/traces</span>
+<span class="w">    </span><span class="nt">headers</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}</span>
+<span class="w">    </span><span class="nt">service_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">havn</span>
+<span class="w">    </span><span class="nt">trace_api</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">                   </span><span class="c1"># one span per API request</span>
+<span class="w">  </span><span class="nt">openlineage</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">transport</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http</span><span class="w">                   </span><span class="c1"># http | file</span>
+<span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://localhost:5000</span><span class="w">        </span><span class="c1"># Marquez</span>
+<span class="w">    </span><span class="nt">endpoint</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api/v1/lineage</span>
+<span class="w">    </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${OPENLINEAGE_API_KEY}</span>
+<span class="w">    </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">analytics</span><span class="w">              </span><span class="c1"># job namespace (default havn://&lt;project name&gt;)</span>
+<span class="w">    </span><span class="nt">column_lineage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </code></pre></div>
-<p>Use them in any SQL model:</p>
-<div class="highlight"><pre><span></span><code><span class="c1">-- transform/silver/customers.sql</span>
-<span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="k">table</span><span class="p">,</span><span class="w"> </span><span class="k">schema</span><span class="o">=</span><span class="n">silver</span>
-
-<span class="k">SELECT</span>
-<span class="w">    </span><span class="n">customer_id</span><span class="p">,</span>
-<span class="w">    </span><span class="n">mask_email</span><span class="p">(</span><span class="n">email</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">masked_email</span><span class="p">,</span>
-<span class="w">    </span><span class="n">fiscal_quarter</span><span class="p">(</span><span class="n">created_date</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">fiscal_q</span>
-<span class="k">FROM</span><span class="w"> </span><span class="n">bronze</span><span class="p">.</span><span class="n">customers</span>
+<h2 id="prometheus-get-metrics">Prometheus: <code>GET /metrics</code><a class="headerlink" href="#prometheus-get-metrics" title="Permanent link">&para;</a></h2>
+<p>Text exposition format, served by <code>havn serve</code>. No extra package is needed.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># prometheus.yml</span>
+<span class="nt">scrape_configs</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">job_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">havn</span>
+<span class="w">    </span><span class="nt">scrape_interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30s</span>
+<span class="w">    </span><span class="nt">static_configs</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">targets</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"havn-host:3000"</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">authorization</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">credentials</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;the telemetry.prometheus.token&gt;</span>
 </code></pre></div>
-<p>That's it. The functions are automatically discovered and registered when havn connects to the database.</p>
-<h2 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
-<ol>
-<li>On <code>connect()</code>, havn scans the <code>macros/</code> directory for <code>.py</code> files</li>
-<li>Functions decorated with <code>@macro</code> are collected with their type signatures</li>
-<li>Each macro is registered as a DuckDB scalar UDF via <code>create_function()</code></li>
-<li>The functions are then available in any SQL query or transform</li>
-</ol>
-<h2 id="type-mapping">Type Mapping<a class="headerlink" href="#type-mapping" title="Permanent link">&para;</a></h2>
-<p>Python type hints are mapped to DuckDB types:</p>
+<p><strong>Process series</strong> (since the server started):
+<code>havn_query_duration_seconds</code> (histogram), <code>havn_transform_duration_seconds</code>
+(histogram, <code>status="success"|"error"</code>), <code>havn_queries_total</code>,
+<code>havn_rows_processed_total</code>, <code>havn_streaming_events_total</code>,
+<code>havn_active_tasks</code>, <code>havn_warehouse_size_bytes</code>, resource budgets.</p>
+<p><strong>Warehouse series</strong> (read from <code>_havn</code> on each scrape, survive restarts):</p>
 <table>
 <thead>
 <tr>
-<th>Python Type</th>
-<th>DuckDB Type</th>
+<th>Metric</th>
+<th>Type</th>
+<th>Labels</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>str</code></td>
-<td><code>VARCHAR</code></td>
+<td><code>havn_runs_total</code></td>
+<td>counter</td>
+<td>run_type, status</td>
 </tr>
 <tr>
-<td><code>int</code></td>
-<td><code>INTEGER</code></td>
+<td><code>havn_last_run_timestamp_seconds</code></td>
+<td>gauge</td>
+<td>run_type</td>
 </tr>
 <tr>
-<td><code>float</code></td>
-<td><code>DOUBLE</code></td>
+<td><code>havn_model_last_build_duration_seconds</code></td>
+<td>gauge</td>
+<td>model, schema, materialized</td>
 </tr>
 <tr>
-<td><code>bool</code></td>
-<td><code>BOOLEAN</code></td>
+<td><code>havn_model_rows</code></td>
+<td>gauge</td>
+<td>model, schema</td>
 </tr>
 <tr>
-<td><code>datetime.date</code></td>
-<td><code>DATE</code></td>
+<td><code>havn_model_freshness_age_seconds</code></td>
+<td>gauge</td>
+<td>model, schema</td>
 </tr>
 <tr>
-<td><code>datetime.datetime</code></td>
-<td><code>TIMESTAMP</code></td>
+<td><code>havn_model_last_build_success</code></td>
+<td>gauge (1/0)</td>
+<td>model, schema, status</td>
 </tr>
 <tr>
-<td>No annotation</td>
-<td><code>VARCHAR</code> (default)</td>
+<td><code>havn_model_build_failures_total</code></td>
+<td>counter</td>
+<td>model, schema</td>
+</tr>
+<tr>
+<td><code>havn_assertion_failures_total</code></td>
+<td>counter</td>
+<td>model, severity</td>
+</tr>
+<tr>
+<td><code>havn_assertions_failing</code></td>
+<td>gauge</td>
+<td>model</td>
+</tr>
+<tr>
+<td><code>havn_model_peak_memory_bytes</code>, <code>havn_model_spill_bytes</code></td>
+<td>gauge</td>
+<td>model</td>
+</tr>
+<tr>
+<td><code>havn_perf_regressions_total</code></td>
+<td>counter</td>
+<td>model</td>
+</tr>
+<tr>
+<td><code>havn_job_runs_total</code></td>
+<td>counter</td>
+<td>job, status</td>
+</tr>
+<tr>
+<td><code>havn_job_last_run_success</code></td>
+<td>gauge (1/0)</td>
+<td>job, status, trigger</td>
+</tr>
+<tr>
+<td><code>havn_job_last_run_timestamp_seconds</code>, <code>havn_job_last_run_duration_seconds</code></td>
+<td>gauge</td>
+<td>job</td>
+</tr>
+<tr>
+<td><code>havn_write_queue_depth</code>, <code>havn_write_queue_capacity</code>, <code>havn_read_pool_idle</code>, <code>havn_resource_tasks_active</code></td>
+<td>gauge</td>
+<td></td>
 </tr>
 </tbody>
 </table>
-<h2 id="sql-macros">SQL Macros<a class="headerlink" href="#sql-macros" title="Permanent link">&para;</a></h2>
-<p>You can also place <code>.sql</code> files in <code>macros/</code> containing <code>CREATE MACRO</code> statements:</p>
-<div class="highlight"><pre><span></span><code><span class="c1">-- macros/date_helpers.sql</span>
-<span class="k">CREATE</span><span class="w"> </span><span class="n">MACRO</span><span class="w"> </span><span class="n">quarter_start</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span>
-<span class="w">    </span><span class="n">DATE_TRUNC</span><span class="p">(</span><span class="s1">'quarter'</span><span class="p">,</span><span class="w"> </span><span class="n">d</span><span class="p">::</span><span class="nb">DATE</span><span class="p">);</span>
-
-<span class="k">CREATE</span><span class="w"> </span><span class="n">MACRO</span><span class="w"> </span><span class="n">is_weekend</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span>
-<span class="w">    </span><span class="k">EXTRACT</span><span class="p">(</span><span class="n">DOW</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">d</span><span class="p">::</span><span class="nb">DATE</span><span class="p">)</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">6</span><span class="p">);</span>
+<p>Set <code>include_models: false</code> for projects with thousands of models.</p>
+<p><strong>Who may scrape</strong>, in order: anyone when <code>allow_unauthenticated: true</code>; a
+scraper on 127.0.0.1 / ::1 when it is <code>localhost</code>; whoever sends
+<code>Authorization: Bearer &lt;token&gt;</code>; and, when havn runs with <code>--auth</code>, any user
+token with read permission. With auth off and no token configured, <code>/metrics</code>
+is as open as the rest of the server.</p>
+<p><code>localhost</code> trusts the connection's address. Behind a reverse proxy on the
+same machine every request arrives from loopback, so a request carrying
+<code>X-Forwarded-For</code>, <code>Forwarded</code> or <code>X-Real-IP</code> is never treated as local; use
+a token for scrapes that go through the proxy. A proxy that does not add
+any of those headers (nginx does not by default) makes every request look
+local: do not use <code>localhost</code> behind one.</p>
+<p>Setting the <code>HAVN_METRICS_TOKEN</code> environment variable alone still turns the
+endpoint on with that token, as it did before the endpoint was configurable.</p>
+<h2 id="opentelemetry-traces">OpenTelemetry traces<a class="headerlink" href="#opentelemetry-traces" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">'havn[otel]'</span>
 </code></pre></div>
-<p>SQL macros are executed directly on connection -- they don't need the <code>@macro</code> decorator.</p>
-<h2 id="listing-macros">Listing Macros<a class="headerlink" href="#listing-macros" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>macros
-</code></pre></div>
-<p>Shows all registered macros with their name, parameters, return type, source file, and documentation.</p>
-<p>Via API:</p>
-<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>http://localhost:3000/api/macros
-</code></pre></div>
-<h2 id="conventions">Conventions<a class="headerlink" href="#conventions" title="Permanent link">&para;</a></h2>
+<p>One trace per pipeline run: a <code>havn transform</code> (or <code>havn job &lt;name&gt;</code>) span,
+a span per step (<code>step transform</code>, or each job step), and a <code>model &lt;name&gt;</code>
+span per build with <code>havn.rows</code>, <code>havn.duration_ms</code>, <code>havn.rows_scanned</code>,
+<code>havn.peak_memory_bytes</code>, <code>havn.plan_captured</code> and an error status when the
+build failed. Parallel workers parent their spans to the run correctly.</p>
+<p>With <code>trace_api: true</code> each API request gets a server span named after its
+route (<code>GET /api/perf/models/{model}</code>); an incoming W3C <code>traceparent</code> header
+continues the caller's trace.</p>
+<p>Spans go over OTLP/HTTP through a batch processor to <code>endpoint</code>. havn uses
+its own tracer provider, so an application embedding havn keeps its global one.
+Without the packages installed, or with <code>enabled: false</code>, all of this is a
+no-op.</p>
+<h2 id="openlineage">OpenLineage<a class="headerlink" href="#openlineage" title="Permanent link">&para;</a></h2>
+<p>Each model build emits a <code>START</code> event before it runs and a <code>COMPLETE</code> or
+<code>FAIL</code> event after, following the OpenLineage 2-0-2 spec, with no SDK
+required:</p>
 <ul>
-<li>Files prefixed with <code>_</code> (e.g., <code>_helpers.py</code>) are skipped</li>
-<li>Errors in individual macro files are logged but don't prevent other macros from loading</li>
-<li>Macros are registered before transforms run, so they're available in all SQL models</li>
-<li><code>havn init</code> creates a <code>macros/</code> directory with example functions</li>
-<li>Precedence runs built-in library, then installed packages, then your project.
-  A name defined twice resolves to the closest copy, and the shadowing is logged</li>
+<li><code>job</code>: the model (<code>gold.orders</code>) in your namespace, with <code>sql</code> and <code>jobType</code>
+  facets;</li>
+<li><code>run</code>: a fresh run id per build, a <code>parent</code> facet pointing at the pipeline
+  run (so Marquez groups a run's models), <code>processing_engine</code>, and
+  <code>errorMessage</code> on <code>FAIL</code>;</li>
+<li><code>inputs</code>: the model's upstreams;</li>
+<li><code>outputs</code>: the model with a <code>schema</code> facet, an <code>outputStatistics</code> row count,
+  and a <code>columnLineage</code> facet from havn's own column lineage.</li>
 </ul>
-<h2 id="related-pages">Related Pages<a class="headerlink" href="#related-pages" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="transforms">Transforms</a> -- Using macros in SQL models</li>
-<li><a href="packages">Packages</a> -- Sharing macros (and models) between projects</li>
-<li><a href="cli-reference">CLI Reference</a> -- <code>havn macros</code> command</li>
-<li><a href="configuration">Configuration</a> -- Project structure</li>
-</ul>
+<p>Datasets are named <code>schema.table</code> in the namespace
+<code>duckdb://&lt;absolute path of the warehouse&gt;</code> (override with
+<code>dataset_namespace</code>).</p>
+<p><code>transport: http</code> POSTs JSON to <code>&lt;url&gt;/&lt;endpoint&gt;</code> with an optional bearer
+<code>api_key</code>. <code>transport: file</code> appends one JSON event per line to <code>path</code>
+(relative to the project). Delivery runs on a background thread; the end of a
+run waits up to <code>timeout_s</code> + 1 second for queued events, so a CLI run does
+not exit before they are sent.</p>
+<p>See also the <a href="../performance/">performance advisor</a>.</p>
 
 
 

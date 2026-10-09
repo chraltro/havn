@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://chraltro.github.io/havn/docs/macros/">
+        <link rel="canonical" href="https://chraltro.github.io/havn/docs/python-models/">
       
       
-        <link rel="prev" href="../contracts/">
+        <link rel="prev" href="../transforms/">
       
       
-        <link rel="next" href="../packages/">
+        <link rel="next" href="../seeds/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Macros - havn</title>
+        <title>Python Models - havn</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#python-sql-macros" class="md-skip">
+        <a href="#python-models" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Macros
+              Python Models
             
           </span>
         </div>
@@ -285,9 +285,11 @@
   
   
   
+    
   
-    <li class="md-tabs__item">
-      <a href="../python-models/" class="md-tabs__link">
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
         
   
   
@@ -399,11 +401,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../macros/" class="md-tabs__link">
         
   
   
@@ -1029,10 +1029,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../python-models/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python Models
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1048,6 +1075,142 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-function" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The function
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependencies
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#building" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Building">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#incremental-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Incremental models
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#change-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Change detection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-and-the-bind-pass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation and the bind pass
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#unit-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unit tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#packages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Packages
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#everything-else" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Everything else
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1191,37 +1354,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Macros
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../macros/" class="md-nav__link">
         
   
   
@@ -1237,103 +1373,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#quick-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Quick Start
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#how-it-works" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        How It Works
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#type-mapping" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Type Mapping
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sql-macros" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SQL Macros
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#listing-macros" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Listing Macros
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#conventions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Conventions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#related-pages" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Related Pages
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2013,10 +2052,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#quick-start" class="md-nav__link">
+  <a href="#the-function" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Quick Start
+        The function
       
     </span>
   </a>
@@ -2024,10 +2063,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-it-works" class="md-nav__link">
+  <a href="#configuration" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How It Works
+        Configuration
       
     </span>
   </a>
@@ -2035,10 +2074,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#type-mapping" class="md-nav__link">
+  <a href="#dependencies" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Type Mapping
+        Dependencies
       
     </span>
   </a>
@@ -2046,10 +2085,38 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#sql-macros" class="md-nav__link">
+  <a href="#building" class="md-nav__link">
     <span class="md-ellipsis">
       
-        SQL Macros
+        Building
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Building">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#incremental-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Incremental models
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#change-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Change detection
       
     </span>
   </a>
@@ -2057,10 +2124,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#listing-macros" class="md-nav__link">
+  <a href="#validation-and-the-bind-pass" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Listing Macros
+        Validation and the bind pass
       
     </span>
   </a>
@@ -2068,10 +2135,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#conventions" class="md-nav__link">
+  <a href="#unit-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Conventions
+        Unit tests
       
     </span>
   </a>
@@ -2079,10 +2146,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#related-pages" class="md-nav__link">
+  <a href="#packages" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Related Pages
+        Packages
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#everything-else" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Everything else
       
     </span>
   </a>
@@ -2109,118 +2187,260 @@
   
 
 
-<h1 id="python-sql-macros">Python SQL Macros<a class="headerlink" href="#python-sql-macros" title="Permanent link">&para;</a></h1>
-<p>havn lets you write Python functions that are callable directly in SQL. No Jinja templating -- just Python functions registered as DuckDB UDFs. "Why template SQL when you have Python right there?"</p>
-<h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
-<p>Create a Python file in the <code>macros/</code> directory with <code>@macro</code>-decorated functions:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># macros/utils.py</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">havn</span><span class="w"> </span><span class="kn">import</span> <span class="n">macro</span>
+<h1 id="python-models">Python models<a class="headerlink" href="#python-models" title="Permanent link">&para;</a></h1>
+<p>Most transforms are plain SQL. Some logic reads better as code: a loop over
+sorted values, a statistical estimate, a call into a Python library. A Python
+model is a <code>.py</code> file in <code>transform/</code> that builds a model with a function. It
+is a node in the DAG like any <code>.sql</code> file beside it: it is ordered by its
+dependencies, selected by the same selectors, change-detected, built with the
+same materializations, checked by the same assertions and recorded in the
+same run log.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># transform/silver/customer_scores.py</span>
+<span class="sd">"""One score per customer, from their orders."""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">havn</span><span class="w"> </span><span class="kn">import</span> <span class="n">model</span>
 
-<span class="nd">@macro</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">mask_email</span><span class="p">(</span><span class="n">email</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<span class="w">    </span><span class="sd">"""Mask the local part of an email, keep domain."""</span>
-    <span class="k">if</span> <span class="ow">not</span> <span class="n">email</span> <span class="ow">or</span> <span class="s2">"@"</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">email</span><span class="p">:</span>
-        <span class="k">return</span> <span class="s2">"***"</span>
-    <span class="n">local</span><span class="p">,</span> <span class="n">domain</span> <span class="o">=</span> <span class="n">email</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"@"</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
-    <span class="k">return</span> <span class="sa">f</span><span class="s2">"***@</span><span class="si">{</span><span class="n">domain</span><span class="si">}</span><span class="s2">"</span>
 
-<span class="nd">@macro</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">fiscal_quarter</span><span class="p">(</span><span class="n">d</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-<span class="w">    </span><span class="sd">"""Return fiscal quarter (FY starts April)."""</span>
-    <span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
-    <span class="n">month</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">fromisoformat</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="o">.</span><span class="n">month</span>
-    <span class="k">return</span> <span class="p">((</span><span class="n">month</span> <span class="o">-</span> <span class="mi">4</span><span class="p">)</span> <span class="o">%</span> <span class="mi">12</span><span class="p">)</span> <span class="o">//</span> <span class="mi">3</span> <span class="o">+</span> <span class="mi">1</span>
+<span class="nd">@model</span><span class="p">(</span>
+    <span class="n">materialized</span><span class="o">=</span><span class="s2">"table"</span><span class="p">,</span>
+    <span class="n">tags</span><span class="o">=</span><span class="p">[</span><span class="s2">"daily"</span><span class="p">],</span>
+    <span class="n">assertions</span><span class="o">=</span><span class="p">[</span><span class="s2">"unique(customer_id)"</span><span class="p">,</span> <span class="s2">"row_count &gt; 0"</span><span class="p">],</span>
+    <span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="s2">"score"</span><span class="p">:</span> <span class="s2">"Sum of order amounts, halved for returns"</span><span class="p">},</span>
+<span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">customer_scores</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">ref</span><span class="p">):</span>
+    <span class="n">orders</span> <span class="o">=</span> <span class="n">ref</span><span class="p">(</span><span class="s2">"bronze.orders"</span><span class="p">)</span>
+    <span class="n">returns</span> <span class="o">=</span> <span class="n">ref</span><span class="p">(</span><span class="s2">"bronze.returns"</span><span class="p">)</span>
+    <span class="n">joined</span> <span class="o">=</span> <span class="n">orders</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">returns</span><span class="p">,</span> <span class="s2">"order_id"</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">"left"</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">joined</span><span class="o">.</span><span class="n">aggregate</span><span class="p">(</span>
+        <span class="s2">"customer_id, sum(amount * CASE WHEN returned THEN 0.5 ELSE 1 END) AS score"</span>
+    <span class="p">)</span>
 </code></pre></div>
-<p>Use them in any SQL model:</p>
-<div class="highlight"><pre><span></span><code><span class="c1">-- transform/silver/customers.sql</span>
-<span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="k">table</span><span class="p">,</span><span class="w"> </span><span class="k">schema</span><span class="o">=</span><span class="n">silver</span>
-
-<span class="k">SELECT</span>
-<span class="w">    </span><span class="n">customer_id</span><span class="p">,</span>
-<span class="w">    </span><span class="n">mask_email</span><span class="p">(</span><span class="n">email</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">masked_email</span><span class="p">,</span>
-<span class="w">    </span><span class="n">fiscal_quarter</span><span class="p">(</span><span class="n">created_date</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">fiscal_q</span>
-<span class="k">FROM</span><span class="w"> </span><span class="n">bronze</span><span class="p">.</span><span class="n">customers</span>
-</code></pre></div>
-<p>That's it. The functions are automatically discovered and registered when havn connects to the database.</p>
-<h2 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
-<ol>
-<li>On <code>connect()</code>, havn scans the <code>macros/</code> directory for <code>.py</code> files</li>
-<li>Functions decorated with <code>@macro</code> are collected with their type signatures</li>
-<li>Each macro is registered as a DuckDB scalar UDF via <code>create_function()</code></li>
-<li>The functions are then available in any SQL query or transform</li>
-</ol>
-<h2 id="type-mapping">Type Mapping<a class="headerlink" href="#type-mapping" title="Permanent link">&para;</a></h2>
-<p>Python type hints are mapped to DuckDB types:</p>
+<p>The model's name comes from the file (<code>customer_scores</code>) and its schema from
+the folder (<code>silver</code>), exactly as for SQL. <code>@model(schema="...")</code> overrides
+the schema.</p>
+<h2 id="the-function">The function<a class="headerlink" href="#the-function" title="Permanent link">&para;</a></h2>
+<p>A file is a model when it has a function decorated with <code>@model</code> (or
+<code>@havn.model</code>), or failing that a top-level <code>def model(...)</code>. Any other <code>.py</code>
+file under <code>transform/</code> is a helper module (see below); by convention helpers
+start with <code>_</code>, and <code>_</code>-prefixed files are never read as models.</p>
+<p>The function asks for what it needs by parameter name:</p>
 <table>
 <thead>
 <tr>
-<th>Python Type</th>
-<th>DuckDB Type</th>
+<th>Parameter</th>
+<th>What it is</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>str</code></td>
-<td><code>VARCHAR</code></td>
+<td><code>db</code></td>
+<td>The build's DuckDB connection.</td>
 </tr>
 <tr>
-<td><code>int</code></td>
-<td><code>INTEGER</code></td>
+<td><code>ref</code></td>
+<td><code>ref("schema.name")</code> returns a lazy DuckDB relation over a model or table, and declares the dependency.</td>
 </tr>
 <tr>
-<td><code>float</code></td>
-<td><code>DOUBLE</code></td>
+<td><code>is_incremental</code></td>
+<td><code>True</code> when the model is incremental and its table already exists, so the function can read only new rows.</td>
 </tr>
 <tr>
-<td><code>bool</code></td>
-<td><code>BOOLEAN</code></td>
-</tr>
-<tr>
-<td><code>datetime.date</code></td>
-<td><code>DATE</code></td>
-</tr>
-<tr>
-<td><code>datetime.datetime</code></td>
-<td><code>TIMESTAMP</code></td>
-</tr>
-<tr>
-<td>No annotation</td>
-<td><code>VARCHAR</code> (default)</td>
+<td><code>this</code></td>
+<td>The model's own <code>schema.name</code>, for SQL that reads the existing table.</td>
 </tr>
 </tbody>
 </table>
-<h2 id="sql-macros">SQL Macros<a class="headerlink" href="#sql-macros" title="Permanent link">&para;</a></h2>
-<p>You can also place <code>.sql</code> files in <code>macros/</code> containing <code>CREATE MACRO</code> statements:</p>
-<div class="highlight"><pre><span></span><code><span class="c1">-- macros/date_helpers.sql</span>
-<span class="k">CREATE</span><span class="w"> </span><span class="n">MACRO</span><span class="w"> </span><span class="n">quarter_start</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span>
-<span class="w">    </span><span class="n">DATE_TRUNC</span><span class="p">(</span><span class="s1">'quarter'</span><span class="p">,</span><span class="w"> </span><span class="n">d</span><span class="p">::</span><span class="nb">DATE</span><span class="p">);</span>
-
-<span class="k">CREATE</span><span class="w"> </span><span class="n">MACRO</span><span class="w"> </span><span class="n">is_weekend</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span>
-<span class="w">    </span><span class="k">EXTRACT</span><span class="p">(</span><span class="n">DOW</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">d</span><span class="p">::</span><span class="nb">DATE</span><span class="p">)</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">6</span><span class="p">);</span>
-</code></pre></div>
-<p>SQL macros are executed directly on connection -- they don't need the <code>@macro</code> decorator.</p>
-<h2 id="listing-macros">Listing Macros<a class="headerlink" href="#listing-macros" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>macros
-</code></pre></div>
-<p>Shows all registered macros with their name, parameters, return type, source file, and documentation.</p>
-<p>Via API:</p>
-<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>http://localhost:3000/api/macros
-</code></pre></div>
-<h2 id="conventions">Conventions<a class="headerlink" href="#conventions" title="Permanent link">&para;</a></h2>
+<p>A function may take any subset, or <code>**kwargs</code> for all of them.</p>
+<p>It returns one of:</p>
 <ul>
-<li>Files prefixed with <code>_</code> (e.g., <code>_helpers.py</code>) are skipped</li>
-<li>Errors in individual macro files are logged but don't prevent other macros from loading</li>
-<li>Macros are registered before transforms run, so they're available in all SQL models</li>
-<li><code>havn init</code> creates a <code>macros/</code> directory with example functions</li>
-<li>Precedence runs built-in library, then installed packages, then your project.
-  A name defined twice resolves to the closest copy, and the shadowing is logged</li>
+<li>a DuckDB relation (<code>ref(...)</code>, <code>db.sql(...)</code>, <code>relation.filter(...)</code>, ...),</li>
+<li>a pandas DataFrame,</li>
+<li>a polars DataFrame,</li>
+<li>a pyarrow Table.</li>
 </ul>
-<h2 id="related-pages">Related Pages<a class="headerlink" href="#related-pages" title="Permanent link">&para;</a></h2>
+<p>Returning <code>None</code>, a list or anything else fails the build with a message
+saying what to return.</p>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
+<p><code>@model(...)</code> takes the keys <code>@config</code> takes, plus the directives SQL spells
+as their own lines:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Same as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>materialized</code></td>
+<td><code>table</code> (default), <code>incremental</code> or <code>snapshot</code></td>
+</tr>
+<tr>
+<td><code>schema</code>, <code>unique_key</code>, <code>incremental_strategy</code>, <code>incremental_filter</code>, <code>partition_by</code>, <code>watermark</code>, <code>on_schema_change</code></td>
+<td>the <code>@config</code> keys</td>
+</tr>
+<tr>
+<td><code>strategy</code>, <code>updated_at</code>, <code>check_cols</code>, <code>hard_deletes</code></td>
+<td>the snapshot keys</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>@config tags=</code> (a list or a comma string)</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td><code>@description</code> (defaults to the function's docstring, else the module's)</td>
+</tr>
+<tr>
+<td><code>columns</code></td>
+<td><code>@col</code> lines, as a dict of column name to text</td>
+</tr>
+<tr>
+<td><code>assertions</code></td>
+<td><code>@assert</code> lines, as a list; <code>"expr, severity=warn"</code> works as in SQL</td>
+</tr>
+<tr>
+<td><code>grain</code></td>
+<td><code>@grain</code></td>
+</tr>
+<tr>
+<td><code>owner</code></td>
+<td><code>@owner</code></td>
+</tr>
+<tr>
+<td><code>depends_on</code></td>
+<td><code>@depends_on</code>, for names <code>ref</code> cannot see (below)</td>
+</tr>
+<tr>
+<td><code>timeout</code>, <code>idle_timeout</code></td>
+<td>seconds; the script runner's hard and idle timeouts</td>
+</tr>
+</tbody>
+</table>
+<p>The arguments are read <strong>without running the file</strong>: havn parses it and reads
+the literals off the syntax tree. That is how <code>havn ls</code>, the DAG and change
+detection know a Python model before it has ever run, and it is why every
+value must be a literal (a string, number, list or dict). <code>@model(materialized=MAT)</code>
+is reported as an error, not guessed at.</p>
+<p><code>view</code> and <code>ephemeral</code> are refused: both are stored SQL that something reads
+later, and a Python model's rows only exist once its function has run.
+<code>incremental_strategy=microbatch</code> is refused too: it substitutes <code>{start}</code> and
+<code>{end}</code> into SQL text, which a function does not have.</p>
+<h2 id="dependencies">Dependencies<a class="headerlink" href="#dependencies" title="Permanent link">&para;</a></h2>
+<p>Dependencies come from three places, all found statically:</p>
+<ol>
+<li>every <code>ref("schema.name")</code> call with a string literal argument;</li>
+<li><code>@model(depends_on=[...])</code>;</li>
+<li>tables named in literal SQL handed to <code>db.sql(...)</code>, <code>db.execute(...)</code> or
+   <code>db.query(...)</code>.</li>
+</ol>
+<p>At run time <code>ref</code> only accepts names in that list, so a dependency can never
+be hidden from the ordering. A name built at run time
+(<code>ref(f"silver.{name}")</code>) is refused unless it is listed in <code>depends_on</code>, and
+<code>havn validate</code> warns about the call.</p>
+<p>Prefer <code>ref</code> over literal SQL. Only <code>ref</code> is redirected by
+<a href="../environments/">defer</a>, inlines an ephemeral upstream, and is replaced by
+unit-test mocks; <code>havn validate</code> says so for a table read through <code>db.sql</code>.</p>
+<h2 id="building">Building<a class="headerlink" href="#building" title="Permanent link">&para;</a></h2>
+<p><code>havn transform</code>, jobs, the web UI and the scheduler all build Python models
+through the same path as SQL models:</p>
+<ol>
+<li>the file is loaded as a fresh module (an edit is picked up without a
+   restart) and the function is called in-process on the build connection,
+   in a supervised thread, under the hard and idle timeouts;</li>
+<li>its result is staged into a TEMP table;</li>
+<li>the ordinary SQL writers materialize the staged rows: <code>CREATE OR REPLACE
+   TABLE</code>, the incremental strategies (<code>delete+insert</code>, <code>merge</code>, <code>append</code>,
+   with <code>on_schema_change</code> and <code>incremental_filter</code>), or the snapshot merge;</li>
+<li>assertions, profiling, the run log, upstream blocking and rewind
+   snapshots follow exactly as for SQL.</li>
+</ol>
+<p>Python models are trusted project code, like macros and ingest scripts. They
+run with the permissions of the havn process.</p>
+<p>Whatever the function prints goes to the run log and is echoed under the
+model's line in the console. A failure names the model file and line first,
+followed by the frames from your own code only:</p>
+<div class="highlight"><pre><span></span><code>fail  silver.customer_scores (table): Python model silver.customer_scores failed at
+      transform/silver/customer_scores.py:14: KeyError: 'amount'
+Traceback (your code, most recent call last):
+  File "transform/silver/customer_scores.py", line 14, in customer_scores
+    total = row["amount"]
+</code></pre></div>
+<h3 id="incremental-models">Incremental models<a class="headerlink" href="#incremental-models" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nd">@model</span><span class="p">(</span><span class="n">materialized</span><span class="o">=</span><span class="s2">"incremental"</span><span class="p">,</span> <span class="n">unique_key</span><span class="o">=</span><span class="s2">"event_id"</span><span class="p">,</span> <span class="n">incremental_strategy</span><span class="o">=</span><span class="s2">"merge"</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">events</span><span class="p">(</span><span class="n">ref</span><span class="p">,</span> <span class="n">is_incremental</span><span class="p">,</span> <span class="n">this</span><span class="p">):</span>
+    <span class="n">src</span> <span class="o">=</span> <span class="n">ref</span><span class="p">(</span><span class="s2">"bronze.events"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">is_incremental</span><span class="p">:</span>
+        <span class="n">src</span> <span class="o">=</span> <span class="n">src</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="sa">f</span><span class="s2">"updated_at &gt; (SELECT max(updated_at) FROM </span><span class="si">{</span><span class="n">this</span><span class="si">}</span><span class="s2">)"</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">src</span>
+</code></pre></div>
+<p>The function decides what to read; havn decides how to write it. Incremental
+models always run (an incremental with nothing new to read writes nothing),
+except a plain <code>append</code> without an <code>incremental_filter</code>, which would duplicate
+rows and so only runs when it changed.</p>
+<h2 id="change-detection">Change detection<a class="headerlink" href="#change-detection" title="Permanent link">&para;</a></h2>
+<p>A Python model rebuilds when its <strong>code</strong> changes. The fingerprint is a hash
+of the file's syntax tree, so comments, blank lines, formatting and docstrings
+never trigger a rebuild, and neither do the metadata keys (<code>tags</code>,
+<code>description</code>, <code>columns</code>, <code>owner</code>, the timeouts). Anything that runs does.</p>
+<p>Local helper modules count too. An <code>import _helpers</code> (or <code>from _helpers
+import x</code>) that resolves to a <code>.py</code> file next to the model or at the root of
+<code>transform/</code> is fingerprinted the same way, transitively, and folded into the
+model's hash. Like a macro edit, a helper edit rebuilds the models that import
+it, and their descendants follow in the same run.</p>
+<p>Upstream changes cascade as for SQL: a rebuilt parent rebuilds its Python
+children, and a rebuilt Python model rebuilds its children.</p>
+<h2 id="validation-and-the-bind-pass">Validation and the bind pass<a class="headerlink" href="#validation-and-the-bind-pass" title="Permanent link">&para;</a></h2>
+<p><code>havn validate</code> reads every Python model without running it and reports:</p>
 <ul>
-<li><a href="transforms">Transforms</a> -- Using macros in SQL models</li>
-<li><a href="packages">Packages</a> -- Sharing macros (and models) between projects</li>
-<li><a href="cli-reference">CLI Reference</a> -- <code>havn macros</code> command</li>
-<li><a href="configuration">Configuration</a> -- Project structure</li>
+<li>syntax errors, with the line;</li>
+<li>unknown or non-literal <code>@model</code> keys, invalid materializations, parameters
+  the function asks for that havn does not provide;</li>
+<li>imports that are neither installed nor a local helper;</li>
+<li><code>ref</code> names that are neither a model nor a table in the warehouse;</li>
+<li><code>ref</code> calls with a non-literal argument, and tables read through literal
+  SQL instead of <code>ref</code> (warnings).</li>
+</ul>
+<p>The bind pass binds SQL and does not run Python. A Python model that has been
+built stands in with its built columns, so the SQL models downstream of it
+still bind; one that has never been built is reported as skipped, and so are
+the models reading it, until it is built once.</p>
+<h2 id="unit-tests">Unit tests<a class="headerlink" href="#unit-tests" title="Permanent link">&para;</a></h2>
+<p><a href="../unit-tests/">Unit tests</a> work unchanged. The function runs for real on the
+in-memory test connection, and <code>ref</code> returns the mocks:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">silver.customer_scores</span>
+<span class="nt">tests</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">halves returned orders</span>
+<span class="w">    </span><span class="nt">given</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">bronze.orders</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">rows</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[{</span><span class="nt">order_id</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="p p-Indicator">,</span><span class="nt"> customer_id</span><span class="p">:</span><span class="w"> </span><span class="nv">7</span><span class="p p-Indicator">,</span><span class="nt"> amount</span><span class="p">:</span><span class="w"> </span><span class="nv">10.0</span><span class="p p-Indicator">}]</span>
+<span class="w">      </span><span class="nt">bronze.returns</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">rows</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[{</span><span class="nt">order_id</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="p p-Indicator">,</span><span class="nt"> returned</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">}]</span>
+<span class="w">    </span><span class="nt">expect</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">rows</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[{</span><span class="nt">customer_id</span><span class="p">:</span><span class="w"> </span><span class="nv">7</span><span class="p p-Indicator">,</span><span class="nt"> score</span><span class="p">:</span><span class="w"> </span><span class="nv">5.0</span><span class="p p-Indicator">}]</span>
+</code></pre></div>
+<h2 id="packages">Packages<a class="headerlink" href="#packages" title="Permanent link">&para;</a></h2>
+<p>A <a href="../packages/">package</a> can ship Python models. Their schemas are prefixed
+like any package model, and <code>ref("silver.customers")</code> inside the package
+resolves to the package's own <code>crm_silver.customers</code> without the author
+writing the prefix.</p>
+<h2 id="everything-else">Everything else<a class="headerlink" href="#everything-else" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Selectors</strong>: <code>tag:</code>, <code>path:</code>, <code>+x</code>, <code>state:modified</code> and the rest work on
+  Python models; <code>config.language:python</code> selects them all.</li>
+<li><strong>Lineage</strong>: column lineage is not traced through a function. Impact
+  analysis lists a Python consumer of a changed column as possibly affected,
+  the schema sentinel likewise, and <code>havn rename-column</code> reports it as a
+  blocker to edit by hand.</li>
+<li><strong>Diff</strong>: <code>havn diff</code> runs the function (as a full, non-incremental build
+  into a temp table) and compares the result with the built table.</li>
+<li><strong>Explain</strong>: there is no SQL to explain; <code>havn explain</code> says so.</li>
+<li><strong>Web UI</strong>: the new-model dialog creates Python models, the file tree marks
+  them, the DAG labels them <code>python</code>, and the editor workbench shows their
+  lineage, checks, columns and runs. <strong>Preview</strong> runs the function in the
+  editor buffer on a read-only connection and shows the first rows; it needs
+  both write and execute permission, since it runs code you have not saved.</li>
+<li><strong>Notebooks</strong>: "model to notebook" and the debug notebook give a Python
+  model a code cell that defines and calls the function against live tables.</li>
 </ul>
 
 

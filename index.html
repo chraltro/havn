@@ -119,6 +119,8 @@ figure.shot { margin: 1rem 0 0; }
 .facts dd { font-size: 0.925rem; color: var(--muted); }
 
 .shot figcaption { font-size: 0.875rem; color: var(--muted); margin-top: 0.7rem; }
+.shots { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem 1.5rem; margin-top: 2.5rem; }
+.shots figure.shot { margin: 0; }
 
 section { padding: 5rem 0 0; }
 
@@ -176,6 +178,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 0.5rem 2rem; justify-content
 footer a { color: var(--muted); }
 
 @media (max-width: 860px) {
+  .shots { grid-template-columns: 1fr; }
   .opening, .pair, .fit, .editions { grid-template-columns: 1fr; gap: 2rem; }
   .opening { padding-top: 5rem; }
   .contents th { width: auto; display: block; padding-bottom: 0.2rem; }
@@ -330,15 +333,16 @@ footer a { color: var(--muted); }
     </p>
     <table class="contents">
       <tr><th scope="row">Loading data</th><td>Python scripts with a database connection ready to use, plus connectors for Postgres, MySQL, Snowflake, BigQuery, Redshift, Databricks, Stripe, HubSpot, Shopify, Google Sheets, S3, CSV, REST and webhooks.</td><td><code>havn connect</code><br><code>havn run</code></td></tr>
-      <tr><th scope="row">Modelling</th><td>SQL models as views, tables, incremental tables (merge, append, delete+insert, microbatch) or SCD2 snapshots. Graph selectors such as <code>+gold.orders</code> and <code>tag:daily</code>.</td><td><code>havn transform</code></td></tr>
+      <tr><th scope="row">Modelling</th><td>SQL or Python models as views, tables, incremental tables (merge, append, delete+insert, microbatch) or SCD2 snapshots. Graph selectors such as <code>+gold.orders</code> and <code>tag:daily</code>.</td><td><code>havn transform</code></td></tr>
       <tr><th scope="row">Testing</th><td>Inline assertions, YAML contracts, unit tests with fixture rows, and a bind pass that catches unknown columns and type errors before anything runs.</td><td><code>havn check</code><br><code>havn test</code></td></tr>
       <tr><th scope="row">Shipping</th><td>Environments with their own warehouse file. Deploy plans that show what will rebuild, a pre-deploy snapshot, and rollback when a deploy fails.</td><td><code>havn deploy prod --plan</code></td></tr>
-      <tr><th scope="row">Reviewing</th><td>Row-level diffs of what a change does to each table, column lineage, and generated GitHub Actions that post the diff on pull requests.</td><td><code>havn diff</code><br><code>havn ci generate</code></td></tr>
-      <tr><th scope="row">Running</th><td>Jobs defined in YAML, cron schedules, retries, a file watcher, and Slack or webhook alerts.</td><td><code>havn jobs run</code></td></tr>
-      <tr><th scope="row">Exploring</th><td>A SQL editor with autocomplete, a table browser, the model graph, notebooks, dashboards and a metrics layer.</td><td><code>havn serve</code></td></tr>
-      <tr><th scope="row">Access</th><td>Users with admin, editor and viewer roles, column masking rules for personal data, and an audit log.</td><td><code>havn serve --auth</code></td></tr>
+      <tr><th scope="row">Reviewing</th><td>A warehouse per git branch that reads unchanged models from production. Row-level diffs of what a change does to each table, column lineage, and generated GitHub Actions that post the diff on pull requests.</td><td><code>havn branch diff</code><br><code>havn ci generate</code></td></tr>
+      <tr><th scope="row">Running</th><td>Jobs defined in YAML, cron schedules, retries, a file watcher, and Slack or webhook alerts. Live models refresh within seconds of new rows from webhooks or Postgres CDC.</td><td><code>havn jobs run</code><br><code>havn live</code></td></tr>
+      <tr><th scope="row">Performance</th><td>The plan and timings of every model build, alerts when a model gets slower than usual, and advice such as which tables to make incremental. Metrics for Prometheus, OpenTelemetry and OpenLineage.</td><td><code>havn perf</code></td></tr>
+      <tr><th scope="row">Exploring</th><td>A SQL editor with autocomplete, a table browser, the model graph, notebooks, dashboards and a metrics layer. Dashboards can be shared by link, embedded, or sent by email and Slack on a schedule.</td><td><code>havn serve</code><br><code>havn reports</code></td></tr>
+      <tr><th scope="row">Access</th><td>Users with admin, editor and viewer roles, row-level security, column masking that follows the data into downstream models, and an audit log. Scripts run by restricted users only see what those users may see.</td><td><code>havn serve --auth</code><br><code>havn rls</code></td></tr>
       <tr><th scope="row">Recovery</th><td>Verified backups and restore points for the whole warehouse.</td><td><code>havn backup</code><br><code>havn rewind</code></td></tr>
-      <tr><th scope="row">AI assistants</th><td>An MCP server, and context files for Claude Code, Cursor and Copilot in every new project.</td><td><code>havn mcp</code></td></tr>
+      <tr><th scope="row">AI assistants</th><td>An MCP server, and context files for Claude Code, Cursor and Copilot in every new project. Questions answered from your defined metrics, with the SQL shown, and model edits from agents checked in a scratch build before you apply them.</td><td><code>havn mcp</code><br><code>havn ask</code></td></tr>
     </table>
     <p style="margin-top:1.25rem;font-size:0.95rem;color:var(--muted)">
       For the parts that are still missing or rough, see
@@ -353,6 +357,41 @@ footer a { color: var(--muted); }
            alt="havn Query page: the table list by schema on the left, a SQL query over silver.shipments, and four result rows grouped by port">
       <figcaption>Data &rsaquo; Query: write SQL against any layer and inspect the result.</figcaption>
     </figure>
+
+    <div class="shots">
+      <figure class="shot">
+        <img src="./screenshots/ask.webp"
+             srcset="./screenshots/ask-1x.webp 1130w, ./screenshots/ask.webp 2260w"
+             sizes="(max-width: 860px) 100vw, 530px"
+             width="2260" height="1412" loading="lazy"
+             alt="havn Ask page: the question 'How many tonnes did each port land?' answered from the tonnes_landed metric, with a bar chart and a table by port">
+        <figcaption>Data &rsaquo; Ask: a question answered from a defined metric, marked verified, with the SQL one click away.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="./screenshots/governance.webp"
+             srcset="./screenshots/governance-1x.webp 1130w, ./screenshots/governance.webp 2260w"
+             sizes="(max-width: 860px) 100vw, 530px"
+             width="2260" height="1412" loading="lazy"
+             alt="havn Governance page previewing a query as the editor ingrid: a row policy limits her to Bergen and Ålesund, and two derived models inherit it">
+        <figcaption>Settings &rsaquo; Governance: what a user sees once row policies, and the ones inherited downstream, apply.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="./screenshots/performance.webp"
+             srcset="./screenshots/performance-1x.webp 1130w, ./screenshots/performance.webp 2260w"
+             sizes="(max-width: 860px) 100vw, 530px"
+             width="2260" height="1412" loading="lazy"
+             alt="havn Performance page: slowest models with build-time trends, an advice card about an ORDER BY in a model others read, and the run's critical path">
+        <figcaption>Observe &rsaquo; Performance: build times per model, advice with the evidence, and what set the run's length.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="./screenshots/published.webp"
+             srcset="./screenshots/published-1x.webp 1440w, ./screenshots/published.webp 2880w"
+             sizes="(max-width: 860px) 100vw, 530px"
+             width="2880" height="1800" loading="lazy"
+             alt="A published havn dashboard, Port operations: three numbers, tonnes by port as a bar chart, and each port's share of the latest batch">
+        <figcaption>A published dashboard: a read-only link that works on a phone, or a scheduled email.</figcaption>
+      </figure>
+    </div>
   </div>
 </section>
 

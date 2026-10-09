@@ -9,7 +9,15 @@
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
+         <loc>https://chraltro.github.io/havn/docs/ask/</loc>
+         <lastmod>2026-10-09</lastmod>
+    </url>
+    <url>
          <loc>https://chraltro.github.io/havn/docs/auth/</loc>
+         <lastmod>2026-10-09</lastmod>
+    </url>
+    <url>
+         <loc>https://chraltro.github.io/havn/docs/branches/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
@@ -33,6 +41,10 @@
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
+         <loc>https://chraltro.github.io/havn/docs/dashboards-sharing/</loc>
+         <lastmod>2026-10-09</lastmod>
+    </url>
+    <url>
          <loc>https://chraltro.github.io/havn/docs/environments/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
@@ -41,11 +53,19 @@
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
+         <loc>https://chraltro.github.io/havn/docs/governance/</loc>
+         <lastmod>2026-10-09</lastmod>
+    </url>
+    <url>
          <loc>https://chraltro.github.io/havn/docs/limitations/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
          <loc>https://chraltro.github.io/havn/docs/lineage/</loc>
+         <lastmod>2026-10-09</lastmod>
+    </url>
+    <url>
+         <loc>https://chraltro.github.io/havn/docs/live-models/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
@@ -69,7 +89,15 @@
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
+         <loc>https://chraltro.github.io/havn/docs/performance/</loc>
+         <lastmod>2026-10-09</lastmod>
+    </url>
+    <url>
          <loc>https://chraltro.github.io/havn/docs/pipelines/</loc>
+         <lastmod>2026-10-09</lastmod>
+    </url>
+    <url>
+         <loc>https://chraltro.github.io/havn/docs/python-models/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>
@@ -94,6 +122,10 @@
     </url>
     <url>
          <loc>https://chraltro.github.io/havn/docs/sources/</loc>
+         <lastmod>2026-10-09</lastmod>
+    </url>
+    <url>
+         <loc>https://chraltro.github.io/havn/docs/telemetry/</loc>
          <lastmod>2026-10-09</lastmod>
     </url>
     <url>

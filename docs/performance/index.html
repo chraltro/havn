@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://chraltro.github.io/havn/docs/macros/">
+        <link rel="canonical" href="https://chraltro.github.io/havn/docs/performance/">
       
       
-        <link rel="prev" href="../contracts/">
+        <link rel="prev" href="../refactoring/">
       
       
-        <link rel="next" href="../packages/">
+        <link rel="next" href="../telemetry/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Macros - havn</title>
+        <title>Performance - havn</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#python-sql-macros" class="md-skip">
+        <a href="#performance-advisor" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Macros
+              Performance
             
           </span>
         </div>
@@ -399,11 +399,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../macros/" class="md-tabs__link">
         
   
   
@@ -743,9 +741,11 @@
   
   
   
+    
   
-    <li class="md-tabs__item">
-      <a href="../performance/" class="md-tabs__link">
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
         
   
   
@@ -1191,37 +1191,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Macros
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../macros/" class="md-nav__link">
         
   
   
@@ -1237,103 +1210,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#quick-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Quick Start
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#how-it-works" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        How It Works
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#type-mapping" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Type Mapping
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sql-macros" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SQL Macros
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#listing-macros" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Listing Macros
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#conventions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Conventions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#related-pages" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Related Pages
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1801,10 +1677,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../performance/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1820,6 +1723,98 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-recorded" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is recorded
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What is recorded">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-plans-are-captured" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How plans are captured
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regressions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regressions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advice
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#critical-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Critical path
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2013,10 +2008,38 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#quick-start" class="md-nav__link">
+  <a href="#what-is-recorded" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Quick Start
+        What is recorded
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What is recorded">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-plans-are-captured" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How plans are captured
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regressions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regressions
       
     </span>
   </a>
@@ -2024,10 +2047,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-it-works" class="md-nav__link">
+  <a href="#advice" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How It Works
+        Advice
       
     </span>
   </a>
@@ -2035,10 +2058,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#type-mapping" class="md-nav__link">
+  <a href="#critical-path" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Type Mapping
+        Critical path
       
     </span>
   </a>
@@ -2046,43 +2069,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#sql-macros" class="md-nav__link">
+  <a href="#api" class="md-nav__link">
     <span class="md-ellipsis">
       
-        SQL Macros
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#listing-macros" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Listing Macros
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#conventions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Conventions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#related-pages" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Related Pages
+        API
       
     </span>
   </a>
@@ -2109,119 +2099,265 @@
   
 
 
-<h1 id="python-sql-macros">Python SQL Macros<a class="headerlink" href="#python-sql-macros" title="Permanent link">&para;</a></h1>
-<p>havn lets you write Python functions that are callable directly in SQL. No Jinja templating -- just Python functions registered as DuckDB UDFs. "Why template SQL when you have Python right there?"</p>
-<h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
-<p>Create a Python file in the <code>macros/</code> directory with <code>@macro</code>-decorated functions:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># macros/utils.py</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">havn</span><span class="w"> </span><span class="kn">import</span> <span class="n">macro</span>
-
-<span class="nd">@macro</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">mask_email</span><span class="p">(</span><span class="n">email</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<span class="w">    </span><span class="sd">"""Mask the local part of an email, keep domain."""</span>
-    <span class="k">if</span> <span class="ow">not</span> <span class="n">email</span> <span class="ow">or</span> <span class="s2">"@"</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">email</span><span class="p">:</span>
-        <span class="k">return</span> <span class="s2">"***"</span>
-    <span class="n">local</span><span class="p">,</span> <span class="n">domain</span> <span class="o">=</span> <span class="n">email</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"@"</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
-    <span class="k">return</span> <span class="sa">f</span><span class="s2">"***@</span><span class="si">{</span><span class="n">domain</span><span class="si">}</span><span class="s2">"</span>
-
-<span class="nd">@macro</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">fiscal_quarter</span><span class="p">(</span><span class="n">d</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-<span class="w">    </span><span class="sd">"""Return fiscal quarter (FY starts April)."""</span>
-    <span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
-    <span class="n">month</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">fromisoformat</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="o">.</span><span class="n">month</span>
-    <span class="k">return</span> <span class="p">((</span><span class="n">month</span> <span class="o">-</span> <span class="mi">4</span><span class="p">)</span> <span class="o">%</span> <span class="mi">12</span><span class="p">)</span> <span class="o">//</span> <span class="mi">3</span> <span class="o">+</span> <span class="mi">1</span>
+<h1 id="performance-advisor">Performance Advisor<a class="headerlink" href="#performance-advisor" title="Permanent link">&para;</a></h1>
+<p>Every model build records how long it took, how many rows went in and out,
+and, unless you switch it off, the query plan DuckDB actually executed with
+real per-operator timings. havn uses that history to tell you which models
+are slow, which ones just got slower, which chain of models sets the length
+of a run, and what to change.</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>perf<span class="w">                          </span><span class="c1"># slowest models, regressions, advice</span>
+havn<span class="w"> </span>perf<span class="w"> </span>gold.orders<span class="w">              </span><span class="c1"># one model: builds, plan, regressions, advice</span>
+havn<span class="w"> </span>perf<span class="w"> </span>--critical-path<span class="w">          </span><span class="c1"># what the last run waited for</span>
+havn<span class="w"> </span>perf<span class="w"> </span>--critical-path<span class="w"> </span>--run<span class="w"> </span>3f2a<span class="w">   </span><span class="c1"># a specific run (id prefix)</span>
+havn<span class="w"> </span>perf<span class="w"> </span>--runs<span class="w">                   </span><span class="c1"># recent runs with wall clock and busy time</span>
+havn<span class="w"> </span>perf<span class="w"> </span>--advice<span class="w"> </span>--all<span class="w">           </span><span class="c1"># advice, including dismissed and snoozed</span>
+havn<span class="w"> </span>perf<span class="w"> </span>gold.orders<span class="w"> </span>--dismiss<span class="w"> </span>order_by_non_final
+havn<span class="w"> </span>perf<span class="w"> </span>gold.orders<span class="w"> </span>--dismiss<span class="w"> </span>unused_table<span class="w"> </span>--snooze<span class="w"> </span><span class="m">14</span>
+havn<span class="w"> </span>perf<span class="w"> </span>gold.orders<span class="w"> </span>--reopen<span class="w"> </span>unused_table
+havn<span class="w"> </span>perf<span class="w"> </span>--json<span class="w">                   </span><span class="c1"># any of the above as JSON</span>
 </code></pre></div>
-<p>Use them in any SQL model:</p>
-<div class="highlight"><pre><span></span><code><span class="c1">-- transform/silver/customers.sql</span>
-<span class="o">@</span><span class="n">config</span><span class="w"> </span><span class="n">materialized</span><span class="o">=</span><span class="k">table</span><span class="p">,</span><span class="w"> </span><span class="k">schema</span><span class="o">=</span><span class="n">silver</span>
-
-<span class="k">SELECT</span>
-<span class="w">    </span><span class="n">customer_id</span><span class="p">,</span>
-<span class="w">    </span><span class="n">mask_email</span><span class="p">(</span><span class="n">email</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">masked_email</span><span class="p">,</span>
-<span class="w">    </span><span class="n">fiscal_quarter</span><span class="p">(</span><span class="n">created_date</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">fiscal_q</span>
-<span class="k">FROM</span><span class="w"> </span><span class="n">bronze</span><span class="p">.</span><span class="n">customers</span>
-</code></pre></div>
-<p>That's it. The functions are automatically discovered and registered when havn connects to the database.</p>
-<h2 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
-<ol>
-<li>On <code>connect()</code>, havn scans the <code>macros/</code> directory for <code>.py</code> files</li>
-<li>Functions decorated with <code>@macro</code> are collected with their type signatures</li>
-<li>Each macro is registered as a DuckDB scalar UDF via <code>create_function()</code></li>
-<li>The functions are then available in any SQL query or transform</li>
-</ol>
-<h2 id="type-mapping">Type Mapping<a class="headerlink" href="#type-mapping" title="Permanent link">&para;</a></h2>
-<p>Python type hints are mapped to DuckDB types:</p>
+<p>In the web UI the same data is on <strong>Observe &gt; Performance</strong>.</p>
+<h2 id="what-is-recorded">What is recorded<a class="headerlink" href="#what-is-recorded" title="Permanent link">&para;</a></h2>
+<p>One row per build in <code>_havn.model_perf</code>:</p>
 <table>
 <thead>
 <tr>
-<th>Python Type</th>
-<th>DuckDB Type</th>
+<th>Column</th>
+<th>Meaning</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>str</code></td>
-<td><code>VARCHAR</code></td>
+<td><code>duration_ms</code></td>
+<td>The build itself, as <code>havn transform</code> reports it</td>
 </tr>
 <tr>
-<td><code>int</code></td>
-<td><code>INTEGER</code></td>
+<td><code>rows_before</code> / <code>rows_out</code></td>
+<td>Rows in the model before and after the build</td>
 </tr>
 <tr>
-<td><code>float</code></td>
-<td><code>DOUBLE</code></td>
+<td><code>rows_in</code></td>
+<td>Size of the model's upstreams at build time (catalog estimate)</td>
 </tr>
 <tr>
-<td><code>bool</code></td>
-<td><code>BOOLEAN</code></td>
+<td><code>rows_scanned</code></td>
+<td>Rows the build's scans actually read (from the profile)</td>
 </tr>
 <tr>
-<td><code>datetime.date</code></td>
-<td><code>DATE</code></td>
+<td><code>rows_produced</code></td>
+<td>Rows the build query produced (an incremental's new slice)</td>
 </tr>
 <tr>
-<td><code>datetime.datetime</code></td>
-<td><code>TIMESTAMP</code></td>
+<td><code>peak_memory_bytes</code></td>
+<td>Memory DuckDB allocated for the build, or the connection's buffer high-water mark when the build raised it (DuckDB reports peaks per connection, not per query, so this is approximate)</td>
 </tr>
 <tr>
-<td>No annotation</td>
-<td><code>VARCHAR</code> (default)</td>
+<td><code>spill_bytes</code></td>
+<td>Growth of the temp-directory high-water mark during the build (a lower bound on what it spilled)</td>
+</tr>
+<tr>
+<td><code>cpu_time_ms</code>, <code>bytes_read</code>, <code>bytes_written</code></td>
+<td>From the profile</td>
+</tr>
+<tr>
+<td><code>full_refresh</code></td>
+<td>True when the build rewrote the whole table</td>
+</tr>
+<tr>
+<td><code>plan</code></td>
+<td>Compact operator tree with real timings and row counts</td>
+</tr>
+<tr>
+<td><code>top_operators</code></td>
+<td>The five operators that took the most time</td>
 </tr>
 </tbody>
 </table>
-<h2 id="sql-macros">SQL Macros<a class="headerlink" href="#sql-macros" title="Permanent link">&para;</a></h2>
-<p>You can also place <code>.sql</code> files in <code>macros/</code> containing <code>CREATE MACRO</code> statements:</p>
-<div class="highlight"><pre><span></span><code><span class="c1">-- macros/date_helpers.sql</span>
-<span class="k">CREATE</span><span class="w"> </span><span class="n">MACRO</span><span class="w"> </span><span class="n">quarter_start</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span>
-<span class="w">    </span><span class="n">DATE_TRUNC</span><span class="p">(</span><span class="s1">'quarter'</span><span class="p">,</span><span class="w"> </span><span class="n">d</span><span class="p">::</span><span class="nb">DATE</span><span class="p">);</span>
-
-<span class="k">CREATE</span><span class="w"> </span><span class="n">MACRO</span><span class="w"> </span><span class="n">is_weekend</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span>
-<span class="w">    </span><span class="k">EXTRACT</span><span class="p">(</span><span class="n">DOW</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">d</span><span class="p">::</span><span class="nb">DATE</span><span class="p">)</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">6</span><span class="p">);</span>
+<h3 id="how-plans-are-captured">How plans are captured<a class="headerlink" href="#how-plans-are-captured" title="Permanent link">&para;</a></h3>
+<p>havn switches DuckDB's profiler on around the one statement that does the
+work (the <code>CREATE TABLE AS</code>, or the staging <code>CREATE TEMP TABLE AS</code> of an
+incremental, snapshot or microbatch model) and reads the profile straight
+after. The query is <strong>not</strong> run a second time and no <code>EXPLAIN ANALYZE</code> is
+issued; the overhead is DuckDB's per-operator timers, a few percent. Views
+are not profiled: creating a view runs nothing.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># project.yml</span>
+<span class="nt">performance</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">            </span><span class="c1"># false: record nothing at all</span>
+<span class="w">  </span><span class="nt">capture_plans</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">      </span><span class="c1"># true | sampled | false</span>
+<span class="w">  </span><span class="nt">sample_rate</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.25</span><span class="w">        </span><span class="c1"># sampled: share of builds that are profiled</span>
+<span class="w">  </span><span class="nt">retention_days</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">90</span><span class="w">       </span><span class="c1"># rows older than this are deleted</span>
+<span class="w">  </span><span class="nt">plan_retention</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20</span><span class="w">       </span><span class="c1"># only the newest N builds of each model keep their plan</span>
 </code></pre></div>
-<p>SQL macros are executed directly on connection -- they don't need the <code>@macro</code> decorator.</p>
-<h2 id="listing-macros">Listing Macros<a class="headerlink" href="#listing-macros" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>macros
-</code></pre></div>
-<p>Shows all registered macros with their name, parameters, return type, source file, and documentation.</p>
-<p>Via API:</p>
-<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>http://localhost:3000/api/macros
-</code></pre></div>
-<h2 id="conventions">Conventions<a class="headerlink" href="#conventions" title="Permanent link">&para;</a></h2>
+<p>With <code>capture_plans: sampled</code>, a model is still always profiled while it has
+fewer than three captured plans, and on the build right after a regression
+that had none, so the next slow build comes with evidence.</p>
+<h2 id="regressions">Regressions<a class="headerlink" href="#regressions" title="Permanent link">&para;</a></h2>
+<p>At the end of every run, each build is compared with the same model's last
+<code>regression_lookback</code> successful builds. A build is a regression when:</p>
 <ul>
-<li>Files prefixed with <code>_</code> (e.g., <code>_helpers.py</code>) are skipped</li>
-<li>Errors in individual macro files are logged but don't prevent other macros from loading</li>
-<li>Macros are registered before transforms run, so they're available in all SQL models</li>
-<li><code>havn init</code> creates a <code>macros/</code> directory with example functions</li>
-<li>Precedence runs built-in library, then installed packages, then your project.
-  A name defined twice resolves to the closest copy, and the shadowing is logged</li>
+<li>its robust z-score against the history's <strong>median and MAD</strong> (median absolute
+  deviation) reaches <code>regression_threshold</code>. A mean and standard deviation are
+  dragged around by one cold-cache outlier; the median and MAD are not;</li>
+<li>it is at least <code>regression_min_ratio</code> times the median, and</li>
+<li>at least <code>regression_min_delta_ms</code> slower in absolute terms, so a 40 ms model
+  that took 90 ms does not page anyone.</li>
 </ul>
-<h2 id="related-pages">Related Pages<a class="headerlink" href="#related-pages" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="transforms">Transforms</a> -- Using macros in SQL models</li>
-<li><a href="packages">Packages</a> -- Sharing macros (and models) between projects</li>
-<li><a href="cli-reference">CLI Reference</a> -- <code>havn macros</code> command</li>
-<li><a href="configuration">Configuration</a> -- Project structure</li>
-</ul>
+<p>Durations are then normalised by rows (rows scanned, else rows read, else rows
+written). A model that took twice as long because it read twice the data grew;
+it did not regress, and is not reported. A reported regression says that it is
+slower per row too.</p>
+<p>Each regression carries a <strong>plan diff</strong> between a representative fast build
+(the captured plan closest to the median from below) and the slow one: which
+operators got slower, with their times and row counts on both sides, and any
+join that changed type or condition (<code>HASH_JOIN</code> became <code>NESTED_LOOP_JOIN</code>).</p>
+<p>Regressions are stored in <code>_havn.perf_regressions</code>, printed at the end of the
+run, and sent as a <code>perf_regression</code> alert through the channels in <code>alerts:</code>
+(Slack, webhook, log), the same way anomalies are.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">performance</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">regression_lookback</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20</span>
+<span class="w">  </span><span class="nt">regression_min_history</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+<span class="w">  </span><span class="nt">regression_threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3.5</span>
+<span class="w">  </span><span class="nt">regression_min_ratio</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.5</span>
+<span class="w">  </span><span class="nt">regression_min_delta_ms</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">500</span>
+<span class="w">  </span><span class="nt">alert_on_regression</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</code></pre></div>
+<h2 id="advice">Advice<a class="headerlink" href="#advice" title="Permanent link">&para;</a></h2>
+<p>Each rule explains itself and shows the evidence it used. All of them stay
+quiet below their thresholds, so a project of small models gets no advice.</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Fires when</th>
+<th>Suggests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>incremental_candidate</code></td>
+<td>A <code>table</code> with at least <code>big_table_rows</code> rows that never lost a row over its recent builds and grew by at most <code>append_growth</code> per run</td>
+<td><code>materialized=incremental</code> with a <code>unique_key</code> (a column the profile shows as unique) and <code>@watermark</code> on a timestamp column, or microbatch</td>
+</tr>
+<tr>
+<td><code>join_fanout</code></td>
+<td>A join's output is <code>fanout_ratio</code> times its largest input (and at least <code>fanout_min_rows</code>), or a nested-loop join / cross product over that many rows</td>
+<td>Check the grain, add the missing join column, aggregate first</td>
+</tr>
+<tr>
+<td><code>materialize_view</code></td>
+<td>A view with a join, <code>GROUP BY</code>, window or <code>DISTINCT</code> read by <code>view_consumers</code> or more models</td>
+<td><code>materialized=table</code></td>
+</tr>
+<tr>
+<td><code>unused_table</code></td>
+<td>A materialized model with no downstream model, no exposure, no dashboard or metric referencing it and no query in the audit or slow-query log for <code>unused_days</code></td>
+<td>Delete it, make it a view, or declare an exposure</td>
+</tr>
+<tr>
+<td><code>scan_small_slice</code></td>
+<td>A scan reads <code>big_table_rows</code> or more to keep at most <code>scan_selectivity</code> of them</td>
+<td>Compare the raw column (not a function of it), or make the model incremental / partition the upstream</td>
+</tr>
+<tr>
+<td><code>order_by_non_final</code></td>
+<td>A top-level <code>ORDER BY</code> without <code>LIMIT</code> in a model other models read</td>
+<td>Remove it</td>
+</tr>
+<tr>
+<td><code>distinct_large</code></td>
+<td><code>SELECT DISTINCT</code> over <code>big_table_rows</code> or more</td>
+<td>Fix the duplicates at their source, <code>GROUP BY</code> keys, or <code>QUALIFY row_number()</code></td>
+</tr>
+<tr>
+<td><code>python_udf_hot_path</code></td>
+<td>A Python <code>@macro</code> called on <code>udf_rows</code> or more rows</td>
+<td>A SQL macro (<code>CREATE MACRO</code> in <code>macros/*.sql</code>)</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="nt">performance</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">advice</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">big_table_rows</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000000</span>
+<span class="w">    </span><span class="nt">min_duration_ms</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span><span class="w">      </span><span class="c1"># builds faster than this get no cost advice</span>
+<span class="w">    </span><span class="nt">fanout_ratio</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+<span class="w">    </span><span class="nt">fanout_min_rows</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100000</span>
+<span class="w">    </span><span class="nt">scan_selectivity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.05</span>
+<span class="w">    </span><span class="nt">view_consumers</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+<span class="w">    </span><span class="nt">unused_days</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">14</span>
+<span class="w">    </span><span class="nt">udf_rows</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100000</span>
+<span class="w">    </span><span class="nt">append_growth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.10</span>
+</code></pre></div>
+<p>An item is dismissed for good, or snoozed for some days, per model and rule
+(<code>havn perf &lt;model&gt; --dismiss &lt;rule&gt; [--snooze N]</code>, or the buttons in the UI).
+The state lives in <code>_havn.perf_advice_state</code>.</p>
+<p><code>unused_table</code> only sees queries that went through the web UI or the SQL API
+(the audit log) and slow queries; <code>havn query</code> from the CLI is not audited.</p>
+<h2 id="critical-path">Critical path<a class="headerlink" href="#critical-path" title="Permanent link">&para;</a></h2>
+<p><code>havn perf --critical-path</code> (and the chart on the Performance page) answers
+"what did this run wait for". It walks back from the model that finished last
+to the upstream that finished latest, and so on. Speeding up a model that is
+not on that chain does not make the run shorter. Each step shows how long it
+waited after its upstream finished: in a parallel run that is the tier barrier.</p>
+<p>It also reports the <strong>longest dependency chain</strong> by build time: with unlimited
+workers the run could not be shorter than that.</p>
+<h2 id="api">API<a class="headerlink" href="#api" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /api/perf/summary?days=7</code></td>
+<td>Slowest models, trend, regressions, advice, recent runs</td>
+</tr>
+<tr>
+<td><code>GET /api/perf/slowest?days=&amp;limit=</code></td>
+<td>Models by median build time</td>
+</tr>
+<tr>
+<td><code>GET /api/perf/trend?models=a,b&amp;days=</code></td>
+<td>Duration history per model</td>
+</tr>
+<tr>
+<td><code>GET /api/perf/regressions?days=&amp;model=</code></td>
+<td>Recorded regressions with plan diffs</td>
+</tr>
+<tr>
+<td><code>GET /api/perf/advice?model=&amp;include_dismissed=</code></td>
+<td>Advice items</td>
+</tr>
+<tr>
+<td><code>POST /api/perf/advice/state</code></td>
+<td><code>{model, rule, status: dismissed\|snoozed\|open, days}</code> (write permission)</td>
+</tr>
+<tr>
+<td><code>GET /api/perf/models/{model}</code></td>
+<td>History, latest plan, regressions, advice</td>
+</tr>
+<tr>
+<td><code>GET /api/perf/builds/{id}</code></td>
+<td>One build with its plan</td>
+</tr>
+<tr>
+<td><code>GET /api/perf/diff?fast=&amp;slow=</code></td>
+<td>Plan diff of two builds</td>
+</tr>
+<tr>
+<td><code>GET /api/perf/runs</code></td>
+<td>Recent runs</td>
+</tr>
+<tr>
+<td><code>GET /api/perf/runs/{id}/critical-path</code></td>
+<td>Critical path and longest chain</td>
+</tr>
+</tbody>
+</table>
+<p>See also <a href="../telemetry/">telemetry</a> for exporting build metrics to
+Prometheus, OpenTelemetry and OpenLineage.</p>
 
 
 
