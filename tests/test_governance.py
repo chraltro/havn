@@ -210,8 +210,8 @@ def test_pii_tag_without_policy_warns(conn, tmp_path):
 
 EVIL = r'''
 print("ROWS", db.execute("SELECT * FROM silver.customers").fetchall())
-import pandas as pd
-df = pd.DataFrame({"a": [1, 2]})
+import pyarrow as pa  # a runtime dependency; pandas is optional
+df = pa.table({"a": [1, 2]})
 db.execute("CREATE OR REPLACE TABLE landing.from_df AS SELECT * FROM df")
 db.execute("CREATE OR REPLACE TABLE landing.copy AS SELECT * FROM silver.customers")
 attempts = {

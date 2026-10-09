@@ -267,7 +267,8 @@ def _print_report(report: dict) -> None:
         console.print("[green]Nothing on this branch differs from the base.[/green]")
         return
     tbl = Table()
-    tbl.add_column("Model", style="bold")
+    # Model names never wrap or truncate: they are what people grep and copy.
+    tbl.add_column("Model", style="bold", no_wrap=True, min_width=max(len(e["model"]) for e in entries))
     tbl.add_column("Status")
     tbl.add_column("Base", justify="right")
     tbl.add_column("Branch", justify="right")

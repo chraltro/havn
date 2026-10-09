@@ -208,9 +208,9 @@ def test_parallel_workers_record_their_builds_too(tmp_path):
     conn = _connect(project)
     try:
         _run(conn, project, parallel=True, db_path=str(project / "warehouse.duckdb"))
-        runs = {r["model_path"]: r for r in conn.execute(
+        runs = {r[0]: {"pipeline_run_id": r[1], "plan_captured": r[2]} for r in conn.execute(
             "SELECT model_path, pipeline_run_id, plan_captured FROM _havn.model_perf"
-        ).fetchdf().to_dict("records")}
+        ).fetchall()}
         assert set(runs) == {"bronze.a", "silver.b", "silver.c"}
         assert len({r["pipeline_run_id"] for r in runs.values()}) == 1
         assert all(r["plan_captured"] for r in runs.values())

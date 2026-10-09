@@ -831,6 +831,7 @@ def client(project):
     import havn.server.app as server_app
 
     server_app.PROJECT_DIR = project
+    server_app.AUTH_ENABLED = False
     return TestClient(server_app.app)
 
 

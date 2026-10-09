@@ -268,6 +268,7 @@ def test_openlineage_down_does_not_fail_the_build(tmp_path):
 
 @pytest.fixture
 def spans():
+    pytest.importorskip("opentelemetry.sdk", reason="the otel extra is not installed")
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
     from havn.engine.telemetry import otel
