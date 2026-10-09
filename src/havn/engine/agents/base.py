@@ -36,6 +36,27 @@ def _resolve_npm_wrapper(cmd_path: str) -> list[str] | None:
         return None
 
 
+def resolve_cli_command(cmd: list[str]) -> list[str]:
+    """``cmd`` with its program resolved so it runs without a shell.
+
+    On Windows an npm .cmd wrapper becomes ``[node, script]`` (see
+    :func:`_resolve_npm_wrapper`); elsewhere the list is returned as is.
+    """
+    cmd = list(cmd)
+    if sys.platform == "win32":
+        resolved = shutil.which(cmd[0])
+        if resolved and resolved.lower().endswith((".cmd", ".bat")):
+            node_cmd = _resolve_npm_wrapper(resolved)
+            if node_cmd:
+                return node_cmd + cmd[1:]
+            # Last resort: resolved full path, let Windows try to exec it.
+            # This may fail for .cmd files, but is safer than shell=True.
+            cmd[0] = resolved
+        elif resolved:
+            cmd[0] = resolved
+    return cmd
+
+
 async def spawn_cli(
     cmd: list[str],
     cwd: str | None = None,
@@ -52,19 +73,7 @@ async def spawn_cli(
     stdin (e.g. to feed a long prompt that would otherwise overflow the
     Windows ~32 KB CreateProcess argv limit).
     """
-    if sys.platform == "win32":
-        resolved = shutil.which(cmd[0])
-        if resolved and resolved.lower().endswith((".cmd", ".bat")):
-            node_cmd = _resolve_npm_wrapper(resolved)
-            if node_cmd:
-                cmd = node_cmd + cmd[1:]
-            else:
-                # Last resort: resolved full path, let Windows try to exec it.
-                # This may fail for .cmd files, but is safer than shell=True.
-                cmd[0] = resolved
-        elif resolved:
-            cmd[0] = resolved
-
+    cmd = resolve_cli_command(cmd)
     return await asyncio.create_subprocess_exec(
         *cmd,
         stdin=stdin,

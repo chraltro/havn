@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 
 class DatabaseConfig(BaseModel):
@@ -106,6 +106,54 @@ class EnvironmentConfig(BaseModel):
     # has not built. Read at transform time only (see engine/defer.py); it
     # never changes what is written, which is always this environment's file.
     defer: str | None = None
+
+
+DEFAULT_BRANCH_PATH = ".havn/branches/{branch}.duckdb"
+
+
+class BranchesConfig(BaseModel):
+    """``branches:`` in project.yml: a warehouse per git branch.
+
+    Off unless ``enabled``. When it is on and the checked-out git branch is
+    not one of ``main``, the warehouse resolves to ``path`` with ``{branch}``
+    replaced by a filename-safe form of the branch name, and every model that
+    warehouse has not built is read from ``base`` (see engine/branches.py).
+    """
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    # Environment whose warehouse is the base. None means the top-level
+    # ``database.path`` (a project without environments).
+    base: str | None = None
+    # Git branches that use the ordinary resolution, never a branch
+    # warehouse. Empty means "main, or master when there is no main".
+    main: list[str] = Field(default_factory=list)
+    path: str = DEFAULT_BRANCH_PATH
+
+
+class BranchState(BaseModel):
+    """How the warehouse was resolved with respect to git branches.
+
+    Always present on a loaded config. ``active`` says whether the warehouse
+    was redirected to a branch file; when it was not, ``reason`` says why
+    (branches off, on the main branch, detached HEAD, ``--env`` given, ...),
+    which is what ``havn branch status`` and ``havn env show`` print.
+    """
+    model_config = ConfigDict(extra="ignore")
+
+    active: bool = False
+    reason: str = ""
+    git_branch: str | None = None      # what git (or HAVN_BRANCH / --branch) says
+    source: str = "git"                # "git", "HAVN_BRANCH", "--branch", "none"
+    detached: bool = False
+    in_repo: bool = False
+    main_branches: list[str] = Field(default_factory=list)
+    slug: str | None = None            # filename-safe branch name
+    path: str | None = None            # branch warehouse, as configured (relative ok)
+    base: str | None = None            # base environment name, None = top-level db
+    base_label: str = "main"           # how the base is named in messages
+    base_path: str | None = None       # base warehouse path (relative ok)
+    base_overridden: bool = False      # --base PATH replaced the configured base
 
 
 class SourceColumn(BaseModel):
@@ -213,11 +261,93 @@ class PoliciesConfig(BaseModel):
     deny: list[DenyRule] = Field(default_factory=list)
 
 
+class GovernanceConfig(BaseModel):
+    """Masking, row-level security and governed Python, under ``governance:``.
+
+    ``python``: how a script or notebook run by a user that masking or row
+    policies apply to is executed. ``subprocess`` (default) runs it in a
+    separate process whose ``db`` sends SQL to the server, which governs it;
+    ``refuse`` does not run it at all.
+
+    ``isolation``: ``best_effort`` (default) runs governed Python even where
+    the operating system does not keep the warehouse file away from the
+    child process (Linux and macOS: the child runs as the same OS user), with
+    Python-level guards only and a warning in the run log; ``strict`` refuses
+    to run it there.
+
+    ``pii_schemas``: schemas where ``havn validate`` warns about a column
+    that carries PII without a masking policy (exposures' tables and the
+    tables export scripts read are always checked).
+    """
+    model_config = ConfigDict(extra="ignore")
+
+    python: str = "subprocess"
+    isolation: str = "best_effort"
+    pii_schemas: list[str] = Field(default_factory=lambda: ["gold"])
+
+
 class ValidationConfig(BaseModel):
     """What `havn validate` reports beyond errors, declared under ``validation:``."""
     model_config = ConfigDict(extra="ignore")
 
     schema_drift: str = "off"  # "warn" | "off"
+
+
+class EmbedConfig(BaseModel):
+    """Which sites may frame published dashboards, under ``sharing.embed:``."""
+    model_config = ConfigDict(extra="ignore")
+
+    # Origins allowed in the published page's CSP frame-ancestors, e.g.
+    # "https://intranet.example.com". Empty means same-origin framing only.
+    allowed_origins: list[str] = Field(default_factory=list)
+
+
+class SharingConfig(BaseModel):
+    """Published dashboards, declared under ``sharing:`` in ``project.yml``."""
+    model_config = ConfigDict(extra="ignore")
+
+    public_links: bool = True  # false refuses to create or serve public links
+    max_public_link_days: int | None = None  # cap on a public link's expiry
+    embed: EmbedConfig = Field(default_factory=EmbedConfig)
+
+
+class SmtpConfig(BaseModel):
+    """Outgoing mail for scheduled reports, under ``reports.smtp:``.
+
+    Values may reference ``.env`` secrets as ``${VAR}``.
+    """
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    host: str | None = None
+    port: int = 587
+    username: str | None = None
+    password: str | None = None
+    from_address: str | None = Field(default=None, alias="from")
+    starttls: bool = True
+    ssl: bool = False  # implicit TLS (port 465); overrides starttls
+    timeout: int = 30
+
+
+class ReportsConfig(BaseModel):
+    """Scheduled dashboard reports, under ``reports:`` in ``project.yml``."""
+    model_config = ConfigDict(extra="ignore")
+
+    base_url: str | None = None  # e.g. https://havn.example.com, for links in reports
+    smtp: SmtpConfig = Field(default_factory=SmtpConfig)
+    slack_webhook_url: str | None = None  # default Slack target; falls back to alerts.slack_webhook_url
+    allowed_recipient_domains: list[str] = Field(default_factory=list)  # empty = any
+    max_rows_per_widget: int = 1000  # rows rendered/attached per widget
+    charts: str = "auto"  # "auto" (matplotlib when installed) | "off"
+
+    @field_validator("charts", mode="before")
+    @classmethod
+    def _charts_flag(cls, v: Any) -> str:
+        # YAML reads a bare `off` / `on` as a boolean.
+        if v is False:
+            return "off"
+        if v is True or v is None:
+            return "auto"
+        return str(v).lower()
 class PackageConfig(BaseModel):
     """One entry under ``packages:`` in ``project.yml``.
 
@@ -255,6 +385,131 @@ class PackageConfig(BaseModel):
         return self
 
 
+class PerfAdviceConfig(BaseModel):
+    """Thresholds for the performance advisor's rules (``performance.advice``).
+
+    Every rule stays quiet below these, so a small project gets no advice
+    about problems it does not have.
+    """
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = True
+    big_table_rows: int = 1_000_000      # "huge" for full-refresh / DISTINCT / scan rules
+    min_duration_ms: int = 1_000         # a build faster than this is never worth advice
+    fanout_ratio: float = 10.0           # join output / largest input
+    fanout_min_rows: int = 100_000       # ...and at least this many output rows
+    scan_selectivity: float = 0.05       # rows kept / rows scanned below this = small slice
+    view_consumers: int = 3              # a view read by this many models
+    unused_days: int = 14                # no reads for this long = unused table
+    udf_rows: int = 100_000              # rows through a Python UDF before it counts as hot
+    append_growth: float = 0.10          # per-run growth at or below this = append-only
+
+
+class PerformanceConfig(BaseModel):
+    """``performance:`` in project.yml: what the advisor records and keeps.
+
+    ``capture_plans`` is ``true`` (profile every build), ``sampled`` (a
+    ``sample_rate`` share of builds, plus any model with too few plans) or
+    ``false`` (durations and row counts only). Plans come from DuckDB's own
+    profiler on the build statement, so the query is never run twice.
+    """
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = True
+    capture_plans: str = "true"
+    sample_rate: float = 0.25
+    retention_days: int = 90
+    plan_retention: int = 20             # newest builds per model that keep their plan
+    regression_lookback: int = 20        # builds of history a run is compared with
+    regression_min_history: int = 5
+    regression_threshold: float = 3.5    # robust z-score (median / MAD)
+    regression_min_ratio: float = 1.5    # and at least this much slower than the median
+    regression_min_delta_ms: int = 500   # and at least this many ms slower
+    alert_on_regression: bool = True
+    advice: PerfAdviceConfig = Field(default_factory=PerfAdviceConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_capture(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "capture_plans" in data:
+            raw = data["capture_plans"]
+            if isinstance(raw, bool) or raw is None:
+                value = "true" if raw else "false"
+            else:
+                value = str(raw).strip().lower()
+                value = {"yes": "true", "on": "true", "always": "true",
+                         "no": "false", "off": "false", "never": "false"}.get(value, value)
+            if value not in ("true", "false", "sampled"):
+                raise ValueError(
+                    f"performance.capture_plans must be true, false or sampled, not {raw!r}"
+                )
+            data = {**data, "capture_plans": value}
+        return data
+
+
+class PrometheusConfig(BaseModel):
+    """``telemetry.prometheus``: the ``GET /metrics`` scrape endpoint."""
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    # Bearer token a scraper may present instead of a user token. Usually
+    # ``${HAVN_METRICS_TOKEN}`` so the secret lives in .env.
+    token: str | None = None
+    # ``false`` (always authenticate when auth is on), ``localhost`` (a scraper
+    # on 127.0.0.1 / ::1 needs no token) or ``true`` (anyone may scrape).
+    allow_unauthenticated: str = "false"
+    include_models: bool = True          # per-model series (one label per model)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_allow(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "allow_unauthenticated" in data:
+            raw = data["allow_unauthenticated"]
+            value = ("true" if raw else "false") if isinstance(raw, bool) else str(raw).strip().lower()
+            if value not in ("true", "false", "localhost"):
+                raise ValueError(
+                    "telemetry.prometheus.allow_unauthenticated must be true, false or localhost"
+                )
+            data = {**data, "allow_unauthenticated": value}
+        return data
+
+
+class OtelConfig(BaseModel):
+    """``telemetry.opentelemetry``: OTLP/HTTP traces of runs, models and API requests."""
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    endpoint: str = "http://localhost:4318/v1/traces"
+    headers: dict[str, str] = Field(default_factory=dict)
+    service_name: str = "havn"
+    trace_api: bool = True               # one span per API request
+
+
+class OpenLineageConfig(BaseModel):
+    """``telemetry.openlineage``: RunEvents per model build, to HTTP or a file."""
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    transport: Literal["http", "file"] = "http"
+    url: str = "http://localhost:5000"   # Marquez default; /api/v1/lineage is appended
+    endpoint: str = "api/v1/lineage"
+    api_key: str | None = None
+    path: str = "openlineage.jsonl"      # file transport, relative to the project
+    namespace: str | None = None         # job namespace; default havn://<project name>
+    dataset_namespace: str | None = None  # default duckdb://<warehouse file>
+    column_lineage: bool = True
+    timeout_s: float = 5.0
+
+
+class TelemetryConfig(BaseModel):
+    """``telemetry:`` in project.yml. Every exporter is off until enabled."""
+    model_config = ConfigDict(extra="ignore")
+
+    prometheus: PrometheusConfig = Field(default_factory=PrometheusConfig)
+    opentelemetry: OtelConfig = Field(default_factory=OtelConfig)
+    openlineage: OpenLineageConfig = Field(default_factory=OpenLineageConfig)
+
+
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(extra="ignore", arbitrary_types_allowed=True)
 
@@ -271,16 +526,40 @@ class ProjectConfig(BaseModel):
     sentinel: SentinelConfig = Field(default_factory=SentinelConfig)
     policies: PoliciesConfig = Field(default_factory=PoliciesConfig)
     validation: ValidationConfig = Field(default_factory=ValidationConfig)
+    sharing: SharingConfig = Field(default_factory=SharingConfig)
+    reports: ReportsConfig = Field(default_factory=ReportsConfig)
+    governance: GovernanceConfig = Field(default_factory=GovernanceConfig)
     snapshots: SnapshotsConfig = Field(default_factory=SnapshotsConfig)
     environments: dict[str, EnvironmentConfig] = Field(default_factory=dict)
     active_environment: str | None = None
+    branches: BranchesConfig = Field(default_factory=BranchesConfig)
+    branch: BranchState = Field(default_factory=BranchState)
     sources: list[SourceConfig] = Field(default_factory=list)
     exposures: list[ExposureConfig] = Field(default_factory=list)
     packages: list[PackageConfig] = Field(default_factory=list)
     resources: dict[str, dict[str, Any]] = Field(default_factory=dict)
     streaming: dict[str, Any] = Field(default_factory=dict)
+    performance: PerformanceConfig = Field(default_factory=PerformanceConfig)
+    telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    # Raw `live:` section; read through havn.engine.live.settings.LiveSettings.
+    live: dict[str, Any] = Field(default_factory=dict)
     project_dir: Path = Field(default_factory=Path.cwd)
     _raw: dict[str, Any] = PrivateAttr(default_factory=dict)
+
+
+def _parse_section(model: type[BaseModel], raw_section: Any, name: str) -> BaseModel:
+    """Parse an optional mapping section, falling back to defaults on bad input.
+
+    A malformed optional section (a typo in ``reports.smtp.port``) is logged
+    and ignored rather than failing every command that loads the project.
+    """
+    if not isinstance(raw_section, dict):
+        return model()
+    try:
+        return model.model_validate(raw_section)
+    except Exception as e:  # pydantic.ValidationError
+        logging.getLogger("havn.config").warning("Ignoring invalid '%s:' section: %s", name, e)
+        return model()
 
 
 def _expand_env_vars(value: Any) -> Any:
@@ -441,10 +720,50 @@ def resolve_active_environment(
     return None, "none"
 
 
+def _parse_branches(raw: dict[str, Any], environments: dict[str, EnvironmentConfig]) -> BranchesConfig:
+    """Parse and validate ``branches:``. Mistakes fail the load, like ``defer:``."""
+    block = raw.get("branches")
+    if block is None or block is False:
+        return BranchesConfig()
+    if block is True:
+        return BranchesConfig(enabled=True)
+    if not isinstance(block, dict):
+        raise ValueError("'branches' must be a mapping, e.g. branches: {enabled: true, base: prod}")
+    main = block.get("main") or []
+    if isinstance(main, str):
+        main = [main]
+    if not isinstance(main, list):
+        raise ValueError("branches.main must be a branch name or a list of them")
+    cfg = BranchesConfig(
+        enabled=bool(block.get("enabled", False)),
+        base=str(block["base"]) if block.get("base") else None,
+        main=[str(m) for m in main],
+        path=str(block.get("path") or DEFAULT_BRANCH_PATH),
+    )
+    if "{branch}" not in cfg.path:
+        raise ValueError(
+            f"branches.path must contain '{{branch}}' so every branch gets its own file "
+            f"(got '{cfg.path}')"
+        )
+    if cfg.base and cfg.base not in environments:
+        known = ", ".join(sorted(environments))
+        raise ValueError(
+            f"branches.base: unknown environment '{cfg.base}'."
+            + (f" Defined environments: {known}" if known else " No environments are defined; "
+               "leave base out to use the top-level database.")
+        )
+    return cfg
+
+
 def load_project(
     project_dir: Path | None = None,
     env: str | None = None,
     strict_env_file: bool = False,
+    *,
+    branch: str | None = None,
+    branch_base: str | None = None,
+    use_branches: bool = True,
+    git_head: Any = None,
 ) -> ProjectConfig:
     """Load project.yml from the given directory (or cwd).
 
@@ -452,6 +771,16 @@ def load_project(
         project_dir: Path to the project directory.
         env: Environment name to activate (e.g. "dev", "prod").
              If environments are defined and env is None, defaults to "dev".
+        branch: Use this git branch's warehouse whatever is checked out
+            (``havn branch ... --name``; CI on a detached checkout).
+        branch_base: A warehouse file to use as the branch's base instead of
+            the configured one (``--base``: a CI artifact, a backup).
+        use_branches: False never resolves to a branch warehouse
+            (``havn deploy``: branch warehouses are never deploy targets).
+        git_head: A :class:`havn.engine.branches.GitHead` to resolve against
+            instead of reading ``.git/HEAD``. ``havn serve`` pins the head it
+            has switched to, so a checkout mid-request cannot move the
+            warehouse under a running build.
     """
     from havn.engine.secrets import load_env
 
@@ -604,11 +933,36 @@ def load_project(
                 f"'{target}'." + (f" Defined environments: {known}" if known else "")
             )
 
+    branches = _parse_branches(raw, environments)
+
     # Apply environment overrides
-    active_env, _source = resolve_active_environment(
+    active_env, env_source = resolve_active_environment(
         project_dir, environments, env, strict_env_file=strict_env_file
     )
-    if active_env and active_env in environments:
+
+    # A branch warehouse replaces the environment resolution when one applies
+    # (see engine/branches.py for the order). The branch file takes the
+    # top-level database settings with its own path; the base is reached
+    # through defer, never opened for writing.
+    from havn.engine.branches import resolve_branch
+
+    branch_state = resolve_branch(
+        project_dir,
+        branches,
+        environments=environments,
+        db_raw=db_raw,
+        backend=database.backend,
+        env_source=env_source,
+        active_env=active_env,
+        forced_branch=branch,
+        base_override=branch_base,
+        use_branches=use_branches,
+        git_head=git_head,
+    )
+    if branch_state.active:
+        database = DatabaseConfig(**{**db_raw, "path": branch_state.path})
+        active_env = None
+    elif active_env and active_env in environments:
         env_cfg = environments[active_env]
         if env_cfg.database:
             database = DatabaseConfig(**{**db_raw, **env_cfg.database})
@@ -642,12 +996,19 @@ def load_project(
         sentinel=sentinel,
         policies=policies,
         validation=ValidationConfig(schema_drift=str((raw.get("validation") or {}).get("schema_drift", "off") or "off")),
+        sharing=_parse_section(SharingConfig, raw.get("sharing"), "sharing"),
+        reports=_parse_section(ReportsConfig, raw.get("reports"), "reports"),
         snapshots=snapshots,
         environments=environments,
         active_environment=active_env if active_env and active_env in environments else None,
+        branches=branches,
+        branch=branch_state,
         sources=sources,
         exposures=exposures,
         packages=packages,
+        performance=PerformanceConfig(**(raw.get("performance") or {})),
+        telemetry=TelemetryConfig(**(raw.get("telemetry") or {})),
+        live=raw.get("live") if isinstance(raw.get("live"), dict) else {},
         project_dir=project_dir,
     )
     config._raw = raw

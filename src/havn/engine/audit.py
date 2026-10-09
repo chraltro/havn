@@ -34,6 +34,16 @@ VALID_ACTIONS = frozenset({
     "token_revoke",
     "snapshot_restore",
     "secret_change",
+    "dashboard_publish",
+    "dashboard_unpublish",
+    "report_create",
+    "report_update",
+    "report_delete",
+    "report_delivery",
+    "ask",
+    "changeset_submit",
+    "changeset_apply",
+    "changeset_discard",
 })
 
 

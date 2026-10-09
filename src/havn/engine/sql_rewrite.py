@@ -34,8 +34,22 @@ class SQLRewriteError(ValueError):
 # struct literal and regenerates it as ``{'start': start}``, which the later
 # substitution can no longer find. Every round trip of model SQL therefore
 # masks them into a plain identifier first and puts them back afterwards.
-_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+#
+# A live model's ``{watermark:schema.table}`` carries an argument. The ``:`` and
+# ``.`` cannot appear in an identifier, so the mask token spells them as
+# ``__c__`` and ``__d__`` and the restore turns them back.
+_PLACEHOLDER_RE = re.compile(
+    r"\{([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*)?)\}"
+)
 _PLACEHOLDER_TOKEN = "__havn_ph_{}__"
+
+
+def _encode_placeholder(name: str) -> str:
+    return name.replace(":", "__c__").replace(".", "__d__")
+
+
+def _decode_placeholder(token: str) -> str:
+    return token.replace("__c__", ":").replace("__d__", ".")
 
 
 def mask_placeholders(sql: str) -> tuple[str, Callable[[str], str]]:
@@ -53,7 +67,7 @@ def mask_placeholders(sql: str) -> tuple[str, Callable[[str], str]]:
 
     def _mask(match: re.Match) -> str:
         found.append(match.group(1))
-        return _PLACEHOLDER_TOKEN.format(match.group(1))
+        return _PLACEHOLDER_TOKEN.format(_encode_placeholder(match.group(1)))
 
     masked = _PLACEHOLDER_RE.sub(_mask, sql)
     if not found:
@@ -61,7 +75,9 @@ def mask_placeholders(sql: str) -> tuple[str, Callable[[str], str]]:
 
     def restore(out: str) -> str:
         for name in found:
-            out = out.replace(_PLACEHOLDER_TOKEN.format(name), "{" + name + "}")
+            out = out.replace(
+                _PLACEHOLDER_TOKEN.format(_encode_placeholder(name)), "{" + name + "}"
+            )
         return out
 
     return masked, restore
@@ -85,7 +101,7 @@ def unmask_placeholders(sql: str) -> str:
     """
     if "__havn_ph_" not in sql:
         return sql
-    return _MASKED_RE.sub(lambda m: "{" + m.group(1) + "}", sql)
+    return _MASKED_RE.sub(lambda m: "{" + _decode_placeholder(m.group(1)) + "}", sql)
 
 
 def table_key(table: exp.Table) -> str:

@@ -577,9 +577,179 @@ Roles: `admin`, `editor`, `viewer`
 Generate CI/CD configuration.
 
 ```bash
-havn ci generate [--project PATH]    # Generate GitHub Actions workflow
+havn ci generate [--project PATH]    # Generate havn-ci.yml (PR data diff) and havn-base.yml (base artifact)
+havn ci comment [--markdown FILE]    # Post (or update) the data-diff comment on the PR
 havn ci diff-comment [--project PATH] # Post formatted diff to PR
 ```
+
+## Branch Warehouses
+
+### havn branch
+
+A warehouse per git branch (`branches.enabled` in project.yml). See [Branch warehouses](branches).
+
+```bash
+havn branch status [--json]                    # branch, warehouse, local vs deferred, stale
+havn branch build [--plan] [--force] [--no-prune] [--defer-snapshot]
+havn branch diff [MODELS...] [--markdown] [--json] [--output FILE] [--full] [--exit-nonzero-on-change]
+havn branch list                               # branch warehouses on disk
+havn branch reset [--yes]                      # delete this branch's warehouse
+havn branch clean [--dry-run]                  # delete warehouses of merged or deleted branches
+```
+
+`status`, `build` and `diff` take `--name BRANCH` (act for a branch that is not
+checked out, e.g. in CI) and `--base PATH` (diff against a base file instead of
+the configured base).
+
+## Governance
+
+### havn rls
+
+Manage row-level security policies. Policies are admin-managed and audit logged; see [Governance](governance.md).
+
+```bash
+havn rls ACTION [--table T] [--filter SQL] [--roles R,R] [--users U,U] [--exempt R,R] [--name NAME] [--id ID] [--env NAME] [--project PATH]
+```
+
+| Argument/Flag | Default | Description |
+|---------------|---------|-------------|
+| `ACTION` | required | `list`, `add` or `remove` |
+| `--table, -t` | none | `schema.table` the policy protects |
+| `--filter, -f` | none | SQL boolean filter; can use `havn_user()`, `havn_role()`, `havn_attr('key')` |
+| `--roles` | none | Comma list of roles the policy applies to |
+| `--users` | none | Comma list of users the policy applies to |
+| `--exempt` | `admin` | Roles exempt from the policy |
+| `--name` | none | Policy name |
+| `--id` | none | Policy ID (for `remove`) |
+| `--env, -e` | none | Environment to use |
+
+```bash
+havn rls list
+havn rls add -t silver.customers -f "region = havn_attr('region')" --roles viewer,editor
+havn rls remove --id <policy-id>
+```
+
+### havn pii
+
+Show PII classifications, including those inherited through lineage. A column is classified by a masking policy, an `@pii` tag in its model, or by being derived from a classified column (unless the model says `@declassify`).
+
+```bash
+havn pii [RELATION] [--env NAME] [--project PATH]
+```
+
+`RELATION` limits the output to one `schema.table`.
+
+## Reports
+
+### havn reports
+
+List, send and preview scheduled dashboard reports. See [Dashboards and sharing](dashboards-sharing.md).
+
+```bash
+havn reports list [--env NAME] [--project PATH]
+havn reports send NAME [--force] [--env NAME] [--project PATH]
+havn reports preview NAME [--out FILE] [--format html|pdf|png] [--env NAME] [--project PATH]
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `list` | Reports with their schedule, recipients and last delivery |
+| `send NAME` | Send a report now, to its configured recipients, as its owner. `--force` sends even if the report's condition is not met |
+| `preview NAME` | Render a report to a local file without sending it. `--out, -o` sets the file (default `<name>.<format>`), `--format, -f` is `html` (default), `pdf` or `png` |
+
+`NAME` is the report name or id.
+
+## Ask and Change Sets
+
+### havn ask
+
+Ask a question; havn answers it from the metrics in `metrics/*.yml`. The model picks metrics, dimensions, grain, filters and a time range; havn validates that choice, compiles it with the semantic layer and runs it read-only. Only catalog metadata is sent to the model. See [Ask](ask.md).
+
+```bash
+havn ask [QUESTION...] [--continue] [--exploratory] [--summarize] [--save-suggestion] [--sql | --no-sql] [--json] [--env NAME] [--project PATH]
+havn ask --eval [FILES...] [--min-accuracy FLOAT]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--eval` | off | Run question to spec eval files (default `tests/ask/*.yml`) |
+| `--min-accuracy` | `1.0` | With `--eval`: exit non-zero below this accuracy (0-1) |
+| `--continue, -c` | off | Refine the previous question ("now by month") |
+| `--exploratory` | off | When no metric fits, try unverified exploratory SQL (needs `ai.exploratory_sql`) |
+| `--summarize` | off | Summarise the result in words (sends result rows to the model; needs `ai.summarize_results`) |
+| `--save-suggestion` | off | Write a suggested metric definition to `metrics/` |
+| `--sql / --no-sql` | `--sql` | Print the compiled SQL |
+| `--json` | off | Print the full answer as JSON |
+| `--env, -e` | none | Environment to use |
+
+### havn changes
+
+Change sets: agent-proposed model edits, verified before they are applied.
+
+```bash
+havn changes list [--all]
+havn changes show CHANGE_SET_ID [--diff]
+havn changes verify CHANGE_SET_ID [--env NAME]
+havn changes apply CHANGE_SET_ID [--force]
+havn changes discard CHANGE_SET_ID
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `list` | List change sets; `--all` includes applied and discarded |
+| `show` | Files and verification report; `--diff` shows the file diffs |
+| `verify` | Re-run verification (through `havn serve` when it is running) |
+| `apply` | Write a verified change set into the project; `--force` applies even though verification failed |
+| `discard` | Discard a change set without applying it |
+
+All accept `--project, -p`.
+
+## Performance and Live Models
+
+### havn perf
+
+Performance advisor: slow models, regressions, advice, plans, critical path. Nothing is re-run to produce this. See [Performance](performance.md).
+
+```bash
+havn perf [MODEL] [--days N] [--limit N] [--regressions] [--advice] [--all] [--runs] [--critical-path] [--run ID] [--dismiss RULE [--snooze DAYS]] [--reopen RULE] [--plan | --no-plan] [--json] [--env NAME] [--project PATH]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `MODEL` | none | A model to show in detail, e.g. `gold.orders` |
+| `--days, -d` | 7 | Look-back window in days |
+| `--limit, -n` | 15 | Rows per table |
+| `--regressions` | off | Only show regressions |
+| `--advice` | off | Only show advice |
+| `--all` | off | Include dismissed and snoozed advice |
+| `--runs` | off | List recent pipeline runs |
+| `--critical-path` | off | Critical path of a run (`--run`, default the latest) |
+| `--run` | latest | Pipeline run id (a prefix is enough) |
+| `--dismiss RULE` | none | Dismiss this advice rule for `MODEL` |
+| `--snooze DAYS` | none | With `--dismiss`: snooze for this many days instead |
+| `--reopen RULE` | none | Reopen a dismissed or snoozed rule for `MODEL` |
+| `--plan / --no-plan` | `--plan` | Show the captured plan in model detail |
+| `--json` | off | Output as JSON |
+
+### havn live
+
+Live models: continuous refresh from streaming ingest to gold. Run `havn live` on its own to start the runner in the foreground. See [Live models](live-models.md).
+
+```bash
+havn live [--once] [--env NAME] [--project PATH]
+havn live status [--json]
+havn live pause MODEL
+havn live resume MODEL
+havn live advance SOURCE
+```
+
+| Command | Description |
+|---------|-------------|
+| `havn live` | Start the runner in the foreground; `--once` runs one refresh cycle and exits |
+| `status` | Live models: status, lag, events per second, last refresh |
+| `pause MODEL` | Stop refreshing a live model (its downstream live models wait) |
+| `resume MODEL` | Resume a paused (or failing) live model; it catches up on everything queued |
+| `advance SOURCE` | Stamp rows committed to a landing table (e.g. `landing.orders`) and announce them to live models |
 
 ## Server
 

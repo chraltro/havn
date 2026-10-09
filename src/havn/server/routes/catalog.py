@@ -259,7 +259,15 @@ def get_environment(request: Request) -> dict:
         "available": list(config.environments.keys()),
         "database_path": config.database.path,
         "defer": _defer_status(config),
+        "branch": _branch_status(config),
     }
+
+
+def _branch_status(config) -> dict:
+    """The branch warehouse resolution, so the switcher can show it."""
+    from havn.server.routes.branch import branch_payload
+
+    return branch_payload(config)
 
 
 def _defer_status(config) -> dict | None:
@@ -271,6 +279,19 @@ def _defer_status(config) -> dict | None:
     describes this instant and not the one after it.
     """
     from havn.engine.defer import defer_target_path, target_lockable
+
+    if config.branch.active:
+        # A branch warehouse defers to its base, not to an environment's
+        # `defer:` (it has no active environment at all).
+        from havn.engine.branches import base_warehouse_path
+
+        lockable, reason = target_lockable(base_warehouse_path(config))
+        return {
+            "target": config.branch.base_label,
+            "path": config.branch.base_path,
+            "lockable": lockable,
+            "reason": reason,
+        }
 
     env_name = config.active_environment
     env_cfg = config.environments.get(env_name) if env_name else None

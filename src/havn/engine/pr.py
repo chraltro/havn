@@ -980,11 +980,12 @@ def _build_pr_locked(
     if not _validate_branch_name(pr.head_ref):
         raise ValueError(f"Invalid head_ref: {pr.head_ref}")
 
-    # Resolve the main warehouse path honouring project.yml's database.path
+    # Resolve the main warehouse path honouring project.yml's database.path.
+    # Never a branch warehouse: a change is diffed against what main has.
     if db_path is None:
         try:
             from havn.config import load_project
-            cfg = load_project(project_dir)
+            cfg = load_project(project_dir, use_branches=False)
             db_path = project_dir / cfg.database.path
         except Exception:
             db_path = project_dir / "warehouse.duckdb"
@@ -1016,6 +1017,13 @@ def _build_pr_locked(
     pr_conn: duckdb.DuckDBPyConnection | None = None
     attached = False
     pr_branch_dag: list = []
+
+    # The build clones from, and diffs against, the main warehouse. ``conn``
+    # usually is that warehouse, but not when the server is on a branch
+    # warehouse (branches.enabled): then main's file is attached read-only
+    # on a connection of its own, and ``conn`` only keeps the build record.
+    source = conn
+    own_source: duckdb.DuckDBPyConnection | None = None
 
     # Defensive cleanup: remove any stale worktree from a previous interrupted
     # build, and drop any lingering pr_db attachment on the caller's connection
@@ -1057,11 +1065,19 @@ def _build_pr_locked(
         # connection to write the clone via ATTACH rather than copying bytes.
         pr_warehouse = worktree_path / "warehouse.duckdb"
         if main_warehouse.exists():
+            from havn.engine.defer import _warehouse_key
+
+            if _warehouse_key(conn) != str(main_warehouse.resolve()):
+                own_source = duckdb.connect()
+                literal = str(main_warehouse).replace("'", "''")
+                own_source.execute(f"ATTACH '{literal}' AS havn_pr_main (READ_ONLY)")
+                own_source.execute("USE havn_pr_main")
+                source = own_source
             try:
-                conn.execute("FORCE CHECKPOINT")
+                source.execute("FORCE CHECKPOINT")
             except Exception:
                 pass
-            _clone_warehouse_via_attach(conn, pr_warehouse)
+            _clone_warehouse_via_attach(source, pr_warehouse)
 
         # Discover the PR branch's DAG from the worktree BEFORE teardown so
         # new-on-PR models are available for the lineage impact computation.
@@ -1099,10 +1115,10 @@ def _build_pr_locked(
 
         # ATTACH the PR warehouse read-only and diff against main
         attach_path = str(pr_warehouse).replace("'", "''")
-        conn.execute(f"ATTACH '{attach_path}' AS pr_db (READ_ONLY)")
+        source.execute(f"ATTACH '{attach_path}' AS pr_db (READ_ONLY)")
         attached = True
 
-        data_diff = _diff_across_attached(conn, attached_alias="pr_db")
+        data_diff = _diff_across_attached(source, attached_alias="pr_db")
         record["data_diff"] = data_diff
 
         # Union of main DAG + PR-branch DAG so new-on-PR models show up as
@@ -1119,7 +1135,7 @@ def _build_pr_locked(
         )
         # Semantic-layer metrics that read an affected model, on both sides.
         touched = set(record["lineage_impact"]["changed"]) | set(record["lineage_impact"]["impacted"])
-        record["metric_diff"] = _metric_diff(conn, worktree_path, "pr_db", touched)
+        record["metric_diff"] = _metric_diff(source, worktree_path, "pr_db", touched)
 
         record["status"] = "success"
     except Exception as e:
@@ -1134,7 +1150,12 @@ def _build_pr_locked(
                 pass
         if attached:
             try:
-                conn.execute("DETACH pr_db")
+                source.execute("DETACH pr_db")
+            except Exception:
+                pass
+        if own_source is not None:
+            try:
+                own_source.close()
             except Exception:
                 pass
         _worktree_cleanup(project_dir, worktree_path)
@@ -1247,7 +1268,11 @@ def get_latest_build(conn: duckdb.DuckDBPyConnection, pr_id: str) -> dict | None
 # themselves, which the review flow writes as it goes, and havn's own runtime
 # files (the `havn serve` lockfile, PR build and deploy worktrees), which exist whenever
 # the web UI is running and are never committed.
-MERGE_IGNORED_PATHS = (".havn/prs/", ".havn/serve.json", ".havn/pr-build/", ".havn/deploy/")
+MERGE_IGNORED_PATHS = (
+    ".havn/prs/", ".havn/serve.json", ".havn/pr-build/", ".havn/deploy/",
+    # Branch warehouses and their records (engine/branches.py): data, never code.
+    ".havn/branches/",
+)
 
 
 def merge_ignored_paths(project_dir: Path) -> tuple[str, ...]:
@@ -1270,6 +1295,13 @@ def merge_ignored_paths(project_dir: Path) -> tuple[str, ...]:
             if full.is_relative_to(root):
                 rel = full.relative_to(root).as_posix()
                 extra += [rel, f"{rel}.wal"]
+        # Branch warehouses wherever branches.path puts them: everything up
+        # to the {branch} placeholder is a prefix only branch files share.
+        # Only a directory prefix: a bare "b" from "b{branch}.duckdb" would
+        # also match every committed path that starts with a b.
+        prefix = (cfg.branches.path or "").replace("\\", "/").split("{branch}")[0]
+        if cfg.branches.enabled and prefix.endswith("/") and not Path(prefix).is_absolute():
+            extra.append(prefix)
     except Exception as e:
         logger.debug("merge ignore: could not read environments: %s", e)
     return MERGE_IGNORED_PATHS + tuple(extra)

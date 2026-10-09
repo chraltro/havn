@@ -95,8 +95,24 @@ async def _lifespan(app: FastAPI):
     except Exception:
         _maintenance = None
 
+    # Live models: refresh continuously from streaming ingest. Started only
+    # when the project has a live model (and live.enabled is not false); a
+    # project without one never pays for the thread.
+    try:
+        from havn.server.routes.live import start_live_runner
+
+        start_live_runner()
+    except Exception as e:
+        logger.warning("Live runner not started: %s", e)
+
     yield
 
+    try:
+        from havn.server.routes.live import stop_live_runner
+
+        stop_live_runner()
+    except Exception:
+        pass
     try:
         from havn.server.routes.streaming import shutdown_flush_worker
         shutdown_flush_worker()
@@ -133,10 +149,49 @@ app.add_middleware(
 async def security_headers(request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if request.url.path.startswith(_PUBLISHED_PAGE_PREFIX):
+        # Published dashboard pages (/p/<key>) are the one document that may
+        # be framed, and only by the origins in sharing.embed.allowed_origins.
+        # The key in the URL is a credential for public links, so it must not
+        # leak through Referer, and the page must not be indexed.
+        response.headers["Content-Security-Policy"] = _published_frame_policy()
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+        response.headers["Cache-Control"] = "no-store"
+    else:
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
+
+
+_PUBLISHED_PAGE_PREFIX = "/p/"
+
+
+def _published_frame_policy() -> str:
+    """CSP frame-ancestors for published pages from sharing.embed.allowed_origins."""
+    from havn.engine.embed import frame_ancestors_policy
+
+    try:
+        from havn.server.deps import _get_config
+
+        origins = _get_config().sharing.embed.allowed_origins
+    except Exception:
+        origins = []
+    return frame_ancestors_policy(origins)
+
+# ---------------------------------------------------------------------------
+# OpenTelemetry: one span per API request, when telemetry.opentelemetry is on
+# ---------------------------------------------------------------------------
+
+@app.middleware("http")
+async def otel_request_spans(request, call_next):
+    from havn.server.tracing import request_tracer, traced_request
+
+    tracer = request_tracer()
+    if tracer is None:
+        return await call_next(request)
+    return await traced_request(tracer, request, call_next)
 
 # ---------------------------------------------------------------------------
 # Memory management: periodic checkpoint to release DuckDB buffers
@@ -168,6 +223,46 @@ async def memory_management_middleware(request, call_next):
     return response
 
 # ---------------------------------------------------------------------------
+# Branch warehouses: notice a git checkout and follow it
+# ---------------------------------------------------------------------------
+
+def _tracks_warehouse(path: str) -> bool:
+    """API requests that may use the warehouse connection.
+
+    Event streams stay open for as long as a tab does; counting them as
+    in flight would hold every branch switch back forever.
+    """
+    return (
+        path.startswith("/api/")
+        and not path.endswith("/events")
+        and not path.startswith("/api/export")
+    )
+
+
+@app.middleware("http")
+async def branch_switch_middleware(request, call_next):
+    """Switch to the checked-out branch's warehouse before serving a request.
+
+    The check reads .git/HEAD at most once a second; the switch itself waits
+    until nothing else is using the connection (see deps.sync_branch_warehouse).
+    """
+    if not _tracks_warehouse(request.url.path):
+        return await call_next(request)
+    from starlette.concurrency import run_in_threadpool
+
+    from havn.server.deps import request_finished, request_started, sync_branch_warehouse
+
+    request_started()
+    try:
+        try:
+            await run_in_threadpool(sync_branch_warehouse)
+        except Exception as e:
+            logger.debug("Branch sync skipped: %s", e)
+        return await call_next(request)
+    finally:
+        request_finished()
+
+# ---------------------------------------------------------------------------
 # Include all route modules
 # ---------------------------------------------------------------------------
 
@@ -189,6 +284,7 @@ from havn.server.routes.collaboration import (  # noqa: E402
 )
 from havn.server.routes.lint import router as lint_router  # noqa: E402
 from havn.server.routes.masking import router as masking_router  # noqa: E402
+from havn.server.routes.governance import router as governance_router  # noqa: E402
 from havn.server.routes.wiki import router as wiki_router  # noqa: E402
 from havn.server.routes.rewind import router as rewind_router  # noqa: E402
 from havn.server.routes.sentinel import router as sentinel_router  # noqa: E402
@@ -206,15 +302,22 @@ from havn.server.routes.dashboards import router as dashboards_router  # noqa: E
 from havn.server.routes.jobs import router as jobs_router  # noqa: E402
 from havn.server.routes.pr import router as pr_router  # noqa: E402
 from havn.server.routes.backup import router as backup_router  # noqa: E402
+from havn.server.routes.branch import router as branch_router  # noqa: E402
 from havn.server.routes.prometheus import router as prometheus_router  # noqa: E402
 from havn.server.routes.resources import router as resources_router  # noqa: E402
 from havn.server.routes.semantic import router as semantic_router  # noqa: E402
 from havn.server.routes.sql_api import router as sql_api_router  # noqa: E402
 from havn.server.routes.export import router as export_router  # noqa: E402
 from havn.server.routes.streaming import router as streaming_router  # noqa: E402
+from havn.server.routes.live import router as live_router  # noqa: E402
 from havn.server.routes.unit_tests import router as unit_tests_router  # noqa: E402
 from havn.server.routes.bind import router as bind_router  # noqa: E402
 from havn.server.routes.rename import router as rename_router  # noqa: E402
+from havn.server.routes.perf import router as perf_router  # noqa: E402
+from havn.server.routes.sharing import router as sharing_router  # noqa: E402
+from havn.server.routes.reports import router as reports_router  # noqa: E402
+from havn.server.routes.ask import router as ask_router  # noqa: E402
+from havn.server.routes.changesets import router as changesets_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(files_router)
@@ -233,6 +336,7 @@ app.include_router(deploy_router)
 app.include_router(collaboration_router)
 app.include_router(lint_router)
 app.include_router(masking_router)
+app.include_router(governance_router)
 app.include_router(wiki_router)
 app.include_router(rewind_router)
 app.include_router(sentinel_router)
@@ -247,13 +351,20 @@ app.include_router(dashboards_router)
 app.include_router(jobs_router)
 app.include_router(pr_router)
 app.include_router(backup_router)
+app.include_router(branch_router)
 app.include_router(prometheus_router)
 app.include_router(resources_router)
 app.include_router(semantic_router)
 app.include_router(sql_api_router)
 app.include_router(export_router)
 app.include_router(streaming_router)
+app.include_router(live_router)
 app.include_router(unit_tests_router)
+app.include_router(perf_router)
+app.include_router(sharing_router)
+app.include_router(reports_router)
+app.include_router(ask_router)
+app.include_router(changesets_router)
 
 # Register WebSocket endpoints (can't use APIRouter for WebSocket)
 register_websocket(app)

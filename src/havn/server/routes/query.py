@@ -13,12 +13,12 @@ from pydantic import BaseModel, Field
 from havn.server.deps import (
     DbConn,
     DbConnReadOnly,
+    _govern,
     _require_permission,
     _serialize,
     _validate_identifier,
 )
-from havn.engine.masking import apply_masking, list_policies, create_policy, delete_policy
-from havn.engine.masking_rewriter import rewrite_query_with_masking, MaskedColumnAccessError
+from havn.engine.masking import list_policies, create_policy, delete_policy
 from havn.server.routes.masking import MANAGE_MASKING_PERMISSION
 
 logger = logging.getLogger("havn.server")
@@ -87,12 +87,15 @@ _QUERY_TIMEOUT_SECONDS = 30  # fallback; overridden per-role below
 @router.post("/api/query/explain")
 def explain_endpoint(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
     """Run EXPLAIN on a SQL query and return structured plan + raw text."""
-    _require_permission(request, "read")
+    user = _require_permission(request, "read")
     _validate_query_sql(req.sql)
+    # A plan carries row estimates (and, analysed, actual counts) of what it
+    # reads, so it is planned for the governed query, not the raw one.
+    sql = _govern(req.sql, user, conn, params=req.params).sql
     try:
         from havn.engine.explain import explain_query as _explain_query, plan_to_dict
 
-        plan_node, raw = _explain_query(conn, req.sql, params=req.params)
+        plan_node, raw = _explain_query(conn, sql, params=req.params)
         return {"plan": plan_to_dict(plan_node), "raw": raw}
     except Exception as e:
         logger.warning("EXPLAIN failed: %s", e)
@@ -102,12 +105,13 @@ def explain_endpoint(request: Request, req: ExplainRequest, conn: DbConnReadOnly
 @router.post("/api/query/explain-analyze")
 def explain_analyze_endpoint(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
     """Run EXPLAIN ANALYZE on a SQL query and return structured plan + raw text."""
-    _require_permission(request, "read")
+    user = _require_permission(request, "read")
     _validate_query_sql(req.sql)
+    sql = _govern(req.sql, user, conn, params=req.params).sql
     try:
         from havn.engine.explain import explain_analyze_query as _explain_analyze, plan_to_dict
 
-        plan_node, raw = _explain_analyze(conn, req.sql, params=req.params)
+        plan_node, raw = _explain_analyze(conn, sql, params=req.params)
         return {"plan": plan_to_dict(plan_node), "raw": raw}
     except Exception as e:
         logger.warning("EXPLAIN ANALYZE failed: %s", e)
@@ -117,12 +121,13 @@ def explain_analyze_endpoint(request: Request, req: ExplainRequest, conn: DbConn
 @router.post("/api/query/profile")
 def profile_query(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
     """Run EXPLAIN ANALYZE on a SQL query and return the profiled plan."""
-    _require_permission(request, "read")
+    user = _require_permission(request, "read")
     _validate_query_sql(req.sql)
+    sql = _govern(req.sql, user, conn, params=req.params).sql
     try:
         from havn.engine.explain import explain_analyze_query as _explain_analyze, plan_to_dict
 
-        plan_node, raw = _explain_analyze(conn, req.sql, params=req.params)
+        plan_node, raw = _explain_analyze(conn, sql, params=req.params)
         return {"plan": plan_to_dict(plan_node), "raw": raw}
     except Exception as e:
         logger.warning("EXPLAIN ANALYZE failed: %s", e)
@@ -244,147 +249,74 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
         finally:
             conn_rw.close()
 
-    # Validate the SQL is a safe read-only query
-    _validate_query_sql(sql)
+    # Validation, governance rewrites (masking, and anything added to
+    # prepare_governed_sql later), the role timeout and post-query masking
+    # all live in the shared governed read path, so dashboards, published
+    # links and reports apply exactly the same rules as this endpoint.
+    from havn.engine.governed_query import (
+        GovernedQueryError,
+        QueryIdentity,
+        run_governed_query,
+    )
 
-    # Pre-query masking: rewrite SQL to inject masking at column source level
     try:
-        rewritten_sql, rewrite_ok, handled_ids = rewrite_query_with_masking(
-            sql, user["role"], conn,
+        data = run_governed_query(
+            conn,
+            sql,
+            QueryIdentity.from_user(user, source="query"),
+            params=req.params,
+            limit=req.limit,
+            offset=req.offset,
+            timeout_s=get_timeout_for_role(user.get("role", "viewer")),
         )
-    except MaskedColumnAccessError as e:
-        raise HTTPException(403, str(e))
-    sql_to_execute = rewritten_sql if rewrite_ok else sql
+    except GovernedQueryError as e:
+        if e.status_code == 400:
+            logger.warning("Query failed: %s", e)
+        raise HTTPException(e.status_code, str(e))
+    duration_ms = data.pop("duration_ms", 0)
 
-    try:
-        import threading
-
-        query_result: dict = {}
-        query_error: list[Exception] = []
-
-        def _exec_query():
+    # Log slow queries
+    if duration_ms >= _SLOW_QUERY_THRESHOLD_MS:
+        try:
+            from havn.engine.database import ensure_meta_table
+            from havn.engine.write_queue import cursor_for
+            from havn.server.deps import _get_shared_conn
+            conn_rw = cursor_for(_get_shared_conn())
             try:
-                # Safety: if no LIMIT in the SQL and no limit param, inject a
-                # server-side cap so DuckDB never buffers millions of rows.
-                # The response includes total_rows so the user knows it was capped.
-                SERVER_ROW_CAP = 50_000
-                # Trailing newline before the closing paren so a query that
-                # ends with a `-- line comment` can't swallow the wrapper.
-                sql_clean = sql_to_execute.strip().rstrip(";") + "\n"
-                has_limit = bool(re.search(r'\bLIMIT\b', sql_to_execute, re.IGNORECASE))
-                effective_limit = req.limit
-
-                if req.offset > 0 and effective_limit is not None:
-                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q OFFSET {req.offset} LIMIT {effective_limit}"
-                elif effective_limit is not None:
-                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q LIMIT {effective_limit}"
-                elif not has_limit:
-                    # No limit anywhere — inject server cap into the SQL itself
-                    # so DuckDB can optimize and stop scanning early. Keep the
-                    # caller's offset: dropping it here silently re-served page 1
-                    # to clients paginating without an explicit limit.
-                    offset_clause = f"OFFSET {req.offset} " if req.offset > 0 else ""
-                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q {offset_clause}LIMIT {SERVER_ROW_CAP}"
-                    effective_limit = SERVER_ROW_CAP
-                elif req.offset > 0:
-                    # SQL has its own LIMIT; apply just the offset
-                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q OFFSET {req.offset}"
-                else:
-                    wrapped = sql_to_execute
-
-                # Validate what actually runs, not only what was sent: the
-                # wrapper and the masking rewrite both change the text.
-                if wrapped != sql:
-                    validate_read_only_query(wrapped)
-                result = conn.execute(wrapped, req.params)
-                columns = [desc[0] for desc in result.description]
-                column_types = [str(desc[1]) for desc in result.description]
-                if effective_limit is not None:
-                    rows = result.fetchmany(effective_limit)
-                else:
-                    rows = result.fetchall()
-                query_result["data"] = {
-                    "columns": columns,
-                    "column_types": column_types,
-                    "rows": [[_serialize(v) for v in row] for row in rows],
-                    "row_count": len(rows),
-                    "truncated": effective_limit is not None and len(rows) == effective_limit,
-                    "offset": req.offset,
-                    "limit": effective_limit,
-                }
-            except Exception as e:
-                query_error.append(e)
-
-        query_timeout = get_timeout_for_role(user.get("role", "viewer"))
-        t_start = time.monotonic()
-
-        # Acquire a resource-manager slot so the query shows up in the UI's
-        # active-task list and counts toward the `query` concurrency budget.
-        from havn.engine.resource_manager import current_task as _current_task
-        from havn.engine.resource_manager import get_resource_manager as _get_rm
-
-        _manager = _get_rm()
-        with _manager.acquire_sync("query", f"sql:{sql[:60]}", conn=conn):
-            _task = _current_task()
-            if _task is not None:
-                _manager.register_cancel(_task.task_id, conn.interrupt)
-
-            thread = threading.Thread(target=_exec_query, daemon=True)
-            thread.start()
-            thread.join(timeout=query_timeout)
-
-            if thread.is_alive():
-                conn.interrupt()
-                raise HTTPException(
-                    408,
-                    f"Query exceeded {query_timeout}s timeout. "
-                    f"Try adding filters or a LIMIT clause.",
+                ensure_meta_table(conn_rw)
+                conn_rw.execute(
+                    "INSERT INTO _havn.slow_queries (query_text, duration_ms, row_count) VALUES (?, ?, ?)",
+                    [req.sql[:10_000], duration_ms, len(data["rows"])],
                 )
-        duration_ms = int((time.monotonic() - t_start) * 1000)
+            finally:
+                conn_rw.close()
+        except Exception:
+            logger.debug("Failed to log slow query", exc_info=True)
 
-        if query_error:
-            if isinstance(query_error[0], ReadOnlyQueryError):
-                raise HTTPException(query_error[0].status_code, str(query_error[0]))
-            raise query_error[0]
-        data = query_result["data"]
-        # Post-query masking: skip policies already handled by pre-query rewriting
-        if not rewrite_ok:
-            data["rows"] = apply_masking(
-                data["columns"], data["rows"], user["role"], conn,
-            )
-        elif handled_ids:
-            # Rewrite succeeded but some policies may still need post-query
-            # (conditional policies, unsupported methods). Run post-query
-            # skipping what was already handled.
-            data["rows"] = apply_masking(
-                data["columns"], data["rows"], user["role"], conn,
-                skip_policy_ids=handled_ids,
-            )
+    return data
 
-        # Log slow queries
-        if duration_ms >= _SLOW_QUERY_THRESHOLD_MS:
+    data = result.to_dict()
+    duration_ms = result.duration_ms
+
+    # Log slow queries
+    if duration_ms >= _SLOW_QUERY_THRESHOLD_MS:
+        try:
+            from havn.engine.database import ensure_meta_table
+            from havn.engine.write_queue import cursor_for
+            from havn.server.deps import _get_shared_conn
+            conn_rw = cursor_for(_get_shared_conn())
             try:
-                from havn.engine.database import ensure_meta_table
-                from havn.engine.write_queue import cursor_for
-                from havn.server.deps import _get_shared_conn
-                conn_rw = cursor_for(_get_shared_conn())
-                try:
-                    ensure_meta_table(conn_rw)
-                    conn_rw.execute(
-                        "INSERT INTO _havn.slow_queries (query_text, duration_ms, row_count) VALUES (?, ?, ?)",
-                        [req.sql[:10_000], duration_ms, len(data["rows"])],
-                    )
-                finally:
-                    conn_rw.close()
-            except Exception:
-                logger.debug("Failed to log slow query", exc_info=True)
+                ensure_meta_table(conn_rw)
+                conn_rw.execute(
+                    "INSERT INTO _havn.slow_queries (query_text, duration_ms, row_count) VALUES (?, ?, ?)",
+                    [req.sql[:10_000], duration_ms, len(data["rows"])],
+                )
+            finally:
+                conn_rw.close()
+        except Exception:
+            logger.debug("Failed to log slow query", exc_info=True)
 
-        return data
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.warning("Query failed: %s", e)
-        raise HTTPException(400, str(e))
+    return data
 
 
 # --- Tables ---
@@ -504,10 +436,11 @@ def sample_table(
             f'"{catalog}"."{schema_name}"."{table}"' if catalog
             else f'"{schema_name}"."{table}"'
         )
-        result = conn.execute(f"SELECT * FROM {quoted} LIMIT {limit} OFFSET {offset}")
+        governed = _govern(f"SELECT * FROM {quoted} LIMIT {limit} OFFSET {offset}", user, conn)
+        result = conn.execute(governed.sql)
         columns = [desc[0] for desc in result.description]
         rows = [[_serialize(v) for v in row] for row in result.fetchall()]
-        rows = apply_masking(columns, rows, user["role"], conn, schema=schema, table=table)
+        rows = governed.post_mask(columns, rows, conn)
         return {
             "schema": schema,
             "table": table,
@@ -516,6 +449,8 @@ def sample_table(
             "limit": limit,
             "offset": offset,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning("Sample query failed for %s.%s: %s", schema, table, e)
         raise HTTPException(400, str(e))
@@ -536,7 +471,6 @@ def profile_table(
             f'"{catalog}"."{schema_name}"."{table}"' if catalog
             else f'"{schema_name}"."{table}"'
         )
-        row_count = conn.execute(f"SELECT COUNT(*) FROM {quoted}").fetchone()[0]
         if catalog is None:
             cols = conn.execute(
                 "SELECT column_name, data_type FROM information_schema.columns "
@@ -558,13 +492,28 @@ def profile_table(
                 [schema_name, table],
             ).fetchall()
 
+        # Every statistic is computed over what this viewer may see: the
+        # row-filtered relation, with masked columns already masked. Naming
+        # the columns lets the rewriter mask each one before the query runs;
+        # one it cannot (a by-name post-query policy) gets no min/max/avg
+        # and masked samples.
+        select_list = ", ".join(f'"{c}"' for c, _t in cols) if cols else "*"
+        governed = _govern(f"SELECT {select_list} FROM {quoted}", user, conn)
+        source = f"({governed.sql}) AS _g"
+        residual = {
+            p["column_name"].lower() for p in governed.masks
+            if not governed.masking_rewritten or p["id"] not in governed.handled_ids
+        }
+        row_count = conn.execute(f"SELECT COUNT(*) FROM {source}").fetchone()[0]
+
         profiles = []
         for col_name, col_type in cols:
             qcol = f'"{col_name}"'
             stats: dict = {"name": col_name, "type": col_type}
+            post_masked = col_name.lower() in residual
 
             basic = conn.execute(
-                f"SELECT COUNT(*) - COUNT({qcol}), COUNT(DISTINCT {qcol}) FROM {quoted}"
+                f"SELECT COUNT(*) - COUNT({qcol}), COUNT(DISTINCT {qcol}) FROM {source}"
             ).fetchone()
             stats["null_count"] = basic[0]
             stats["distinct_count"] = basic[1]
@@ -583,43 +532,33 @@ def profile_table(
                     "HUGEINT",
                 )
             )
-            if is_numeric:
+            if post_masked:
+                stats["min"] = stats["max"] = None
+                if is_numeric:
+                    stats["avg"] = None
+            elif is_numeric:
                 num = conn.execute(
-                    f"SELECT MIN({qcol}), MAX({qcol}), AVG({qcol}::DOUBLE) FROM {quoted}"
+                    f"SELECT MIN({qcol}), MAX({qcol}), AVG(TRY_CAST({qcol} AS DOUBLE)) FROM {source}"
                 ).fetchone()
                 stats["min"] = _serialize(num[0])
                 stats["max"] = _serialize(num[1])
                 stats["avg"] = round(num[2], 4) if num[2] is not None else None
             else:
                 minmax = conn.execute(
-                    f"SELECT MIN({qcol}::VARCHAR), MAX({qcol}::VARCHAR) FROM {quoted}"
+                    f"SELECT MIN({qcol}::VARCHAR), MAX({qcol}::VARCHAR) FROM {source}"
                 ).fetchone()
                 stats["min"] = minmax[0]
                 stats["max"] = minmax[1]
 
             samples = conn.execute(
-                f"SELECT DISTINCT {qcol}::VARCHAR FROM {quoted} WHERE {qcol} IS NOT NULL LIMIT 5"
+                f"SELECT DISTINCT {qcol}::VARCHAR FROM {source} WHERE {qcol} IS NOT NULL LIMIT 5"
             ).fetchall()
-            stats["sample_values"] = [s[0] for s in samples]
+            values = [[s[0]] for s in samples]
+            if post_masked:
+                values = governed.post_mask([col_name], values, conn)
+            stats["sample_values"] = [v[0] for v in values]
 
             profiles.append(stats)
-
-        # Mask sample_values in profile output
-        from havn.engine.masking import load_policies, apply_mask
-
-        policies = load_policies(conn)
-        for col_profile in profiles:
-            for p in policies:
-                if user["role"] in p["exempted_roles"]:
-                    continue
-                if (p["schema_name"].lower() == schema.lower()
-                        and p["table_name"].lower() == table.lower()
-                        and p["column_name"].lower() == col_profile["name"].lower()):
-                    col_profile["sample_values"] = [
-                        apply_mask(v, p["method"], p["method_config"])
-                        for v in col_profile["sample_values"]
-                    ]
-                    break
 
         return {
             "schema": schema,
@@ -627,6 +566,8 @@ def profile_table(
             "row_count": row_count,
             "columns": profiles,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning("Profile failed for %s.%s: %s", schema, table, e)
         raise HTTPException(400, str(e))
@@ -715,14 +656,19 @@ def export_csv(request: Request, req: ExportRequest):
             logger.debug("Failed to release export-csv cursor", exc_info=True)
 
     try:
-        # Pre-query masking rewrite
+        from havn.engine.governed_query import (
+            GovernedQueryError,
+            QueryIdentity,
+            apply_post_query_governance,
+            prepare_governed_sql,
+        )
+
+        csv_identity = QueryIdentity.from_user(user, source="export")
         try:
-            csv_rewritten, csv_rewrite_ok, csv_handled = rewrite_query_with_masking(
-                req.sql, user["role"], conn,
-            )
-        except MaskedColumnAccessError as e:
-            raise HTTPException(403, str(e))
-        csv_sql = csv_rewritten if csv_rewrite_ok else req.sql
+            csv_prepared = prepare_governed_sql(conn, req.sql, csv_identity, params=req.params)
+        except GovernedQueryError as e:
+            raise HTTPException(e.status_code, str(e))
+        csv_sql = csv_prepared.sql
 
         csv_timeout = get_timeout_for_role(user.get("role", "viewer"))
         try:
@@ -752,13 +698,9 @@ def export_csv(request: Request, req: ExportRequest):
                 if not batch:
                     break
                 serialized = [[_serialize(v) for v in row] for row in batch]
-                if not csv_rewrite_ok:
-                    serialized = apply_masking(columns, serialized, user["role"], conn)
-                elif csv_handled:
-                    serialized = apply_masking(
-                        columns, serialized, user["role"], conn,
-                        skip_policy_ids=csv_handled,
-                    )
+                serialized = apply_post_query_governance(
+                    csv_prepared, columns, serialized, csv_identity, conn,
+                )
                 for row in serialized:
                     writer.writerow(row)
                 yield buf.getvalue()

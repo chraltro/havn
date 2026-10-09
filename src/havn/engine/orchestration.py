@@ -605,8 +605,14 @@ def execute_job(
     trigger: str = "manual",
     emit: Callable | None = None,
     force: bool = False,
+    run_as=None,
 ) -> JobResult:
     """Execute a job's plan step by step, logging to _havn.job_runs.
+
+    ``run_as`` is the user who started the job from the UI or API: its
+    script steps run governed for them if masking or row policies apply
+    (see ``runner.run_script``). Scheduled runs pass None and run as the
+    system.
 
     Transform steps are built by ``build_one_model``, as ``havn transform``
     builds them: every model is rebuilt when ``force`` or the job's
@@ -670,6 +676,20 @@ def execute_job(
         "total": len(plan.steps),
         "pipeline_run_id": run_id,
     })
+
+    # Run span, per-step spans and the end-of-run perf checks (regressions,
+    # retention). Entered by hand so the long body below keeps its shape;
+    # closed in the finally with whatever exception is in flight.
+    import contextlib
+    import sys
+
+    from havn.engine.instrumentation import instrument_run, instrument_step
+
+    instr = contextlib.ExitStack()
+    instr.enter_context(instrument_run(
+        conn, project_dir=project_dir, pipeline_run_id=run_id, kind="job", name=job.name,
+        attributes={"havn.job.trigger": trigger, "havn.job.steps": len(plan.steps)},
+    ))
 
     try:
         # Build model map for transform steps
@@ -755,6 +775,8 @@ def execute_job(
 
             step_start = time.perf_counter()
             step_result: dict = {"step": step.step, "type": step.type, "target": step.target}
+            step_span = instrument_step(run_id, step.target, step.type, {"havn.step.number": step.step})
+            step_outcome = step_span.__enter__()
 
             # Capture previous row count for delta display
             prev_rows = None
@@ -785,6 +807,7 @@ def execute_job(
                         timeout=_remaining_s(),
                         use_circuit_breaker=False,
                         pipeline_run_id=run_id,
+                        run_as=run_as,
                     )
                     if r.get("orphaned"):
                         step_result["orphaned"] = True
@@ -850,6 +873,7 @@ def execute_job(
                                 timeout=_remaining_s(),
                                 use_circuit_breaker=False,
                                 pipeline_run_id=run_id,
+                                run_as=run_as,
                             )
                             if r.get("orphaned"):
                                 step_result["orphaned"] = True
@@ -878,6 +902,13 @@ def execute_job(
                         pass
 
             result.step_details.append(step_result)
+            if step_result.get("status") == "error":
+                step_outcome["error"] = str(step_result.get("error") or "step failed")
+            step_outcome["attributes"] = {
+                "havn.step.status": step_result.get("status"),
+                "havn.step.rows": step_result.get("rows_affected"),
+            }
+            step_span.__exit__(None, None, None)
 
             _emit("model_end", {
                 "name": step.target,
@@ -979,6 +1010,10 @@ def execute_job(
         })
     finally:
         _cancel_flags.pop(run_id, None)
+        try:
+            instr.__exit__(*sys.exc_info())
+        except Exception as e:
+            logger.debug("Job instrumentation failed to close: %s", e)
 
     return result
 

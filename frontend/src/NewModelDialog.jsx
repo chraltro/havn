@@ -3,10 +3,17 @@ import { api } from "./api";
 import FocusTrap from "./FocusTrap";
 
 /**
- * Dialog for creating new SQL models, notebooks, or ingest scripts.
+ * Dialog for creating new SQL or Python models, notebooks, or ingest scripts.
  */
+
+// What each model language can be materialized as. A Python model's rows
+// only exist once its function has run, so it cannot be a view.
+const MATERIALIZATIONS = {
+  model: ["table", "view"],
+  python: ["table", "incremental"],
+};
 export default function NewModelDialog({ onClose, onCreated }) {
-  const [type, setType] = useState("model"); // "model", "notebook", "ingest"
+  const [type, setType] = useState("model"); // "model", "python", "notebook", "ingest"
   const [name, setName] = useState("");
   const [schema, setSchema] = useState("bronze");
   const [materialized, setMaterialized] = useState("table");
@@ -21,8 +28,9 @@ export default function NewModelDialog({ onClose, onCreated }) {
     setCreating(true);
     setError(null);
     try {
-      if (type === "model") {
-        const result = await api.createModel(name, schema, materialized);
+      if (type === "model" || type === "python") {
+        const language = type === "python" ? "python" : "sql";
+        const result = await api.createModel(name, schema, materialized, "", language);
         if (onCreated) onCreated(result);
       } else if (type === "notebook") {
         const result = await api.createNotebook(name, name);
@@ -48,8 +56,15 @@ export default function NewModelDialog({ onClose, onCreated }) {
 
         <div style={{ marginBottom: "12px" }}>
           <label htmlFor="new-model-type" style={{ display: "block", marginBottom: "4px", fontSize: "12px", color: "var(--havn-text-secondary)" }}>Type</label>
-          <select id="new-model-type" value={type} onChange={(e) => setType(e.target.value)} style={{ width: "100%", padding: "6px", background: "var(--havn-bg-secondary)", color: "var(--havn-text)", border: "1px solid var(--havn-border)", borderRadius: "4px" }}>
+          <select id="new-model-type" value={type} onChange={(e) => {
+            const next = e.target.value;
+            setType(next);
+            // Keep the materialization valid for the new kind of model.
+            const allowed = MATERIALIZATIONS[next];
+            if (allowed && !allowed.includes(materialized)) setMaterialized(allowed[0]);
+          }} style={{ width: "100%", padding: "6px", background: "var(--havn-bg-secondary)", color: "var(--havn-text)", border: "1px solid var(--havn-border)", borderRadius: "4px" }}>
             <option value="model">SQL Model</option>
+            <option value="python">Python Model</option>
             <option value="notebook">Notebook</option>
             <option value="ingest">Ingest Script</option>
           </select>
@@ -61,7 +76,7 @@ export default function NewModelDialog({ onClose, onCreated }) {
             id="new-model-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder={type === "model" ? "my_model" : type === "notebook" ? "my_notebook" : "my_ingest"}
+            placeholder={type === "model" || type === "python" ? "my_model" : type === "notebook" ? "my_notebook" : "my_ingest"}
             style={{ width: "100%", padding: "6px", background: "var(--havn-bg-secondary)", color: "var(--havn-text)", border: "1px solid var(--havn-border)", borderRadius: "4px", boxSizing: "border-box" }}
             autoFocus
             aria-required="true"
@@ -70,7 +85,7 @@ export default function NewModelDialog({ onClose, onCreated }) {
           />
         </div>
 
-        {type === "model" && (
+        {(type === "model" || type === "python") && (
           <>
             <div style={{ marginBottom: "12px" }}>
               <label htmlFor="new-model-schema" style={{ display: "block", marginBottom: "4px", fontSize: "12px", color: "var(--havn-text-secondary)" }}>Schema</label>
@@ -83,10 +98,17 @@ export default function NewModelDialog({ onClose, onCreated }) {
             <div style={{ marginBottom: "12px" }}>
               <label htmlFor="new-model-materialized" style={{ display: "block", marginBottom: "4px", fontSize: "12px", color: "var(--havn-text-secondary)" }}>Materialization</label>
               <select id="new-model-materialized" value={materialized} onChange={(e) => setMaterialized(e.target.value)} style={{ width: "100%", padding: "6px", background: "var(--havn-bg-secondary)", color: "var(--havn-text)", border: "1px solid var(--havn-border)", borderRadius: "4px" }}>
-                <option value="table">table</option>
-                <option value="view">view</option>
+                {MATERIALIZATIONS[type].map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
               </select>
             </div>
+            {type === "python" && (
+              <p style={{ margin: "0 0 12px", fontSize: "12px", color: "var(--havn-text-secondary)", lineHeight: 1.5 }}>
+                Creates <code>transform/{schema}/{name.trim() || "my_model"}.py</code> with a <code>@model</code> function.
+                Read other models with <code>ref("schema.name")</code> and return a relation or DataFrame.
+              </p>
+            )}
           </>
         )}
 

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { api } from "./api";
+import ChangeSetCard from "./ChangeSetCard";
 
 const AGENTS = [
   {
@@ -35,6 +36,15 @@ const AGENTS = [
     ],
   },
 ];
+
+// Review: the agent edits a copy and its changes come back as a verified
+// change set. Auto: it writes project files directly. Ask: read-only.
+const MODE_INFO = {
+  review: { label: "Review", title: "Review mode: edits are verified as a change set before you apply them" },
+  auto: { label: "Auto", title: "Auto mode: agent can read and write project files directly" },
+  ask: { label: "Ask", title: "Ask mode: agent can only read files" },
+};
+const MODE_NEXT = { review: "auto", auto: "ask", ask: "review" };
 
 function timestamp() {
   const d = new Date();
@@ -268,7 +278,7 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
     } catch {}
     for (const a of AGENTS) {
       const savedMessages = (saved[a.id] && saved[a.id].messages) || [];
-      init[a.id] = { messages: savedMessages, isConnected: false, isStreaming: false, permissionMode: "auto", selectedModel: "" };
+      init[a.id] = { messages: savedMessages, isConnected: false, isStreaming: false, permissionMode: "review", selectedModel: "" };
     }
     return init;
   });
@@ -308,7 +318,7 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
   }, [agentStates]);
 
   // Current agent shorthand
-  const cur = agentStates[selectedAgent] || { messages: [], isConnected: false, isStreaming: false, permissionMode: "auto", selectedModel: "" };
+  const cur = agentStates[selectedAgent] || { messages: [], isConnected: false, isStreaming: false, permissionMode: "review", selectedModel: "" };
 
   useEffect(() => {
     // Goes through the api client so the bearer token is attached; a bare
@@ -337,7 +347,7 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
 
     ws.onopen = () => {
       const st = agentStatesRef.current[agentId] || {};
-      ws.send(JSON.stringify({ type: "start", agent: agentId, model: st.selectedModel || "" }));
+      ws.send(JSON.stringify({ type: "start", agent: agentId, model: st.selectedModel || "", mode: st.permissionMode || "review" }));
     };
 
     ws.onmessage = (event) => {
@@ -362,6 +372,18 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
         });
       } else if (data.type === "mode_changed") {
         updateAgent(agentId, { permissionMode: data.mode });
+      } else if (data.type === "changeset" && data.changeset) {
+        // One card per change set: a newer revision or report replaces it.
+        const cs = data.changeset;
+        updateAgent(agentId, (s) => {
+          const others = s.messages.filter((m) => !(m.role === "changeset" && m.changeset?.id === cs.id));
+          return { ...s, messages: [...others, { role: "changeset", changeset: cs, ts: timestamp() }] };
+        });
+      } else if (data.type === "changeset_ignored") {
+        updateAgent(agentId, (s) => ({
+          ...s,
+          messages: [...s.messages, { role: "system", content: `Not carried over (outside model files): ${(data.paths || []).join(", ")}`, ts: timestamp() }],
+        }));
       } else if (data.type === "model_changed") {
         updateAgent(agentId, { selectedModel: data.model });
       } else if (data.type === "chunk") {
@@ -533,7 +555,7 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
   };
 
   const toggleMode = () => {
-    const newMode = cur.permissionMode === "auto" ? "ask" : "auto";
+    const newMode = MODE_NEXT[cur.permissionMode] || "review";
     updateAgent(selectedAgent, { permissionMode: newMode });
     const ws = socketsRef.current[selectedAgent];
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -677,6 +699,20 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
             );
           }
 
+          if (msg.role === "changeset") {
+            return (
+              <div key={`cs-${msg.changeset.id}`} style={{ margin: "6px 0" }}>
+                <ChangeSetCard
+                  changeset={msg.changeset}
+                  onOpenFile={onOpenFile}
+                  onChanged={(next) => {
+                    if (next.status === "applied") onFileChangedRef.current?.();
+                  }}
+                />
+              </div>
+            );
+          }
+
           // User message
           if (msg.role === "user") {
             return (
@@ -760,16 +796,12 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
             onClick={toggleMode}
             style={{
               ...st.modeBtn,
-              ...(permissionMode === "auto" ? st.modeBtnAuto : st.modeBtnAsk),
+              ...(permissionMode === "ask" ? st.modeBtnAsk : st.modeBtnAuto),
             }}
-            title={
-              permissionMode === "auto"
-                ? "Auto mode: agent can read and write files"
-                : "Ask mode: agent can only read files"
-            }
+            title={MODE_INFO[permissionMode]?.title || MODE_INFO.review.title}
           >
-            <span style={st.modeDot(permissionMode === "auto")} />
-            {permissionMode === "auto" ? "Auto" : "Ask"}
+            <span style={st.modeDot(permissionMode !== "ask")} />
+            {MODE_INFO[permissionMode]?.label || "Review"}
           </button>
           {(() => {
             const agent = AGENTS.find((a) => a.id === selectedAgent);

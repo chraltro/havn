@@ -162,3 +162,22 @@ The Monaco editor in `havn serve`.
 | Unit tests (fixed input rows, expected output) | Supported | `tests/unit/*.yml` declares mock upstream rows and the expected output; `havn test` runs each case on an in-memory DuckDB with the project's macros, reading nothing from the warehouse. An unmocked upstream is an error, not a fallback. Incremental models are tested as a full refresh: `incremental_filter` and the merge strategy are not exercised. |
 | Anomaly detection | Supported | Statistical checks over run history, configured under `quality.anomaly_detection` and surfaced in the web UI. |
 | `havn diff` | Supported | Row-level diff of what a change would do, before you build it. |
+
+## Governance, branches, Python models, reports and live models
+
+| Feature | Status | Notes |
+|---|---|---|
+| Governed Python (OS-level isolation) | Partial | Scripts, notebooks and jobs started by a governed user run in a separate process whose `db` sends SQL to the server. On Windows the server holds the warehouse file and WAL with an exclusive lock, so the child cannot open them. On Linux and macOS the child runs as the same OS user and could read the file with native code; `governance.isolation: strict` refuses governed Python there. See [Governance](governance.md#residual-risk-read-this). |
+| Governed Python and native code | Partial | Native code in already-loaded extensions (for example `pyarrow.parquet.read_table` on a rewind snapshot or backup file) is not seen by the audit hook on any OS. |
+| Scheduled jobs and `macros/` | Partial | Scheduled jobs run as the system, and Python files in `macros/` run inside the server process, so anyone who can edit them can run unrestricted code. |
+| Branch warehouses on DuckLake | Not supported | A DuckLake project never resolves to a branch warehouse: DuckLake has no writable fork of a catalog and defer cannot attach a DuckLake base. See [Branches](branches.md#limits). |
+| Branch following under `havn serve --auth` | Not supported | Users, tokens and masking policies live in the warehouse and a new branch warehouse has none, so the server does not follow checkouts when auth is on. |
+| Ad-hoc queries on a branch | Partial | Queries in the web UI and `havn query` see only what the branch warehouse holds. Unbuilt models are read from the base during builds, not by ad-hoc queries. Query the base with `--env prod`. |
+| Python models as `view`, `ephemeral` or `microbatch` | Not supported | A `.py` model builds as a table, incremental (not microbatch) or snapshot. View and ephemeral are stored SQL that something reads, and microbatch substitutes `{start}` and `{end}` into SQL text. |
+| Column lineage through a Python model | Not supported | Lineage is not traced through a function. Impact analysis lists a Python consumer as possibly affected and `havn rename-column` reports it as a blocker to edit by hand. See [Python models](python-models.md#everything-else). |
+| Report charts | Partial | Chart widgets in scheduled reports need `pip install "havn[reports]"` (matplotlib). Without it reports carry tables and a text-only PDF. |
+| Report schedules | Partial | Cron schedules are evaluated in the server's local time by the scheduler that also runs job schedules. |
+| Live models: hard deletes downstream | Partial | With the default `cdc_deletes=hard` a deleted key's row is removed, so a live model downstream never sees the delete. Use `cdc_deletes=soft` and filter `WHERE NOT _havn_deleted` there. |
+| Live models: writes from other processes | Partial | The in-process event bus wakes the runner instantly; writes from another process are seen at the next `poll_interval`. |
+| Live models: full-refresh sources | Not supported | A table replaced wholesale has no ordering a watermark could follow. |
+

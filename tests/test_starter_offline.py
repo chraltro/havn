@@ -47,6 +47,8 @@ def test_starter_project_builds_offline(tmp_path, monkeypatch):
     try:
         assert conn.execute("SELECT count(*) FROM landing.earthquakes").fetchone()[0] == 25
         assert conn.execute("SELECT count(*) FROM gold.region_risk").fetchone()[0] >= 3
+        # The starter's Python model built from the same sample.
+        assert conn.execute("SELECT count(*) FROM gold.magnitude_frequency").fetchone()[0] >= 3
         failed = conn.execute(
             "SELECT model_path, expression, detail FROM _havn.assertion_results WHERE NOT passed"
         ).fetchall()
@@ -57,3 +59,20 @@ def test_starter_project_builds_offline(tmp_path, monkeypatch):
         assert errors == []
     finally:
         conn.close()
+
+
+def test_starter_python_model_is_a_dag_node(tmp_path, monkeypatch):
+    """The starter's one Python model is discovered, ordered after its ref()
+    upstream and read cleanly, without anything being run."""
+    from havn.engine.transform import build_dag, discover_all_models
+    from havn.engine.transform.python_models import python_validation_errors
+
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+    assert runner.invoke(app, ["init", "demo"]).exit_code == 0
+    models = build_dag(discover_all_models(tmp_path / "demo"))
+    names = [m.full_name for m in models]
+    py = next(m for m in models if m.full_name == "gold.magnitude_frequency")
+    assert py.is_python and py.depends_on == ["silver.earthquake_events"]
+    assert names.index("silver.earthquake_events") < names.index("gold.magnitude_frequency")
+    assert python_validation_errors(py) == []

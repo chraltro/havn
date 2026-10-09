@@ -2,7 +2,11 @@
 
 ## /metrics — Prometheus scrape
 
-Text-exposition format. Scrape with Prometheus or VictoriaMetrics:
+Text-exposition format. Off until `telemetry.prometheus.enabled: true` in
+project.yml (or `HAVN_METRICS_TOKEN` is set). Besides the process series below
+it carries per-model, job and queue series read from the warehouse, and
+respects auth; see [Telemetry](telemetry) for the full list, OpenTelemetry
+traces and OpenLineage events. Scrape with Prometheus or VictoriaMetrics:
 
 ```yaml
 scrape_configs:

@@ -90,16 +90,19 @@ def get_primary_key(sql: str, project_config=None, model_full_name: str = "") ->
 
 
 def _get_column_info(
-    conn: duckdb.DuckDBPyConnection, schema: str, table: str
+    conn: duckdb.DuckDBPyConnection, schema: str, table: str, catalog: str | None = None
 ) -> dict[str, str]:
-    """Get column name -> type mapping for an existing table."""
+    """Get column name -> type mapping for an existing table.
+
+    ``catalog`` reads an attached database instead of the connection's own.
+    """
     try:
         rows = conn.execute(
             "SELECT column_name, data_type FROM information_schema.columns "
-            "WHERE table_catalog = current_database() "
+            "WHERE lower(table_catalog) = lower(coalesce(?, current_database())) "
             "AND table_schema = ? AND table_name = ? "
             "ORDER BY ordinal_position",
-            [schema, table],
+            [catalog, schema, table],
         ).fetchall()
         return {row[0]: row[1] for row in rows}
     except Exception as e:
@@ -174,18 +177,20 @@ def _serialize(value):
     return str(value)
 
 
-def _table_exists(conn: duckdb.DuckDBPyConnection, schema: str, table: str) -> bool:
-    """Check if a table/view exists in this warehouse.
+def _table_exists(
+    conn: duckdb.DuckDBPyConnection, schema: str, table: str, catalog: str | None = None
+) -> bool:
+    """Check if a table/view exists in this warehouse (or in ``catalog``).
 
-    Scoped to the current database: information_schema spans every attached
-    one, so a model only the defer target holds looked present here.
+    Scoped to one database: information_schema spans every attached one, so a
+    model only the defer target holds looked present here.
     """
     try:
         result = conn.execute(
             "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_catalog = current_database() "
+            "WHERE lower(table_catalog) = lower(coalesce(?, current_database())) "
             "AND table_schema = ? AND table_name = ?",
-            [schema, table],
+            [catalog, schema, table],
         ).fetchone()
         return result[0] > 0 if result else False
     except Exception as e:
@@ -233,8 +238,12 @@ def diff_model(
     target_table: str,
     primary_key: list[str] | None = None,
     full: bool = False,
+    target_catalog: str | None = None,
 ) -> DiffResult:
     """Compare a model's SELECT output against its currently materialized table.
+
+    ``target_catalog`` compares against the table in an attached database
+    instead of this one: a branch warehouse's model against the base's copy.
 
     Args:
         conn: DuckDB connection
@@ -261,8 +270,10 @@ def diff_model(
     total_after = conn.execute("SELECT COUNT(*) FROM _havn_diff_new").fetchone()[0]
 
     # Step 3: Check if target exists
-    target_exists = _table_exists(conn, target_schema, target_table)
+    target_exists = _table_exists(conn, target_schema, target_table, target_catalog)
     target_ref = f'"{target_schema}"."{target_table}"'
+    if target_catalog:
+        target_ref = f'"{target_catalog}".{target_ref}'
 
     if not target_exists:
         # Everything is new
@@ -280,7 +291,7 @@ def diff_model(
         )
 
     # Step 4: Get existing table info
-    old_columns = _get_column_info(conn, target_schema, target_table)
+    old_columns = _get_column_info(conn, target_schema, target_table, target_catalog)
     total_before = conn.execute(f"SELECT COUNT(*) FROM {target_ref}").fetchone()[0]
 
     # Step 5: Compute schema changes
@@ -396,6 +407,46 @@ def diff_model(
     )
 
 
+def _diff_python_model(
+    conn: duckdb.DuckDBPyConnection,
+    model,
+    all_models: list,
+    project_config,
+    full: bool,
+) -> DiffResult:
+    """Diff a Python model: run its function, then diff the staged result.
+
+    The function runs exactly as a SQL model's query does here, as a full
+    (non-incremental) build into a temp table; nothing is written to the
+    model's own table. The primary key comes from project.yml, else from
+    the model's ``unique_key``.
+    """
+    from havn.engine.transform.python_models import (
+        PythonModelError,
+        drop_staged,
+        run_python_model,
+    )
+
+    try:
+        staged = run_python_model(
+            conn, model,
+            model_map={m.full_name: m for m in all_models},
+            is_incremental=False,
+        )
+    except PythonModelError as e:
+        return DiffResult(model=model.full_name, error=f"Model function failed: {e}")
+    try:
+        pk = get_primary_key_from_config(project_config, model.full_name)
+        if pk is None and model.unique_key:
+            pk = [k.strip() for k in model.unique_key.split(",") if k.strip()]
+        return diff_model(
+            conn, f"SELECT * FROM {staged}", model.schema, model.name,
+            primary_key=pk, full=full,
+        )
+    finally:
+        drop_staged(conn, staged)
+
+
 def diff_models(
     conn: duckdb.DuckDBPyConnection,
     transform_dir,
@@ -455,6 +506,11 @@ def diff_models(
     for model in ordered:
         if changed_set is not None and model.full_name not in changed_set:
             results.append(DiffResult(model=model.full_name, skipped=True))
+            continue
+        if model.is_python:
+            results.append(
+                _diff_python_model(conn, model, all_models, project_config, full)
+            )
             continue
         pk = get_primary_key(model.sql, project_config, model.full_name)
         result = diff_model(

@@ -79,6 +79,13 @@ FILE_ACCESS_MESSAGE = (
     "file functions are not available in the bind pass; this model is skipped"
 )
 
+# What the shadow says about a Python model that has never been built: there
+# is no SQL to bind and no recorded columns to stand in for it.
+PYTHON_MODEL_MESSAGE = (
+    "Python model not bound (the bind pass binds SQL only) and not built "
+    "yet, so models reading it are skipped; build it once to bind them"
+)
+
 # DuckDB's own wording when the lockdown refuses something.
 _FILE_ACCESS_MARKERS = (
     "file system operations are disabled",
@@ -506,6 +513,33 @@ def _seed_base_tables(
 # ---------------------------------------------------------------------------
 
 
+def _python_model_columns(
+    source: duckdb.DuckDBPyConnection, models: list[SQLModel]
+) -> dict[str, list[tuple[str, str]]]:
+    """The last-built columns of each Python model in ``models``.
+
+    The built table in the catalog first, then the schema recorded at its
+    last build (``_havn.model_columns``), which survives the table being
+    dropped. Keyed by lowercased full name; a model never built is absent.
+    """
+    names = [m.full_name.lower() for m in models if m.is_python]
+    if not names:
+        return {}
+    found = _fetch_base_columns(source, names)
+    missing = [n for n in names if n not in found]
+    if missing:
+        from .columns import load_model_columns
+
+        for name in missing:
+            try:
+                recorded = load_model_columns(source, name)
+            except Exception:  # pragma: no cover - defensive
+                recorded = []
+            if recorded:
+                found[name] = [(c["name"], c["type"]) for c in recorded]
+    return found
+
+
 def _unavailable(reason: str, started: float) -> BindResult:
     return BindResult(
         duration_ms=int((time.perf_counter() - started) * 1000),
@@ -529,6 +563,12 @@ def _bindable_query(model: SQLModel) -> str:
     are replaced in place the line numbers in any error still point at the
     line the user wrote.
     """
+    if "{watermark" in model.query:
+        # A live model's consumed watermark: an integer at build time, so a
+        # zero binds with the right type and leaves line numbers alone.
+        from havn.engine.live.graph import WATERMARK_RE
+
+        return WATERMARK_RE.sub("0", model.query)
     if model.incremental_strategy != "microbatch":
         return model.query
     if "{start}" not in model.query and "{end}" not in model.query:
@@ -669,6 +709,7 @@ def bind_models(
         for schema in sorted({m.schema for m in ordered}):
             shadow.execute(f"CREATE SCHEMA IF NOT EXISTS {_quote_ident(schema)}")
         _seed_base_tables(shadow, conn, ordered, base_tables)
+        python_columns = _python_model_columns(conn, ordered)
 
         _lock_down(shadow)
 
@@ -695,6 +736,29 @@ def bind_models(
                         message=(
                             f"{model.full_name}: upstream {unbound[0]} was "
                             "skipped by the bind pass"
+                        ),
+                        kind="skipped",
+                    )
+                )
+                skipped.add(model.full_name)
+                continue
+            if model.is_python:
+                # The binder only binds SQL, and running the function here
+                # would run user code on a validate. Its last build's columns
+                # stand in, so the SQL models downstream still bind; with no
+                # build yet, they are skipped like a file-reading upstream.
+                columns = python_columns.get(model.full_name.lower())
+                if columns:
+                    try:
+                        _create_typed_stub(shadow, model.schema, model.name, columns)
+                        result.schemas[model.full_name] = list(columns)
+                        continue
+                    except Exception as e:  # pragma: no cover - defensive
+                        logger.debug("Bind pass could not stub %s: %s", model.full_name, e)
+                result.warnings.append(
+                    BindError(
+                        message=(
+                            f"{model.full_name}: {PYTHON_MODEL_MESSAGE}"
                         ),
                         kind="skipped",
                     )

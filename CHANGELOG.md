@@ -4,6 +4,130 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Row-level security.** Row policies per table (`havn rls`,
+  `/api/governance/row-policies`, admin only, audit logged) filter rows for
+  the roles and users they name, reading the viewer through `havn_user()`,
+  `havn_role()` and `havn_attr('key')` over admin-managed user attributes.
+  Aliases, CTEs, subqueries, joins, `UNION`, `LATERAL` and views over a
+  protected table all read the filtered rows; the rewrite is checked against
+  DuckDB's plan, and a query it cannot follow is refused.
+- **Policies follow lineage.** A column derived from a masked column is
+  masked the same way, `@pii` tags propagate downstream and `@declassify`
+  stops them. A model that drops a row filter's column shows that policy's
+  subjects no rows unless it says `@declassify rows`. `havn pii` lists
+  classifications; `havn validate` and `havn check` warn about PII reaching
+  gold or exported tables unmasked.
+- **Governed Python.** Scripts, notebooks and jobs started by a user that
+  masking or row policies apply to run in a separate process whose `db`
+  sends SQL to the server, which governs it. `import duckdb`, opening the
+  warehouse file and similar escapes are blocked (`governance:` in
+  project.yml; see `docs/governance.md` for what this does and does not
+  cover on each OS).
+- **One governed read path.** `/api/query`, its CSV export, the semantic
+  layer, dashboards, published links, scheduled reports and `havn ask` all
+  run through `engine/governed_query.py`: read-only validation, masking and
+  row policies, the role timeout and post-query masking.
+- **Python models.** A `.py` file in `transform/` with an `@model` function
+  (`from havn import model`) is a DAG node like a `.sql` file. Its config,
+  `ref("schema.name")` calls and local helper imports are read without
+  running it; it builds as a table, incremental or snapshot with the same
+  strategies, assertions, blocking, run log and rewind as SQL, and rebuilds
+  when its code or a helper it imports changes. `havn validate` checks it
+  without running it, and the web UI creates, previews and labels it. The
+  starter project includes one, `gold.magnitude_frequency`.
+- **A warehouse per git branch.** With `branches: {enabled: true, base:
+  prod}`, every branch other than main gets its own warehouse that starts
+  empty and reads every model it has not built from the base, read-only.
+  `havn branch status|build|diff|list|reset|clean`; `havn serve` follows git
+  checkouts and Ship shows "Data changes on this branch". `havn ci generate`
+  writes a base workflow and a PR workflow that posts the data diff as a
+  comment and updates it on each push.
+- **Published dashboards.** A read-only page at `/p/<key>` that works on a
+  phone and shows when its data was built. Signed-in links run as the
+  viewer; public links (admins only) run as a chosen user or role, can expire
+  and be revoked, and only their hash is stored. Published pages run only the
+  dashboard's saved queries, and can be framed by sites in
+  `sharing.embed.allowed_origins`.
+- **Scheduled reports.** A dashboard or one widget by email and Slack on a
+  cron schedule, as the report's owner, with PDF, PNG and CSV attachments and
+  an optional "only send when" condition. Charts need `havn[reports]`;
+  without it reports carry tables and a text-only PDF. `havn reports
+  list|send|preview`.
+- **Ask the warehouse.** `havn ask "question"`, a Data → Ask tab and an
+  `ask` MCP tool answer questions from `metrics/*.yml`: the model picks
+  metrics, dimensions, grain, filters and a time range, and havn validates,
+  compiles and runs that spec. Answers show the spec, the SQL, lineage and
+  freshness; unanswerable questions list the closest metrics and suggest a
+  definition. Providers: the Anthropic API or any OpenAI-compatible endpoint
+  (Ollama, LM Studio), configured under `ai:`. Only catalog metadata is sent
+  to the model unless you opt in. `havn ask --eval` measures accuracy on your
+  own catalog.
+- **Ask without an API key.** `ai: {provider: agent}` asks through the agent
+  sidebar's CLI (Claude Code, Codex or Gemini CLI), already signed in, run
+  headless with no tools. It is the default when no `ANTHROPIC_API_KEY` is set
+  and one of those CLIs is installed.
+- **Verified agent changes.** The agent sidebar's Review mode (now the
+  default) and the `submit_change_set` MCP tool turn proposed edits into
+  change sets that are checked before you apply them: read-only SQL check,
+  validate, bind, affected unit tests, a scratch build with assertions and
+  contracts, and a data diff against the real tables. `havn changes`.
+- **Performance advisor.** Every model build records its duration, rows,
+  memory, spill and the plan DuckDB ran, with operator timings, without
+  running anything twice (`performance.capture_plans`). A build much slower
+  than its own history is reported and alerted with a plan diff. Advice with
+  evidence covers incremental candidates, join fan-out, views worth
+  materialising, unused tables and more, each dismissable. `havn perf`,
+  `havn perf --critical-path`, and Observe → Performance.
+- **Telemetry export** (all off by default): Prometheus at `/metrics`
+  with per-model build, freshness, job and pool metrics; OpenTelemetry traces
+  for runs, models and API requests (`havn[otel]`); OpenLineage events per
+  model build with column lineage.
+- **Live models.** `@config live=true` refreshes an incremental model or view
+  within seconds of new data landing from a webhook, CDC or API-poll source,
+  in DAG order from bronze to gold. `{watermark}` in `incremental_filter`
+  reads only what the model has not applied. `cdc_op=`, `cdc_seq=` and
+  `cdc_deletes=hard|soft` apply inserts, updates and deletes, ignoring
+  duplicate, replayed and out-of-order events. A failing refresh is rolled
+  back, retried with backoff and alerted. `havn live`, Observe → Live, and
+  lag on DAG nodes.
+
+### Changed
+
+- **`/metrics` is off by default.** Turn it on with
+  `telemetry.prometheus.enabled: true` or by setting `HAVN_METRICS_TOKEN`.
+- **Streaming landing tables carry a `_havn_seq` column.** Insert into them
+  with a column list or `BY NAME`, not positional `VALUES`.
+- `havn serve --auth` never follows git branches: users, tokens and policies
+  live in the base warehouse.
+- **`havn mcp` without a running server reads governed** as the role in
+  `HAVN_MCP_ROLE` (default `editor`): masking, row policies and the `_havn`
+  block apply. Set `HAVN_MCP_ROLE=admin` for the old behaviour.
+- Editing a dashboard whose public link or scheduled report runs as a more
+  privileged identity needs that privilege.
+- Performance plans and build errors (`/api/perf/models`, `builds`, `diff`,
+  `runs`) need editor access: they can carry literal values.
+
+### Fixed
+
+- Conditional masking policies are applied before the query runs;
+  `SELECT email AS e` no longer escaped them.
+- Table profiles no longer return unmasked min/max values. `/v1/sql`
+  results are visible only to the user who ran them. Governed users are
+  refused the raw warehouse export and the agent sidebar, and no longer see
+  other users' notebook outputs, collaboration rows, diff samples or
+  failed-assertion details. `_havn` metadata is admin-only through query
+  surfaces.
+- Dashboard filters bind multi-select, date-range and number-range values
+  correctly (they were compared with `=`) and apply to the outermost query,
+  where masking checks them.
+- A view built in a deferred run referenced the defer target and failed once
+  the run finished; it is now built as a table.
+- Joining an already-open transaction sent a second `BEGIN`, which aborts the
+  outer transaction in DuckDB.
+- The DAG's incremental-model badge showed V, the view badge; it is now Δ.
+
 ## [0.2.31] - 2026-10-09
 
 ### Security

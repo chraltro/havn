@@ -64,8 +64,42 @@ class CreateModelRequest(BaseModel):
     schema_name: str = Field(
         default="bronze", pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$"
     )
-    materialized: str = Field(default="table", pattern=r"^(table|view)$")
+    materialized: str = Field(default="table", pattern=r"^(table|view|incremental)$")
     sql: str = Field(default="", max_length=1_000_000)
+    # "python" creates transform/<schema>/<name>.py from a starter template.
+    language: str = Field(default="sql", pattern=r"^(sql|python)$")
+
+
+def _python_model_template(schema: str, name: str, materialized: str) -> str:
+    """A starter Python model: one @model function returning a relation."""
+    extra = ', unique_key="id"' if materialized == "incremental" else ""
+    params = "db, ref, is_incremental, this" if materialized == "incremental" else "db, ref"
+    body = (
+        "    # ref(\"schema.table\") returns a DuckDB relation over a model or table,\n"
+        "    # and makes it a dependency of this model.\n"
+    )
+    if materialized == "incremental":
+        body += (
+            "    rows = db.sql(\"SELECT 1 AS id, current_timestamp AS updated_at\")\n"
+            "    if is_incremental:\n"
+            "        # Only rows newer than what the table already holds.\n"
+            "        rows = rows.filter(f\"updated_at > (SELECT max(updated_at) FROM {this})\")\n"
+            "    return rows\n"
+        )
+    else:
+        body += (
+            "    # Return a relation, a pandas or polars DataFrame, or a pyarrow Table.\n"
+            "    return db.sql(\"SELECT 1 AS placeholder\")\n"
+        )
+    return (
+        f'"""{schema}.{name}: describe what this model builds."""\n'
+        "from havn import model\n"
+        "\n"
+        "\n"
+        f'@model(materialized="{materialized}"{extra})\n'
+        f"def {name}({params}):\n"
+        + body
+    )
 
 
 # --- Model list ---
@@ -103,6 +137,7 @@ def list_models(
             "schema": m.schema,
             "full_name": m.full_name,
             "materialized": m.materialized,
+            "language": getattr(m, "language", "sql"),
             "depends_on": m.depends_on,
             "path": m.path.relative_to(project_dir).as_posix(),
             "content_hash": m.content_hash,
@@ -232,9 +267,15 @@ def _selection_warnings(conn, req: TransformRequest) -> dict | None:
 
 @router.post("/api/diff")
 def run_diff_endpoint(request: Request, req: DiffRequest, conn: DbConn) -> list[dict]:
-    """Diff models: compare SQL output against materialized tables."""
-    _require_permission(request, "read")
+    """Diff models: compare SQL output against materialized tables.
+
+    Counts and schema changes are returned to everyone with read access.
+    Sample rows are raw model output, so they are withheld from a user that
+    masking or row policies apply to on that model.
+    """
+    user = _require_permission(request, "read")
     from havn.engine.diff import diff_models
+    from havn.server.deps import _governed_relation
 
     config = _get_config()
     try:
@@ -267,16 +308,28 @@ def run_diff_endpoint(request: Request, req: DiffRequest, conn: DbConn) -> list[
                     }
                     for sc in r.schema_changes
                 ],
-                "sample_added": r.sample_added,
-                "sample_removed": r.sample_removed,
-                "sample_modified": r.sample_modified,
+                "sample_added": [] if withheld else r.sample_added,
+                "sample_removed": [] if withheld else r.sample_removed,
+                "sample_modified": [] if withheld else r.sample_modified,
+                "samples_withheld": withheld,
                 "skipped": r.skipped,
             }
             for r in results
+            for withheld in [_samples_withheld(user, conn, r.model, _governed_relation)]
         ]
     except Exception as e:
         logger.exception("Diff failed")
         raise HTTPException(400, f"Diff failed: {e}")
+
+
+def _samples_withheld(user: dict, conn, model: str, governed_relation) -> bool:
+    schema, _, name = (model or "").partition(".")
+    if not name:
+        return user.get("role") != "admin"
+    try:
+        return governed_relation(user, conn, schema, name)
+    except Exception:
+        return user.get("role") != "admin"
 
 
 # --- Lineage ---
@@ -397,6 +450,11 @@ def get_explain(
     )
     if target is None:
         raise HTTPException(404, f"Model '{model_name}' not found")
+    if target.is_python:
+        raise HTTPException(
+            400,
+            f"{target.full_name} is a Python model: there is no SQL query to explain",
+        )
 
     if analyze:
         plan, raw_text = explain_analyze_query(conn, target.query)
@@ -448,7 +506,7 @@ def get_model_notebook_view(
     request: Request, model_name: str, conn: DbConnReadOnlyOptional = None
 ) -> dict:
     """Get a notebook-style view for a SQL model."""
-    _require_permission(request, "read")
+    user = _require_permission(request, "read")
     from havn.engine.transform import extract_column_lineage
 
     transform_dir = _get_project_dir() / "transform"
@@ -469,13 +527,16 @@ def get_model_notebook_view(
     sample_data = None
     if conn:
         try:
+            from havn.server.deps import _govern
+
             quoted = f'"{target.schema}"."{target.name}"'
-            result = conn.execute(f"SELECT * FROM {quoted} LIMIT 50")
+            governed = _govern(f"SELECT * FROM {quoted} LIMIT 50", user, conn)
+            result = conn.execute(governed.sql)
             columns = [desc[0] for desc in result.description]
-            rows = result.fetchall()
+            rows = [[_serialize(v) for v in row] for row in result.fetchall()]
             sample_data = {
                 "columns": columns,
-                "rows": [[_serialize(v) for v in row] for row in rows],
+                "rows": governed.post_mask(columns, rows, conn),
             }
         except Exception:
             sample_data = None
@@ -496,6 +557,7 @@ def get_model_notebook_view(
         "path": rel_path,
         "sql_source": sql_source,
         "materialized": target.materialized,
+        "language": getattr(target, "language", "sql"),
         "schema": target.schema,
         "sample_data": sample_data,
         "lineage": lineage,
@@ -681,6 +743,7 @@ def get_model_workbench(
         "schema": target.schema,
         "name": target.name,
         "materialized": target.materialized,
+        "language": getattr(target, "language", "sql"),
         "description": target.description,
         "owner": target.owner,
         "tags": list(target.tags),
@@ -691,6 +754,70 @@ def get_model_workbench(
         "checks": checks,
         "runs": runs,
         "state": state,
+    }
+
+
+# --- Python model preview ---
+
+
+class PythonPreviewRequest(BaseModel):
+    path: str = Field(..., min_length=1, max_length=1000)
+    # The editor buffer, unsaved changes included. None reads the file.
+    content: str | None = Field(default=None, max_length=1_000_000)
+    limit: int = Field(default=100, ge=1, le=1000)
+
+
+@router.post("/api/models/preview-python")
+def preview_python_model_endpoint(
+    request: Request, req: PythonPreviewRequest, conn: DbConnReadOnly
+) -> dict:
+    """Run a Python model's function and return its first rows, writing nothing.
+
+    The editor's Preview for a ``transform/**/*.py`` model: a SQL model's
+    preview runs the SQL in the buffer, and this is the same for a function.
+    The code runs in the server process, so it needs both ``write`` (it is
+    code from the buffer, as good as a saved file) and ``execute``. It gets
+    a read-only connection: ``ref()`` and ``db.sql()`` read, nothing writes.
+    """
+    _require_permission(request, "write")
+    _require_permission(request, "execute")
+    from havn.engine.transform.python_models import (
+        PythonModelError,
+        build_python_model,
+        preview_python_model,
+    )
+
+    project_dir = _get_project_dir()
+    transform_dir = project_dir / "transform"
+    full_path = (project_dir / req.path.replace("\\", "/")).resolve()
+    if full_path.suffix != ".py" or not full_path.is_relative_to(transform_dir.resolve()):
+        raise HTTPException(400, "Preview needs a .py file under transform/")
+    if req.content is None:
+        if not full_path.is_file():
+            raise HTTPException(404, f"File not found: {req.path}")
+        text = read_project_text(full_path)
+    else:
+        text = req.content
+    try:
+        model = build_python_model(full_path, text, transform_dir.resolve())
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if model is None:
+        raise HTTPException(
+            400, "No model function in this file: decorate one with @model or name it model"
+        )
+    models = _discover_models_cached(transform_dir)
+    model_map = {m.full_name: m for m in models}
+    try:
+        data = preview_python_model(conn, model, model_map=model_map, limit=req.limit)
+    except PythonModelError as e:
+        raise HTTPException(400, str(e))
+    return {
+        "model": model.full_name,
+        "columns": data["columns"],
+        "rows": [[_serialize(v) for v in row] for row in data["rows"]],
+        "truncated": data["truncated"],
+        "output": data["output"],
     }
 
 
@@ -708,13 +835,35 @@ def create_model_endpoint(request: Request, req: CreateModelRequest) -> dict:
     if not schema_dir.resolve().is_relative_to(transform_dir.resolve()):
         raise HTTPException(400, "Invalid schema name")
 
+    is_python = req.language == "python"
+    if is_python and req.materialized == "view":
+        raise HTTPException(
+            400,
+            "A Python model cannot be a view: its rows only exist once its "
+            "function has run. Use table or incremental.",
+        )
+
     schema_dir.mkdir(parents=True, exist_ok=True)
 
-    model_path = schema_dir / f"{req.name}.sql"
-    if model_path.exists():
-        raise HTTPException(
-            409, f"Model '{req.schema_name}.{req.name}' already exists"
+    model_path = schema_dir / f"{req.name}.{'py' if is_python else 'sql'}"
+    # Either spelling claims the name: a .sql and a .py of one name are two
+    # definitions of one model, which discovery refuses.
+    for ext in ("sql", "py"):
+        if (schema_dir / f"{req.name}.{ext}").exists():
+            raise HTTPException(
+                409, f"Model '{req.schema_name}.{req.name}' already exists"
+            )
+
+    if is_python:
+        model_path.write_text(
+            req.sql or _python_model_template(req.schema_name, req.name, req.materialized),
+            encoding="utf-8",
         )
+        return {
+            "status": "created",
+            "path": model_path.relative_to(project_dir).as_posix(),
+            "full_name": f"{req.schema_name}.{req.name}",
+        }
 
     sql_content = (
         req.sql
@@ -776,6 +925,10 @@ def run_validate(request: Request, conn_opt: DbConnReadOnlyOptional = None) -> d
         source_columns=source_columns,
         landing_schemas=landing_schemas,
     )
+    if conn_opt is not None:
+        from havn.engine.governance.report import governance_warnings
+
+        errors = list(errors) + governance_warnings(conn_opt, project_dir, config, models)
 
     error_count = sum(1 for e in errors if e.severity == "error")
 
@@ -818,9 +971,15 @@ def run_check(request: Request, conn_opt: DbConnReadOnlyOptional = None) -> dict
             source_columns[full] = {c.name for c in t.columns}
 
     conn = conn_opt
+    user = _require_permission(request, "read")
     errors = validate_models(
         conn, models, known_tables=known_tables, source_columns=source_columns
     )
+    if conn is not None:
+        from havn.engine.governance.report import governance_warnings
+
+        errors = list(errors) + governance_warnings(conn, project_dir, config, models)
+    from havn.server.deps import _governed_relation
 
     # Run inline assertions (-- assert: comments) against live data
     assertion_results: list[dict] = []
@@ -829,12 +988,16 @@ def run_check(request: Request, conn_opt: DbConnReadOnlyOptional = None) -> dict
             if model.assertions:
                 try:
                     results = run_assertions(conn, model)
+                    withheld = _samples_withheld(user, conn, model.full_name, _governed_relation)
                     for ar in results:
                         assertion_results.append({
                             "model": model.full_name,
                             "expression": ar.expression,
                             "passed": ar.passed,
-                            "detail": ar.detail,
+                            "detail": (
+                                "Details withheld: masking or row policies apply to you on this model."
+                                if withheld and ar.detail and not ar.passed else ar.detail
+                            ),
                         })
                 except Exception as e:
                     assertion_results.append({

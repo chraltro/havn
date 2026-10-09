@@ -21,8 +21,12 @@ import { SECTIONS, TAB_TO_SECTION, SECTION_DEFAULT, tabToPath, pathToTab } from 
 import RunSummary from "./RunSummary";
 import SettingsPanel from "./SettingsPanel";
 import MaskingPanel from "./MaskingPanel";
+import GovernancePanel from "./GovernancePanel";
 import QualityPanel from "./QualityPanel";
 import UnitTestsPanel from "./UnitTestsPanel";
+import PerformancePanel from "./PerformancePanel";
+import LivePanel from "./LivePanel";
+import AskPanel from "./AskPanel";
 import WikiPanel from "./WikiPanel";
 import LoginPage from "./LoginPage";
 import ResizeHandle from "./ResizeHandle";
@@ -45,6 +49,7 @@ import CommandPalette from "./CommandPalette";
 import FocusTrap from "./FocusTrap";
 import DashboardListPanel from "./DashboardListPanel";
 import DashboardCanvas from "./DashboardCanvas";
+import ReportsPanel from "./ReportsPanel";
 import WidgetEditor from "./WidgetEditor";
 import DashboardFilterBar from "./DashboardFilterBar";
 import { DashboardProvider, useDashboard } from "./DashboardContext";
@@ -52,6 +57,7 @@ import { useAuth } from "./AuthContext";
 import { WarehouseProvider, useWarehouse } from "./WarehouseContext";
 import { isSystemSchema, schemaCompare } from "./schemaOrder";
 import { PipelineProvider, usePipeline } from "./PipelineContext";
+import { isModelFile, isPythonModelPath, modelNameFromPath, pythonModelTemplate } from "./modelFiles";
 
 
 /** Row cap for the editor preview pane (whole model and single CTE alike). */
@@ -410,6 +416,19 @@ function AppContent() {
   const { tables, files, streams, loadFiles, refreshAll } = useWarehouse();
   const { running, output, runSummary, progress, addOutput, clearOutput, setRunSummary, runTransformAll, runStream, cancelPipeline, runLint, runCurrentScript, runSingleModel, runSelection, runContracts, runPipeline } = usePipeline();
 
+  // A git checkout moved the server onto another warehouse (branch
+  // warehouses): reload what the sidebar shows and say where the data is now.
+  const handleBranchChange = useCallback((b) => {
+    refreshAll();
+    const name = b?.branch || "a detached HEAD";
+    addOutput(
+      "info",
+      b?.active
+        ? `Now on ${name}: showing its branch warehouse (${b.warehouse?.path}); unbuilt models are read from ${b.base?.label}.`
+        : `Now on ${name}: showing the base warehouse.`,
+    );
+  }, [refreshAll, addOutput]);
+
   // Editor state
   const [activeFile, setActiveFile] = useState(null);
   const [sidebarFilter, setSidebarFilter] = useState("");
@@ -699,8 +718,8 @@ function AppContent() {
       setActiveTab("Editor");
       return;
     }
-    if (path.endsWith(".sql") && path.startsWith("transform/") && opts.notebookView) {
-      const parts = path.replace("transform/", "").replace(".sql", "").split("/");
+    if ((path.endsWith(".sql") || isPythonModelPath(path)) && path.startsWith("transform/") && opts.notebookView) {
+      const parts = path.replace("transform/", "").replace(/\.(sql|py)$/, "").split("/");
       if (parts.length >= 2) {
         setModelNotebookName(`${parts[0]}.${parts[1]}`);
         return;
@@ -885,8 +904,8 @@ function AppContent() {
       // Run on save: rebuild this single model / re-run this single
       // script after a successful save, if the toggle is on.
       if (runAfter && runOnSave && !running) {
-        if (activeFile.includes("transform/") && activeFile.endsWith(".sql")) {
-          const modelName = activeFile.replace(/^transform\//, "").replace(/\.sql$/, "").replace(/\//g, ".");
+        if (isModelFile(activeFile, fileContent)) {
+          const modelName = modelNameFromPath(activeFile);
           runSingleModel(modelName).catch(e => addOutput("error", `Run on save failed: ${e.message}`));
         } else if ((activeFile.startsWith("ingest/") || activeFile.startsWith("export/")) && activeFile.endsWith(".py")) {
           runCurrentScript(activeFile).catch(e => addOutput("error", `Run on save failed: ${e.message}`));
@@ -902,7 +921,9 @@ function AppContent() {
   async function createFile(path) {
     path = path.replace(/\\/g, "/");
     if (!path.trim()) return;
-    const defaultContent = path.endsWith(".py")
+    const defaultContent = isPythonModelPath(path)
+      ? pythonModelTemplate(path)
+      : path.endsWith(".py")
       ? '# A DuckDB connection is available as `db`\n\n'
       : path.endsWith(".sql")
       ? `-- config: materialized=table\n\nSELECT 1\n`
@@ -920,14 +941,14 @@ function AppContent() {
   async function deleteFile(path) {
     path = path.replace(/\\/g, "/");
 
-    const isTransform = path.endsWith(".sql") && path.startsWith("transform/");
+    const isTransform = path.startsWith("transform/") && (path.endsWith(".sql") || isPythonModelPath(path));
     const isSeed = path.endsWith(".csv") && path.startsWith("seeds/");
     let dropObject = false;
 
     if (isTransform || isSeed) {
       const parts = path.split("/");
       const fileName = parts[parts.length - 1];
-      const name = fileName.replace(/\.(sql|csv)$/, "");
+      const name = fileName.replace(/\.(sql|csv|py)$/, "");
       const schema = isSeed ? "seeds" : (parts.length >= 3 ? parts[1] : "bronze");
       const choice = await new Promise((resolve) => {
         deleteResolveRef.current = resolve;
@@ -986,6 +1007,11 @@ function AppContent() {
     if (dirty && !(await saveFile({ runAfter: false }))) return;
     if (activeFile.endsWith(".sql")) {
       await runTransformAll(false);
+    } else if (isModelFile(activeFile, fileContent)) {
+      await runSingleModel(modelNameFromPath(activeFile));
+    } else if (activeFile.endsWith(".py") && activeFile.startsWith("transform/")) {
+      // A helper module: it only runs inside the models that import it.
+      addOutput("warn", `${activeFile} is a helper module, not a model; build the models that import it.`);
     } else if (activeFile.endsWith(".py")) {
       await runCurrentScript(activeFile);
     } else if (activeFile.endsWith(".yml") && activeFile.startsWith("contracts/")) {
@@ -994,9 +1020,9 @@ function AppContent() {
   }
 
   async function handleRunSingleModel() {
-    if (!activeFile || !activeFile.includes("transform/") || !activeFile.endsWith(".sql")) return;
+    if (!activeFile || !isModelFile(activeFile, fileContent)) return;
     if (dirty && !(await saveFile({ runAfter: false }))) return;
-    const modelName = activeFile.replace(/^transform\//, "").replace(/\.sql$/, "").replace(/\//g, ".");
+    const modelName = modelNameFromPath(activeFile);
     await runSingleModel(modelName);
   }
 
@@ -1041,8 +1067,27 @@ function AppContent() {
   }
 
   async function previewCurrentFile() {
-    if (!activeFile || !activeFile.endsWith(".sql")) return;
+    if (!activeFile) return;
+    if (isPythonModelPath(activeFile)) return previewPythonModel();
+    if (!activeFile.endsWith(".sql")) return;
     await previewSql(stripModelDirectives(fileContent));
+  }
+
+  /** Run the Python model's function on the editor buffer and show its rows. */
+  async function previewPythonModel() {
+    setPreviewRunning(true);
+    setPreviewError(null);
+    setPreviewLabel("Model function");
+    try {
+      const data = await api.previewPythonModel(activeFile, fileContent, PREVIEW_LIMIT);
+      setPreview(data);
+      if (data.output && data.output.trim()) addOutput("info", data.output.trimEnd());
+    } catch (e) {
+      setPreviewError(e.message);
+      setPreview(null);
+    } finally {
+      setPreviewRunning(false);
+    }
   }
 
   function handleSelectTable(schema, name) {
@@ -1063,7 +1108,10 @@ function AppContent() {
     }
   }
 
-  const isTransformFile = activeFile && activeFile.includes("transform/") && activeFile.endsWith(".sql");
+  // SQL files under transform/ and the .py files there that define a model
+  // function; a helper module opens in the plain editor.
+  const isTransformFile = !!activeFile && isModelFile(activeFile, fileContent);
+  const isPythonModel = isTransformFile && activeFile.endsWith(".py");
   // Ctrl/Cmd+S saves only while a dirty file is open in the editor (notebooks
   // have their own save).
   saveShortcutRef.current = activeTab === "Editor" && activeFile && dirty && !activeFile.endsWith(".dpnb")
@@ -1091,7 +1139,7 @@ function AppContent() {
       onMount={(editor) => { editorRef.current = editor; setEditorInstance(editor); }}
       goToLine={goToLine}
       onFormat={activeFile?.endsWith(".sql") ? formatCurrentFile : undefined}
-      onPreview={activeFile?.endsWith(".sql") ? previewCurrentFile : undefined}
+      onPreview={activeFile?.endsWith(".sql") || isPythonModel ? previewCurrentFile : undefined}
       onStatus={setBindStatus}
       onOpenModel={(path, line, col) => openFileAtLine(path, line || 1, col || 1)}
       onPreviewCte={(sql, name) => previewSql(sql, name ? `CTE ${name}` : "CTE")}
@@ -1172,7 +1220,7 @@ function AppContent() {
             onContracts={runContracts}
             onCancel={cancelPipeline}
           />
-          <EnvironmentSwitcher showConfirm={showConfirm} />
+          <EnvironmentSwitcher showConfirm={showConfirm} onBranchChange={handleBranchChange} />
           {currentUser && (
             <div className="havn-userinfo" style={styles.userInfo}>
               <span style={styles.userName}>{currentUser.display_name || currentUser.username}</span>
@@ -1386,6 +1434,7 @@ function AppContent() {
                 {isTransformFile ? (
                 <ModelWorkbench
                   activeFile={activeFile}
+                  language={isPythonModel ? "python" : "sql"}
                   content={fileContent}
                   dirty={dirty}
                   running={running}
@@ -1443,7 +1492,8 @@ function AppContent() {
             )}
             {activeTab === "Query" && <ErrorBoundary name="Query"><QueryPanel addOutput={addOutput} onOpenModel={async (key) => { openFile(await resolveModelPath(key)); }} /></ErrorBoundary>}
             {activeTab === "Tables" && <ErrorBoundary name="Tables"><TablesPanel selectedTable={selectedTable} onQueryTable={queryTable} tables={tables} onSelectTable={handleSelectTable} /></ErrorBoundary>}
-            {activeTab === "Data Sources" && <ErrorBoundary name="Data Sources"><DataSourcesPanel addOutput={addOutput} showConfirm={showConfirm} onDataChanged={refreshAll} /></ErrorBoundary>}
+            {activeTab === "Reports" && <ErrorBoundary name="Reports"><ReportsPanel /></ErrorBoundary>}
+            {activeTab === "Data Sources" &&<ErrorBoundary name="Data Sources"><DataSourcesPanel addOutput={addOutput} showConfirm={showConfirm} onDataChanged={refreshAll} /></ErrorBoundary>}
 
             {activeTab === "DAG" && <ErrorBoundary name="DAG"><DAGPanel onOpenFile={openFile} showConfirm={showConfirm} /></ErrorBoundary>}
             {activeTab === "Git" && <ErrorBoundary name="Git"><GitReviewsPanel showConfirm={showConfirm} /></ErrorBoundary>}
@@ -1453,7 +1503,11 @@ function AppContent() {
             {activeTab === "Docs" && <ErrorBoundary name="Docs"><DocsPanel /></ErrorBoundary>}
             {activeTab === "Quality" && <ErrorBoundary name="Quality"><QualityPanel addOutput={addOutput} /></ErrorBoundary>}
             {activeTab === "Unit Tests" && <ErrorBoundary name="Unit Tests"><UnitTestsPanel /></ErrorBoundary>}
+            {activeTab === "Performance" && <ErrorBoundary name="Performance"><PerformancePanel /></ErrorBoundary>}
+            {activeTab === "Live" && <ErrorBoundary name="Live"><LivePanel /></ErrorBoundary>}
+            {activeTab === "Ask" && <ErrorBoundary name="Ask"><AskPanel /></ErrorBoundary>}
             {activeTab === "Masking" && <ErrorBoundary name="Masking"><MaskingPanel showConfirm={showConfirm} /></ErrorBoundary>}
+            {activeTab === "Governance" && <ErrorBoundary name="Governance"><GovernancePanel showConfirm={showConfirm} /></ErrorBoundary>}
             {activeTab === "Wiki" && <ErrorBoundary name="Wiki"><WikiPanel /></ErrorBoundary>}
             {activeTab === "Runs" && <ErrorBoundary name="Runs"><HistoryPanel onOpenFile={openFile} /></ErrorBoundary>}
             {activeTab === "Resources" && <ErrorBoundary name="Resources"><ResourcePanel /></ErrorBoundary>}

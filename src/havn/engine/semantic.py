@@ -38,7 +38,11 @@ from havn.engine.utils import validate_identifier
 
 TIME_GRAINS = ("hour", "day", "week", "month", "quarter", "year")
 
+#: Comparison operators a query-time dimension filter may use.
+FILTER_OPS = ("=", "!=", ">", ">=", "<", "<=", "in", "not in")
+
 _MAX_LITERAL_LEN = 64
+_MAX_IN_VALUES = 100
 
 
 class SemanticError(ValueError):
@@ -217,6 +221,82 @@ def _quote_ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+@dataclass
+class DimensionFilter:
+    """A query-time predicate on one declared dimension (or the time column).
+
+    ``value`` is a scalar for the comparison operators and a list for ``in`` /
+    ``not in``. ``None`` with ``=`` / ``!=`` compiles to ``IS [NOT] NULL``.
+    Values are always emitted as escaped literals, never as SQL.
+    """
+
+    dimension: str
+    op: str = "="
+    value: object = None
+
+    def to_dict(self) -> dict:
+        return {"dimension": self.dimension, "op": self.op, "value": self.value}
+
+    @classmethod
+    def from_any(cls, raw: object) -> "DimensionFilter":
+        if isinstance(raw, DimensionFilter):
+            return raw
+        if not isinstance(raw, dict):
+            raise SemanticError(f"filter must be a mapping, got {type(raw).__name__}")
+        dim = str(raw.get("dimension") or "").strip()
+        if not dim:
+            raise SemanticError("filter is missing 'dimension'")
+        op = str(raw.get("op") or "=").strip().lower()
+        op = {"==": "=", "<>": "!=", "not_in": "not in"}.get(op, op)
+        return cls(dimension=dim, op=op, value=raw.get("value"))
+
+
+def _value_literal(value: object, label: str) -> str:
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, float)):
+        if value != value or value in (float("inf"), float("-inf")):
+            raise SemanticError(f"{label} value must be a finite number")
+        return repr(value)
+    if isinstance(value, (list, tuple, dict)):
+        raise SemanticError(f"{label} value must be a scalar")
+    return _sql_literal(str(value), label)
+
+
+def _compile_filter(f: DimensionFilter, metric: MetricDef) -> str:
+    allowed = list(metric.dimensions)
+    if metric.time_dimension:
+        allowed.append(metric.time_dimension)
+    if f.dimension not in allowed:
+        declared = ", ".join(allowed) or "none declared"
+        raise SemanticError(
+            f"cannot filter metric {metric.name!r} on {f.dimension!r} "
+            f"(filterable: {declared})"
+        )
+    if f.op not in FILTER_OPS:
+        raise SemanticError(
+            f"invalid filter operator {f.op!r} (use one of: {', '.join(FILTER_OPS)})"
+        )
+    col = _quote_ident(f.dimension)
+    label = f"filter on {f.dimension}"
+    if f.op in ("in", "not in"):
+        values = f.value if isinstance(f.value, (list, tuple)) else [f.value]
+        values = [v for v in values if v is not None]
+        if not values:
+            raise SemanticError(f"{label}: '{f.op}' needs at least one value")
+        if len(values) > _MAX_IN_VALUES:
+            raise SemanticError(f"{label}: at most {_MAX_IN_VALUES} values")
+        items = ", ".join(_value_literal(v, label) for v in values)
+        return f"{col} {'NOT IN' if f.op == 'not in' else 'IN'} ({items})"
+    if f.value is None:
+        if f.op == "=":
+            return f"{col} IS NULL"
+        if f.op == "!=":
+            return f"{col} IS NOT NULL"
+        raise SemanticError(f"{label}: '{f.op}' needs a value")
+    return f"{col} {f.op} {_value_literal(f.value, label)}"
+
+
 def compile_metric(
     metric: MetricDef,
     *,
@@ -225,6 +305,8 @@ def compile_metric(
     start: str | None = None,
     end: str | None = None,
     limit: int | None = None,
+    where: list[DimensionFilter | dict] | None = None,
+    order_by: list[tuple[str, bool]] | None = None,
 ) -> str:
     """Compile a metric plus query-time options into a SELECT statement.
 
@@ -237,6 +319,11 @@ def compile_metric(
         start, end: Inclusive lower / exclusive upper bound on the time
             dimension (any string DuckDB can cast to TIMESTAMP).
         limit: Optional row cap appended as LIMIT.
+        where: Query-time dimension filters (see :class:`DimensionFilter`),
+            ANDed with the metric's own ``filters``.
+        order_by: ``[(field, descending)]`` replacing the default ordering by
+            the group-by columns. A field is the metric name, the grain, or
+            one of the selected dimensions.
     """
     dimensions = list(dimensions or [])
     for d in dimensions:
@@ -270,6 +357,8 @@ def compile_metric(
     n_group = len(select_parts) - 1
 
     where_parts = [f"({f})" for f in metric.filters]
+    for raw in where or []:
+        where_parts.append(_compile_filter(DimensionFilter.from_any(raw), metric))
     if start is not None:
         where_parts.append(
             f"{time_col} >= CAST({_sql_literal(start, 'start')} AS TIMESTAMP)"
@@ -289,6 +378,17 @@ def compile_metric(
     if n_group:
         positions = ", ".join(str(i + 1) for i in range(n_group))
         lines.append(f"GROUP BY {positions}")
+    if order_by:
+        orderable = [metric.name, *dimensions] + ([grain] if grain else [])
+        terms = []
+        for field_name, descending in order_by:
+            if field_name not in orderable:
+                raise SemanticError(
+                    f"cannot order by {field_name!r} (use one of: {', '.join(orderable)})"
+                )
+            terms.append(f"{q(field_name)} {'DESC' if descending else 'ASC'}")
+        lines.append("ORDER BY " + ", ".join(terms))
+    elif n_group:
         lines.append(f"ORDER BY {positions}")
     if limit is not None:
         if not isinstance(limit, int) or limit <= 0:

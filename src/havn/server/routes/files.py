@@ -11,7 +11,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from havn.engine.packages import PACKAGES_DIRNAME
-from havn.server.deps import _detect_language, _get_project_dir, _require_permission
+from havn.server.deps import (
+    DbConnReadOnlyOptional,
+    _detect_language,
+    _get_project_dir,
+    _require_permission,
+)
 
 import logging
 
@@ -311,9 +316,14 @@ def save_files(request: Request, req: BatchSaveRequest) -> dict:
 
 
 @router.get("/api/files/{file_path:path}")
-def read_file(request: Request, file_path: str) -> dict:
-    """Read a file's content."""
-    _require_permission(request, "read")
+def read_file(request: Request, file_path: str, conn: DbConnReadOnlyOptional = None) -> dict:
+    """Read a file's content.
+
+    A notebook's saved outputs are what the last person to run it could see,
+    so a user that masking or row policies apply to gets the notebook
+    without them (the hash stays the file's own, so a save still works).
+    """
+    user = _require_permission(request, "read")
     project_dir = _get_project_dir()
     full_path = _safe_project_path(project_dir, file_path)
     if not full_path.exists():
@@ -337,6 +347,18 @@ def read_file(request: Request, file_path: str) -> dict:
         # Typically a file another process holds an exclusive lock on (Windows).
         raise HTTPException(409, f"Cannot read file: {e.strerror or e}")
     fh = _file_hash(content)
+    if full_path.suffix == ".dpnb" and conn is not None:
+        from havn.server.deps import _is_governed
+
+        if _is_governed(user, conn):
+            import json as _json
+
+            from havn.server.routes.notebooks import strip_notebook_outputs
+
+            try:
+                content = _json.dumps(strip_notebook_outputs(_json.loads(content)), indent=2)
+            except (ValueError, TypeError, AttributeError):
+                content = "{}"
     return JSONResponse(
         content={
             "path": file_path,
@@ -472,6 +494,22 @@ def _drop_db_object(full_path: Path, file_path: str) -> str | None:
                 schema = m.group(1)
         except Exception:
             pass
+    elif full_path.suffix == ".py" and normalized.startswith("transform/"):
+        # A Python model: its schema comes from @model(schema=...) or the
+        # folder, exactly as discovery reads it. A helper module is no model
+        # and drops nothing.
+        try:
+            from havn.engine.transform.python_models import build_python_model
+            from havn.textio import read_project_text
+
+            py_model = build_python_model(
+                full_path, read_project_text(full_path), full_path.parents[len(normalized.split("/")) - 2]
+            )
+        except Exception:
+            py_model = None
+        if py_model is None or full_path.name.startswith("_"):
+            return None
+        schema, name = py_model.schema, py_model.name
     elif full_path.suffix == ".csv" and normalized.startswith("seeds/"):
         schema = "seeds"
         name = full_path.stem

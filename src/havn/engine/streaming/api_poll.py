@@ -238,8 +238,11 @@ def _upsert_rows(
                 f"CREATE TABLE {target} AS SELECT * FROM read_json_auto('{safe_path}')"
             )
         else:
+            # BY NAME: a landing table that live models read carries a
+            # _havn_seq column the API response does not, and positional
+            # inserts would also break on a reordered response.
             conn.execute(
-                f"INSERT INTO {target} SELECT * FROM read_json_auto('{safe_path}')"
+                f"INSERT INTO {target} BY NAME SELECT * FROM read_json_auto('{safe_path}')"
             )
     finally:
         try:
@@ -337,6 +340,14 @@ class APIPollConsumer:
 
             # ---- 3. insert ----------------------------------------------
             rows_inserted = _upsert_rows(conn, "landing", self.connector_name, rows)
+            if rows_inserted:
+                # A poll that landed rows is a live source commit.
+                try:
+                    from havn.engine.live.sources import advance_source
+
+                    advance_source(conn, f"landing.{self.connector_name}")
+                except Exception as e:
+                    logger.warning("live advance for landing.%s failed: %s", self.connector_name, e)
 
             # ---- 4 & 5. watermark update --------------------------------
             new_watermark: str | None = None

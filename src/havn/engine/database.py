@@ -40,6 +40,10 @@ def open_warehouse(
         db_config = config.database
         if project_dir is None:
             project_dir = config.project_dir
+        if config.branch.active and not read_only:
+            from havn.engine.branches import write_branch_record
+
+            write_branch_record(config)
     elif isinstance(config, DatabaseConfig):
         db_config = config
     else:

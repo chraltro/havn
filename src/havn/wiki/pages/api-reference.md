@@ -873,6 +873,129 @@ Discard working directory changes for specific files. Requires `write` permissio
 
 Returns: `{status: "discarded", files: [...]}`
 
+## Governance
+
+Admin-only endpoints need the `manage_users` permission (the admin role). Changes are audit logged. See [Governance](governance.md).
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/api/governance` | read | Governance report: policies, classifications, PII reaching gold |
+| GET | `/api/governance/row-policies` | admin | List row-level security policies |
+| POST | `/api/governance/row-policies` | admin | Create a row policy |
+| PUT | `/api/governance/row-policies/{policy_id}` | admin | Update a row policy |
+| DELETE | `/api/governance/row-policies/{policy_id}` | admin | Delete a row policy |
+| PUT | `/api/users/{username}/attributes` | admin | Set a user's attributes, read in policies through `havn_attr('key')` |
+| POST | `/api/governance/preview` | admin | Run a query as another user or role to see what they see |
+
+## Branches
+
+Requires `branches.enabled` in `project.yml`. See [Branches](branches.md).
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/api/branch` | read | Active branch and whether branch warehouses are enabled |
+| GET | `/api/branch/status` | read | Branch, warehouse, locally built versus deferred models |
+| POST | `/api/branch/build` | execute | Build the models the branch changed |
+| POST | `/api/branch/diff` | read | Data diff of the branch's models against the base |
+| GET | `/api/branch/list` | read | Branch warehouses on disk |
+
+## Sharing and Published Dashboards
+
+Published pages are served at `/p/<key>` (a signed-in link id or a public link token) and are the only pages that may be framed, by origins in `sharing.embed.allowed_origins`. See [Dashboards and sharing](dashboards-sharing.md).
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/p/{key}` | link | Published dashboard page (served by the web UI; data comes from `/api/published/...`) |
+| GET | `/api/dashboards/{dashboard_id}/shares` | write | Links for a dashboard |
+| POST | `/api/dashboards/{dashboard_id}/shares` | write (public links: admin) | Create a signed-in or public link |
+| GET | `/api/shares` | write | All links |
+| PATCH | `/api/shares/{share_id}` | write (public links: admin) | Change expiry or the identity a public link runs as |
+| DELETE | `/api/shares/{share_id}` | write (public links: admin) | Revoke a link |
+| GET | `/api/published/{key}` | none for public links, read for signed-in | The dashboard definition and data freshness |
+| POST | `/api/published/{key}/query` | same | Run one of the dashboard's saved queries |
+| POST | `/api/published/{key}/filters/{filter_id}/options` | same | Options for a dashboard filter |
+
+## Reports
+
+Scheduled dashboard reports. Changes, sends and previews need the report's owner or an admin.
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/api/reports/capabilities` | write | Whether charts, PDF and PNG are available |
+| GET | `/api/reports` | write | List reports |
+| POST | `/api/reports` | write | Create a report |
+| GET | `/api/reports/{report_id}` | write | Get a report |
+| PUT | `/api/reports/{report_id}` | write | Update a report |
+| DELETE | `/api/reports/{report_id}` | write | Delete a report |
+| POST | `/api/reports/{report_id}/send` | write | Send now; `?force=true` ignores the condition |
+| POST | `/api/reports/{report_id}/preview` | write | Render without sending |
+| GET | `/api/reports/{report_id}/render` | write | Rendered report; `?format=pdf`, `png` or `html` |
+
+## Ask
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/api/ask/status` | read | Whether a provider is configured |
+| POST | `/api/ask` | read | Answer a question from the metrics catalog |
+| POST | `/api/ask/accept-metric` | write | Save a suggested metric definition to `metrics/` |
+| POST | `/api/ask/eval` | read | Run question to spec evals and report accuracy |
+
+## Change Sets
+
+Verified agent edits. See [Ask and change sets](ask.md).
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/api/changesets` | write | List change sets (`?open=true` for unapplied) |
+| GET | `/api/changesets/{cs_id}` | write | Files and verification report |
+| POST | `/api/changesets` | write | Submit a change set; it is verified on submission |
+| POST | `/api/changesets/{cs_id}/verify` | write | Re-run verification |
+| POST | `/api/changesets/{cs_id}/apply` | write | Write a verified change set into the project |
+| POST | `/api/changesets/{cs_id}/discard` | write | Discard without applying |
+
+## Performance
+
+Endpoints that return plans or build errors need `write`, because those carry literal values. See [Performance](performance.md).
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/api/perf/summary` | read | Totals over `?days=` |
+| GET | `/api/perf/slowest` | read | Slowest models |
+| GET | `/api/perf/trend` | read | Duration trend for `?models=` |
+| GET | `/api/perf/regressions` | read | Builds much slower than their own history |
+| GET | `/api/perf/advice` | read | Advice with evidence |
+| POST | `/api/perf/advice/state` | write | Dismiss, snooze or reopen an advice rule |
+| GET | `/api/perf/models/{model}` | write | Build history and captured plans for a model |
+| GET | `/api/perf/builds/{build_id}` | write | One build with its plan |
+| GET | `/api/perf/diff` | write | Plan diff between a fast and a slow build (`?fast=&slow=`) |
+| GET | `/api/perf/runs` | write | Recent pipeline runs |
+| GET | `/api/perf/runs/{run_id}/critical-path` | read | Critical path of a run |
+
+## Live Models
+
+See [Live models](live-models.md).
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/api/live/status` | read | Live models: status, lag, events per second |
+| GET | `/api/live/events` | read | Event stream of refreshes (`?after=`) |
+| POST | `/api/live/start` | execute | Start the live runner in the server |
+| POST | `/api/live/stop` | execute | Stop it |
+| POST | `/api/live/models/{model}/pause` | execute | Pause a live model |
+| POST | `/api/live/models/{model}/resume` | execute | Resume a live model |
+| POST | `/api/live/models/{model}/refresh` | execute | Refresh a live model now |
+| POST | `/api/live/sources/{source}/advance` | execute | Announce rows committed to a landing table |
+
+## Metrics and Health
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/metrics` | `telemetry.prometheus` token, or read when auth is on | Prometheus scrape endpoint; 404 while `telemetry.prometheus.enabled` is false. See [Telemetry](telemetry.md) |
+| GET | `/health` | none | Liveness alias |
+| GET | `/api/health` | none | Health check |
+| GET | `/api/metrics` | see route | Platform metrics summary |
+| GET | `/api/metrics/models` | see route | Per-model metrics |
+
 ## Notebooks
 
 ### POST /api/notebooks/save/{name}

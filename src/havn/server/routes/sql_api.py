@@ -55,6 +55,9 @@ class StatementState:
     row_count: int = 0
     task_id: str | None = None
     _arrow: bytes | None = None
+    # Who ran it: results are theirs (governed for them), not every reader's.
+    owner: str = ""
+    viewer: Any = None  # a governance Viewer when policies apply, else None
 
 
 class _StatementRegistry:
@@ -109,12 +112,30 @@ def _execute_statement(state: StatementState) -> None:
         try:
             cur = cursor_for(conn)
             try:
-                cur.execute(state.sql)
-                if cur.description:
-                    state.columns = [d[0] for d in cur.description]
+                if state.viewer is not None:
+                    # Masking or row policies apply to the caller: run the
+                    # statement governed (reads masked/filtered, writes their
+                    # role allows, refusals where governance cannot follow).
+                    from havn.engine.governance.statements import GovernedSession
+                    from havn.server.deps import _get_db_path, _get_project_dir
+
+                    session = GovernedSession(
+                        cur, state.viewer, project_dir=_get_project_dir(),
+                        warehouse=_get_db_path(), cwd=_get_project_dir(),
+                    )
+                    result = session.execute(state.sql)
+                    table = result.table
+                    has_result = bool(result.columns) and table is not None
+                else:
+                    cur.execute(state.sql)
+                    has_result = bool(cur.description)
+                    table = None
+                if has_result:
                     import pyarrow as pa
 
-                    table = cur.to_arrow_table() if hasattr(cur, "to_arrow_table") else cur.fetch_arrow_table()
+                    if table is None:
+                        table = cur.to_arrow_table() if hasattr(cur, "to_arrow_table") else cur.fetch_arrow_table()
+                    state.columns = list(table.column_names)
                     state.row_count = table.num_rows
                     slice_ = table.slice(0, MAX_INLINE_ROWS) if MAX_INLINE_ROWS else table
                     # Convert to row-arrays without an intermediate dict-per-row
@@ -164,9 +185,11 @@ class ExecuteRequest(BaseModel):
 
 @router.post("/v1/sql")
 async def execute_sql(body: ExecuteRequest, request: Request) -> Response:
-    _require_permission(request, "execute")
+    user = _require_permission(request, "execute")
 
-    state = StatementState(statement_id=str(uuid.uuid4()), sql=body.sql)
+    state = StatementState(statement_id=str(uuid.uuid4()), sql=body.sql,
+                           owner=user.get("username", ""))
+    state.viewer = _governed_viewer(user)
     _registry.put(state)
 
     wait = body.wait_seconds if body.wait_seconds is not None else SYNC_TIMEOUT_SECONDS
@@ -188,19 +211,15 @@ async def execute_sql(body: ExecuteRequest, request: Request) -> Response:
 
 @router.get("/v1/sql/{statement_id}")
 async def get_statement(statement_id: str, request: Request) -> Response:
-    _require_permission(request, "read")
-    state = _registry.get(statement_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="statement not found")
+    user = _require_permission(request, "read")
+    state = _owned(statement_id, user)
     return _json_response(200, _render_state(state, include_rows=False))
 
 
 @router.get("/v1/sql/{statement_id}/result")
 async def stream_result(statement_id: str, request: Request) -> Response:
-    _require_permission(request, "read")
-    state = _registry.get(statement_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="statement not found")
+    user = _require_permission(request, "read")
+    state = _owned(statement_id, user)
     if state.status not in ("succeeded",):
         raise HTTPException(status_code=409, detail=f"not ready: {state.status}")
 
@@ -225,10 +244,8 @@ async def stream_result(statement_id: str, request: Request) -> Response:
 
 @router.delete("/v1/sql/{statement_id}")
 async def cancel_statement(statement_id: str, request: Request) -> Response:
-    _require_permission(request, "execute")
-    state = _registry.get(statement_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="statement not found")
+    user = _require_permission(request, "execute")
+    state = _owned(statement_id, user)
     if state.task_id:
         get_resource_manager().cancel(state.task_id)
     return _json_response(200, {"statement_id": statement_id, "status": "cancelling"})
@@ -237,6 +254,34 @@ async def cancel_statement(statement_id: str, request: Request) -> Response:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _owned(statement_id: str, user: dict) -> StatementState:
+    """The statement, if ``user`` ran it (admins see every statement).
+
+    Results were produced for the user who ran the statement -- with their
+    masking and row policies -- so another reader holding the id must not
+    get them. Not-yours answers 404, like an unknown id.
+    """
+    state = _registry.get(statement_id)
+    if state is None or (state.owner != user.get("username", "") and user.get("role") != "admin"):
+        raise HTTPException(status_code=404, detail="statement not found")
+    return state
+
+
+def _governed_viewer(user: dict):
+    """A Viewer when masking or row policies apply to ``user``, else None."""
+    from havn.engine.governance import viewer_from_user
+    from havn.server.deps import _is_governed
+
+    cur = cursor_for(_get_write_queue().conn)
+    try:
+        return viewer_from_user(user) if _is_governed(user, cur) else None
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
 
 
 def _render_state(state: StatementState, *, include_rows: bool) -> dict[str, Any]:

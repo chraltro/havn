@@ -11,6 +11,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from havn.server.deps import (
     DbConnReadOnly,
+    DbConnReadOnlyOptional,
     _authenticate_websocket,
     _require_permission,
     _serialize,
@@ -58,21 +59,39 @@ def create_session(request: Request, req: CreateSessionRequest) -> dict:
 
 
 @router.get("/api/sessions/{session_id}")
-def get_session_detail(request: Request, session_id: str) -> dict:
-    """Get details of a collaboration session."""
-    _require_permission(request, "read")
+def get_session_detail(
+    request: Request, session_id: str, conn: DbConnReadOnlyOptional
+) -> dict:
+    """Get details of a collaboration session.
+
+    History rows were governed for whoever ran the query. A participant that
+    masking or row policies apply to gets other people's rows withheld (the
+    SQL is still shown, to re-run under their own policies).
+    """
+    user = _require_permission(request, "read")
     from havn.engine.collaboration import session_manager
 
     session = session_manager.get_session(session_id)
     if not session:
         raise HTTPException(404, "Session not found")
+    history = session.query_history[-20:]
+    me = user.get("username", "anonymous")
+    if conn is not None and any(e.get("user_id") != me for e in history):
+        from havn.server.deps import _is_governed
+
+        if _is_governed(user, conn):
+            history = [
+                e if e.get("user_id") == me
+                else {**e, "rows": [], "rows_withheld": True}
+                for e in history
+            ]
     return {
         "session_id": session.session_id,
         "name": session.name,
         "created_at": session.created_at,
         "participants": session_manager.get_participants(session_id),
         "shared_sql": session.shared_sql,
-        "query_history": session.query_history[-20:],
+        "query_history": history,
     }
 
 
@@ -97,7 +116,6 @@ def session_query(
     """Execute a query within a collaboration session and record in history."""
     user = _require_permission(request, "read")
     from havn.engine.collaboration import session_manager
-    from havn.engine.masking import apply_masking
     from havn.server.routes.query import _validate_query_sql
 
     session = session_manager.get_session(session_id)
@@ -107,16 +125,10 @@ def session_query(
     # Validate SQL is safe read-only query
     _validate_query_sql(req.sql)
 
-    # Pre-query masking rewrite
-    from havn.engine.masking_rewriter import rewrite_query_with_masking, MaskedColumnAccessError
+    from havn.server.deps import _govern
 
-    try:
-        sess_rewritten, sess_rewrite_ok, sess_handled = rewrite_query_with_masking(
-            req.sql, user["role"], conn,
-        )
-    except MaskedColumnAccessError as e:
-        raise HTTPException(403, str(e))
-    sess_sql = sess_rewritten if sess_rewrite_ok else req.sql
+    governed = _govern(req.sql, user, conn)
+    sess_sql = governed.sql
 
     from havn.engine.query_governor import QueryTimeoutError, execute_governed, get_timeout_for_role
 
@@ -131,14 +143,7 @@ def session_query(
             [desc[0] for desc in result.description] if result.description else []
         )
         rows = [[_serialize(v) for v in row] for row in result.fetchall()]
-        # Apply post-query masking for unhandled policies
-        if not sess_rewrite_ok:
-            rows = apply_masking(columns, rows, user["role"], conn)
-        elif sess_handled:
-            rows = apply_masking(
-                columns, rows, user["role"], conn,
-                skip_policy_ids=sess_handled,
-            )
+        rows = governed.post_mask(columns, rows, conn)
         duration_ms = int((time.time() - start) * 1000)
 
         entry = session_manager.add_query_result(

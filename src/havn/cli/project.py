@@ -176,6 +176,7 @@ def init(
         SAMPLE_EXPORT_SCRIPT,
         SAMPLE_FULL_REFRESH_JOB,
         SAMPLE_GOLD_REGIONS_SQL,
+        SAMPLE_GOLD_MAGNITUDE_PY,
         SAMPLE_GOLD_SUMMARY_SQL,
         SAMPLE_GOLD_TOP_SQL,
         SAMPLE_INCREMENTAL_JOB,
@@ -249,6 +250,7 @@ def init(
         _write(target / "transform" / "gold" / "earthquake_summary.sql", SAMPLE_GOLD_SUMMARY_SQL, encoding="utf-8")
         _write(target / "transform" / "gold" / "top_earthquakes.sql", SAMPLE_GOLD_TOP_SQL, encoding="utf-8")
         _write(target / "transform" / "gold" / "region_risk.sql", SAMPLE_GOLD_REGIONS_SQL, encoding="utf-8")
+        _write(target / "transform" / "gold" / "magnitude_frequency.py", SAMPLE_GOLD_MAGNITUDE_PY, encoding="utf-8")
         _write(target / "export" / "earthquake_report.py", SAMPLE_EXPORT_SCRIPT, encoding="utf-8")
         _write(target / "macros" / "geo.py", SAMPLE_MACRO_GEO, encoding="utf-8")
         _write(target / "seeds" / "magnitude_scale.csv", SAMPLE_SEED_CSV, encoding="utf-8")
@@ -268,8 +270,12 @@ def init(
         "__pycache__/\n*.pyc\n.venv/\n.env\noutput/\n_snapshots/\n"
         ".havn/pr-build/\n"
         ".havn/deploy/\n"
+        # One warehouse per git branch (branches: in project.yml).
+        ".havn/branches/\n"
         # The `havn serve` lockfile: runtime state, never shared.
         ".havn/serve.json\n"
+        # Agent change sets and `havn ask --continue` history: local state.
+        ".havn/changesets/\n.havn/ask/\n"
         # Installed package sources are reproducible from havn_packages.lock,
         # which IS committed. Only the checkout is ignored.
         "havn_packages/\n"
@@ -349,6 +355,33 @@ def init(
         )
 
 
+def _catalog_names(config, project_dir: Path) -> set[str] | None:
+    """Lowercase ``schema.name`` of every warehouse object, or None.
+
+    None means the catalog could not be read (no warehouse yet, or it is
+    locked by another process), so the caller cannot tell a missing table
+    from an unreadable one.
+    """
+    if not _warehouse_exists(config, project_dir):
+        return None
+    from havn.engine.database import open_warehouse
+
+    try:
+        conn = open_warehouse(config, project_dir, read_only=True)
+    except Exception:
+        return None
+    try:
+        rows = conn.execute(
+            "SELECT lower(table_schema) || '.' || lower(table_name) "
+            "FROM information_schema.tables WHERE table_catalog = current_database()"
+        ).fetchall()
+    except Exception:
+        return None
+    finally:
+        conn.close()
+    return {r[0] for r in rows}
+
+
 @app.command()
 def validate(
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
@@ -417,6 +450,40 @@ def validate(
             if schema in ("bronze", "silver", "gold"):
                 warnings.append(f"Model {m.full_name}: depends on '{dep}' which is not a known model")
 
+    # 4b. Python models: what discovery read off each file (syntax, @model
+    # keys, the function's parameters), imports that would fail, and refs
+    # that name neither a model nor a table. None of it runs the file.
+    python_models = [m for m in models if m.is_python]
+    if python_models:
+        from havn.engine.transform.python_models import python_validation_errors
+
+        catalog = _catalog_names(config, project_dir)
+        py_failures = 0
+        for m in python_models:
+            for e in python_validation_errors(m):
+                where = f"{m.full_name}:{e.line}" if e.line else m.full_name
+                if e.severity == "error":
+                    errors.append(f"{where}: {e.message}")
+                    py_failures += 1
+                else:
+                    warnings.append(f"{where}: {e.message}")
+            for dep in m.depends_on:
+                if dep in model_names or (catalog is not None and dep in catalog):
+                    continue
+                if catalog is None:
+                    warnings.append(
+                        f"{m.full_name}: ref('{dep}') is not a model; with no "
+                        "warehouse yet it cannot be checked as a table"
+                    )
+                else:
+                    errors.append(
+                        f"{m.full_name}: ref('{dep}') names no model and no table "
+                        "in the warehouse"
+                    )
+                    py_failures += 1
+        if not py_failures:
+            console.print(f"[green]python[/green] {len(python_models)} Python model(s) read cleanly")
+
     # 5. Check for circular dependencies
     try:
         build_dag(models)
@@ -456,6 +523,23 @@ def validate(
             console.print(
                 f"[green]bind[/green] {len(models)} models resolved against the warehouse"
             )
+
+    # 5c. Governance: PII reaching gold/exported tables unmasked, models whose
+    # readers an inherited row policy shows nothing, untraceable lineage.
+    if warehouse_ready:
+        from havn.engine.database import open_warehouse
+        from havn.engine.governance.report import governance_warnings
+
+        try:
+            gconn = open_warehouse(config, project_dir, read_only=True)
+        except Exception:
+            gconn = None
+        if gconn is not None:
+            try:
+                for w in governance_warnings(gconn, project_dir, config, models):
+                    warnings.append(f"{w.model}: {w.message}")
+            finally:
+                gconn.close()
 
     # 6. Check .env variables referenced in config
     import re

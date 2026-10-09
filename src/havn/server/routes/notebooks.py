@@ -22,6 +22,7 @@ from havn.server.deps import (
     DbConnReadOnlyOptional,
     _discover_models_cached,
     _get_project_dir,
+    _is_governed,
     _require_permission,
     _serialize,
     build_dag,
@@ -145,15 +146,39 @@ def list_notebooks(request: Request) -> list[dict]:
 
 
 @router.get("/api/notebooks/open/{name:path}")
-def get_notebook(request: Request, name: str) -> dict:
-    """Get a notebook's contents."""
-    _require_permission(request, "read")
+def get_notebook(request: Request, name: str, conn: DbConnReadOnlyOptional = None) -> dict:
+    """Get a notebook's contents.
+
+    Saved cell outputs are whatever the last person to run the notebook
+    could see. A user that masking or row policies apply to gets the cells
+    without them (running the notebook shows their own governed results).
+    """
+    user = _require_permission(request, "read")
     from havn.engine.notebook import load_notebook
 
     nb_path = _resolve_notebook(_get_project_dir(), name)
     if not nb_path.exists():
         raise HTTPException(404, f"Notebook '{name}' not found")
-    return load_notebook(nb_path)
+    nb = load_notebook(nb_path)
+    if conn is not None and _is_governed(user, conn):
+        nb = strip_notebook_outputs(nb)
+    return nb
+
+
+def strip_notebook_outputs(nb: dict) -> dict:
+    """A copy of ``nb`` with every saved cell output removed."""
+    out = dict(nb)
+    cells = []
+    for cell in nb.get("cells", []) or []:
+        if isinstance(cell, dict):
+            cell = dict(cell)
+            if cell.get("outputs"):
+                cell["outputs"] = []
+                cell["outputs_withheld"] = True
+        cells.append(cell)
+    out["cells"] = cells
+    out.pop("cell_results", None)
+    return out
 
 
 @router.post("/api/notebooks/save/{name:path}")
@@ -185,17 +210,38 @@ def create_notebook_endpoint(request: Request, name: str, title: str = "") -> di
 
 @router.post("/api/notebooks/run/{name:path}")
 def run_notebook_endpoint(request: Request, name: str, conn: DbConn) -> dict:
-    """Execute all cells in a notebook (code, sql, and ingest)."""
-    _require_permission(request, "execute")
+    """Execute all cells in a notebook (code, sql, and ingest).
+
+    For a user that masking or row policies apply to, code cells run in a
+    governed child process and SQL/ingest cells run governed on the server.
+    Their outputs are returned but not saved into the file, which other
+    users (and admins) open.
+    """
+    user = _require_permission(request, "execute")
     from havn.engine.notebook import load_notebook, run_notebook, save_notebook
 
-    nb_path = _resolve_notebook(_get_project_dir(), name)
+    project_dir = _get_project_dir()
+    nb_path = _resolve_notebook(project_dir, name)
     if not nb_path.exists():
         raise HTTPException(404, f"Notebook '{name}' not found")
     nb = load_notebook(nb_path)
-    result = run_notebook(conn, nb, project_dir=_get_project_dir())
+    if _is_governed(user, conn):
+        from havn.engine.governance import viewer_from_user
+        from havn.engine.governance.python_host import run_notebook_governed
+
+        result = run_notebook_governed(conn, nb, viewer_from_user(user), project_dir=project_dir)
+        result["outputs_saved"] = False
+        return _mask_notebook_result(result)
+    result = run_notebook(conn, nb, project_dir=project_dir)
     save_notebook(nb_path, result)
     return result
+
+
+def _mask_notebook_result(nb: dict) -> dict:
+    for cell in nb.get("cells", []) or []:
+        if isinstance(cell, dict) and isinstance(cell.get("outputs"), list):
+            cell["outputs"] = _mask_notebook_outputs(cell["outputs"])
+    return nb
 
 
 @router.post("/api/notebooks/run-cell/{name:path}")
@@ -208,9 +254,25 @@ def run_cell_endpoint(
     are available in subsequent cells. Send reset=true to clear the namespace
     (e.g. at the start of Run All).
     """
-    _require_permission(request, "execute")
+    user = _require_permission(request, "execute")
     if req.reset:
         _notebook_namespaces.pop(name, None)
+    if _is_governed(user, conn):
+        # Masking or row policies apply to this user: SQL and ingest cells
+        # run governed on the server, code cells in the user's governed
+        # kernel (a child process whose db proxies SQL back here).
+        from havn.engine.governance import viewer_from_user
+        from havn.engine.governance.python_host import run_cell_governed
+
+        result = run_cell_governed(
+            conn, viewer_from_user(user), _get_project_dir(), name,
+            req.cell_type or "code", req.source, reset=bool(req.reset),
+        )
+        return {
+            "outputs": _mask_notebook_outputs(result["outputs"]),
+            "duration_ms": result.get("duration_ms", 0),
+            "config": result.get("config", {}),
+        }
     if req.cell_type == "sql":
         from havn.engine.notebook import execute_sql_cell
 

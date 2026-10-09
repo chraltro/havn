@@ -236,17 +236,35 @@ app.add_typer(ci_app)
 def ci_generate(
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
-    """Generate a GitHub Actions workflow for havn CI."""
+    """Generate GitHub Actions workflows that put a data diff on every pull request."""
     from havn.engine.ci import generate_workflow
 
     project_dir = _resolve_project(project_dir)
     result = generate_workflow(project_dir)
-    console.print(f"[green]Generated {result['path']}[/green]")
+    console.print(f"[green]Generated {result['path']}[/green] [dim](pull requests: build what changed, post the data diff)[/dim]")
+    console.print(f"[green]Generated {result['base_path']}[/green] [dim](pushes to {result['main']}: build and upload the base warehouse)[/dim]")
     console.print()
     console.print("[bold]Next steps:[/bold]")
-    console.print("  1. Review the generated workflow file")
-    console.print("  2. Commit and push to your repository")
-    console.print("  3. Open a pull request to see havn diff results as PR comments")
+    console.print(f"  1. Check how {result['base_path']} builds the base: [bold]{result['build']}[/bold]")
+    console.print("  2. Commit and push to your repository; the base workflow runs on the first push")
+    console.print("  3. Open a pull request to see the row-level data diff as a PR comment")
+
+
+@ci_app.command("comment")
+def ci_comment(
+    markdown: Annotated[str, typer.Option("--markdown", "-m", help="Markdown file to post (from havn branch diff --markdown)")] = "havn-data-diff.md",
+    repo: Annotated[Optional[str], typer.Option("--repo", help="GitHub repo (owner/repo)")] = None,
+    pr: Annotated[Optional[int], typer.Option("--pr", help="Pull request number")] = None,
+) -> None:
+    """Post a markdown data diff to a pull request, updating havn's earlier comment."""
+    from havn.engine.ci import post_markdown_comment
+
+    result = post_markdown_comment(markdown, repo, pr)
+    if result.get("error"):
+        console.print(f"[red]{result['error']}[/red]")
+        raise typer.Exit(1)
+    verb = "Updated" if result.get("updated") else "Posted"
+    console.print(f"[green]{verb} the data diff on PR #{result.get('pr')}[/green]")
 
 
 @ci_app.command("diff-comment")

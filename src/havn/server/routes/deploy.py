@@ -60,7 +60,9 @@ def _target(env: str) -> tuple[object, Path, bool]:
     if not active.environments:
         if env != DEFAULT_ENV:
             raise HTTPException(404, f"Unknown environment '{env}'; this project declares none")
-        cfg = active
+        # On a branch the active config points at the branch warehouse, which
+        # is never a deploy target: deploy to what main resolves to.
+        cfg = load_project(project_dir, use_branches=False) if active.branch.active else active
     else:
         if env not in active.environments:
             known = ", ".join(active.environments)

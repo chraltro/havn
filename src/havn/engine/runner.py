@@ -545,11 +545,14 @@ def _run_notebook_as_script(
     notebook_path: Path,
     on_cell_start: Callable | None = None,
     should_stop: Callable[[], bool] | None = None,
+    viewer=None,
 ) -> dict:
     """Run a .dpnb notebook as a pipeline script.
 
     Captures per-cell timing and output, detects output tables for DAG
-    integration, and returns detailed execution results.
+    integration, and returns detailed execution results. With a governed
+    ``viewer`` the code cells run in a governed child process and SQL and
+    ingest cells run governed on the server (see ``havn.engine.governance``).
     """
     from havn.engine.notebook import extract_notebook_outputs, load_notebook, run_notebook
 
@@ -564,10 +567,18 @@ def _run_notebook_as_script(
 
     # A pipeline step stops at the first failing cell: later cells would run
     # against whatever the failed one left half-built.
-    result_nb = run_notebook(
-        conn, notebook, project_dir=project_dir,
-        stop_on_error=True, on_cell_start=on_cell_start, should_stop=should_stop,
-    )
+    if viewer is not None:
+        from havn.engine.governance.python_host import run_notebook_governed
+
+        result_nb = run_notebook_governed(
+            conn, notebook, viewer, project_dir=project_dir,
+            stop_on_error=True, on_cell_start=on_cell_start, should_stop=should_stop,
+        )
+    else:
+        result_nb = run_notebook(
+            conn, notebook, project_dir=project_dir,
+            stop_on_error=True, on_cell_start=on_cell_start, should_stop=should_stop,
+        )
 
     # Collect per-cell results
     cell_results = result_nb.get("cell_results", [])
@@ -644,6 +655,7 @@ def run_script(
     use_circuit_breaker: bool = True,
     pipeline_run_id: str | None = None,
     force: bool = False,
+    run_as=None,
 ) -> dict:
     """Run a single script (.py or .dpnb).
 
@@ -672,6 +684,13 @@ def run_script(
         use_circuit_breaker: If True, wrap execution with the default circuit breaker
         pipeline_run_id: Shared ID grouping all executions in a pipeline run
         force: If True, bypass the ``schedule=once`` skip check.
+        run_as: The user the script runs for (a ``Viewer`` or the user dict
+            the server's auth returns), when a person started it from the web
+            UI or API. If masking or row policies apply to that user, the
+            script runs in a governed child process whose ``db`` applies
+            them (see ``havn.engine.governance``). None -- CLI runs,
+            scheduled jobs, the file watcher -- runs in-process as the
+            system, which owns the warehouse file.
 
     Returns:
         Dict with keys: script, status, duration_ms, log_output, error
@@ -710,7 +729,25 @@ def run_script(
             use_circuit_breaker=use_circuit_breaker,
             pipeline_run_id=pipeline_run_id,
             force=force,
+            run_as=run_as,
         )
+
+
+def _project_dir_of(script_path: Path) -> Path | None:
+    for parent in script_path.resolve().parents:
+        if (parent / "project.yml").exists():
+            return parent
+    return None
+
+
+def governed_viewer(conn, run_as, project_dir: Path | None):
+    """The Viewer to govern a run for, or None for the in-process path."""
+    if run_as is None:
+        return None
+    from havn.engine.governance import is_governed, viewer_from_user
+
+    viewer = viewer_from_user(run_as)
+    return viewer if is_governed(conn, viewer, project_dir) else None
 
 
 def _run_script_body(
@@ -721,6 +758,7 @@ def _run_script_body(
     use_circuit_breaker: bool = True,
     pipeline_run_id: str | None = None,
     force: bool = False,
+    run_as=None,
 ) -> dict:
     """Inner implementation — unchanged script-execution logic."""
     ensure_meta_table(conn)
@@ -786,6 +824,16 @@ def _run_script_body(
     label = f"[bold]{script_path.name}[/bold]"
     console.print(f"  [blue]run [/blue] {label}")
 
+    project_dir = _project_dir_of(script_path)
+    viewer = governed_viewer(conn, run_as, project_dir)
+    if viewer is not None and script_path.suffix != ".dpnb":
+        return _run_governed_py(
+            conn, script_path, _source_cache or read_project_text(script_path), viewer,
+            script_type=script_type, timeout=timeout, idle_timeout=idle_timeout,
+            use_circuit_breaker=use_circuit_breaker, pipeline_run_id=pipeline_run_id,
+            project_dir=project_dir,
+        )
+
     # Dispatch .dpnb notebooks. They run under the same hard/idle timeout
     # as .py scripts; each started cell counts as activity.
     if script_path.suffix == ".dpnb":
@@ -799,6 +847,7 @@ def _run_script_body(
             conn, script_path.name,
             lambda: _run_notebook_as_script(
                 conn, script_path, on_cell_start=_on_cell, should_stop=stop.is_set,
+                viewer=viewer,
             ),
             timeout=timeout,
             activity=lambda: cells_started[0],
@@ -936,6 +985,68 @@ def _run_script_body(
     return {"script": script_path.name, "status": "success", "duration_ms": duration_ms, "log_output": log_output, "error": None, "rows_affected": rows_affected}
 
 
+def _run_governed_py(
+    conn: duckdb.DuckDBPyConnection,
+    script_path: Path,
+    source: str,
+    viewer,
+    *,
+    script_type: str,
+    timeout: float,
+    idle_timeout: float | None,
+    use_circuit_breaker: bool,
+    pipeline_run_id: str | None,
+    project_dir: Path | None,
+) -> dict:
+    """A .py script for a governed user: a child process with a governed ``db``."""
+    from havn.engine.governance.python_host import GovernedPythonError, run_governed_script
+
+    label = f"[bold]{script_path.name}[/bold]"
+    if idle_timeout is None:
+        idle_timeout = SCRIPT_IDLE_TIMEOUT_SECONDS
+    try:
+        outcome = run_governed_script(
+            conn, script_path, source, viewer, project_dir=project_dir,
+            timeout=timeout, idle_timeout=idle_timeout,
+        )
+    except GovernedPythonError as e:
+        msg = str(e)
+        log_run(conn, script_type, script_path.name, "error", 0, error=msg,
+                pipeline_run_id=pipeline_run_id)
+        console.print(f"  [red]refused[/red] {label}: {msg}")
+        return {"script": script_path.name, "status": "error", "duration_ms": 0,
+                "log_output": msg, "error": msg, "governed": True}
+    duration_ms = int(outcome.elapsed * 1000)
+    base = {"script": script_path.name, "duration_ms": duration_ms, "governed": True}
+    if outcome.status == "timeout":
+        sup = {"elapsed": outcome.elapsed, "reason": outcome.reason, "orphaned": False,
+               "idle_timeout": idle_timeout}
+        error_msg = _timeout_message(sup, timeout)
+        log_run(conn, script_type, script_path.name, "error", duration_ms, error=error_msg,
+                log_output=outcome.log_output or None, pipeline_run_id=pipeline_run_id)
+        console.print(f"  [red]timeout[/red] {label}: {error_msg}")
+        if use_circuit_breaker:
+            _get_circuit_breaker()._record_failure(script_path.name)
+        return {**base, "status": "error", "log_output": outcome.log_output, "error": error_msg,
+                "timed_out": True, "timeout_reason": outcome.reason, "orphaned": False}
+    if outcome.status == "error":
+        log_run(conn, script_type, script_path.name, "error", duration_ms, error=outcome.error,
+                log_output=outcome.log_output or None, pipeline_run_id=pipeline_run_id)
+        console.print(f"  [red]fail[/red] {label}: {outcome.error}")
+        if use_circuit_breaker:
+            _get_circuit_breaker()._record_failure(script_path.name)
+        return {**base, "status": "error", "log_output": outcome.log_output, "error": outcome.error}
+    rows_affected = _extract_row_count(outcome.log_output)
+    log_run(conn, script_type, script_path.name, "success", duration_ms, rows_affected=rows_affected,
+            log_output=outcome.log_output or None, pipeline_run_id=pipeline_run_id)
+    rows_msg = f", {rows_affected} rows" if rows_affected else ""
+    console.print(f"  [green]done[/green] {label} ({duration_ms}ms{rows_msg}, governed)")
+    if use_circuit_breaker:
+        _get_circuit_breaker()._record_success(script_path.name)
+    return {**base, "status": "success", "log_output": outcome.log_output, "error": None,
+            "rows_affected": rows_affected}
+
+
 def _extract_row_count(output: str) -> int:
     """Extract row count from script output by matching common patterns.
 
@@ -977,6 +1088,7 @@ def run_scripts_in_dir(
     targets: list[str] | None = None,
     pipeline_run_id: str | None = None,
     force: bool = False,
+    run_as=None,
 ) -> list[dict]:
     """Run all scripts in a directory (or specific targets).
 
@@ -1011,7 +1123,8 @@ def run_scripts_in_dir(
     for script in scripts:
         if script.name.startswith("_"):
             continue
-        result = run_script(conn, script, script_type, pipeline_run_id=pipeline_run_id, force=force)
+        result = run_script(conn, script, script_type, pipeline_run_id=pipeline_run_id, force=force,
+                            run_as=run_as)
         results.append(result)
         # A script that timed out and is still running owns the connection;
         # every later script would be refused anyway, so stop here.

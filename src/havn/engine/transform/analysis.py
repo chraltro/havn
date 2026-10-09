@@ -41,7 +41,12 @@ def extract_column_lineage(
     Tracing several models in one pass? Call
     :func:`havn.engine.sql_analysis.fetch_column_catalog` once and pass the
     result as ``column_catalog`` so the catalog is not re-read per model.
+
+    A Python model has no SQL to trace and returns ``{}``: which input column
+    a function's output came from is not knowable without running it.
     """
+    if model.is_python:
+        return {}
     return _extract_column_lineage_impl(
         query=model.query,
         depends_on=model.depends_on,
@@ -157,7 +162,9 @@ def _validate_snapshot_config(models: list[SQLModel]) -> list[ValidationError]:
     """
     errors: list[ValidationError] = []
     for model in models:
-        config = parse_config(model.sql)
+        # A Python model has no @config header to read the raw keys from;
+        # its settings are checked through the model's own attributes.
+        config = {} if model.is_python else parse_config(model.sql)
         is_snapshot = model.materialized == "snapshot"
 
         if not is_snapshot:
@@ -478,6 +485,16 @@ def validate_models(
             )
 
     for model in models:
+        if model.is_python:
+            # What discovery read off the file: syntax, @model keys, the
+            # function's parameters, dynamic ref() calls. The table and
+            # dependency checks below (4-7) apply to it like any model; the
+            # SQL-level ones in between do not.
+            from .python_models import python_validation_errors
+
+            errors.extend(python_validation_errors(model))
+            continue
+
         # 1. Parse check. ``model.ast`` is the tree discovery already parsed.
         parsed = model.ast
         if parsed is None:
@@ -615,10 +632,17 @@ def validate_models(
 
     # --- Additional pre-build validations ---
 
-    errors.extend(_validate_config_keys(models))
+    # The @config checks read a SQL file's header; a Python model's keys were
+    # checked against PYTHON_CONFIG_KEYS when it was discovered. Tags and the
+    # snapshot settings mean the same thing in both, so those run on both.
+    sql_models = [m for m in models if not m.is_python]
+    errors.extend(_validate_config_keys(sql_models))
     errors.extend(_validate_tags(models))
     errors.extend(_validate_snapshot_config(models))
-    errors.extend(_validate_microbatch_config(models))
+    errors.extend(_validate_microbatch_config(sql_models))
+    from havn.engine.live.graph import validate_live
+
+    errors.extend(validate_live(sql_models, {m.full_name: parse_config(m.sql) for m in sql_models}))
 
     # Default landing schemas if not provided
     _landing = {s.lower() for s in landing_schemas} if landing_schemas else {"landing"}
@@ -1002,6 +1026,15 @@ def impact_analysis(
             ds_model = model_map.get(ds_name)
             if not ds_model:
                 continue
+            if ds_model.is_python:
+                # Column use inside a function cannot be traced statically.
+                # A Python consumer of the target is reported as possibly
+                # affected rather than silently left out.
+                if any(d.lower() == target_key for d in ds_model.depends_on):
+                    affected_columns.append({
+                        "model": ds_name, "column": column, "clause": "python",
+                    })
+                continue
             lineage = extract_column_lineage(ds_model, conn, column_catalog=catalog)
             for out_col, sources in lineage.items():
                 for src in sources:
@@ -1094,13 +1127,33 @@ def check_freshness(
 
     # Build a model_path -> source_specs lookup if sources are requested.
     source_specs_by_model: dict[str, list[dict]] = {}
-    if include_sources and transform_dir is not None:
+    # Live models are judged by lag, not by when they last ran: one that has
+    # applied everything its sources hold is fresh however long ago that was,
+    # and one sitting on data older than live.max_lag is stale however
+    # recently it refreshed.
+    live_lags: dict[str, float] = {}
+    max_lag = 300.0
+    if transform_dir is not None:
         try:
             from .discovery import discover_all_models
 
-            for m in discover_all_models(Path(transform_dir).parent):
-                if m.source_freshness:
-                    source_specs_by_model[m.full_name] = m.source_freshness
+            project_root = Path(transform_dir).parent
+            all_models = discover_all_models(project_root)
+            if include_sources:
+                for m in all_models:
+                    if m.source_freshness:
+                        source_specs_by_model[m.full_name] = m.source_freshness
+            if any(m.live for m in all_models):
+                from havn.engine.live.settings import LiveSettings
+                from havn.engine.live.status import live_freshness
+
+                live_lags = live_freshness(conn, all_models)
+                try:
+                    from havn.config import load_project
+
+                    max_lag = LiveSettings.from_raw(load_project(project_root).live).max_lag
+                except Exception:
+                    pass
         except Exception as e:
             logger.debug("Couldn't load model source specs: %s", e)
 
@@ -1113,6 +1166,11 @@ def check_freshness(
             "is_stale": hours_since is not None and hours_since > max_age_hours,
             "row_count": row_count,
         }
+        if model_path in live_lags:
+            lag = live_lags[model_path]
+            entry["live"] = True
+            entry["lag_seconds"] = round(lag, 3)
+            entry["is_stale"] = lag > max_lag
         if include_sources:
             specs = source_specs_by_model.get(model_path, [])
             sources_out: list[dict] = []

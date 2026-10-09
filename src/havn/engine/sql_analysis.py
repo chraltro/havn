@@ -49,6 +49,10 @@ _OWNER_PAREN = re.compile(r"^@owner\s*\(\s*(.+?)\s*\)$", re.MULTILINE)
 _OWNER_SPACE = re.compile(r"^@owner\s*:?\s+(.+)$", re.MULTILINE)
 _SOURCE_FRESHNESS_PAREN = re.compile(r"^@source_freshness\s*\(\s*(.+?)\s*\)$", re.MULTILINE)
 _SOURCE_FRESHNESS_SPACE = re.compile(r"^@source_freshness\s*:?\s+(.+)$", re.MULTILINE)
+_PII_PAREN = re.compile(r"^@pii\s*\(\s*(.+?)\s*\)$", re.MULTILINE)
+_PII_SPACE = re.compile(r"^@pii\s*:?\s+(.+)$", re.MULTILINE)
+_DECLASSIFY_PAREN = re.compile(r"^@declassify\s*\(\s*(.+?)\s*\)$", re.MULTILINE)
+_DECLASSIFY_SPACE = re.compile(r"^@declassify\s*:?\s+(.+)$", re.MULTILINE)
 
 # Combined for use in parse functions (try paren first, then space)
 CONFIG_PATTERN = (_CONFIG_PAREN, _CONFIG_SPACE)
@@ -59,6 +63,8 @@ ASSERT_PATTERN = (_ASSERT_PAREN, _ASSERT_SPACE)
 GRAIN_PATTERN = (_GRAIN_PAREN, _GRAIN_SPACE)
 OWNER_PATTERN = (_OWNER_PAREN, _OWNER_SPACE)
 SOURCE_FRESHNESS_PATTERN = (_SOURCE_FRESHNESS_PAREN, _SOURCE_FRESHNESS_SPACE)
+PII_PATTERN = (_PII_PAREN, _PII_SPACE)
+DECLASSIFY_PATTERN = (_DECLASSIFY_PAREN, _DECLASSIFY_SPACE)
 
 # Legacy "-- config:" syntax (still supported for backward compatibility)
 _LEGACY_CONFIG_PATTERN = re.compile(r"^--\s*config:\s*(.+)$", re.MULTILINE)
@@ -76,6 +82,8 @@ _META_PREFIXES = (
     "@grain",
     "@owner",
     "@source_freshness",
+    "@pii",
+    "@declassify",
     # Legacy
     "-- config:",
     "-- depends_on:",
@@ -127,7 +135,16 @@ CONFIG_KEYS = frozenset({
     "batch_size",
     "begin",
     "lookback",
+    # Live models (continuous refresh) and CDC apply.
+    "live",
+    "live_interval",
+    "cdc_op",
+    "cdc_seq",
+    "cdc_deletes",
 })
+
+# How a CDC-applying model treats a delete event.
+CDC_DELETE_POLICIES = frozenset({"hard", "soft"})
 
 # Accepted values of `materialized`, checked at validation time rather than
 # only when execution reaches "Unknown materialization".
@@ -314,6 +331,48 @@ def parse_owner(sql: str) -> str:
     """
     match = _search_patterns(OWNER_PATTERN, sql)
     return match.group(1).strip() if match else ""
+
+
+def parse_pii(sql: str) -> list[str]:
+    """Columns a model classifies as PII, from ``@pii`` lines.
+
+    ``@pii email, phone`` tags the model's own output columns. The tag
+    follows column lineage downstream (see ``havn.engine.governance``).
+    Several lines may be used; names are lowercased and deduplicated.
+    """
+    cols: list[str] = []
+    seen: set[str] = set()
+    for m in _finditer_patterns(PII_PATTERN, sql):
+        for raw in m.group(1).split(","):
+            name = raw.strip().strip('"').lower()
+            if name and name not in seen:
+                seen.add(name)
+                cols.append(name)
+    return cols
+
+
+def parse_declassify(sql: str) -> dict[str, str]:
+    """``@declassify`` lines: ``{column: reason}``.
+
+    ``@declassify email_domain: only the domain is kept`` stops an inherited
+    PII classification (and its masking) at this model's column.
+    ``@declassify rows: aggregated per region`` stops inherited row policies
+    at this model; the key ``"*rows"`` carries that reason. A column that is
+    literally called ``rows`` is declassified with ``@declassify "rows"``.
+    """
+    out: dict[str, str] = {}
+    for m in _finditer_patterns(DECLASSIFY_PATTERN, sql):
+        body = m.group(1).strip()
+        names, _, reason = body.partition(":")
+        for raw in names.split(","):
+            raw = raw.strip()
+            if not raw:
+                continue
+            if raw.lower() == "rows":
+                out["*rows"] = reason.strip()
+            else:
+                out[raw.strip('"').lower()] = reason.strip()
+    return out
 
 
 def parse_source_freshness(sql: str) -> list[dict]:

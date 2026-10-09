@@ -75,10 +75,13 @@ Ingest Scripts (.py / .dpnb)
 | Category | Pages |
 |----------|-------|
 | Getting Started | [Getting Started](getting-started.md), [Configuration](configuration.md), [Environments](environments.md) |
-| Core Concepts | [Transforms](transforms.md), [Pipelines](pipelines.md), [Seeds](seeds.md), [Sources](sources.md) |
-| Data Integration | [Connectors](connectors.md), [CDC](cdc.md) |
-| Data Quality | [Quality](quality.md), [Contracts](contracts.md), [Lineage](lineage.md) |
+| Core Concepts | [Transforms](transforms.md), [Python Models](python-models.md), [Pipelines](pipelines.md), [Seeds](seeds.md), [Sources](sources.md), [Macros](macros.md), [Packages](packages.md), [Semantic Layer](semantic-layer.md) |
+| Branches and CI | [Branches](branches.md) -- a warehouse per git branch, data diff on pull requests |
+| Data Integration | [Connectors](connectors.md), [CDC](cdc.md), [Live Models](live-models.md) |
+| Data Quality | [Quality](quality.md), [Unit Tests](unit-tests.md), [Contracts](contracts.md), [Lineage](lineage.md) |
 | Refactoring | [Refactoring](refactoring.md) -- rename a column, find column references |
-| Security | [Auth](auth.md), [Masking](masking.md) |
-| Advanced | [Scheduler](scheduler.md), [Notebooks](notebooks.md), [Versioning](versioning.md) |
-| Reference | [CLI Reference](cli-reference.md), [API Reference](api-reference.md) |
+| Security | [Auth](auth.md), [Masking](masking.md), [Governance](governance.md) -- row-level security, lineage-following masking, governed Python |
+| Sharing and Reports | [Dashboards and Sharing](dashboards-sharing.md) -- published dashboards, scheduled reports |
+| AI | [Ask](ask.md) -- ask questions of your metrics, verified agent changes; [MCP Server](mcp.md) |
+| Advanced | [Scheduler](scheduler.md), [Notebooks](notebooks.md), [Versioning](versioning.md), [Performance](performance.md), [Telemetry](telemetry.md) |
+| Reference | [What havn Supports](limitations.md), [CLI Reference](cli-reference.md), [API Reference](api-reference.md) |

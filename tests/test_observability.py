@@ -32,9 +32,14 @@ def test_streaming_events_counter_labels():
 def client(tmp_path, monkeypatch):
     import havn.server.app as server_app
 
+    from havn.server.deps import _clear_config_cache
+
     monkeypatch.setattr(server_app, "PROJECT_DIR", tmp_path)
+    monkeypatch.delenv("HAVN_METRICS_TOKEN", raising=False)
+    _clear_config_cache()
     (tmp_path / "project.yml").write_text(
         "name: test\ndatabase:\n  backend: duckdb\n  path: warehouse.duckdb\n"
+        "telemetry:\n  prometheus:\n    enabled: true\n"
     )
     return TestClient(server_app.app)
 

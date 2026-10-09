@@ -153,10 +153,13 @@ def get_dag(request: Request) -> dict:
                 "label": m.path.name,
                 "schema": m.schema,
                 "type": m.materialized,
+                "language": getattr(m, "language", "sql"),
                 "path": m.path.relative_to(project_dir).as_posix(),
                 # None for project models. The panel labels the rest so a
                 # node that cannot be edited here is visibly not yours.
                 "package": getattr(m, "package", None),
+                # Live models get a lag badge (from /api/live/status).
+                "live": bool(getattr(m, "live", False)),
             }
         )
 
@@ -286,6 +289,7 @@ def get_orchestration_dag(request: Request) -> dict:
             "label": m.name,
             "schema": m.schema,
             "materialized": m.materialized,
+            "language": getattr(m, "language", "sql"),
             "depends_on": list(m.depends_on or []),
             "path": m.path.relative_to(project_dir).as_posix() if m.path else None,
             "row_count": state.get("row_count"),
@@ -412,8 +416,10 @@ def get_full_dag(request: Request) -> dict:
                 "label": m.path.name,
                 "schema": m.schema,
                 "type": m.materialized,
+                "language": getattr(m, "language", "sql"),
                 "path": m.path.relative_to(project_dir).as_posix(),
                 "package": getattr(m, "package", None),
+                "live": bool(getattr(m, "live", False)),
             }
         )
 

@@ -2,6 +2,8 @@
 
 SQL transforms are the core of havn's data pipeline. Every `.sql` file in the `transform/` directory is a model that produces a table or view in DuckDB. Models are parsed, ordered by dependency, and executed automatically.
 
+A `.py` file in `transform/` with an `@model` function is a model too: see [Python models](python-models.md).
+
 ## File Structure
 
 Models are organized into subdirectories that correspond to schemas:

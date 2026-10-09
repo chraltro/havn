@@ -3,6 +3,7 @@ import { api } from "./api";
 import { useAuth } from "./AuthContext";
 import { timeAgo } from "./HomePanel";
 import DeployCard from "./DeployCard";
+import BranchDataChanges from "./BranchDataChanges";
 
 /*
  * Ship: should this change go in? A change is a havn PR (a git branch with a
@@ -11,6 +12,9 @@ import DeployCard from "./DeployCard";
  */
 
 const POLL_MS = 2000;
+
+/** `selected` value for the checked-out branch's data changes (not a PR id). */
+export const BRANCH_VIEW = "__branch__";
 
 /** Column for each node: upstream 0, changed from 1, downstream after its parents. */
 export function layoutColumns(nodes, edges) {
@@ -61,7 +65,7 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
   }, []);
 
   const loadReview = useCallback(async (id) => {
-    if (!id) return;
+    if (!id || id === BRANCH_VIEW) return;
     try {
       const r = await api.getPrReview(id);
       if (selectedRef.current !== id) return;
@@ -75,6 +79,14 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
   }, []);
 
   useEffect(() => { loadList(); }, [loadList]);
+
+  // With branch warehouses on, the checked-out branch has data of its own,
+  // and its diff against the base is a view here before any PR exists.
+  const [branch, setBranch] = useState(null);
+  useEffect(() => {
+    Promise.resolve(api.getBranch?.()).then((b) => setBranch(b || null)).catch(() => setBranch(null));
+  }, []);
+  const branchView = !!branch?.enabled && !!branch?.active;
 
   // Changes and deploys are git branches and commits. Without a repository
   // the deploy box could only show the server's 400, so offer git init instead.
@@ -174,12 +186,23 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
   const done = (prs || []).filter((p) => p.status !== "open").slice(0, 8);
 
   return (
-    <div style={s.layout} className="havn-ship">
+    <div style={selected === BRANCH_VIEW ? { ...s.layout, gridTemplateColumns: "250px minmax(0, 1fr)" } : s.layout} className="havn-ship">
       <aside style={s.list} aria-label="Changes">
         <div style={s.listHead}>
           <h2 style={s.h2}>Changes</h2>
           <button style={s.link} onClick={() => onNavigate("Git:Reviews")}>+ New</button>
         </div>
+        {branchView && (
+          <>
+            <button type="button" style={{ ...s.item, ...(selected === BRANCH_VIEW ? s.itemOn : null), marginTop: 8 }}
+                    onClick={() => setSelected(BRANCH_VIEW)} aria-current={selected === BRANCH_VIEW ? "true" : undefined}
+                    data-testid="branch-view-item">
+              <span style={s.itemTitle}>Data changes on this branch</span>
+              <span style={s.itemMeta}><span style={{ fontFamily: "var(--havn-font-mono)" }}>{branch.branch}</span> vs {branch.base?.label}</span>
+            </button>
+            <div style={{ borderBottom: "1px solid var(--havn-border)", margin: "8px 6px 10px" }} />
+          </>
+        )}
         {listError && <div style={s.err}>{listError}</div>}
         {prs && open.length === 0 && (
           <div style={s.dim}>No open changes. Create one from a branch in <button style={s.link} onClick={() => onNavigate("Git:Reviews")}>Git → Reviews</button>.</div>
@@ -213,7 +236,8 @@ export default function ShipPanel({ running, showConfirm, addOutput, onOpenFile,
           </div>
         )}
         {reviewError && <div style={{ ...s.err, marginBottom: 12 }}>{reviewError}</div>}
-        {selected && !review && !reviewError && <div style={s.dim}>Loading…</div>}
+        {selected === BRANCH_VIEW && <BranchDataChanges addOutput={addOutput} />}
+        {selected && selected !== BRANCH_VIEW && !review && !reviewError && <div style={s.dim}>Loading…</div>}
         {review && (
           <ChangeDetail review={review} busy={busyHere} buildRunning={buildRunning} onOpenFile={onOpenFile}
                         onBuild={() => {

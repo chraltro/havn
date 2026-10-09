@@ -12,6 +12,7 @@ from typing import Callable
 import duckdb
 
 from havn.engine.database import ensure_meta_table, log_run
+from havn.engine.perf.capture import run_build_statement
 from havn.engine.utils import validate_identifier
 
 from .discovery import _clear_block, _compute_upstream_hash, _invalidate_state, _needs_build, _update_state
@@ -35,13 +36,17 @@ def _begin_transaction(conn: duckdb.DuckDBPyConnection) -> bool:
     transaction may already be active. In that case we join it instead of
     starting a second one, and the caller must not commit or roll back work
     that it does not own.
+
+    The check runs before any BEGIN is sent: DuckDB answers a nested BEGIN
+    with an error that also aborts the outer transaction, so "try BEGIN and
+    join on failure" left the outer one unusable.
     """
-    try:
-        conn.execute("BEGIN TRANSACTION")
-        return True
-    except duckdb.TransactionException as e:
-        logger.debug("Transaction already active, joining the outer one: %s", e)
-        return False
+    from havn.engine.utils import begin_transaction
+
+    owns = begin_transaction(conn)
+    if not owns:
+        logger.debug("Transaction already active, joining the outer one")
+    return owns
 
 
 class SchemaChangeError(ValueError):
@@ -651,14 +656,17 @@ def _execute_microbatch(
         owns_tx = _begin_transaction(conn)
         try:
             if not exists:
-                conn.execute(f"CREATE TABLE {model.full_name} AS\n{query}")
+                run_build_statement(
+                    conn, f"CREATE TABLE {model.full_name} AS\n{query}", full_refresh=True
+                )
                 exists = True
                 written = conn.execute(
                     f"SELECT count(*) FROM {model.full_name}"
                 ).fetchone()[0]
             else:
-                conn.execute(
-                    f"CREATE OR REPLACE TEMP TABLE {staging} AS\n{query}"
+                run_build_statement(
+                    conn, f"CREATE OR REPLACE TEMP TABLE {staging} AS\n{query}",
+                    full_refresh=False,
                 )
                 plan = _plan_schema_change(
                     model,
@@ -950,7 +958,9 @@ def _execute_snapshot(
     ).fetchone()[0] > 0
 
     query = resolve_query(model, model_map, query_rewriter)
-    conn.execute(f"CREATE OR REPLACE TEMP TABLE {staging} AS\n{query}")
+    run_build_statement(
+        conn, f"CREATE OR REPLACE TEMP TABLE {staging} AS\n{query}", full_refresh=False
+    )
     staging_cols = conn.execute(
         "SELECT column_name, data_type FROM information_schema.columns "
         "WHERE table_name = ? AND table_catalog = 'temp' "
@@ -1240,6 +1250,15 @@ def resolve_query(
     return query_rewriter(query) if query_rewriter is not None else query
 
 
+def _substitute(sql: str | None, placeholders: dict[str, str] | None) -> str | None:
+    """Replace each placeholder token in ``sql`` with its value."""
+    if not sql or not placeholders:
+        return sql
+    for token, value in placeholders.items():
+        sql = sql.replace(token, value)
+    return sql
+
+
 def _execute_incremental(
     conn: duckdb.DuckDBPyConnection,
     model: SQLModel,
@@ -1250,8 +1269,13 @@ def _execute_incremental(
     force: bool = False,
     run_id: str | None = None,
     query_rewriter: Callable[[str], str] | None = None,
+    placeholders: dict[str, str] | None = None,
 ) -> tuple[int, int]:
     """Execute an incremental model.
+
+    ``placeholders`` maps literal tokens (a live model's ``{watermark}``) to
+    the SQL text that replaces them in both the query and the
+    incremental_filter; see :mod:`havn.engine.live.refresh`.
 
     Strategies:
         delete+insert (default): Delete matching rows by unique_key, insert new.
@@ -1298,8 +1322,8 @@ def _execute_incremental(
     # silently lost forever; the dedup on unique_key absorbs the re-read. For
     # append-only loads there is no dedup, so we keep strict ``>`` to avoid
     # inserting duplicates of the boundary rows.
-    query = resolve_query(model, model_map, query_rewriter)
-    incremental_filter = model.incremental_filter
+    query = _substitute(resolve_query(model, model_map, query_rewriter), placeholders)
+    incremental_filter = _substitute(model.incremental_filter, placeholders)
     if model.watermark and not incremental_filter:
         wm = model.watermark.strip()
         validate_identifier(wm, "watermark column")
@@ -1312,7 +1336,18 @@ def _execute_incremental(
             f"WHERE (SELECT MAX({wm}) FROM {{this}}) IS NULL "
             f"OR {wm} {cmp} (SELECT MAX({wm}) FROM {{this}})"
         )
-    if exists and incremental_filter:
+    # A live build (placeholders given) keeps its filter on the first load as
+    # well, unless it needs {this}: with {watermark} at 0 the filter is what
+    # keeps out rows committed to landing but not yet stamped with a
+    # _havn_seq. Reading those in the full load and again once stamped would
+    # apply them twice.
+    first_load_filter = (
+        placeholders is not None
+        and bool(incremental_filter)
+        and "{this}" not in (model.incremental_filter or "")
+        and not model.watermark
+    )
+    if (exists or first_load_filter) and incremental_filter:
         # Replace {this} with the target table name. Wrap the user query in
         # a subquery so trailing clauses (GROUP BY / ORDER BY / LIMIT / ;)
         # don't produce malformed SQL when the filter is appended.
@@ -1330,10 +1365,16 @@ def _execute_incremental(
 
     strategy = model.incremental_strategy
 
-    if not exists:
+    if model.cdc_op:
+        # Change events, not rows: dedupe per key by sequence, skip stale and
+        # duplicate events, apply deletes. See cdc_apply for the rules.
+        from .cdc_apply import execute_cdc
+
+        execute_cdc(conn, model, query, exists, actions)
+    elif not exists:
         # First run — full load
         ddl = f"CREATE TABLE {model.full_name} AS\n{query}"
-        conn.execute(ddl)
+        run_build_statement(conn, ddl, full_refresh=True)
     elif strategy == "append" or not model.unique_key:
         # Append-only. It still goes through staging, because a bare
         # ``INSERT INTO target <query>`` matches columns by position: a
@@ -1344,7 +1385,9 @@ def _execute_incremental(
         # list so order stops mattering.
         validate_identifier(model.name, "staging table name")
         staging_name = f"_havn_staging_{model.name}"
-        conn.execute(f"CREATE OR REPLACE TEMP TABLE {staging_name} AS\n{query}")
+        run_build_statement(
+            conn, f"CREATE OR REPLACE TEMP TABLE {staging_name} AS\n{query}", full_refresh=False
+        )
         plan = _plan_schema_change(
             model,
             _table_columns(conn, model.schema, model.name),
@@ -1386,7 +1429,9 @@ def _execute_incremental(
         staging_name = f"_havn_staging_{model.name}"
 
         # Create staging table with new data
-        conn.execute(f"CREATE OR REPLACE TEMP TABLE {staging_name} AS\n{query}")
+        run_build_statement(
+            conn, f"CREATE OR REPLACE TEMP TABLE {staging_name} AS\n{query}", full_refresh=False
+        )
 
         # Schema evolution: diff staging against target on name AND type, in
         # both directions, and resolve the difference with the model's
@@ -1551,8 +1596,12 @@ def execute_model(
     force: bool = False,
     run_id: str | None = None,
     query_rewriter: Callable[[str], str] | None = None,
+    python_output: list[str] | None = None,
 ) -> tuple[int, int]:
     """Execute a single model. Returns (duration_ms, row_count).
+
+    ``python_output`` collects what a Python model's function printed, for
+    the run log. SQL models print nothing and leave it alone.
 
     ``actions`` collects human-readable schema-evolution lines ("added column
     region VARCHAR") when the caller wants them for the run log. Passing None
@@ -1579,11 +1628,39 @@ def execute_model(
         _drop_conflicting(conn, model.schema, model.name, "ephemeral")
         return 0, 0
 
+    from .locks import model_lock
+
     manager = get_resource_manager()
-    with manager.acquire_sync("transform", f"model:{model.full_name}", conn=conn):
+    # One build per model at a time across batch runs, jobs and the live
+    # runner (see transform/locks.py).
+    with model_lock(model.full_name), manager.acquire_sync(
+        "transform", f"model:{model.full_name}", conn=conn
+    ):
         manager_task_register_cancel(manager, conn)
 
-        if model.materialized == "incremental":
+        if model.is_python:
+            duration_ms, row_count = _execute_python(
+                conn, model, actions, model_map,
+                snapshot_settings=snapshot_settings,
+                query_rewriter=query_rewriter,
+                python_output=python_output,
+            )
+        elif model.materialized == "incremental" and model.live:
+            # A live model consumes source watermarks. Every builder -- this
+            # batch run, a job, the live runner -- goes through the same
+            # bookkeeping, so whoever gets here first applies the pending
+            # batch and the next finds nothing left (havn.engine.live.refresh).
+            from havn.engine.live.refresh import build_live
+
+            duration_ms, row_count = build_live(
+                conn, model, model_map,
+                lambda placeholders: _execute_incremental(
+                    conn, model, actions, model_map,
+                    batch_range=batch_range, force=force, run_id=run_id,
+                    query_rewriter=query_rewriter, placeholders=placeholders,
+                ),
+            )
+        elif model.materialized == "incremental":
             duration_ms, row_count = _execute_incremental(
                 conn, model, actions, model_map,
                 batch_range=batch_range, force=force, run_id=run_id,
@@ -1597,21 +1674,33 @@ def execute_model(
         else:
             conn.execute(f"CREATE SCHEMA IF NOT EXISTS {model.schema}")
             start = time.perf_counter()
-            _drop_conflicting(conn, model.schema, model.name, model.materialized)
             query = resolve_query(model, model_map, query_rewriter)
+            kind = model.materialized
+            if kind == "view" and query_rewriter is not None and query != resolve_query(model, model_map):
+                # A deferred view reads from the defer target's attach alias,
+                # which exists only for the length of the run. Stored as a
+                # view it would fail on every later query ("Catalog
+                # havn_defer_... does not exist"), so a view that defer
+                # redirected is materialized as a table instead: the rows it
+                # would have shown, read while the target was attached.
+                kind = "table"
+                logger.info(
+                    "defer: %s reads the defer target, so it is built as a table", model.full_name
+                )
+            _drop_conflicting(conn, model.schema, model.name, kind)
 
-            if model.materialized == "view":
+            if kind == "view":
                 ddl = f"CREATE OR REPLACE VIEW {model.full_name} AS\n{query}"
-            elif model.materialized == "table":
+            elif kind == "table":
                 ddl = f"CREATE OR REPLACE TABLE {model.full_name} AS\n{query}"
             else:
                 raise ValueError(f"Unknown materialization: {model.materialized}")
 
-            conn.execute(ddl)
+            run_build_statement(conn, ddl, full_refresh=model.materialized == "table")
             duration_ms = int((time.perf_counter() - start) * 1000)
 
             row_count = 0
-            if model.materialized == "table":
+            if kind == "table":
                 result = conn.execute(f"SELECT count(*) FROM {model.full_name}").fetchone()
                 row_count = result[0] if result else 0
 
@@ -1620,6 +1709,48 @@ def execute_model(
         )
         ROWS_PROCESSED.labels(category="transform").inc(row_count)
         return duration_ms, row_count
+
+
+def _execute_python(
+    conn: duckdb.DuckDBPyConnection,
+    model: SQLModel,
+    actions: list[str] | None,
+    model_map: dict[str, SQLModel] | None,
+    *,
+    snapshot_settings: SnapshotSettings | None,
+    query_rewriter: Callable[[str], str] | None,
+    python_output: list[str] | None,
+) -> tuple[int, int]:
+    """Build a Python model: run its function, then write the result as SQL.
+
+    The function's result is staged into a TEMP table, and a SQL stand-in
+    selecting from it goes through the very writers a SQL model uses, so a
+    Python incremental gets the same strategies and on_schema_change rules.
+    Ephemeral inlining and defer redirects apply inside ``ref()`` rather
+    than to the stand-in, whose only input is the staged table.
+    """
+    from .python_models import drop_staged, run_python_model, staged_model
+
+    start = time.perf_counter()
+    conn.execute(f"CREATE SCHEMA IF NOT EXISTS {model.schema}")
+    staged = run_python_model(
+        conn, model, model_map=model_map, query_rewriter=query_rewriter,
+        output=python_output,
+    )
+    try:
+        stand_in = staged_model(model, staged)
+        if model.materialized == "incremental":
+            _execute_incremental(conn, stand_in, actions)
+        elif model.materialized == "snapshot":
+            _execute_snapshot(conn, stand_in, actions, None, snapshot_settings)
+        else:
+            _drop_conflicting(conn, model.schema, model.name, "table")
+            conn.execute(f"CREATE OR REPLACE TABLE {model.full_name} AS\n{stand_in.query}")
+    finally:
+        drop_staged(conn, staged)
+    duration_ms = int((time.perf_counter() - start) * 1000)
+    row = conn.execute(f"SELECT count(*) FROM {model.full_name}").fetchone()
+    return duration_ms, (row[0] if row else 0)
 
 
 def manager_task_register_cancel(manager, conn: duckdb.DuckDBPyConnection) -> None:
@@ -1668,8 +1799,12 @@ def _log_build(
     schema_changes: list[str],
     assertion_results: list[AssertionResult],
     pipeline_run_id: str | None = None,
+    output: str | None = None,
 ) -> None:
     """Record a finished build in the run log, after its assertions ran.
+
+    ``output`` is what a Python model printed while it ran; it follows the
+    schema-change lines in the run log's output column.
 
     A failed severity=error assertion logs the build as "error" (the model's
     descendants are blocked, so calling it a success would contradict the rest
@@ -1690,9 +1825,17 @@ def _log_build(
         conn, "transform", model.full_name, "error" if failed else "success",
         duration_ms, row_count,
         error=error,
-        log_output="; ".join(schema_changes) or None,
+        log_output=_join_output(schema_changes, output),
         pipeline_run_id=pipeline_run_id,
     )
+
+
+def _join_output(schema_changes: list[str], output: str | None) -> str | None:
+    """The run log's output text: schema changes, then printed output."""
+    parts = ["; ".join(schema_changes)] if schema_changes else []
+    if output and output.strip():
+        parts.append(output.rstrip())
+    return "\n".join(parts) or None
 
 
 def _execute_single_model(
@@ -1743,19 +1886,27 @@ def _execute_single_model(
                 pass
             return model.full_name, ModelResult(status="skipped")
 
+        from havn.engine.instrumentation import instrument_build
+
         schema_changes: list[str] = []
-        duration_ms, row_count = execute_model(
-            conn, model, schema_changes, model_map,
-            snapshot_settings=(
-                snapshot_settings_for(project_dir)
-                if model.materialized == "snapshot"
-                else None
-            ),
-            batch_range=batch_range,
-            force=force,
-            run_id=pipeline_run_id,
-            query_rewriter=query_rewriter,
-        )
+        py_output: list[str] = []
+        with instrument_build(
+            conn, model, project_dir=project_dir, pipeline_run_id=pipeline_run_id,
+        ) as probe:
+            duration_ms, row_count = execute_model(
+                conn, model, schema_changes, model_map,
+                snapshot_settings=(
+                    snapshot_settings_for(project_dir)
+                    if model.materialized == "snapshot"
+                    else None
+                ),
+                batch_range=batch_range,
+                force=force,
+                run_id=pipeline_run_id,
+                query_rewriter=query_rewriter,
+                python_output=py_output,
+            )
+            probe.done(duration_ms, row_count)
         _update_state(conn, model, duration_ms, row_count)
 
         # Run assertions (and the synthesised @grain check, if any). A
@@ -1767,7 +1918,7 @@ def _execute_single_model(
             _save_assertions(conn, model, assertion_results)
         _log_build(
             conn, model, duration_ms, row_count, schema_changes,
-            assertion_results, pipeline_run_id,
+            assertion_results, pipeline_run_id, output="".join(py_output),
         )
         if assertion_results:
             failed_error = [
@@ -1803,7 +1954,11 @@ def _execute_single_model(
 
     except Exception as e:
         try:
-            log_run(conn, "transform", model.full_name, "error", error=str(e), pipeline_run_id=pipeline_run_id)
+            log_run(
+                conn, "transform", model.full_name, "error", error=str(e),
+                log_output=getattr(e, "output", None) or None,
+                pipeline_run_id=pipeline_run_id,
+            )
         except Exception as e2:
             logger.debug("Failed to log run error: %s", e2)
         return model.full_name, ModelResult(status="error", error=str(e))

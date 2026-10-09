@@ -73,6 +73,10 @@ def check(
             source_columns=source_columns,
             deny_rules=list(config.policies.deny) if config.policies.deny else None,
         )
+        if conn is not None:
+            from havn.engine.governance.report import governance_warnings
+
+            errors = list(errors) + governance_warnings(conn, project_dir, config, models)
 
         if errors:
             err_count = sum(1 for e in errors if e.severity == "error")

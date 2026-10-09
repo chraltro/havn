@@ -106,3 +106,19 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "slow" in item.keywords:
             item.add_marker(skip_slow)
+
+
+@pytest.fixture(autouse=True)
+def _reset_server_auth():
+    """Leave the server's auth switch off after every test.
+
+    Several API tests turn auth on; one that fails (or forgets) before
+    switching it back would make every later API test in the process get 401s,
+    depending on test order.
+    """
+    yield
+    import sys
+
+    app = sys.modules.get("havn.server.app")
+    if app is not None:
+        app.AUTH_ENABLED = False

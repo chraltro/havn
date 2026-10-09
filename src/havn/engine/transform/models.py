@@ -88,8 +88,61 @@ class ProfileResult:
 
 
 @dataclass
+class PythonModelInfo:
+    """What discovery read out of a ``transform/**/*.py`` model, statically.
+
+    Nothing in here came from running the file: the config, the ``ref()``
+    calls and the fingerprint are all read off the ``ast``. That is what lets
+    ``havn ls``, the DAG and change detection work on a project whose Python
+    models have never been run, and it is why ``@model(...)`` arguments must
+    be literals.
+    """
+
+    # The function the build calls: the one decorated with @model, or the
+    # top-level ``def model`` when nothing is decorated.
+    function: str = ""
+    # Its parameter names, in order. Each is injected by name at build time.
+    params: list[str] = field(default_factory=list)
+    # True when the function takes ``**kwargs`` (it then receives everything).
+    takes_kwargs: bool = False
+    # sha256 of the module's ast with docstrings and the metadata-only
+    # decorator keywords (tags, description, columns, owner, timeouts)
+    # removed. Comments and formatting never reach an ast, so they cannot
+    # rebuild a model; any change to code that runs does.
+    fingerprint: str = ""
+    # Fingerprint of the local helper modules the file imports (``import
+    # _helpers`` resolved next to the model or at the transform root), or ""
+    # when it imports none. Folded into content_hash only, like macro_hash.
+    helper_hash: str = ""
+    # Helper modules found, relative to the transform root, for display.
+    helpers: list[str] = field(default_factory=list)
+    # Where ``import`` looks for local helpers while the model runs: the
+    # model's own directory and the transform root it was discovered under.
+    search_path: list[Path] = field(default_factory=list)
+    # A ref() name as written -> the name it resolves to. Only set for
+    # package models, whose refs to the package's own models are namespaced.
+    ref_aliases: dict[str, str] = field(default_factory=dict)
+    # Hard and idle timeouts in seconds, or None for the script defaults.
+    timeout: float | None = None
+    idle_timeout: float | None = None
+    # Problems found while reading the file: (message, line or None). A model
+    # with errors is still discovered, so the DAG and validate can show it;
+    # building it raises the first one.
+    errors: list[tuple[str, int | None]] = field(default_factory=list)
+    # Things worth saying that do not stop a build.
+    warnings: list[tuple[str, int | None]] = field(default_factory=list)
+
+
+@dataclass
 class SQLModel:
-    """A single SQL transformation model."""
+    """A single transformation model: a ``.sql`` file, or a ``.py`` file.
+
+    The class keeps its historical name. A Python model is the same object
+    with ``python`` set and an empty ``query``; everything that orders,
+    selects, hashes, builds, asserts and records models treats it exactly
+    like a SQL model, and the few places that need SQL text check
+    :attr:`is_python` first.
+    """
 
     path: Path
     name: str  # e.g. "customers"
@@ -133,6 +186,24 @@ class SQLModel:
     begin: str | None = None  # the first window's date or timestamp, UTC
     # How many already-done windows to reprocess on each run, for late arrivals.
     lookback: int = 1
+    # --- Live models (see havn.engine.live) ---
+    # @config live=true: refreshed by the live runner whenever an input
+    # advances. Deliberately left out of content_hash, like tags: turning a
+    # model live changes who triggers its build, not what the build writes.
+    live: bool = False
+    # @config live_interval=10s: the least time between two live refreshes of
+    # this model, in seconds. 0 means "as often as the runner cycles".
+    live_interval: float = 0.0
+    # --- CDC apply, for incremental merge / delete+insert models ---
+    # Column in the query output holding the change operation (I/U/D, or
+    # insert/update/delete), and the column that orders changes to one key
+    # (an LSN or another monotonically increasing sequence).
+    cdc_op: str | None = None
+    cdc_seq: str | None = None
+    # "hard" removes a deleted key's row (and remembers the delete in a
+    # tombstone table so a replayed older event cannot resurrect it); "soft"
+    # keeps the row with _havn_deleted = true so downstream models see it.
+    cdc_deletes: str = "hard"
     grain: list[str] = field(default_factory=list)  # @grain columns; auto-asserts uniqueness post-build
     owner: str = ""  # @owner label for alert routing
     # @config tags=daily,finance -- labels for `tag:` selectors. Deliberately
@@ -150,6 +221,25 @@ class SQLModel:
     # what descendants see): editing a macro has to rebuild the models
     # that call it, and only those, so every other model keeps its hash.
     macro_hash: str = ""
+    # Set for a Python model (``transform/**/*.py``), None for a SQL model.
+    python: PythonModelInfo | None = None
+
+    @property
+    def is_python(self) -> bool:
+        """Whether this model is defined by a Python function, not SQL."""
+        return self.python is not None
+
+    @property
+    def language(self) -> str:
+        """``"python"`` or ``"sql"``, for API payloads and display."""
+        return "python" if self.python is not None else "sql"
+    # Governance metadata, deliberately out of content_hash: classifying a
+    # column changes who may see it, not what the build writes.
+    # @pii email, phone -> output columns this model classifies as PII.
+    pii: list[str] = field(default_factory=list)
+    # @declassify col: reason -> {col: reason}; the key "*rows" carries an
+    # @declassify rows: reason (inherited row policies stop here).
+    declassified: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.refresh_content_hash()
@@ -165,7 +255,12 @@ class SQLModel:
         # so editing e.g. @config unique_key or incremental_strategy triggers
         # a rebuild. Only non-default values are appended, keeping hashes of
         # models without these settings stable across havn upgrades.
-        parts = [f"{self.materialized}:{_drop_leading_blank_lines(self.query)}"]
+        if self.python is not None:
+            # A Python model has no query; its definition is the fingerprint
+            # of the file's code (see PythonModelInfo.fingerprint).
+            parts = [f"{self.materialized}:python:{self.python.fingerprint}"]
+        else:
+            parts = [f"{self.materialized}:{_drop_leading_blank_lines(self.query)}"]
         if self.unique_key:
             parts.append(f"unique_key={self.unique_key}")
         if self.incremental_strategy != "delete+insert":
@@ -200,6 +295,14 @@ class SQLModel:
             parts.append(f"begin={self.begin}")
         if self.lookback != 1:
             parts.append(f"lookback={self.lookback}")
+        # CDC apply settings decide which version of a key survives and
+        # whether a delete removes the row, so changing them is a rebuild.
+        if self.cdc_op:
+            parts.append(f"cdc_op={self.cdc_op}")
+        if self.cdc_seq:
+            parts.append(f"cdc_seq={self.cdc_seq}")
+        if self.cdc_deletes != "hard":
+            parts.append(f"cdc_deletes={self.cdc_deletes}")
         # Assertions and @grain are stripped out of `query` by
         # strip_config_comments, so without folding them in here, adding an
         # @assert to a model that is already built leaves content_hash
@@ -218,8 +321,15 @@ class SQLModel:
         # through _parent_built; folding the fingerprint in transitively made
         # every model downstream of any caller look modified on its own.
         self.definition_hash = _hash_content("|".join(parts))
-        if self.macro_hash:
-            parts.append(f"macros={self.macro_hash}")
+        # Local helper modules a Python model imports behave like macros: an
+        # edit rebuilds the importers (their content_hash moves) and only
+        # those, while descendants follow through _parent_built.
+        helper_hash = self.python.helper_hash if self.python is not None else ""
+        if self.macro_hash or helper_hash:
+            if self.macro_hash:
+                parts.append(f"macros={self.macro_hash}")
+            if helper_hash:
+                parts.append(f"helpers={helper_hash}")
             self.content_hash = _hash_content("|".join(parts))
         else:
             self.content_hash = self.definition_hash
@@ -238,6 +348,12 @@ class SQLModel:
         rewritten after construction, so the cache cannot go stale.
         """
         if isinstance(self._ast_cache, _Unparsed):
+            if self.python is not None:
+                # No SQL to parse, and no parse error either: SQL-only checks
+                # skip a Python model on ``is_python`` before they get here.
+                self._ast_cache = None
+                self._parse_error = ""
+                return None
             from havn.engine.sql_analysis import parse_sql_with_error
 
             parsed, error = parse_sql_with_error(self.query)

@@ -319,6 +319,19 @@ class SchedulerThread(threading.Thread):
                                         pass
                 except Exception as e:
                     logger.debug("Orchestration scheduler check failed: %s", e)
+
+                # --- Scheduled dashboard reports (_havn.reports) ---
+                try:
+                    from havn.engine.reports import run_due_reports_for_project
+
+                    for delivery in run_due_reports_for_project(self.project_dir):
+                        colour = "green" if delivery["status"] in ("sent", "skipped") else "red"
+                        console.print(
+                            f"[bold {colour}]Scheduler:[/bold {colour}] Report "
+                            f"{delivery['report_id']} {delivery['status']}"
+                        )
+                except Exception as e:
+                    logger.warning("Scheduled report check failed: %s", e)
             except Exception as e:
                 logger.error("Scheduler error: %s", e)
 

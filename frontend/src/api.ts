@@ -305,6 +305,124 @@ export interface WidgetQueryResult {
   error?: string;
 }
 
+/** A published-dashboard link (GET/POST /api/dashboards/{id}/shares). */
+export interface DashboardShare {
+  id: string;
+  dashboard_id: string;
+  dashboard_name?: string | null;
+  mode: "signed_in" | "public";
+  label: string;
+  token_hint?: string | null;
+  view_as_user?: string | null;
+  view_as_role?: string | null;
+  expires_at?: string | null;
+  revoked_at?: string | null;
+  created_by: string;
+  created_at?: string | null;
+  last_viewed_at?: string | null;
+  view_count: number;
+  status: "active" | "expired" | "revoked";
+  /** Path of the published page; only known for signed-in links and at public-link creation. */
+  path?: string | null;
+  url?: string;
+  /** Present once, in the response that creates a public link. */
+  token?: string;
+  embed_html?: string;
+}
+
+export interface ShareCreate {
+  mode: "signed_in" | "public";
+  label?: string;
+  expires_in_days?: number;
+  view_as_user?: string;
+  view_as_role?: "viewer" | "editor" | "admin";
+}
+
+export interface Freshness {
+  as_of: string | null;
+  newest: string | null;
+  models: { name: string; last_built_at: string | null }[];
+  unknown: string[];
+  model_count?: number;
+}
+
+/** The SQL-free definition a published page renders. */
+export interface PublishedDashboard {
+  dashboard: {
+    id: string;
+    name: string;
+    description: string;
+    layout: Record<string, unknown>;
+    filters: { id: string; label: string; type: string; column: string; has_options?: boolean; options?: string[] }[];
+    settings: { parameters: { name: string; label?: string; type?: string; default?: unknown }[] };
+    widgets: { id: string; widget_type: string; chart_type?: string; title: string; config: Record<string, unknown>; position: Record<string, number>; sort_order: number; has_query: boolean }[];
+  };
+  share: { mode: "signed_in" | "public"; label: string; expires_at: string | null };
+  viewer: { username: string | null };
+  freshness: Freshness;
+}
+
+export interface ReportCondition {
+  widget_id: string;
+  op: "gt" | "gte" | "lt" | "lte" | "eq" | "ne" | "has_rows" | "no_rows";
+  column?: string;
+  value?: number;
+}
+
+export interface Report {
+  id: string;
+  name: string;
+  dashboard_id: string;
+  dashboard_name?: string | null;
+  widget_id?: string | null;
+  schedule?: string | null;
+  enabled: boolean;
+  owner: string;
+  recipients: { email: string[]; slack: string[] };
+  formats: ("pdf" | "png" | "csv")[];
+  filters: Record<string, unknown>;
+  parameters: Record<string, unknown>;
+  condition?: ReportCondition | null;
+  subject: string;
+  message: string;
+  last_run_at?: string | null;
+  last_status?: "sent" | "skipped" | "failed" | "partial" | null;
+  last_error?: string | null;
+  next_run_at?: string | null;
+}
+
+export interface ReportDelivery {
+  id: string;
+  report_id: string;
+  trigger: string;
+  status: "sent" | "skipped" | "failed" | "partial";
+  condition_met: boolean | null;
+  channels: { channel: string; target: string; status: string; error?: string }[];
+  summary: { kpis?: { label: string; display: string }[]; condition?: string | null };
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface ReportPreview {
+  subject: string;
+  html: string;
+  text: string;
+  condition_met: boolean;
+  condition: { met: boolean; description: string } | null;
+  attachments: { filename: string; type: string; bytes: number }[];
+  notes: string[];
+}
+
+export interface ReportCapabilities {
+  charts: boolean;
+  email_configured: boolean;
+  slack_default_configured: boolean;
+  base_url: string | null;
+  allowed_recipient_domains: string[];
+  formats: string[];
+}
+
 export interface FileEntry {
   path: string;
   type: string;
@@ -379,6 +497,7 @@ export interface UserEntry {
   display_name?: string;
   created_at?: string;
   last_login?: string;
+  attributes?: Record<string, unknown>;
 }
 
 export interface StreamConfig {
@@ -620,7 +739,7 @@ interface RequestOptions extends RequestInit {
 }
 
 /** Endpoints that need a longer timeout (e.g. diff can scan many models). */
-const LONG_TIMEOUT_PATHS = ["/diff", "/transform", "/stream/", "/query", "/contracts", "/docs/", "/unit-tests"];
+const LONG_TIMEOUT_PATHS = ["/diff", "/transform", "/stream/", "/query", "/contracts", "/docs/", "/unit-tests", "/ask", "/changesets"];
 
 function getTimeoutForPath(path: string): number {
   if (LONG_TIMEOUT_PATHS.some((p) => path.startsWith(p) || path === p)) {
@@ -1184,6 +1303,15 @@ export const api = {
   switchEnvironment: (envName: string) =>
     request(`/environment/${envName}`, { method: "PUT" }),
 
+  // Branch warehouses (a warehouse per git branch)
+  getBranch: () => request("/branch"),
+  getBranchStatus: () => request("/branch/status"),
+  buildBranch: (opts: { force?: boolean; prune?: boolean; plan?: boolean } = {}) =>
+    request("/branch/build", { method: "POST", body: JSON.stringify(opts) }),
+  diffBranch: (opts: { models?: string[]; full?: boolean } = {}) =>
+    request("/branch/diff", { method: "POST", body: JSON.stringify(opts) }),
+  listBranchWarehouses: () => request("/branch/list"),
+
   // Seeds
   listSeeds: () => request("/seeds"),
   runSeeds: (force: boolean = false, schema_name: string = "seeds") =>
@@ -1210,11 +1338,24 @@ export const api = {
   // Everything the editor workbench shows for the model defined in `path`.
   getModelWorkbench: (path: string) => request(`/models/workbench?path=${encodeURIComponent(path)}`),
 
+  // Run a Python model's function on the editor buffer; returns its first rows.
+  previewPythonModel: (path: string, content: string, limit: number = 100) =>
+    request<{ model: string; columns: string[]; rows: unknown[][]; truncated: boolean; output: string }>(
+      "/models/preview-python",
+      { method: "POST", body: JSON.stringify({ path, content, limit }) },
+    ),
+
   // Create model
-  createModel: (name: string, schema_name: string = "bronze", materialized: string = "table", sql: string = "") =>
+  createModel: (
+    name: string,
+    schema_name: string = "bronze",
+    materialized: string = "table",
+    sql: string = "",
+    language: "sql" | "python" = "sql",
+  ) =>
     request("/models/create", {
       method: "POST",
-      body: JSON.stringify({ name, schema_name, materialized, sql }),
+      body: JSON.stringify({ name, schema_name, materialized, sql, language }),
     }),
 
   // Check (validation + assertions + contracts)
@@ -1228,6 +1369,51 @@ export const api = {
       method: "POST",
       body: JSON.stringify(model ? { model } : {}),
     }),
+
+  // Performance advisor
+  getPerfSummary: (days: number = 7) => request<any>(`/perf/summary?days=${days}`),
+  getPerfModel: (model: string) => request<any>(`/perf/models/${encodeURIComponent(model)}`),
+  getPerfBuild: (id: string) => request<any>(`/perf/builds/${encodeURIComponent(id)}`),
+  getPerfDiff: (fast: string, slow: string) =>
+    request<any>(`/perf/diff?fast=${encodeURIComponent(fast)}&slow=${encodeURIComponent(slow)}`),
+  getPerfAdvice: (includeDismissed: boolean = false) =>
+    request<any[]>(`/perf/advice?include_dismissed=${includeDismissed}`),
+  setPerfAdviceState: (model: string, rule: string, status: string, days: number | null = null) =>
+    request<any>("/perf/advice/state", {
+      method: "POST",
+      body: JSON.stringify(days ? { model, rule, status, days } : { model, rule, status }),
+    }),
+  getPerfCriticalPath: (runId: string) => request<any>(`/perf/runs/${encodeURIComponent(runId)}/critical-path`),
+  // Ask the warehouse (semantic-layer questions)
+  getAskStatus: () => request<Record<string, unknown>>("/ask/status"),
+  ask: (
+    question: string,
+    history: { question: string; spec: Record<string, unknown> | null }[] = [],
+    options: { exploratory?: boolean; summarize?: boolean } = {},
+  ) =>
+    request<Record<string, any>>("/ask", {
+      method: "POST",
+      body: JSON.stringify({ question, history, ...options }),
+    }),
+  acceptSuggestedMetric: (definition: Record<string, unknown>, path: string | null = null) =>
+    request<{ path: string }>("/ask/accept-metric", {
+      method: "POST",
+      body: JSON.stringify({ definition, path }),
+    }),
+
+  // Change sets (verified agent changes)
+  listChangeSets: (openOnly: boolean = true) =>
+    request<{ changesets: Record<string, any>[] }>(`/changesets?open=${openOnly ? "true" : "false"}`),
+  getChangeSet: (id: string) => request<Record<string, any>>(`/changesets/${encodeURIComponent(id)}`),
+  verifyChangeSet: (id: string) =>
+    request<Record<string, any>>(`/changesets/${encodeURIComponent(id)}/verify`, { method: "POST" }),
+  applyChangeSet: (id: string, force: boolean = false) =>
+    request<Record<string, any>>(`/changesets/${encodeURIComponent(id)}/apply`, {
+      method: "POST",
+      body: JSON.stringify({ force }),
+    }),
+  discardChangeSet: (id: string) =>
+    request<Record<string, any>>(`/changesets/${encodeURIComponent(id)}/discard`, { method: "POST" }),
 
   // Contracts
   runContracts: () => request("/contracts/run", { method: "POST" }),
@@ -1245,6 +1431,20 @@ export const api = {
   getCDCStatus: () => request("/cdc"),
   resetCDCWatermark: (name: string) =>
     request(`/cdc/${encodeURIComponent(name)}/reset`, { method: "POST" }),
+
+  // Governance: row policies, user attributes, preview as user
+  getGovernance: () => request<any>("/governance"),
+  listRowPolicies: () => request<any[]>("/governance/row-policies"),
+  createRowPolicy: (policy: unknown) =>
+    request("/governance/row-policies", { method: "POST", body: JSON.stringify(policy) }),
+  updateRowPolicy: (id: string, updates: unknown) =>
+    request(`/governance/row-policies/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(updates) }),
+  deleteRowPolicy: (id: string) =>
+    request(`/governance/row-policies/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  setUserAttributes: (username: string, attributes: Record<string, unknown>) =>
+    request<any>(`/users/${encodeURIComponent(username)}/attributes`, { method: "PUT", body: JSON.stringify({ attributes }) }),
+  previewAsUser: (username: string, sql: string, limit = 200) =>
+    request<any>("/governance/preview", { method: "POST", body: JSON.stringify({ username, sql, limit }) }),
 
   // Masking
   getMaskingMethods: () => request<any>("/masking/methods"),
@@ -1377,6 +1577,55 @@ export const api = {
     }),
   clearDashboardCache: (dashboardId: string) =>
     request(`/dashboards/${dashboardId}/cache`, { method: "DELETE" }),
+
+  // Published dashboards: share links (management needs an account)
+  listDashboardShares: (dashboardId: string) =>
+    request<DashboardShare[]>(`/dashboards/${dashboardId}/shares`),
+  createDashboardShare: (dashboardId: string, body: ShareCreate) =>
+    request<DashboardShare>(`/dashboards/${dashboardId}/shares`, { method: "POST", body: JSON.stringify(body) }),
+  updateDashboardShare: (shareId: string, body: { expires_in_days?: number; expires_at?: string; clear_expiry?: boolean }) =>
+    request<DashboardShare>(`/shares/${encodeURIComponent(shareId)}`, { method: "PATCH", body: JSON.stringify(body) }),
+  revokeDashboardShare: (shareId: string) =>
+    request<DashboardShare>(`/shares/${encodeURIComponent(shareId)}`, { method: "DELETE" }),
+
+  // Published dashboards: the read-only API behind /p/<key>
+  getPublished: (key: string) => request<PublishedDashboard>(`/published/${encodeURIComponent(key)}`),
+  queryPublished: (key: string, filters: Record<string, unknown> = {}, parameters: Record<string, unknown> = {}, widgetIds?: string[]) =>
+    request<{ results: Record<string, WidgetQueryResult>; freshness: Freshness }>(`/published/${encodeURIComponent(key)}/query`, {
+      method: "POST",
+      body: JSON.stringify({ filters, parameters, ...(widgetIds ? { widget_ids: widgetIds } : {}) }),
+      retryable: true,
+    }),
+  publishedFilterOptions: (key: string, filterId: string) =>
+    request<{ options: string[] }>(`/published/${encodeURIComponent(key)}/filters/${encodeURIComponent(filterId)}/options`, {
+      method: "POST",
+      retryable: true,
+    }),
+
+  // Scheduled reports
+  reportCapabilities: () => request<ReportCapabilities>("/reports/capabilities"),
+  listReports: () => request<Report[]>("/reports"),
+  getReport: (id: string) => request<Report & { deliveries: ReportDelivery[] }>(`/reports/${encodeURIComponent(id)}`),
+  createReport: (body: Partial<Report>) =>
+    request<Report>("/reports", { method: "POST", body: JSON.stringify(body) }),
+  updateReport: (id: string, body: Partial<Report>) =>
+    request<Report>(`/reports/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteReport: (id: string) => request(`/reports/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  sendReport: (id: string, force = false) =>
+    request<ReportDelivery>(`/reports/${encodeURIComponent(id)}/send?force=${force ? "true" : "false"}`, { method: "POST" }),
+  previewReport: (id: string) =>
+    request<ReportPreview>(`/reports/${encodeURIComponent(id)}/preview`, { method: "POST" }),
+  downloadReport: async (id: string, format: "pdf" | "png" | "html") => {
+    const headers: Record<string, string> = {};
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+    const res = await fetch(`${BASE}/reports/${encodeURIComponent(id)}/render?format=${format}`, { headers });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try { detail = (await res.json()).detail || detail; } catch { /* not JSON */ }
+      throw new Error(detail);
+    }
+    return res.blob();
+  },
 
   // Orchestration Jobs
   listJobs: () => request<OrchestrationJob[]>("/jobs"),
@@ -1562,7 +1811,134 @@ export const api = {
     })();
     return () => ctrl.abort();
   },
+
+  // Live models: continuous refresh from streaming ingest
+  getLiveStatus: () => request<LiveStatus>("/live/status"),
+  startLiveRunner: () => request<{ running: boolean }>("/live/start", { method: "POST" }),
+  stopLiveRunner: () => request<{ running: boolean }>("/live/stop", { method: "POST" }),
+  pauseLiveModel: (model: string) =>
+    request(`/live/models/${encodeURIComponent(model)}/pause`, { method: "POST" }),
+  resumeLiveModel: (model: string) =>
+    request(`/live/models/${encodeURIComponent(model)}/resume`, { method: "POST" }),
+  refreshLiveModel: (model: string) =>
+    request(`/live/models/${encodeURIComponent(model)}/refresh`, { method: "POST" }),
+  /** Follow GET /live/events (SSE). Calls onEvent(type, data); returns a stop function. */
+  streamLiveEvents: (onEvent: (type: string, data: any, id?: number) => void, signal?: AbortSignal) => {
+    const headers: Record<string, string> = {};
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+    const ctrl = new AbortController();
+    if (signal) signal.addEventListener("abort", () => ctrl.abort());
+    (async () => {
+      let after = 0;
+      // Reconnect with backoff until stopped: the stream ends when the
+      // server restarts, and a live view should simply carry on.
+      for (let attempt = 0; !ctrl.signal.aborted; attempt++) {
+        try {
+          const resp = await fetch(`${BASE}/live/events?after=${after}`, { headers, signal: ctrl.signal });
+          if (!resp.body) return;
+          attempt = 0;
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = "";
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            let idx;
+            while ((idx = buf.indexOf("\n\n")) !== -1) {
+              const frame = parseSSEFrame(buf.slice(0, idx));
+              buf = buf.slice(idx + 2);
+              if (!frame) continue;
+              if (frame.id) after = Number(frame.id) || after;
+              onEvent(frame.event, frame.data, frame.id ? Number(frame.id) : undefined);
+            }
+          }
+        } catch {
+          if (ctrl.signal.aborted) return;
+        }
+        await new Promise((r) => setTimeout(r, Math.min(1000 * 2 ** attempt, 15000)));
+      }
+    })();
+    return () => ctrl.abort();
+  },
 };
+
+/** One `id:`/`event:`/`data:` SSE frame, or null for a comment / keepalive. */
+export function parseSSEFrame(frame: string): { id?: string; event: string; data: any } | null {
+  let id: string | undefined;
+  let event = "message";
+  const data: string[] = [];
+  for (const line of frame.split("\n")) {
+    if (line.startsWith(":")) continue;
+    if (line.startsWith("id: ")) id = line.slice(4);
+    else if (line.startsWith("event: ")) event = line.slice(7);
+    else if (line.startsWith("data: ")) data.push(line.slice(6));
+  }
+  if (!data.length) return null;
+  try {
+    return { id, event, data: JSON.parse(data.join("\n")) };
+  } catch {
+    return null;
+  }
+}
+
+export interface LiveInput {
+  source: string;
+  consumed: number;
+  watermark: number;
+  behind: number;
+}
+
+export interface LiveModelStatus {
+  model: string;
+  materialized: string;
+  strategy?: string | null;
+  cdc?: boolean;
+  live_interval?: number | null;
+  status: "live" | "behind" | "waiting" | "failing" | "paused";
+  waiting_on?: string | null;
+  lag_seconds: number;
+  events_per_second?: number;
+  inputs: LiveInput[];
+  paused?: boolean;
+  consecutive_failures?: number;
+  next_retry_at?: string | null;
+  last_error?: string | null;
+  last_refresh_at?: string | null;
+  last_duration_ms?: number;
+  last_lag_ms?: number | null;
+  refreshes?: number;
+  rows_total?: number;
+  refreshing?: boolean;
+}
+
+export interface LiveSourceStatus {
+  source: string;
+  kind: "source" | "model";
+  watermark: number;
+  rows_total: number;
+  advanced_at: string | null;
+  events_per_second: number;
+  consumers: string[];
+}
+
+export interface LiveStatus {
+  now?: string;
+  runner: {
+    running: boolean;
+    started_at?: string | null;
+    cycles?: number;
+    refreshes?: number;
+    events_seen?: number;
+    last_cycle_at?: string | null;
+    last_cycle_ms?: number;
+    discovery_error?: string | null;
+  };
+  settings: Record<string, number | boolean>;
+  models: LiveModelStatus[];
+  sources: LiveSourceStatus[];
+  max_lag_seconds: number;
+}
 
 export interface ResourceCategory {
   name: string;

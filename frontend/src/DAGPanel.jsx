@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { api } from "./api";
 import { useHintTriggerFn } from "./HintSystem";
 import { usePipeline } from "./PipelineContext";
+import { STATUS_META as LIVE_STATUS, fmtLag } from "./LivePanel";
 
 /** Where the selector grammar is written down, for the input's tooltip. */
 const SELECTOR_HELP =
@@ -382,6 +383,8 @@ const ds = {
 export default function DAGPanel({ onOpenFile, showConfirm }) {
   const canvasRef = useRef(null);
   const [dag, setDag] = useState(null);
+  // Live models' lag and status, keyed by model, for the badge on their node.
+  const [liveInfo, setLiveInfo] = useState({});
   const [hovered, setHovered] = useState(null);
   const setHintTrigger = useHintTriggerFn();
   const [error, setError] = useState(null);
@@ -426,6 +429,25 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
     loadDAG();
     setHintTrigger("dagOpened", true);
   }, []);
+
+  // Live models: poll their lag while the DAG shows any. Cheap (one status
+  // read every few seconds) and only runs when there is something to show.
+  const hasLive = useMemo(() => !!dag?.nodes?.some((n) => n.live), [dag]);
+  useEffect(() => {
+    if (!hasLive) { setLiveInfo({}); return; }
+    let cancelled = false;
+    const load = () => api.getLiveStatus()
+      .then((s) => {
+        if (cancelled) return;
+        const map = {};
+        for (const m of s.models || []) map[m.model] = { lag: m.lag_seconds, status: m.status, view: m.materialized === "view" };
+        setLiveInfo(map);
+      })
+      .catch(() => {});
+    load();
+    const t = setInterval(load, 3000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [hasLive]);
 
   // Auto-refresh when pipeline completes
   useEffect(() => {
@@ -817,11 +839,42 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
         }
       } else if (!rewindMode) {
         // Type badge
-        const badge = n.type === "ingest" ? "I" : n.type === "import" ? "\u2191" : n.type === "source" ? "S" : n.type === "seed" ? "D" : n.type === "exposure" ? "E" : n.type === "table" ? "T" : n.type === "ephemeral" ? "\u25ca" : n.type === "snapshot" ? "\u29d6" : "V";
+        const badge = n.type === "ingest" ? "I" : n.type === "import" ? "\u2191" : n.type === "source" ? "S" : n.type === "seed" ? "D" : n.type === "exposure" ? "E" : n.type === "table" ? "T" : n.type === "ephemeral" ? "\u25ca" : n.type === "snapshot" ? "\u29d6" : n.type === "incremental" ? "\u0394" : "V";
         ctx.fillStyle = color;
         ctx.font = `bold 9px ${monoFamily}`;
         ctx.textAlign = "right";
         ctx.fillText(badge, pos.x + NODE_W - 6, pos.y + 12);
+
+        // A Python model: built by a function, not a query. Marked in the
+        // footer so it reads at a glance without crowding the label or the type.
+        // Bottom-left, where the package line goes; that line moves right.
+        let footX = pos.x + 8;
+        if (n.language === "python") {
+          ctx.fillStyle = getCV("--havn-green") || "#3fb950";
+          ctx.font = `bold 9px ${monoFamily}`;
+          ctx.textAlign = "left";
+          ctx.fillText("python", footX, pos.y + NODE_H - 9);
+          footX += ctx.measureText("python ").width + 4;
+        }
+
+        // Live models: lag (or state) in the bottom-right corner, colored
+        // like the Live view, so a stalled chain is visible on the graph.
+        if (n.live) {
+          const info = liveInfo[n.id];
+          const meta = LIVE_STATUS[info?.status] || LIVE_STATUS.live;
+          const text = !info ? "live"
+            : info.status === "failing" || info.status === "paused" || info.status === "waiting" ? info.status
+            : info.view ? "live" : `lag ${fmtLag(info.lag)}`;
+          ctx.font = `600 9px ${monoFamily}`;
+          ctx.textAlign = "right";
+          const tw = ctx.measureText(text).width;
+          const cx = pos.x + NODE_W - 8 - tw - 8;
+          ctx.fillStyle = getCV(meta.color.slice(4, -1)) || "#3fb950";
+          ctx.beginPath();
+          ctx.arc(cx, pos.y + NODE_H - 12, 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillText(text, pos.x + NODE_W - 8, pos.y + NODE_H - 11);
+        }
 
         // Package provenance. A model from havn_packages/ is not this
         // project's to edit, so it says where it came from — quietly, since
@@ -832,7 +885,7 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
           ctx.fillStyle = getCV("--havn-text-secondary") || "#8b949e";
           ctx.font = `9px ${monoFamily}`;
           ctx.textAlign = "left";
-          ctx.fillText(`pkg:${n.package}`, pos.x + 8, pos.y + NODE_H - 9, NODE_W - 20);
+          ctx.fillText(`pkg:${n.package}`, footX, pos.y + NODE_H - 9, NODE_W - 12 - (footX - pos.x));
           ctx.globalAlpha = prevAlpha;
         }
       }
@@ -840,7 +893,7 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
 
     ctx.globalAlpha = 1;
     ctx.restore();
-  }, [dag, layout, hovered, rewindMode, currentSnaps, prevSnaps, selectedNode, scale, offsetX, offsetY, dagSearch, columnEdgeSet, selectorMatches]);
+  }, [dag, layout, hovered, rewindMode, currentSnaps, prevSnaps, selectedNode, scale, offsetX, offsetY, dagSearch, columnEdgeSet, selectorMatches, liveInfo]);
 
   useEffect(() => {
     draw();
@@ -1050,6 +1103,11 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
               <span style={styles.legendItem}>
                 <span style={{ ...styles.legendDot, background: SCHEMA_COLORS.seed }} />seed
               </span>
+              {dag?.nodes?.some((n) => n.language === "python") && (
+                <span style={styles.legendItem} title="Built by a Python function (transform/**/*.py)">
+                  <span style={{ color: "var(--havn-green)", fontFamily: "var(--havn-font-mono)", fontWeight: 700, fontSize: "10px" }}>python</span>model
+                </span>
+              )}
             </div>
           )}
           {!rewindMode && (
@@ -1336,9 +1394,9 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
 const styles = {
   container: { display: "flex", flexDirection: "column", flex: 1, height: "100%", minHeight: 0, overflow: "hidden" },
   header: { display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "8px 12px", borderBottom: "1px solid var(--havn-border)", fontSize: "13px", flexShrink: 0 },
-  headerControls: { display: "flex", alignItems: "center", gap: 12 },
+  headerControls: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "flex-end", minWidth: 0 },
   legend: { display: "flex", gap: "10px", fontSize: "11px", color: "var(--havn-text-secondary)", alignItems: "center", flexWrap: "wrap" },
-  legendItem: { display: "flex", alignItems: "center", gap: "4px" },
+  legendItem: { display: "flex", alignItems: "center", gap: "4px", whiteSpace: "nowrap" },
   legendDot: { width: "7px", height: "7px", borderRadius: "50%", display: "inline-block", flexShrink: 0 },
   mainArea: { flex: 1, display: "flex", overflow: "hidden", minHeight: 0 },
   canvas: { display: "block" },

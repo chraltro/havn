@@ -554,6 +554,8 @@ def check_contract_schema(
 def describe_with_nullability(
     conn: duckdb.DuckDBPyConnection,
     model: str,
+    *,
+    relation: str | None = None,
 ) -> tuple[list[tuple[str, str]], dict[str, bool]]:
     """``([(column, type)], {column: admits_nulls})`` for a built object.
 
@@ -574,7 +576,8 @@ def describe_with_nullability(
     try:
         validate_identifier(parts[0], "contract model schema")
         validate_identifier(parts[1], "contract model name")
-        rows = conn.execute(f'DESCRIBE "{parts[0]}"."{parts[1]}"').fetchall()
+        target = relation or f'"{parts[0]}"."{parts[1]}"'
+        rows = conn.execute(f"DESCRIBE {target}").fetchall()
     except Exception as e:
         logger.debug("Could not describe %s for its contract: %s", model, e)
         return [], {}
@@ -775,12 +778,19 @@ def _get_consecutive_failures(
 def evaluate_contract(
     conn: duckdb.DuckDBPyConnection,
     contract: Contract,
+    *,
+    relation: str | None = None,
 ) -> ContractResult:
     """Evaluate a single contract against the warehouse.
 
     Uses the same assertion evaluation logic as inline ``-- assert:`` comments.
     Supports {previous} placeholders for relative thresholds, freshness
     assertions, severity levels, and escalation.
+
+    ``relation`` points the checks at another object than the contract's
+    model, e.g. ``"_havn_verify"."gold"."orders"`` for a change set built into
+    a scratch database. Freshness assertions are skipped then: a scratch
+    build was made a moment ago and says nothing about the real table.
     """
     from havn.engine.transform import SQLModel, _evaluate_assertion
 
@@ -816,15 +826,24 @@ def evaluate_contract(
             error=str(e),
         )
 
-    # Scoped to the current database: information_schema spans every attached
-    # one, so under --defer a model only the defer target holds looked present
-    # and the contract ran against the target's copy.
-    exists = conn.execute(
-        "SELECT COUNT(*) FROM information_schema.tables "
-        "WHERE table_catalog = current_database() "
-        "AND lower(table_schema) = lower(?) AND lower(table_name) = lower(?)",
-        [schema, name],
-    ).fetchone()[0] > 0
+    if relation is not None:
+        # A scratch build (verified change sets): the relation is a quoted
+        # catalog-qualified name havn built itself, not the contract's model.
+        try:
+            conn.execute(f"SELECT 1 FROM {relation} LIMIT 0")
+            exists = True
+        except Exception:
+            exists = False
+    else:
+        # Scoped to the current database: information_schema spans every
+        # attached one, so under --defer a model only the defer target holds
+        # looked present and the contract ran against the target's copy.
+        exists = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_catalog = current_database() "
+            "AND lower(table_schema) = lower(?) AND lower(table_name) = lower(?)",
+            [schema, name],
+        ).fetchone()[0] > 0
 
     if not exists:
         return ContractResult(
@@ -841,7 +860,7 @@ def evaluate_contract(
         path=contract.path or Path("."),
         name=name,
         schema=schema,
-        full_name=contract.model,
+        full_name=relation or contract.model,
         sql="",
         query="",
         materialized="table",
@@ -850,6 +869,14 @@ def evaluate_contract(
     for expr in contract.assertions:
         try:
             # Check for freshness assertions
+            if _FRESHNESS_RE.match(expr.strip()) and relation is not None:
+                results.append({
+                    "expression": expr,
+                    "passed": True,
+                    "detail": "Freshness is not checked against a scratch build",
+                    "skipped": True,
+                })
+                continue
             if _FRESHNESS_RE.match(expr.strip()):
                 passed, detail = _evaluate_freshness(conn, contract.model, expr)
                 results.append({
@@ -908,7 +935,9 @@ def evaluate_contract(
         })
         all_passed = False
     if contract.columns:
-        columns, nullability = describe_with_nullability(conn, contract.model)
+        columns, nullability = describe_with_nullability(
+            conn, contract.model, relation=relation
+        )
         schema_findings = check_contract_schema(
             contract, columns, nullability=nullability
         )

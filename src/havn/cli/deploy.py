@@ -36,7 +36,8 @@ def deploy(
     from havn.engine.deploy import DeployError, new_record, plan_deploy, run_deploy
 
     project = _resolve_project(project_dir)
-    base = load_project(project)
+    # Branch warehouses are never deploy targets: resolve as if on main.
+    base = load_project(project, use_branches=False)
     if base.environments and env not in base.environments:
         console.print(f"[red]Unknown environment '{env}'.[/red] Defined: {', '.join(base.environments)}")
         raise typer.Exit(1)
