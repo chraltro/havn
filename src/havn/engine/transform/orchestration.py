@@ -157,7 +157,16 @@ def run_transform(
     # process (``POST /api/transform`` and the scheduler both run outside the
     # pipeline lock), and a run with ``defer=None`` must build exactly what it
     # would have built alone.
-    with _defer_context(conn, defer, models) as query_rewriter:
+    from havn.engine.instrumentation import instrument_run, instrument_step
+
+    # One run span and, at the end, regression checks over every build this
+    # run recorded. A caller already instrumenting this pipeline_run_id
+    # keeps its own run; this one then joins it.
+    with instrument_run(
+        conn, project_dir=_root, pipeline_run_id=pipeline_run_id, kind="transform",
+        attributes={"havn.run.parallel": parallel, "havn.run.selected": len(models)},
+    ), instrument_step(pipeline_run_id, "transform", "transform"), \
+            _defer_context(conn, defer, models) as query_rewriter:
         if parallel:
             return _run_transform_parallel(
                 conn, models, force, max_workers, db_path=db_path,
@@ -422,19 +431,27 @@ def build_one_model(
         return stale
 
     try:
+        from havn.engine.instrumentation import instrument_build
+
         schema_changes: list[str] = []
-        duration_ms, row_count = execute_model(
-            conn, model, schema_changes, model_map,
-            snapshot_settings=(
-                snapshot_settings_for(project_dir)
-                if model.materialized == "snapshot"
-                else None
-            ),
-            batch_range=batch_range,
-            force=force,
-            run_id=pipeline_run_id,
-            query_rewriter=query_rewriter,
-        )
+        # Perf capture, trace span and lineage events for this build; see
+        # havn.engine.instrumentation. Never fails the build.
+        with instrument_build(
+            conn, model, project_dir=project_dir, pipeline_run_id=pipeline_run_id,
+        ) as probe:
+            duration_ms, row_count = execute_model(
+                conn, model, schema_changes, model_map,
+                snapshot_settings=(
+                    snapshot_settings_for(project_dir)
+                    if model.materialized == "snapshot"
+                    else None
+                ),
+                batch_range=batch_range,
+                force=force,
+                run_id=pipeline_run_id,
+                query_rewriter=query_rewriter,
+            )
+            probe.done(duration_ms, row_count)
         _update_state(conn, model, duration_ms, row_count)
 
         suffix = f" ({row_count:,} rows, {duration_ms}ms)" if row_count else f" ({duration_ms}ms)"

@@ -12,6 +12,7 @@ from typing import Callable
 import duckdb
 
 from havn.engine.database import ensure_meta_table, log_run
+from havn.engine.perf.capture import run_build_statement
 from havn.engine.utils import validate_identifier
 
 from .discovery import _clear_block, _compute_upstream_hash, _invalidate_state, _needs_build, _update_state
@@ -651,14 +652,17 @@ def _execute_microbatch(
         owns_tx = _begin_transaction(conn)
         try:
             if not exists:
-                conn.execute(f"CREATE TABLE {model.full_name} AS\n{query}")
+                run_build_statement(
+                    conn, f"CREATE TABLE {model.full_name} AS\n{query}", full_refresh=True
+                )
                 exists = True
                 written = conn.execute(
                     f"SELECT count(*) FROM {model.full_name}"
                 ).fetchone()[0]
             else:
-                conn.execute(
-                    f"CREATE OR REPLACE TEMP TABLE {staging} AS\n{query}"
+                run_build_statement(
+                    conn, f"CREATE OR REPLACE TEMP TABLE {staging} AS\n{query}",
+                    full_refresh=False,
                 )
                 plan = _plan_schema_change(
                     model,
@@ -950,7 +954,9 @@ def _execute_snapshot(
     ).fetchone()[0] > 0
 
     query = resolve_query(model, model_map, query_rewriter)
-    conn.execute(f"CREATE OR REPLACE TEMP TABLE {staging} AS\n{query}")
+    run_build_statement(
+        conn, f"CREATE OR REPLACE TEMP TABLE {staging} AS\n{query}", full_refresh=False
+    )
     staging_cols = conn.execute(
         "SELECT column_name, data_type FROM information_schema.columns "
         "WHERE table_name = ? AND table_catalog = 'temp' "
@@ -1333,7 +1339,7 @@ def _execute_incremental(
     if not exists:
         # First run — full load
         ddl = f"CREATE TABLE {model.full_name} AS\n{query}"
-        conn.execute(ddl)
+        run_build_statement(conn, ddl, full_refresh=True)
     elif strategy == "append" or not model.unique_key:
         # Append-only. It still goes through staging, because a bare
         # ``INSERT INTO target <query>`` matches columns by position: a
@@ -1344,7 +1350,9 @@ def _execute_incremental(
         # list so order stops mattering.
         validate_identifier(model.name, "staging table name")
         staging_name = f"_havn_staging_{model.name}"
-        conn.execute(f"CREATE OR REPLACE TEMP TABLE {staging_name} AS\n{query}")
+        run_build_statement(
+            conn, f"CREATE OR REPLACE TEMP TABLE {staging_name} AS\n{query}", full_refresh=False
+        )
         plan = _plan_schema_change(
             model,
             _table_columns(conn, model.schema, model.name),
@@ -1386,7 +1394,9 @@ def _execute_incremental(
         staging_name = f"_havn_staging_{model.name}"
 
         # Create staging table with new data
-        conn.execute(f"CREATE OR REPLACE TEMP TABLE {staging_name} AS\n{query}")
+        run_build_statement(
+            conn, f"CREATE OR REPLACE TEMP TABLE {staging_name} AS\n{query}", full_refresh=False
+        )
 
         # Schema evolution: diff staging against target on name AND type, in
         # both directions, and resolve the difference with the model's
@@ -1607,7 +1617,7 @@ def execute_model(
             else:
                 raise ValueError(f"Unknown materialization: {model.materialized}")
 
-            conn.execute(ddl)
+            run_build_statement(conn, ddl, full_refresh=model.materialized == "table")
             duration_ms = int((time.perf_counter() - start) * 1000)
 
             row_count = 0
@@ -1743,19 +1753,25 @@ def _execute_single_model(
                 pass
             return model.full_name, ModelResult(status="skipped")
 
+        from havn.engine.instrumentation import instrument_build
+
         schema_changes: list[str] = []
-        duration_ms, row_count = execute_model(
-            conn, model, schema_changes, model_map,
-            snapshot_settings=(
-                snapshot_settings_for(project_dir)
-                if model.materialized == "snapshot"
-                else None
-            ),
-            batch_range=batch_range,
-            force=force,
-            run_id=pipeline_run_id,
-            query_rewriter=query_rewriter,
-        )
+        with instrument_build(
+            conn, model, project_dir=project_dir, pipeline_run_id=pipeline_run_id,
+        ) as probe:
+            duration_ms, row_count = execute_model(
+                conn, model, schema_changes, model_map,
+                snapshot_settings=(
+                    snapshot_settings_for(project_dir)
+                    if model.materialized == "snapshot"
+                    else None
+                ),
+                batch_range=batch_range,
+                force=force,
+                run_id=pipeline_run_id,
+                query_rewriter=query_rewriter,
+            )
+            probe.done(duration_ms, row_count)
         _update_state(conn, model, duration_ms, row_count)
 
         # Run assertions (and the synthesised @grain check, if any). A
