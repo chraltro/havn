@@ -448,3 +448,49 @@ def check_rate_limit(share_id: str, client: str) -> bool:
 def reset_rate_limits() -> None:
     with _rate_lock:
         _rate_hits.clear()
+
+
+_ROLE_RANK = {"viewer": 0, "editor": 1, "admin": 2}
+
+
+def role_rank(role: str | None) -> int:
+    """Privilege order of a havn role; unknown roles rank lowest."""
+    return _ROLE_RANK.get(role or "", 0)
+
+
+def published_run_as_rank(conn: duckdb.DuckDBPyConnection, dashboard_id: str) -> tuple[int, str | None]:
+    """The most privileged identity the dashboard's saved SQL runs as unattended.
+
+    Active public links run as their view-as user or role, and enabled
+    scheduled reports run as their owner. Whoever edits the dashboard's
+    widgets or filters decides what SQL those identities run, so an edit must
+    come from someone at least that privileged. Returns ``(rank, why)``;
+    ``why`` names the link or report that set the rank.
+    """
+    best, why = -1, None
+    try:
+        rows = conn.execute(
+            "SELECT id, view_as_user, view_as_role, expires_at, revoked_at FROM _havn.dashboard_shares "
+            "WHERE dashboard_id = ? AND mode = 'public'",
+            [dashboard_id],
+        ).fetchall()
+    except duckdb.CatalogException:
+        rows = []
+    for share_id, as_user, as_role, expires_at, revoked_at in rows:
+        if _status(expires_at, revoked_at) != "active":
+            continue
+        role = _user_role(conn, as_user) if as_user else as_role
+        if role_rank(role) > best:
+            best, why = role_rank(role), f"public link {share_id} (views as {as_user or role})"
+    try:
+        owners = conn.execute(
+            "SELECT name, owner FROM _havn.reports WHERE dashboard_id = ? AND enabled",
+            [dashboard_id],
+        ).fetchall()
+    except duckdb.CatalogException:
+        owners = []
+    for name, owner in owners:
+        role = "admin" if owner == "local" else _user_role(conn, owner)
+        if role_rank(role) > best:
+            best, why = role_rank(role), f"report '{name}' (runs as {owner})"
+    return best, why

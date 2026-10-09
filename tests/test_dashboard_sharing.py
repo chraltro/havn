@@ -402,3 +402,35 @@ def test_embed_origins_are_sanitised():
         "frame-ancestors 'self' https://a.example.com"
     snippet = embed_snippet('https://h/p/abc"><script>', "T")
     assert "<script>" not in snippet and "embed=1" in snippet
+
+
+def test_editor_cannot_change_sql_a_public_link_runs_as_admin(client, project, dashboard):
+    # An admin's public link runs the widgets as admin; an editor rewriting a
+    # widget would decide what admin-level SQL anonymous viewers get.
+    _public(client, project, dashboard, view_as_role="admin")
+    eve = _h(project, "eve")
+    r = client.put(
+        f"/api/dashboards/{dashboard['id']}/widgets/{dashboard['kpi']}",
+        json={"sql_query": "SELECT * FROM _havn.users"}, headers=eve,
+    )
+    assert r.status_code == 403, r.text
+    r = client.post(f"/api/dashboards/{dashboard['id']}/widgets", headers=eve, json={
+        "widget_type": "table", "title": "x", "sql_query": "SELECT * FROM _havn.tokens",
+        "position": {"x": 1, "y": 1, "w": 4, "h": 4},
+    })
+    assert r.status_code == 403, r.text
+    # The admin who published it still can.
+    r = client.put(
+        f"/api/dashboards/{dashboard['id']}/widgets/{dashboard['kpi']}",
+        json={"title": "Total revenue"}, headers=_h(project, "ada"),
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_editor_can_edit_when_links_run_as_viewer(client, project, dashboard):
+    _public(client, project, dashboard, view_as_role="viewer")
+    r = client.put(
+        f"/api/dashboards/{dashboard['id']}/widgets/{dashboard['kpi']}",
+        json={"title": "Revenue (gross)"}, headers=_h(project, "eve"),
+    )
+    assert r.status_code == 200, r.text

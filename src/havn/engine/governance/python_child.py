@@ -14,9 +14,9 @@ Defence in depth inside the process (an audit hook, PEP 578):
 * importing ``duckdb`` (which could open those files natively) raises;
 * starting processes and calling into native code through ``ctypes`` raise.
 
-What it cannot stop is native code in an already-imported extension reading
-a path directly (``pyarrow.parquet.read_table`` on a snapshot file, for
-instance). On Windows the server holds the live warehouse and its WAL
+Native file readers (pyarrow, polars, fastparquet) never raise an audit
+event, so their entry points are wrapped to check paths too. What it cannot
+stop is native code reading a path through some other entry point. On Windows the server holds the live warehouse and its WAL
 locked, so those cannot be opened by any other process; the bootstrap checks
 that before running user code and reports the result to the server.
 
@@ -495,6 +495,117 @@ class _ModuleBlocker:
         return None
 
 
+# Native readers that open files without Python's open() (so the audit hook
+# never sees them): their path arguments are checked at the Python boundary.
+# Module -> function names; classes are wrapped at construction.
+_NATIVE_READERS: dict[str, tuple[str, ...]] = {
+    "pyarrow": ("memory_map", "create_memory_map", "OSFile", "input_stream", "output_stream"),
+    "pyarrow.parquet": ("read_table", "read_pandas", "ParquetFile", "ParquetDataset", "read_schema", "read_metadata"),
+    "pyarrow.dataset": ("dataset", "parquet_dataset", "FileSystemDataset"),
+    "pyarrow.feather": ("read_table", "read_feather"),
+    "pyarrow.orc": ("read_table", "ORCFile"),
+    "pyarrow.csv": ("read_csv", "open_csv"),
+    "pyarrow.json": ("read_json",),
+    "pyarrow.ipc": ("open_file", "open_stream", "RecordBatchFileReader", "RecordBatchStreamReader"),
+    "pyarrow.fs": ("LocalFileSystem",),
+    "polars": ("read_parquet", "scan_parquet", "read_ipc", "scan_ipc", "read_csv", "scan_csv",
+               "read_ndjson", "scan_ndjson", "read_avro", "read_delta", "scan_delta", "read_database_uri"),
+    "fastparquet": ("ParquetFile",),
+}
+_PATH_KWARGS = ("source", "path", "paths", "file", "where", "filename", "path_or_paths", "uri")
+
+
+class _PathReaders:
+    """Wrap known native file readers so they refuse protected paths.
+
+    Installed on sys.meta_path after the module blocker: wraps a module's
+    readers as soon as it is imported. Native code reading paths through any
+    other entry point is not covered (see the module docstring).
+    """
+
+    check = staticmethod(lambda path: False)
+
+    def _paths(self, args, kwargs, offset=0):
+        values = list(args[offset:offset + 1]) + [kwargs[k] for k in _PATH_KWARGS if k in kwargs]
+        for v in values:
+            if isinstance(v, (list, tuple)):
+                yield from (x for x in v if isinstance(x, (str, bytes, os.PathLike)))
+            elif isinstance(v, (str, bytes, os.PathLike)):
+                yield v
+
+    def _wrap(self, fn, qualname, offset=0):
+        readers = self
+
+        def guarded(*args, **kwargs):
+            for p in readers._paths(args, kwargs, offset):
+                if readers.check(p):
+                    raise PermissionError(
+                        f"{qualname}({p!r}): that path is part of the warehouse and cannot be "
+                        "read from a governed script; query it through db"
+                    )
+            return fn(*args, **kwargs)
+
+        guarded.__wrapped__ = fn
+        guarded.__name__ = getattr(fn, "__name__", qualname)
+        return guarded
+
+    def wrap_module(self, module) -> None:
+        name = getattr(module, "__name__", None)
+        names = _NATIVE_READERS.get(name or "")
+        if not names or getattr(module, "__havn_guarded__", False):
+            return
+        for attr in names:
+            fn = getattr(module, attr, None)
+            if isinstance(fn, type):
+                # Replace the class's __init__, not the class: isinstance()
+                # checks inside the library must keep working. Extension
+                # types refuse the assignment and stay unguarded.
+                try:
+                    fn.__init__ = self._wrap(fn.__init__, f"{name}.{attr}", offset=1)
+                except (AttributeError, TypeError):
+                    pass
+            elif callable(fn):
+                try:
+                    setattr(module, attr, self._wrap(fn, f"{name}.{attr}"))
+                except (AttributeError, TypeError):
+                    pass
+        try:
+            module.__havn_guarded__ = True
+        except (AttributeError, TypeError):
+            pass
+
+    def find_spec(self, name, path=None, target=None):
+        if name not in _NATIVE_READERS:
+            return None
+        import importlib.abc
+
+        for finder in sys.meta_path:
+            if finder is self or finder is _ModuleBlocker or not hasattr(finder, "find_spec"):
+                continue
+            spec = finder.find_spec(name, path, target)
+            if spec is None:
+                continue
+            loader = spec.loader
+            if loader is not None and hasattr(loader, "exec_module"):
+                original = loader.exec_module
+                readers = self
+
+                class _Loader(importlib.abc.Loader):
+                    def create_module(self, spec_):
+                        return loader.create_module(spec_) if hasattr(loader, "create_module") else None
+
+                    def exec_module(self, module):
+                        original(module)
+                        readers.wrap_module(module)
+
+                spec.loader = _Loader()
+            return spec
+        return None
+
+
+_path_readers = _PathReaders()
+
+
 def _install_guards(protected: list[str]) -> None:
     norm_roots = [os.path.normcase(os.path.abspath(p)) for p in protected]
 
@@ -535,10 +646,29 @@ def _install_guards(protected: list[str]) -> None:
         if event.startswith(_BLOCKED_EVENT_PREFIXES):
             raise PermissionError(f"{event} is not available in a governed script")
 
+    def _refuses(path) -> bool:
+        # A protected path, or a directory that contains one (a recursive
+        # dataset scan of the project root would reach .havn/ snapshots).
+        if _is_protected(path):
+            return True
+        try:
+            raw = os.fsdecode(path)
+        except TypeError:
+            return False
+        if not os.path.isdir(raw):
+            return False
+        full = os.path.normcase(os.path.abspath(raw)).rstrip(os.sep) + os.sep
+        return any(root.startswith(full) for root in norm_roots)
+
+    _path_readers.check = _refuses
+
     for mod in list(sys.modules):
         if mod.split(".")[0] in ("duckdb", "_duckdb"):
             del sys.modules[mod]
+    for mod in list(sys.modules):
+        _path_readers.wrap_module(sys.modules.get(mod))
     sys.meta_path.insert(0, _ModuleBlocker)
+    sys.meta_path.insert(1, _path_readers)
     sys.addaudithook(hook)
 
 

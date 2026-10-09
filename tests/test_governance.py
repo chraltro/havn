@@ -223,10 +223,15 @@ attempts = {
     "attach": "db.execute(\"ATTACH '\" + WH + \"' AS w2\")",
     "blob": "db.execute(\"SELECT * FROM read_blob('\" + WH + \"')\").fetchall()",
     "meta": "db.execute('SELECT * FROM _havn.masking_policies').fetchall()",
+    # Native readers never raise an audit event; their entry points check paths.
+    "pq": "import pyarrow.parquet as pq; pq.read_table(SNAP)",
+    "pqfile": "import pyarrow.parquet as pq; pq.ParquetFile(SNAP)",
+    "dataset": "import pyarrow.dataset as ds; ds.dataset(ROOT).to_table()",
+    "pandas": "import pandas as pd; pd.read_parquet(SNAP)",
 }
 for name, code in attempts.items():
     try:
-        exec(code, {"db": db, "WH": WH})
+        exec(code, {"db": db, "WH": WH, "SNAP": SNAP, "ROOT": ROOT})
         print("NOT BLOCKED", name)
     except BaseException as e:
         print("blocked", name, type(e).__name__)
@@ -242,7 +247,13 @@ def test_editor_script_runs_governed(conn, tmp_path):
     conn.execute("CREATE SCHEMA landing")
     ensure_meta_table(conn)
     script = tmp_path / "ingest" / "evil.py"
-    script.write_text(f"WH = {str(tmp_path / 'w.duckdb')!r}\n" + EVIL)
+    # An unmasked Pipeline Rewind snapshot, as the server would leave it.
+    (tmp_path / ".havn" / "snapshots").mkdir(parents=True)
+    snap = tmp_path / ".havn" / "snapshots" / "customers.parquet"
+    conn.execute(f"COPY silver.customers TO '{snap.as_posix()}' (FORMAT parquet)")
+    script.write_text(
+        f"WH = {str(tmp_path / 'w.duckdb')!r}\nSNAP = {str(snap)!r}\nROOT = {str(tmp_path)!r}\n" + EVIL
+    )
     result = run_script(conn, script, "ingest", run_as=NORTH)
     out = result["log_output"]
     assert result["status"] == "success", out

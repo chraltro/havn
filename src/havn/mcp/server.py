@@ -229,8 +229,15 @@ class MCPServer:
             "truncated": bool(data.get("truncated", False)),
         }
 
-    def _execute_readonly(self, sql: str, max_rows: int = _DEFAULT_QUERY_ROWS) -> dict:
-        """Validate and run a read-only query, via server or direct connection."""
+    def _execute_readonly(
+        self, sql: str, max_rows: int = _DEFAULT_QUERY_ROWS, *, trusted: bool = False,
+    ) -> dict:
+        """Validate and run a read-only query, via server or direct connection.
+
+        ``trusted`` is for havn's own fixed queries (run history, the
+        catalog), which read ``_havn`` metadata no agent SQL may; it skips
+        governance on the direct path only.
+        """
         validate_read_only_query(sql)
         max_rows = max(1, min(int(max_rows), _MAX_QUERY_ROWS))
 
@@ -246,19 +253,32 @@ class MCPServer:
         if not backend.exists():
             raise ToolError("No warehouse database found. Run a pipeline first.")
 
+        # Without the server, the agent still reads through the governed
+        # path: masking, row policies and the _havn metadata block apply as
+        # the role in HAVN_MCP_ROLE (default editor). An agent, or a prompt
+        # injected into one, must not read users, tokens or masked columns
+        # just because `havn serve` is down. Set HAVN_MCP_ROLE=admin to opt out.
+        import os
+
+        from havn.engine.governed_query import GovernedQueryError, QueryIdentity, run_governed_query
+
+        role = os.environ.get("HAVN_MCP_ROLE", "editor").strip().lower()
+        if role not in ("viewer", "editor", "admin"):
+            role = "editor"
+        if trusted:
+            role = "admin"
         conn = open_warehouse(config, self.project_dir, read_only=True)
         try:
-            cur = conn.execute(sql)
-            if cur.description is None:
-                return {"columns": [], "rows": [], "row_count": 0, "truncated": False}
-            columns = [d[0] for d in cur.description]
-            rows = cur.fetchmany(max_rows + 1)
-        except ToolError:
-            raise
-        except Exception as e:
+            data = run_governed_query(
+                conn, sql, QueryIdentity(username="mcp", role=role, source="mcp", attributes={}),
+                limit=max_rows + 1, project_dir=self.project_dir,
+            )
+        except GovernedQueryError as e:
             raise ToolError(str(e))
         finally:
             conn.close()
+        columns = data["columns"]
+        rows = data["rows"]
         truncated = len(rows) > max_rows
         rows = [list(r) for r in rows[:max_rows]]
         return {
@@ -839,6 +859,7 @@ class MCPServer:
             "FROM _havn.run_log "
             f"ORDER BY started_at DESC LIMIT {limit}",
             max_rows=limit,
+            trusted=True,
         )
         keys = ["run_type", "target", "status", "started_at", "duration_ms", "rows_affected", "error"]
         return {"runs": [dict(zip(keys, row)) for row in result["rows"]]}
@@ -859,7 +880,7 @@ class MCPServer:
         # the tests themselves run entirely in memory either way.
         catalog: dict = {}
         try:
-            rows = self._execute_readonly(CATALOG_SQL, max_rows=_MAX_QUERY_ROWS)["rows"]
+            rows = self._execute_readonly(CATALOG_SQL, max_rows=_MAX_QUERY_ROWS, trusted=True)["rows"]
             catalog = catalog_from_rows(rows)
         except Exception as e:
             logger.debug("No catalog available for unit tests: %s", e)

@@ -230,6 +230,7 @@ def run_governed_query(
     timeout_s: float | None = None,
     row_cap: int | None = SERVER_ROW_CAP,
     task_label: str | None = None,
+    project_dir: Path | None = None,
 ) -> dict:
     """Run a read-only query as ``identity`` and return a JSON-ready result.
 
@@ -244,7 +245,7 @@ def run_governed_query(
     from havn.engine.resource_manager import current_task, get_resource_manager
     from havn.engine.sql_safety import ReadOnlyQueryError, validate_read_only_query
 
-    prepared = prepare_governed_sql(conn, sql, identity, params=params)
+    prepared = prepare_governed_sql(conn, sql, identity, params=params, project_dir=project_dir)
     wrapped, effective_limit = _wrap_for_paging(prepared.sql, limit, offset, row_cap)
     if wrapped != prepared.sql:
         try:

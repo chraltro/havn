@@ -102,6 +102,24 @@ class DashboardImport(BaseModel):
 _QUERY_TIMEOUT_SECONDS = 30
 
 
+def _guard_published_edit(conn, dashboard_id: str, user: dict) -> None:
+    """Refuse an edit to SQL that runs as someone more privileged than the editor.
+
+    A public link or scheduled report runs the dashboard's saved widget and
+    filter SQL as its view-as identity or owner, so an editor changing that
+    SQL on a dashboard an admin published could make it read admin-only data.
+    """
+    from havn.engine.sharing import published_run_as_rank, role_rank
+
+    rank, why = published_run_as_rank(conn, dashboard_id)
+    if rank > role_rank(user.get("role")):
+        raise HTTPException(
+            403,
+            f"This dashboard's queries also run as a more privileged identity ({why}). "
+            "Ask its owner or an admin to make this change, or revoke the link or report first.",
+        )
+
+
 def _get_user_name(request: Request) -> str:
     """Extract username from request, defaulting to 'anonymous'."""
     user = getattr(request.state, "user", None)
@@ -389,7 +407,8 @@ def update_dashboard(
     request: Request, dashboard_id: str, req: DashboardUpdate, conn: DbConn
 ) -> dict:
     """Update dashboard metadata, layout, filters, or settings."""
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
+    _guard_published_edit(conn, dashboard_id, user)
     username = _get_user_name(request)
 
     # Build dynamic SET clause
@@ -624,7 +643,8 @@ def import_dashboard(request: Request, req: DashboardImport, conn: DbConn) -> di
 @router.post("/api/dashboards/{dashboard_id}/widgets")
 def add_widget(request: Request, dashboard_id: str, req: WidgetCreate, conn: DbConn) -> dict:
     """Add a widget to a dashboard."""
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
+    _guard_published_edit(conn, dashboard_id, user)
 
     # Verify dashboard exists
     exists = conn.execute(
@@ -681,7 +701,8 @@ def update_widget(
     request: Request, dashboard_id: str, widget_id: str, req: WidgetUpdate, conn: DbConn
 ) -> dict:
     """Update a widget's configuration."""
-    _require_permission(request, "write")
+    user = _require_permission(request, "write")
+    _guard_published_edit(conn, dashboard_id, user)
 
     sets: list[str] = []
     params: list = []

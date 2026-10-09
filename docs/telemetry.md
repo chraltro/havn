@@ -79,7 +79,9 @@ is as open as the rest of the server.
 `localhost` trusts the connection's address. Behind a reverse proxy on the
 same machine every request arrives from loopback, so a request carrying
 `X-Forwarded-For`, `Forwarded` or `X-Real-IP` is never treated as local; use
-a token for scrapes that go through the proxy.
+a token for scrapes that go through the proxy. A proxy that does not add
+any of those headers (nginx does not by default) makes every request look
+local: do not use `localhost` behind one.
 
 Setting the `HAVN_METRICS_TOKEN` environment variable alone still turns the
 endpoint on with that token, as it did before the endpoint was configurable.

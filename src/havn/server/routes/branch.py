@@ -112,9 +112,11 @@ def post_branch_diff(
     req: BranchDiffRequest = Body(default_factory=BranchDiffRequest),
 ) -> dict:
     """Row-level and schema diff of the branch's models against the base."""
-    _require_permission(request, "read")
+    user = _require_permission(request, "read")
     from havn.engine.branches import BranchError, diff_branch, format_markdown
     from havn.engine.defer import DeferError
+    from havn.server.deps import _governed_relation
+    from havn.server.routes.models import _samples_withheld
 
     config = _get_config()
     if not config.branch.active:
@@ -122,6 +124,16 @@ def post_branch_diff(
     conn = _cursor_or_memory()
     try:
         report = diff_branch(conn, config, models=req.models, full=req.full)
+        # Sample rows are raw model output (the diff runs ungoverned), so,
+        # like /api/diff, they are withheld from a user that masking or row
+        # policies apply to on that model -- in the JSON and the markdown.
+        for entry in report.get("models", []):
+            withheld = _samples_withheld(user, conn, entry.get("model"), _governed_relation)
+            entry["samples_withheld"] = withheld
+            if withheld:
+                entry["sample_added"] = []
+                entry["sample_removed"] = []
+                entry["sample_modified"] = []
     except (BranchError, DeferError) as e:
         raise HTTPException(400, str(e)) from e
     finally:

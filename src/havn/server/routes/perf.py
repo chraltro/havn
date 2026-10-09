@@ -191,7 +191,7 @@ def perf_advice_state(request: Request, req: AdviceStateRequest, conn: DbConn) -
 @router.get("/api/perf/models/{model}")
 def perf_model(request: Request, model: str, conn: DbConnReadOnlyOptional, limit: int = 60) -> dict:
     """One model: build history, its latest captured plan, regressions and advice."""
-    _require_permission(request, "read")
+    _require_permission(request, "write")  # plans and build errors carry literal values
     model = model.lower()
     out: dict = {"model": model, "history": [], "plan": None, "plan_build": None,
                  "regressions": [], "advice": []}
@@ -222,7 +222,7 @@ def perf_model(request: Request, model: str, conn: DbConnReadOnlyOptional, limit
 @router.get("/api/perf/builds/{build_id}")
 def perf_build(request: Request, build_id: str, conn: DbConnReadOnlyOptional) -> dict:
     """One recorded build with its plan (enriched with per-operator time shares)."""
-    _require_permission(request, "read")
+    _require_permission(request, "write")  # plans and build errors carry literal values
     if conn is None:
         raise HTTPException(404, "No warehouse")
     from havn.engine.perf import get_build
@@ -237,7 +237,7 @@ def perf_build(request: Request, build_id: str, conn: DbConnReadOnlyOptional) ->
 @router.get("/api/perf/diff")
 def perf_diff(request: Request, fast: str, slow: str, conn: DbConnReadOnlyOptional) -> dict:
     """Plan diff between two recorded builds of the same model."""
-    _require_permission(request, "read")
+    _require_permission(request, "write")  # plans and build errors carry literal values
     if conn is None:
         raise HTTPException(404, "No warehouse")
     from havn.engine.perf import diff_plans, get_build
@@ -256,7 +256,7 @@ def perf_diff(request: Request, fast: str, slow: str, conn: DbConnReadOnlyOption
 
 @router.get("/api/perf/runs")
 def perf_runs(request: Request, conn: DbConnReadOnlyOptional, limit: int = 20) -> list[dict]:
-    _require_permission(request, "read")
+    _require_permission(request, "write")  # plans and build errors carry literal values
     if conn is None:
         return []
     from havn.engine.perf import recent_runs
