@@ -432,6 +432,9 @@ def test_suggest_chart_shapes():
     spec = QuerySpec(metrics=["m"], dimensions=["d"], grain="month")
     chart = suggest_chart(spec, ["month", "d", "m"], [["2026-01", "a", 1], ["2026-01", "b", 2]])
     assert chart == {"type": "line", "x": "month", "y": ["m"], "series": "d"}
+    # A top-1 answer is a table: one bar says less than the row under it.
+    spec = QuerySpec(metrics=["m", "n"], dimensions=["d"], limit=1)
+    assert suggest_chart(spec, ["d", "m", "n"], [["Bergen", 1652.8, 28]]) == {"type": "table"}
 
 
 # ---------------------------------------------------------------------------

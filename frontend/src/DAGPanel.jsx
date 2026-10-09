@@ -1394,9 +1394,9 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
 const styles = {
   container: { display: "flex", flexDirection: "column", flex: 1, height: "100%", minHeight: 0, overflow: "hidden" },
   header: { display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "8px 12px", borderBottom: "1px solid var(--havn-border)", fontSize: "13px", flexShrink: 0 },
-  headerControls: { display: "flex", alignItems: "center", gap: 12 },
+  headerControls: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "flex-end", minWidth: 0 },
   legend: { display: "flex", gap: "10px", fontSize: "11px", color: "var(--havn-text-secondary)", alignItems: "center", flexWrap: "wrap" },
-  legendItem: { display: "flex", alignItems: "center", gap: "4px" },
+  legendItem: { display: "flex", alignItems: "center", gap: "4px", whiteSpace: "nowrap" },
   legendDot: { width: "7px", height: "7px", borderRadius: "50%", display: "inline-block", flexShrink: 0 },
   mainArea: { flex: 1, display: "flex", overflow: "hidden", minHeight: 0 },
   canvas: { display: "block" },

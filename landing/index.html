@@ -119,6 +119,8 @@ figure.shot { margin: 1rem 0 0; }
 .facts dd { font-size: 0.925rem; color: var(--muted); }
 
 .shot figcaption { font-size: 0.875rem; color: var(--muted); margin-top: 0.7rem; }
+.shots { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem 1.5rem; margin-top: 2.5rem; }
+.shots figure.shot { margin: 0; }
 
 section { padding: 5rem 0 0; }
 
@@ -176,6 +178,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 0.5rem 2rem; justify-content
 footer a { color: var(--muted); }
 
 @media (max-width: 860px) {
+  .shots { grid-template-columns: 1fr; }
   .opening, .pair, .fit, .editions { grid-template-columns: 1fr; gap: 2rem; }
   .opening { padding-top: 5rem; }
   .contents th { width: auto; display: block; padding-bottom: 0.2rem; }
@@ -354,6 +357,41 @@ footer a { color: var(--muted); }
            alt="havn Query page: the table list by schema on the left, a SQL query over silver.shipments, and four result rows grouped by port">
       <figcaption>Data &rsaquo; Query: write SQL against any layer and inspect the result.</figcaption>
     </figure>
+
+    <div class="shots">
+      <figure class="shot">
+        <img src="./screenshots/ask.webp"
+             srcset="./screenshots/ask-1x.webp 1130w, ./screenshots/ask.webp 2260w"
+             sizes="(max-width: 860px) 100vw, 530px"
+             width="2260" height="1412" loading="lazy"
+             alt="havn Ask page: the question 'How many tonnes did each port land?' answered from the tonnes_landed metric, with a bar chart and a table by port">
+        <figcaption>Data &rsaquo; Ask: a question answered from a defined metric, marked verified, with the SQL one click away.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="./screenshots/governance.webp"
+             srcset="./screenshots/governance-1x.webp 1130w, ./screenshots/governance.webp 2260w"
+             sizes="(max-width: 860px) 100vw, 530px"
+             width="2260" height="1412" loading="lazy"
+             alt="havn Governance page previewing a query as the editor ingrid: a row policy limits her to Bergen and Ålesund, and two derived models inherit it">
+        <figcaption>Settings &rsaquo; Governance: what a user sees once row policies, and the ones inherited downstream, apply.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="./screenshots/performance.webp"
+             srcset="./screenshots/performance-1x.webp 1130w, ./screenshots/performance.webp 2260w"
+             sizes="(max-width: 860px) 100vw, 530px"
+             width="2260" height="1412" loading="lazy"
+             alt="havn Performance page: slowest models with build-time trends, an advice card about an ORDER BY in a model others read, and the run's critical path">
+        <figcaption>Observe &rsaquo; Performance: build times per model, advice with the evidence, and what set the run's length.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="./screenshots/published.webp"
+             srcset="./screenshots/published-1x.webp 1440w, ./screenshots/published.webp 2880w"
+             sizes="(max-width: 860px) 100vw, 530px"
+             width="2880" height="1800" loading="lazy"
+             alt="A published havn dashboard, Port operations: three numbers, tonnes by port as a bar chart, and each port's share of the latest batch">
+        <figcaption>A published dashboard: a read-only link that works on a phone, or a scheduled email.</figcaption>
+      </figure>
+    </div>
   </div>
 </section>
 

@@ -261,6 +261,10 @@ def suggest_chart(spec: QuerySpec | None, columns: list[str], rows: list[list]) 
         return {"type": "table"}
     if not spec.grain and not spec.dimensions and len(rows) == 1:
         return {"type": "number", "y": metric_cols}
+    if len(rows) == 1:
+        # One bar (or one point) says less than the table under it, and two
+        # metrics of different sizes on one axis leave one of them invisible.
+        return {"type": "table"}
     if spec.grain and spec.grain in columns:
         series = None
         if len(spec.dimensions) == 1:

@@ -30,7 +30,7 @@ pip install havn && havn init my-project && cd my-project && havn jobs run full-
 ```
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/chraltro/havn/main/.github/assets/screenshot.webp" width="800" alt="havn Home page: pipeline health with nine models up to date, fifteen checks passing, recent runs, and the landing, bronze, silver and gold layers" />
+  <img src="https://raw.githubusercontent.com/chraltro/havn/main/.github/assets/screenshot.webp" width="800" alt="havn Home page: pipeline health with ten models up to date, fifteen checks passing, recent runs, and the landing, bronze, silver and gold layers" />
 </p>
 
 ## Why havn?
@@ -185,6 +185,19 @@ havn context   # generate project summary, paste into any AI chat
 | [Cursor](https://cursor.sh) | `.cursorrules` | Yes |
 | [GitHub Copilot](https://github.com/features/copilot) | `.github/copilot-instructions.md` | Yes |
 | Any LLM | `havn context` | Yes |
+
+## Screens
+
+<table>
+<tr>
+<td width="50%"><img src="https://raw.githubusercontent.com/chraltro/havn/main/landing/screenshots/ask-1x.webp" alt="Ask: tonnes by port answered from a defined metric"><br><sub><b>Ask</b>: questions answered from your metrics, with the SQL shown.</sub></td>
+<td width="50%"><img src="https://raw.githubusercontent.com/chraltro/havn/main/landing/screenshots/governance-1x.webp" alt="Governance: previewing a query as a user limited to two ports"><br><sub><b>Governance</b>: row policies, and what a given user would see.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="https://raw.githubusercontent.com/chraltro/havn/main/landing/screenshots/performance-1x.webp" alt="Performance: slowest models, advice and the critical path"><br><sub><b>Performance</b>: build times, advice with evidence, the critical path.</sub></td>
+<td width="50%"><img src="https://raw.githubusercontent.com/chraltro/havn/main/landing/screenshots/published-1x.webp" alt="A published dashboard: Port operations"><br><sub><b>Published dashboards</b>: read-only links, embeds and scheduled reports.</sub></td>
+</tr>
+</table>
 
 ## Quick Start
 
