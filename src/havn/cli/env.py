@@ -132,6 +132,30 @@ def env(
         except UnknownEnvironmentError as e:
             console.print(f"[red]{e}[/red]")
             raise typer.Exit(1)
+
+        # A branch warehouse replaces the environment resolution, so it is
+        # what the next build writes to and has to be the first thing shown.
+        config = _load_config(project_dir)
+        if config.branch.active:
+            from havn.engine.branches import base_warehouse_path
+            from havn.engine.defer import target_lockable
+
+            console.print(
+                f"Branch warehouse: [bold]{config.branch.path}[/bold] "
+                f"[dim](git branch {config.branch.git_branch}, from {config.branch.source})[/dim]"
+            )
+            base_path = base_warehouse_path(config)
+            console.print(
+                f"Defer target: [bold]{config.branch.base_label}[/bold] [dim]({config.branch.base_path})[/dim]"
+            )
+            ok, reason = target_lockable(base_path)
+            if ok:
+                console.print("Defer target readable: [green]yes[/green]")
+            else:
+                console.print(f"Defer target readable: [yellow]no[/yellow] [dim]({reason})[/dim]")
+            console.print("[dim]`havn branch status` shows what is built on the branch; --env overrides it.[/dim]")
+            return
+
         top_db = (raw.get("database") or {}).get("path", "warehouse.duckdb")
         if active:
             db_path = ((environments.get(active) or {}).get("database") or {}).get("path") or top_db
@@ -174,6 +198,9 @@ def env(
                     console.print("Defer target readable: [green]yes[/green]")
                 else:
                     console.print(f"Defer target readable: [yellow]no[/yellow] [dim]({reason})[/dim]")
+
+        if config.branches.enabled:
+            console.print(f"[dim]Branch warehouse: off ({config.branch.reason})[/dim]")
 
     elif action == "reset":
         env_path = project_dir / ENV_FILE
