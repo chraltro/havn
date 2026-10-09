@@ -80,5 +80,5 @@ Ingest Scripts (.py / .dpnb)
 | Data Quality | [Quality](quality.md), [Contracts](contracts.md), [Lineage](lineage.md) |
 | Refactoring | [Refactoring](refactoring.md) -- rename a column, find column references |
 | Security | [Auth](auth.md), [Masking](masking.md) |
-| Advanced | [Scheduler](scheduler.md), [Notebooks](notebooks.md), [Versioning](versioning.md) |
+| Advanced | [Scheduler](scheduler.md), [Notebooks](notebooks.md), [Versioning](versioning.md), [Performance](performance.md), [Telemetry](telemetry.md) |
 | Reference | [CLI Reference](cli-reference.md), [API Reference](api-reference.md) |
