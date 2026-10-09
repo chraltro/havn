@@ -244,147 +244,51 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
         finally:
             conn_rw.close()
 
-    # Validate the SQL is a safe read-only query
-    _validate_query_sql(sql)
+    # Validation, governance rewrites (masking, and anything added to
+    # prepare_governed_sql later), the role timeout and post-query masking
+    # all live in the shared governed read path, so dashboards, published
+    # links and reports apply exactly the same rules as this endpoint.
+    from havn.engine.governed_query import (
+        GovernedQueryError,
+        QueryIdentity,
+        run_governed_query,
+    )
 
-    # Pre-query masking: rewrite SQL to inject masking at column source level
     try:
-        rewritten_sql, rewrite_ok, handled_ids = rewrite_query_with_masking(
-            sql, user["role"], conn,
+        data = run_governed_query(
+            conn,
+            sql,
+            QueryIdentity.from_user(user, source="query"),
+            params=req.params,
+            limit=req.limit,
+            offset=req.offset,
+            timeout_s=get_timeout_for_role(user.get("role", "viewer")),
         )
-    except MaskedColumnAccessError as e:
-        raise HTTPException(403, str(e))
-    sql_to_execute = rewritten_sql if rewrite_ok else sql
+    except GovernedQueryError as e:
+        if e.status_code == 400:
+            logger.warning("Query failed: %s", e)
+        raise HTTPException(e.status_code, str(e))
+    duration_ms = data.pop("duration_ms", 0)
 
-    try:
-        import threading
-
-        query_result: dict = {}
-        query_error: list[Exception] = []
-
-        def _exec_query():
+    # Log slow queries
+    if duration_ms >= _SLOW_QUERY_THRESHOLD_MS:
+        try:
+            from havn.engine.database import ensure_meta_table
+            from havn.engine.write_queue import cursor_for
+            from havn.server.deps import _get_shared_conn
+            conn_rw = cursor_for(_get_shared_conn())
             try:
-                # Safety: if no LIMIT in the SQL and no limit param, inject a
-                # server-side cap so DuckDB never buffers millions of rows.
-                # The response includes total_rows so the user knows it was capped.
-                SERVER_ROW_CAP = 50_000
-                # Trailing newline before the closing paren so a query that
-                # ends with a `-- line comment` can't swallow the wrapper.
-                sql_clean = sql_to_execute.strip().rstrip(";") + "\n"
-                has_limit = bool(re.search(r'\bLIMIT\b', sql_to_execute, re.IGNORECASE))
-                effective_limit = req.limit
-
-                if req.offset > 0 and effective_limit is not None:
-                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q OFFSET {req.offset} LIMIT {effective_limit}"
-                elif effective_limit is not None:
-                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q LIMIT {effective_limit}"
-                elif not has_limit:
-                    # No limit anywhere — inject server cap into the SQL itself
-                    # so DuckDB can optimize and stop scanning early. Keep the
-                    # caller's offset: dropping it here silently re-served page 1
-                    # to clients paginating without an explicit limit.
-                    offset_clause = f"OFFSET {req.offset} " if req.offset > 0 else ""
-                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q {offset_clause}LIMIT {SERVER_ROW_CAP}"
-                    effective_limit = SERVER_ROW_CAP
-                elif req.offset > 0:
-                    # SQL has its own LIMIT; apply just the offset
-                    wrapped = f"SELECT * FROM ({sql_clean}) AS _q OFFSET {req.offset}"
-                else:
-                    wrapped = sql_to_execute
-
-                # Validate what actually runs, not only what was sent: the
-                # wrapper and the masking rewrite both change the text.
-                if wrapped != sql:
-                    validate_read_only_query(wrapped)
-                result = conn.execute(wrapped, req.params)
-                columns = [desc[0] for desc in result.description]
-                column_types = [str(desc[1]) for desc in result.description]
-                if effective_limit is not None:
-                    rows = result.fetchmany(effective_limit)
-                else:
-                    rows = result.fetchall()
-                query_result["data"] = {
-                    "columns": columns,
-                    "column_types": column_types,
-                    "rows": [[_serialize(v) for v in row] for row in rows],
-                    "row_count": len(rows),
-                    "truncated": effective_limit is not None and len(rows) == effective_limit,
-                    "offset": req.offset,
-                    "limit": effective_limit,
-                }
-            except Exception as e:
-                query_error.append(e)
-
-        query_timeout = get_timeout_for_role(user.get("role", "viewer"))
-        t_start = time.monotonic()
-
-        # Acquire a resource-manager slot so the query shows up in the UI's
-        # active-task list and counts toward the `query` concurrency budget.
-        from havn.engine.resource_manager import current_task as _current_task
-        from havn.engine.resource_manager import get_resource_manager as _get_rm
-
-        _manager = _get_rm()
-        with _manager.acquire_sync("query", f"sql:{sql[:60]}", conn=conn):
-            _task = _current_task()
-            if _task is not None:
-                _manager.register_cancel(_task.task_id, conn.interrupt)
-
-            thread = threading.Thread(target=_exec_query, daemon=True)
-            thread.start()
-            thread.join(timeout=query_timeout)
-
-            if thread.is_alive():
-                conn.interrupt()
-                raise HTTPException(
-                    408,
-                    f"Query exceeded {query_timeout}s timeout. "
-                    f"Try adding filters or a LIMIT clause.",
+                ensure_meta_table(conn_rw)
+                conn_rw.execute(
+                    "INSERT INTO _havn.slow_queries (query_text, duration_ms, row_count) VALUES (?, ?, ?)",
+                    [req.sql[:10_000], duration_ms, len(data["rows"])],
                 )
-        duration_ms = int((time.monotonic() - t_start) * 1000)
+            finally:
+                conn_rw.close()
+        except Exception:
+            logger.debug("Failed to log slow query", exc_info=True)
 
-        if query_error:
-            if isinstance(query_error[0], ReadOnlyQueryError):
-                raise HTTPException(query_error[0].status_code, str(query_error[0]))
-            raise query_error[0]
-        data = query_result["data"]
-        # Post-query masking: skip policies already handled by pre-query rewriting
-        if not rewrite_ok:
-            data["rows"] = apply_masking(
-                data["columns"], data["rows"], user["role"], conn,
-            )
-        elif handled_ids:
-            # Rewrite succeeded but some policies may still need post-query
-            # (conditional policies, unsupported methods). Run post-query
-            # skipping what was already handled.
-            data["rows"] = apply_masking(
-                data["columns"], data["rows"], user["role"], conn,
-                skip_policy_ids=handled_ids,
-            )
-
-        # Log slow queries
-        if duration_ms >= _SLOW_QUERY_THRESHOLD_MS:
-            try:
-                from havn.engine.database import ensure_meta_table
-                from havn.engine.write_queue import cursor_for
-                from havn.server.deps import _get_shared_conn
-                conn_rw = cursor_for(_get_shared_conn())
-                try:
-                    ensure_meta_table(conn_rw)
-                    conn_rw.execute(
-                        "INSERT INTO _havn.slow_queries (query_text, duration_ms, row_count) VALUES (?, ?, ?)",
-                        [req.sql[:10_000], duration_ms, len(data["rows"])],
-                    )
-                finally:
-                    conn_rw.close()
-            except Exception:
-                logger.debug("Failed to log slow query", exc_info=True)
-
-        return data
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.warning("Query failed: %s", e)
-        raise HTTPException(400, str(e))
+    return data
 
 
 # --- Tables ---
@@ -715,14 +619,19 @@ def export_csv(request: Request, req: ExportRequest):
             logger.debug("Failed to release export-csv cursor", exc_info=True)
 
     try:
-        # Pre-query masking rewrite
+        from havn.engine.governed_query import (
+            GovernedQueryError,
+            QueryIdentity,
+            apply_post_query_governance,
+            prepare_governed_sql,
+        )
+
+        csv_identity = QueryIdentity.from_user(user, source="export")
         try:
-            csv_rewritten, csv_rewrite_ok, csv_handled = rewrite_query_with_masking(
-                req.sql, user["role"], conn,
-            )
-        except MaskedColumnAccessError as e:
-            raise HTTPException(403, str(e))
-        csv_sql = csv_rewritten if csv_rewrite_ok else req.sql
+            csv_prepared = prepare_governed_sql(conn, req.sql, csv_identity)
+        except GovernedQueryError as e:
+            raise HTTPException(e.status_code, str(e))
+        csv_sql = csv_prepared.sql
 
         csv_timeout = get_timeout_for_role(user.get("role", "viewer"))
         try:
@@ -752,13 +661,9 @@ def export_csv(request: Request, req: ExportRequest):
                 if not batch:
                     break
                 serialized = [[_serialize(v) for v in row] for row in batch]
-                if not csv_rewrite_ok:
-                    serialized = apply_masking(columns, serialized, user["role"], conn)
-                elif csv_handled:
-                    serialized = apply_masking(
-                        columns, serialized, user["role"], conn,
-                        skip_policy_ids=csv_handled,
-                    )
+                serialized = apply_post_query_governance(
+                    csv_prepared, columns, serialized, csv_identity, conn,
+                )
                 for row in serialized:
                     writer.writerow(row)
                 yield buf.getvalue()

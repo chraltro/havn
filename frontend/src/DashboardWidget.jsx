@@ -146,7 +146,7 @@ export default function DashboardWidget({
   onTitleChange,
   style,
 }) {
-  const { editMode, widgetData, refreshWidget, setCrossFilter, updateWidget, dashboard, showToast } = useDashboard();
+  const { editMode, widgetData, refreshWidget, setCrossFilter, updateWidget, dashboard, showToast, readOnly } = useDashboard();
   const [showMenu, setShowMenu] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(widget.title || "");
@@ -190,6 +190,9 @@ export default function DashboardWidget({
 
   const handleChartClick = (column, value) => {
     if (column && value !== undefined) {
+      // Published views run only saved queries with declared filters, so
+      // chart clicks (drill-down, cross-filter) are an editor feature.
+      if (readOnly) return;
       if (widget.config?.drill_down?.enabled) {
         // Enter drill-down mode
         setDrillState({ column, value, level: 0 });

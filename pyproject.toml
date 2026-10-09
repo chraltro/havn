@@ -61,6 +61,10 @@ otel = [
     "opentelemetry-sdk>=1.20",
     "opentelemetry-exporter-otlp-proto-http>=1.20",
 ]
+# Server-side charts for scheduled reports (PNG snapshots, charts in the PDF
+# and email). Without it reports still send: HTML tables, KPI values, CSV and
+# a text-only PDF.
+reports = ["matplotlib>=3.7"]
 snowflake = ["snowflake-connector-python>=3.0"]
 bigquery = ["google-cloud-bigquery>=3.0", "google-auth>=2.0"]
 redshift = ["redshift-connector>=2.0"]

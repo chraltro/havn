@@ -47,6 +47,7 @@ import CommandPalette from "./CommandPalette";
 import FocusTrap from "./FocusTrap";
 import DashboardListPanel from "./DashboardListPanel";
 import DashboardCanvas from "./DashboardCanvas";
+import ReportsPanel from "./ReportsPanel";
 import WidgetEditor from "./WidgetEditor";
 import DashboardFilterBar from "./DashboardFilterBar";
 import { DashboardProvider, useDashboard } from "./DashboardContext";
@@ -1489,7 +1490,8 @@ function AppContent() {
             )}
             {activeTab === "Query" && <ErrorBoundary name="Query"><QueryPanel addOutput={addOutput} onOpenModel={async (key) => { openFile(await resolveModelPath(key)); }} /></ErrorBoundary>}
             {activeTab === "Tables" && <ErrorBoundary name="Tables"><TablesPanel selectedTable={selectedTable} onQueryTable={queryTable} tables={tables} onSelectTable={handleSelectTable} /></ErrorBoundary>}
-            {activeTab === "Data Sources" && <ErrorBoundary name="Data Sources"><DataSourcesPanel addOutput={addOutput} showConfirm={showConfirm} onDataChanged={refreshAll} /></ErrorBoundary>}
+            {activeTab === "Reports" && <ErrorBoundary name="Reports"><ReportsPanel /></ErrorBoundary>}
+            {activeTab === "Data Sources" &&<ErrorBoundary name="Data Sources"><DataSourcesPanel addOutput={addOutput} showConfirm={showConfirm} onDataChanged={refreshAll} /></ErrorBoundary>}
 
             {activeTab === "DAG" && <ErrorBoundary name="DAG"><DAGPanel onOpenFile={openFile} showConfirm={showConfirm} /></ErrorBoundary>}
             {activeTab === "Git" && <ErrorBoundary name="Git"><GitReviewsPanel showConfirm={showConfirm} /></ErrorBoundary>}
