@@ -168,6 +168,46 @@ async def memory_management_middleware(request, call_next):
     return response
 
 # ---------------------------------------------------------------------------
+# Branch warehouses: notice a git checkout and follow it
+# ---------------------------------------------------------------------------
+
+def _tracks_warehouse(path: str) -> bool:
+    """API requests that may use the warehouse connection.
+
+    Event streams stay open for as long as a tab does; counting them as
+    in flight would hold every branch switch back forever.
+    """
+    return (
+        path.startswith("/api/")
+        and not path.endswith("/events")
+        and not path.startswith("/api/export")
+    )
+
+
+@app.middleware("http")
+async def branch_switch_middleware(request, call_next):
+    """Switch to the checked-out branch's warehouse before serving a request.
+
+    The check reads .git/HEAD at most once a second; the switch itself waits
+    until nothing else is using the connection (see deps.sync_branch_warehouse).
+    """
+    if not _tracks_warehouse(request.url.path):
+        return await call_next(request)
+    from starlette.concurrency import run_in_threadpool
+
+    from havn.server.deps import request_finished, request_started, sync_branch_warehouse
+
+    request_started()
+    try:
+        try:
+            await run_in_threadpool(sync_branch_warehouse)
+        except Exception as e:
+            logger.debug("Branch sync skipped: %s", e)
+        return await call_next(request)
+    finally:
+        request_finished()
+
+# ---------------------------------------------------------------------------
 # Include all route modules
 # ---------------------------------------------------------------------------
 
@@ -206,6 +246,7 @@ from havn.server.routes.dashboards import router as dashboards_router  # noqa: E
 from havn.server.routes.jobs import router as jobs_router  # noqa: E402
 from havn.server.routes.pr import router as pr_router  # noqa: E402
 from havn.server.routes.backup import router as backup_router  # noqa: E402
+from havn.server.routes.branch import router as branch_router  # noqa: E402
 from havn.server.routes.prometheus import router as prometheus_router  # noqa: E402
 from havn.server.routes.resources import router as resources_router  # noqa: E402
 from havn.server.routes.semantic import router as semantic_router  # noqa: E402
@@ -247,6 +288,7 @@ app.include_router(dashboards_router)
 app.include_router(jobs_router)
 app.include_router(pr_router)
 app.include_router(backup_router)
+app.include_router(branch_router)
 app.include_router(prometheus_router)
 app.include_router(resources_router)
 app.include_router(semantic_router)

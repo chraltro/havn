@@ -63,15 +63,27 @@ _config_cache: dict[str, Any] = {"config": None, "mtime": 0.0, "path": None}
 
 
 def _get_config_cached():
-    """Load project config with file-mtime-based caching."""
+    """Load project config with file-mtime-based caching.
+
+    Resolved against the git head the server has *switched to*
+    (:func:`applied_git_head`), not the live one: a checkout moves the
+    warehouse only when :func:`sync_branch_warehouse` decides it is safe.
+    """
     active_env = _get_active_env()
+    head = applied_git_head()
+    # With sign-in on, users, tokens and masking policies live in the
+    # warehouse, and a fresh branch warehouse has none of them: following a
+    # checkout would log everyone out and offer first-run admin setup to
+    # whoever asks first. A server with --auth therefore never resolves to a
+    # branch warehouse.
+    use_branches = not _get_auth_enabled()
     config_path = _get_project_dir() / "project.yml"
     try:
         mtime = config_path.stat().st_mtime
     except FileNotFoundError:
-        return load_project(_get_project_dir(), env=active_env)
+        return load_project(_get_project_dir(), env=active_env, git_head=head, use_branches=use_branches)
 
-    cache_key = f"{config_path}:{active_env}"
+    cache_key = f"{config_path}:{active_env}:{head.key}:{use_branches}"
     if (
         _config_cache["config"] is not None
         and _config_cache["path"] == cache_key
@@ -79,7 +91,7 @@ def _get_config_cached():
     ):
         return _config_cache["config"]
 
-    config = load_project(_get_project_dir(), env=active_env)
+    config = load_project(_get_project_dir(), env=active_env, git_head=head, use_branches=use_branches)
     _config_cache["config"] = config
     _config_cache["mtime"] = mtime
     _config_cache["path"] = cache_key
@@ -283,7 +295,12 @@ def _get_backend() -> WarehouseBackend:
     if factory is not None:
         _backend = factory(project_dir, _get_config())
     else:
-        _backend = create_backend(_get_config().database, project_dir=project_dir)
+        config = _get_config()
+        if config.branch.active:
+            from havn.engine.branches import write_branch_record
+
+            write_branch_record(config)
+        _backend = create_backend(config.database, project_dir=project_dir)
     return _backend
 
 
@@ -385,6 +402,144 @@ def reset_shared_conn() -> None:
             except Exception:
                 pass
             _backend = None
+
+
+# ---------------------------------------------------------------------------
+# Branch warehouses: follow git checkouts
+# ---------------------------------------------------------------------------
+# With `branches.enabled`, the warehouse depends on the checked-out git
+# branch. The server pins the head it last switched to ("applied") and
+# resolves every config against it; a checkout is noticed by reading
+# .git/HEAD (throttled, see the middleware in app.py and the git checkout
+# route) and the connection is moved only when nothing is using it: no
+# pipeline, deploy or change build in flight and no other request open. Until
+# then the switch is reported as pending and retried on the next request, so
+# a build never has its warehouse closed under it.
+
+_branch_lock = threading.Lock()
+_branch_state: dict[str, Any] = {
+    "applied": None,       # GitHead the server serves
+    "project": None,       # project dir the applied head belongs to
+    "pending": None,       # {"branch", "head", "reason"} while a switch waits
+    "checked": 0.0,        # monotonic time of the last HEAD read
+    "switched_at": None,   # wall time of the last switch
+}
+_BRANCH_CHECK_INTERVAL = 1.0
+_inflight_lock = threading.Lock()
+_inflight = {"count": 0}
+
+
+def applied_git_head():
+    """The git head the server's warehouse resolution is pinned to."""
+    from havn.engine.branches import read_git_head
+
+    project = str(_get_project_dir())
+    if _branch_state["applied"] is None or _branch_state["project"] != project:
+        _branch_state["applied"] = read_git_head(project)
+        _branch_state["project"] = project
+        _branch_state["pending"] = None
+    return _branch_state["applied"]
+
+
+def request_started() -> None:
+    with _inflight_lock:
+        _inflight["count"] += 1
+
+
+def request_finished() -> None:
+    with _inflight_lock:
+        _inflight["count"] = max(0, _inflight["count"] - 1)
+
+
+def _switch_blocker(own_requests: int) -> str | None:
+    """Why the warehouse cannot be switched right now, or None."""
+    try:
+        from havn.server.routes.pipeline import _pipeline_state
+
+        if _pipeline_state.get("running"):
+            label = _pipeline_state.get("operation_label") or _pipeline_state.get("operation") or "pipeline"
+            return f"{label} is running"
+    except Exception:
+        pass
+    try:
+        from havn.engine.deploy import _deploy_lock
+
+        if _deploy_lock.locked():
+            return "a deploy is running"
+    except Exception:
+        pass
+    try:
+        from havn.engine.pr import _build_lock
+
+        if _build_lock.locked():
+            return "a change build is running"
+    except Exception:
+        pass
+    with _inflight_lock:
+        others = _inflight["count"] - own_requests
+    if others > 0:
+        return f"{others} other request(s) are using the warehouse"
+    return None
+
+
+def sync_branch_warehouse(*, force: bool = False, own_requests: int = 1) -> dict:
+    """Move the server onto the checked-out branch's warehouse, when safe.
+
+    ``own_requests`` is how many in-flight requests belong to the caller (the
+    request running this check), so they do not count as "busy". Returns
+    :func:`branch_sync_state`.
+    """
+    from havn.engine.branches import read_git_head
+
+    applied = applied_git_head()
+    now = time.monotonic()
+    if not force and now - _branch_state["checked"] < _BRANCH_CHECK_INTERVAL:
+        return branch_sync_state()
+    _branch_state["checked"] = now
+    project = _get_project_dir()
+    live = read_git_head(project)
+    if live.key == applied.key:
+        _branch_state["pending"] = None
+        return branch_sync_state()
+
+    with _branch_lock:
+        applied = applied_git_head()
+        if live.key == applied.key:
+            return branch_sync_state()
+        blocker = _switch_blocker(own_requests)
+        if blocker:
+            _branch_state["pending"] = {"branch": live.branch, "head": live.key, "reason": blocker}
+            return branch_sync_state()
+        try:
+            before = _get_config().database.model_dump()
+        except Exception:
+            before = None
+        _branch_state["applied"] = live
+        _branch_state["pending"] = None
+        _branch_state["switched_at"] = time.time()
+        _clear_config_cache()
+        try:
+            after = _get_config().database.model_dump()
+        except Exception:
+            after = None
+        if before != after:
+            # Close the old warehouse before anything opens the new one:
+            # on Windows DuckDB holds an exclusive lock per file.
+            reset_shared_conn()
+            logger.info(
+                "git checkout %s: warehouse is now %s",
+                live.branch or "(detached)", (after or {}).get("path"),
+            )
+    return branch_sync_state()
+
+
+def branch_sync_state() -> dict:
+    head = _branch_state["applied"]
+    return {
+        "head": head.key if head is not None else None,
+        "pending": _branch_state["pending"],
+        "switched_at": _branch_state["switched_at"],
+    }
 
 
 def get_db() -> Generator[duckdb.DuckDBPyConnection, None, None]:
