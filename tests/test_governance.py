@@ -361,6 +361,34 @@ def test_api_row_policies_admin_only_and_enforced(api):
     assert api["viewer"].post("/api/query", json={"sql": "SELECT * FROM _havn.users"}).status_code == 403
 
 
+def test_api_access_log_records_reads_admin_only(api):
+    # A row policy makes the viewer a governed identity, so /api/query records
+    # the relations it read to the data-access log.
+    assert api["admin"].post("/api/governance/row-policies", json={
+        "schema_name": "silver", "table_name": "customers",
+        "filter_sql": "region = havn_attr('region')"}).status_code == 200
+    assert api["admin"].put("/api/users/viewer/attributes",
+                            json={"attributes": {"region": "north"}}).status_code == 200
+
+    assert api["viewer"].post(
+        "/api/query", json={"sql": "SELECT * FROM silver.customers"}
+    ).status_code == 200
+
+    # The access log is admin only; a viewer cannot read who-read-what.
+    assert api["viewer"].get("/api/audit/access").status_code == 403
+
+    entries = api["admin"].get("/api/audit/access?table=silver.customers").json()
+    assert any(
+        e["user"] == "viewer"
+        and "silver.customers" in e["tables"]
+        and "silver.customers" in e["row_filtered_tables"]
+        for e in entries
+    ), entries
+    # Filter by user works too.
+    assert all(e["user"] == "viewer" for e in api["admin"].get(
+        "/api/audit/access?user=viewer").json())
+
+
 def test_api_v1_sql_governed_and_owned(api):
     api["admin"].post("/api/governance/row-policies", json={
         "schema_name": "silver", "table_name": "customers", "filter_sql": "region = 'north'",

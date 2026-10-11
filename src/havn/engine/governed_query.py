@@ -199,6 +199,37 @@ def _serialize(value: Any) -> Any:
     return str(value)
 
 
+def _record_access(
+    audit_conn: duckdb.DuckDBPyConnection,
+    prepared: PreparedQuery,
+    identity: QueryIdentity,
+    row_count: int,
+    duration_ms: int,
+    ip_address: str | None,
+) -> None:
+    """Write one data-access row from a finished governed read. Never raises."""
+    governed = prepared.governed
+    masks = getattr(governed, "masks", None) or []
+    row_tables = getattr(governed, "row_filtered_tables", None) or []
+    from havn.engine.access_log import log_access
+
+    log_access(
+        audit_conn,
+        user=identity.username,
+        role=identity.role,
+        source=identity.source,
+        statement=prepared.original_sql,
+        read_tables=getattr(governed, "read_tables", None) or [],
+        pii_columns=getattr(governed, "pii_columns", None) or [],
+        masked_columns=getattr(governed, "masked_columns", None) or [],
+        row_filtered_tables=row_tables,
+        policy_count=len(masks) + len(row_tables),
+        row_count=row_count,
+        duration_ms=duration_ms,
+        ip_address=ip_address,
+    )
+
+
 def _wrap_for_paging(sql: str, limit: int | None, offset: int, row_cap: int | None) -> tuple[str, int | None]:
     """Return (sql to run, effective limit) with paging and the server cap applied."""
     # Trailing newline before the closing paren so a query that ends with a
@@ -231,12 +262,18 @@ def run_governed_query(
     row_cap: int | None = SERVER_ROW_CAP,
     task_label: str | None = None,
     project_dir: Path | None = None,
+    audit_conn: duckdb.DuckDBPyConnection | None = None,
+    ip_address: str | None = None,
 ) -> dict:
     """Run a read-only query as ``identity`` and return a JSON-ready result.
 
     Returns ``{columns, column_types, rows, row_count, truncated, offset,
     limit, duration_ms}``. ``params`` binds ``$name`` (dict) or ``$1``/``?``
     (list) placeholders; values are never spliced into the SQL.
+
+    When ``audit_conn`` (a writable connection) is given, one row is written to
+    the data-access log recording the relations and PII columns this read
+    touched. It is best-effort and never fails the query.
 
     Raises :class:`GovernedQueryError`: 400 for invalid or failing SQL,
     403 for masked-column access, 408 on timeout.
@@ -311,6 +348,8 @@ def run_governed_query(
     columns = holder["columns"]
     rows = [[_serialize(v) for v in row] for row in holder["rows"]]
     rows = apply_post_query_governance(prepared, columns, rows, identity, conn)
+    if audit_conn is not None:
+        _record_access(audit_conn, prepared, identity, len(rows), duration_ms, ip_address)
     return {
         "columns": columns,
         "column_types": holder["column_types"],

@@ -24,6 +24,51 @@ def _open(project_dir: Optional[Path], env: Optional[str]):
     return conn, project_dir, config
 
 
+@app.command("access-log")
+def access_log(
+    user: Annotated[Optional[str], typer.Option("--user", "-u", help="Only this user")] = None,
+    table: Annotated[Optional[str], typer.Option("--table", "-t", help="Reads touching this schema.table")] = None,
+    pii_column: Annotated[Optional[str], typer.Option("--pii", help="Reads touching this PII column (schema.table.column)")] = None,
+    source: Annotated[Optional[str], typer.Option("--source", help="Surface: query, export, dashboard, ...")] = None,
+    since: Annotated[Optional[str], typer.Option("--since", help="On or after this timestamp (e.g. 2026-10-01)")] = None,
+    until: Annotated[Optional[str], typer.Option("--until", help="On or before this timestamp")] = None,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max rows")] = 50,
+    env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use")] = None,
+    project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory")] = None,
+) -> None:
+    """Show the data-access log: who read which relations and PII columns, when.
+
+    Answers "who read gold.customers.email last week" — which the audit log
+    (truncated SQL only) cannot. Populated by governed reads on the query and
+    CSV-export surfaces.
+    """
+    from havn.engine.access_log import query_access_log
+
+    conn, _project_dir, _config = _open(project_dir, env)
+    try:
+        entries = query_access_log(
+            conn, limit=limit, user=user, table=table,
+            pii_column=pii_column, source=source, since=since, until=until,
+        )
+    finally:
+        conn.close()
+    if not entries:
+        console.print("[dim]No matching access-log entries.[/dim]")
+        return
+    table_view = Table(title="Data access")
+    for col in ("When", "User", "Role", "Source", "Tables", "PII read", "Masked", "Rows"):
+        table_view.add_column(col, overflow="fold")
+    for e in entries:
+        pii = ", ".join(e["pii_columns"]) or "[dim]-[/dim]"
+        masked = ", ".join(e["masked_columns"]) or "[dim]-[/dim]"
+        tables = ", ".join(e["tables"]) or "[dim]-[/dim]"
+        table_view.add_row(
+            (e["timestamp"] or "")[:19], e["user"], e["role"] or "", e["source"] or "",
+            tables, pii, masked, str(e["row_count"]),
+        )
+    console.print(table_view)
+
+
 @app.command("pii")
 def pii(
     relation: Annotated[Optional[str], typer.Argument(help="Only this schema.table")] = None,

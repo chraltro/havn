@@ -85,6 +85,14 @@ class GovernedQuery:
     handled_ids: set[str] = field(default_factory=set)
     masks: list[dict] = field(default_factory=list)
     masking_rewritten: bool = False
+    # What this read touched, for the data-access log. Populated for governed
+    # identities (an unrestricted admin short-circuits before these are known,
+    # so they stay empty there). Strings are ``schema.table`` /
+    # ``schema.table.column``, lowercased.
+    read_tables: list[str] = field(default_factory=list)
+    pii_columns: list[str] = field(default_factory=list)
+    masked_columns: list[str] = field(default_factory=list)
+    row_filtered_tables: list[str] = field(default_factory=list)
 
     @property
     def needs_post_mask(self) -> bool:
@@ -572,6 +580,23 @@ def govern_query(
         _fix_qualified_columns(final_tree)
     final_sql = final_tree.sql(dialect="duckdb")
     verify_plan(conn, final_sql, final_tree, vp, catalog, params, skip=registered)
+    # Record what was read, for the data-access log. `reach` is every base
+    # relation whose data feeds the result (references plus their lineage
+    # closure), so PII columns and row filters are reported even when reached
+    # only through a view.
+    classifications = vp.snapshot.classifications
+    pii_columns = sorted(
+        f"{s}.{t}.{c}"
+        for (s, t) in reach
+        if (s, t) in classifications
+        for c in classifications[(s, t)]
+    )
+    masked_columns = sorted(
+        f"{p['schema_name'].lower()}.{p['table_name'].lower()}.{p['column_name'].lower()}"
+        for p in masks
+    )
+    row_filtered = sorted(f"{s}.{t}" for (s, t) in vp.rows if (s, t) in reach)
+    read_tables = sorted(f"{s}.{t}" for (s, t) in reach)
     return GovernedQuery(
         sql=prefix + final_sql,
         viewer=v,
@@ -579,6 +604,10 @@ def govern_query(
         handled_ids=set(handled),
         masks=masks,
         masking_rewritten=masking_rewritten,
+        read_tables=read_tables,
+        pii_columns=pii_columns,
+        masked_columns=masked_columns,
+        row_filtered_tables=row_filtered,
     )
 
 

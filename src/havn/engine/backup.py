@@ -16,8 +16,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import duckdb
-
 from havn.engine.database import connect
 
 logger = logging.getLogger("havn.engine.backup")
@@ -128,6 +126,7 @@ def create_backup(
     output: Path | None = None,
     verify: bool = True,
     note: str = "",
+    encryption_key: str | None = None,
 ) -> dict[str, Any]:
     """Create a verified backup of the warehouse database.
 
@@ -156,7 +155,7 @@ def create_backup(
     # 1. Flush WAL via CHECKPOINT
     _conn = None
     try:
-        _conn = connect(db_path)
+        _conn = connect(db_path, encryption_key=encryption_key)
         _conn.execute("CHECKPOINT")
     except Exception as e:
         logger.warning("CHECKPOINT skipped (proceeding with copy): %s", e)
@@ -181,7 +180,7 @@ def create_backup(
     verified = False
     if verify:
         try:
-            verify_conn = duckdb.connect(str(output), read_only=True)
+            verify_conn = connect(str(output), read_only=True, encryption_key=encryption_key)
             # Verify we can read the catalog and count tables
             verify_conn.execute(
                 "SELECT COUNT(*) FROM information_schema.tables"
@@ -218,6 +217,7 @@ def restore_backup(
     db_path: Path,
     backup_path: Path,
     verify: bool = True,
+    encryption_key: str | None = None,
 ) -> dict[str, Any]:
     """Restore the warehouse from a backup file.
 
@@ -236,7 +236,7 @@ def restore_backup(
         raise BackupError(f"Backup file not found: {backup_path}")
 
     if verify:
-        result = verify_backup(backup_path, project_dir=project_dir)
+        result = verify_backup(backup_path, project_dir=project_dir, encryption_key=encryption_key)
         if not result.get("valid"):
             raise BackupError(
                 f"Backup failed verification: {result.get('error', 'unknown error')}"
@@ -294,7 +294,9 @@ def restore_backup(
     }
 
 
-def verify_backup(backup_path: Path, project_dir: Path | None = None) -> dict[str, Any]:
+def verify_backup(
+    backup_path: Path, project_dir: Path | None = None, encryption_key: str | None = None
+) -> dict[str, Any]:
     """Verify a backup file's integrity and compute its checksum.
 
     A tracked backup whose SHA-256 no longer matches the manifest is invalid
@@ -323,8 +325,8 @@ def verify_backup(backup_path: Path, project_dir: Path | None = None) -> dict[st
         }
 
     try:
-        conn = duckdb.connect(str(backup_path), read_only=True)
-    except duckdb.Error as e:
+        conn = connect(str(backup_path), read_only=True, encryption_key=encryption_key)
+    except Exception as e:
         return {
             "path": str(backup_path),
             "valid": False,

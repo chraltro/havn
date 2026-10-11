@@ -164,7 +164,13 @@ def _default_catalog_for(backend: WarehouseBackend) -> str | None:
     the attached ``warehouse`` catalog, so cursors must re-enter it or
     every query fails with ``Table ... does not exist``. For plain DuckDB
     the cursor's default catalog (the opened file) is already correct.
+
+    An encrypted DuckDB file is attached to an in-memory root, so it behaves
+    like DuckLake here: the backend reports its attached catalog name.
     """
+    explicit = getattr(backend, "default_catalog", None)
+    if explicit:
+        return explicit
     return "warehouse" if backend.name == "ducklake" else None
 
 
@@ -200,7 +206,7 @@ def cursor_for(conn: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
         except Exception:
             pass
     if cat:
-        cur.execute(f"USE {cat}")
+        cur.execute(f'USE "{cat}"')
     return cur
 
 
@@ -245,7 +251,7 @@ class ReadPool:
         try:
             cursor = conn.cursor()
             if self._default_catalog:
-                cursor.execute(f"USE {self._default_catalog}")
+                cursor.execute(f'USE "{self._default_catalog}"')
             try:
                 yield cursor
             finally:
@@ -273,7 +279,7 @@ class SharedConnPool:
     def connection(self) -> Generator[duckdb.DuckDBPyConnection, None, None]:
         cursor = self._conn.cursor()
         if self._default_catalog:
-            cursor.execute(f"USE {self._default_catalog}")
+            cursor.execute(f'USE "{self._default_catalog}"')
         try:
             yield cursor
         finally:

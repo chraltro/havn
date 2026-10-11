@@ -4,6 +4,44 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Data-access log.** Every governed read on the query and CSV-export
+  surfaces records one row to `_havn.access_log`: the user and role, the
+  relations read, the PII-classified columns in scope, the columns a policy
+  masked, the row-filtered tables, the row count and the time. The audit log
+  says *that* a query ran (truncated SQL); this says *what data* it reached, so
+  "who read `gold.customers.email` last week" is answerable. Read it with
+  `havn access-log` (filters: `--user`, `--table`, `--pii`, `--source`,
+  `--since`, `--until`) or `GET /api/audit/access` (admin only). The governance
+  rewriter already computed the relations and policies to enforce them; this
+  persists what it found. Dashboards, published links, reports and `havn ask`
+  share the same governed path and can opt in with one argument; they are not
+  logged yet. Only reads that run are recorded; a read refused by governance
+  (403) or stopped by the timeout (408) is not yet logged.
+- **Encryption at rest for the warehouse (duckdb backend).** Set
+  `database.encryption_key: ${HAVN_ENCRYPTION_KEY}` in project.yml and havn
+  opens the warehouse as an AES-encrypted DuckDB file (`ATTACH ... ENCRYPTION_KEY`).
+  `current_database()` is unchanged (the file is attached under its own stem),
+  so the engine is unaffected. Reads and backup copies (byte copies of an
+  encrypted file stay encrypted) need nothing extra; *writing* an encrypted
+  file needs DuckDB's OpenSSL crypto provider (the `httpfs` extension), and
+  havn refuses to write rather than produce an insecure or plaintext file when
+  it is unavailable. See `docs/encryption.md` for what is and is not covered
+  yet (defer targets, PR-build copies and migration destinations still need the
+  key threaded through).
+
+### Fixed
+
+- **Pipeline Rewind snapshots could be committed to git.** `.havn/snapshots/`
+  (a Parquet copy of every model after each build) and `.havn/metadata/` were
+  not in the `.gitignore` that `havn init` writes, and `havn checkpoint` runs
+  `git add --all`, so model row data — including PII — could be committed and
+  pushed. The scaffold now ignores them (and `_backups/`), `havn init --force`
+  appends the lines to an existing `.gitignore`, and `havn checkpoint` refuses
+  to stage warehouse files (`*.duckdb`) and the local-only data directories
+  even when the `.gitignore` predates this fix, warning which paths it skipped.
+
 ## [0.3.0] - 2026-10-09
 
 ### Added

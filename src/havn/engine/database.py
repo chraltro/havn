@@ -61,6 +61,7 @@ def connect(
     memory_limit: str | None = None,
     threads: int | None = None,
     project_dir: str | Path | None = None,
+    encryption_key: str | None = None,
 ) -> duckdb.DuckDBPyConnection:
     """Open a specific DuckDB file directly (no backend abstraction).
 
@@ -73,11 +74,18 @@ def connect(
         memory_limit: Max memory (e.g. "4GB", "75%", "512MB").
         threads: Max DuckDB threads (default: half of CPU cores).
         project_dir: If provided, auto-register macros from ``project_dir/macros/``.
+        encryption_key: If set, open the file as an AES-encrypted DuckDB
+            database (see ``engine/backends/encryption.py``).
     """
     import os
 
     db_path = str(db_path)
-    conn = duckdb.connect(db_path, read_only=read_only)
+    if encryption_key:
+        from havn.engine.backends.encryption import open_encrypted
+
+        conn = open_encrypted(db_path, encryption_key, read_only=read_only)
+    else:
+        conn = duckdb.connect(db_path, read_only=read_only)
     if _progress_bar_enabled():
         conn.execute("SET enable_progress_bar = true")
     else:
@@ -401,6 +409,10 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
                 "timestamp" TIMESTAMP DEFAULT current_timestamp
             )
         """)
+    # Data-access log: who read which relations and PII columns. One source of
+    # truth for the DDL lives in engine/access_log.py (no PK, so DuckLake-safe).
+    from havn.engine.access_log import ensure_access_log_table
+    ensure_access_log_table(conn)
     # Slow query tracking
     _exec("""
         CREATE TABLE IF NOT EXISTS _havn.slow_queries (

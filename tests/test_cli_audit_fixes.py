@@ -246,6 +246,52 @@ def test_init_force_appends_missing_gitignore_lines(tmp_path):
     assert (target / ".gitignore").read_text(encoding="utf-8") == before
 
 
+def test_init_gitignore_ignores_rewind_snapshots(tmp_path):
+    # Pipeline Rewind writes a Parquet copy of every model under
+    # .havn/snapshots/ after each build. Those files are row data; if they
+    # are not ignored, `havn checkpoint` (git add --all) commits them.
+    target = tmp_path / "proj"
+    result = runner.invoke(app, ["init", "proj", "--dir", str(target), "--empty"])
+    assert result.exit_code == 0, result.output
+    lines = (target / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert ".havn/snapshots/" in lines
+    assert ".havn/metadata/" in lines
+
+
+def test_checkpoint_never_stages_local_data(tmp_path):
+    # An existing project created before the gitignore fix has a stale
+    # .gitignore that does not cover the rewind snapshot dir, and may already
+    # have snapshot files on disk. `havn checkpoint` must not commit them even
+    # so, the same way it refuses to commit .env.
+    target = tmp_path / "proj"
+    runner.invoke(app, ["init", "proj", "--dir", str(target), "--empty"])
+    (target / ".gitignore").write_text("*.pyc\n.env\n", encoding="utf-8")
+
+    snap = target / ".havn" / "snapshots" / "gold" / "orders"
+    snap.mkdir(parents=True)
+    (snap / "run1.parquet").write_bytes(b"PAR1 row data stands in for real rows")
+    (target / "warehouse.duckdb").write_bytes(b"warehouse bytes")
+    (target / "transform" / "gold").mkdir(parents=True, exist_ok=True)
+    (target / "transform" / "gold" / "keep.sql").write_text("SELECT 1 AS x\n", encoding="utf-8")
+
+    for cmd in (
+        ["git", "init"],
+        ["git", "config", "user.email", "t@t"],
+        ["git", "config", "user.name", "t"],
+    ):
+        subprocess.run(cmd, cwd=target, capture_output=True)
+
+    result = runner.invoke(app, ["checkpoint", "--project", str(target), "-m", "work"])
+    assert result.exit_code == 0, result.output
+
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=target, capture_output=True, text=True
+    ).stdout
+    assert ".havn/snapshots/gold/orders/run1.parquet" not in tracked
+    assert "warehouse.duckdb" not in tracked
+    assert "transform/gold/keep.sql" in tracked
+
+
 def test_csv_connector_accepts_uppercase_format():
     from havn.connectors.csv_file import CSVConnector
 

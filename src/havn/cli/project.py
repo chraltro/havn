@@ -268,6 +268,11 @@ def init(
         "*.duckdb\n*.duckdb.wal\n"
         ".havn/catalog.ducklake\n.havn/catalog.ducklake.wal\n.havn/data/\n"
         "__pycache__/\n*.pyc\n.venv/\n.env\noutput/\n_snapshots/\n"
+        # Verified backups of the warehouse (a byte copy per backup).
+        "_backups/\n"
+        # Pipeline Rewind: a Parquet copy of every model after each build, plus
+        # its metadata DB. This is row data — never commit it.
+        ".havn/snapshots/\n.havn/metadata/\n"
         ".havn/pr-build/\n"
         ".havn/deploy/\n"
         # One warehouse per git branch (branches: in project.yml).
@@ -719,6 +724,19 @@ def checkpoint(
     # Unstage .env if it got added
     subprocess.run(["git", "reset", "HEAD", ".env"], cwd=project_dir, capture_output=True, check=False)
 
+    # Belt and suspenders for projects whose .gitignore predates the rules
+    # below (or whose warehouse/snapshots were committed before): never let
+    # `havn checkpoint` commit warehouse files or the local-only derived state
+    # that holds row data. These are always reproducible and often contain the
+    # very data masking is meant to protect.
+    unstaged = _unstage_never_commit(project_dir)
+    if unstaged:
+        shown = ", ".join(unstaged[:3]) + (f" (+{len(unstaged) - 3} more)" if len(unstaged) > 3 else "")
+        console.print(
+            f"[yellow]Not committing local warehouse/snapshot data: {shown}. "
+            f"Add it to .gitignore (or run `havn init --force`) to silence this.[/yellow]"
+        )
+
     # Check if there's anything to commit
     result = subprocess.run(
         ["git", "diff", "--cached", "--name-only"],
@@ -749,6 +767,59 @@ def checkpoint(
     branch = current_branch(project_dir) or "unknown"
     console.print(f"[green]Committed {len(staged_files)} file(s) on branch {branch}[/green]")
     console.print(f"  [dim]{message}[/dim]")
+
+
+# Paths that are always local, reproducible, and may hold row data. They are
+# gitignored in a fresh project; this list is what `havn checkpoint` falls back
+# to for projects whose .gitignore predates those rules.
+_NEVER_COMMIT_DIRS = (
+    ".havn/snapshots/",   # Pipeline Rewind: a Parquet copy of every model
+    ".havn/metadata/",    # Rewind metadata DB
+    ".havn/branches/",    # per-branch warehouses
+    ".havn/pr-build/",    # transient PR-build worktrees
+    ".havn/deploy/",      # transient deploy worktrees
+    ".havn/ci-base/",     # CI-downloaded base warehouse
+    "_snapshots/",        # versioning restore points (Parquet)
+    "_backups/",          # verified warehouse backups
+)
+_NEVER_COMMIT_SUFFIXES = (".duckdb", ".duckdb.wal")
+
+
+def _unstage_never_commit(project_dir: Path) -> list[str]:
+    """Unstage any staged path that must never be committed; return their names.
+
+    Matches the warehouse files and local-only derived-state directories. Git
+    reports paths with forward slashes on every platform, so prefix matching is
+    safe. Defensive throughout: a git error here must not break the commit.
+    """
+    import subprocess
+
+    try:
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=project_dir, capture_output=True, text=True,
+        ).stdout or ""
+    except Exception:
+        return []
+
+    offenders = [
+        f for f in (line.strip() for line in staged.splitlines())
+        if f and (
+            f.startswith(_NEVER_COMMIT_DIRS)
+            or f.endswith(_NEVER_COMMIT_SUFFIXES)
+        )
+    ]
+    if not offenders:
+        return []
+    try:
+        # `--` so a path that looks like a flag is still treated as a path.
+        subprocess.run(
+            ["git", "reset", "-q", "HEAD", "--", *offenders],
+            cwd=project_dir, capture_output=True, check=False,
+        )
+    except Exception:
+        return []
+    return offenders
 
 
 def _generate_commit_message(staged_files: list[str]) -> str:
@@ -943,12 +1014,14 @@ def backup(
         raise typer.Exit(1)
 
     db_path = project_dir / config.database.path
+    from havn.engine.backends.encryption import resolve_encryption_key
     try:
         entry = create_backup(
             project_dir, db_path,
             output=output,
             verify=not no_verify,
             note=note,
+            encryption_key=resolve_encryption_key(config.database),
         )
     except BackupError as e:
         console.print(f"[red]Backup failed: {e}[/red]")
@@ -992,10 +1065,12 @@ def backup_restore(
     if db_path.exists():
         console.print(f"[yellow]Overwriting existing database: {db_path}[/yellow]")
 
+    from havn.engine.backends.encryption import resolve_encryption_key
     try:
         result = restore_backup(
             project_dir, db_path, backup_path,
             verify=not no_verify,
+            encryption_key=resolve_encryption_key(config.database),
         )
     except BackupError as e:
         console.print(f"[red]Restore failed: {e}[/red]")
@@ -1068,8 +1143,18 @@ def backup_verify(
             if (candidate / "project.yml").exists():
                 project_dir = candidate
                 break
+    # Resolve the at-rest key so an encrypted backup can be opened for verify.
+    key = None
+    if project_dir is not None:
+        try:
+            from havn.config import load_project
+            from havn.engine.backends.encryption import resolve_encryption_key
+
+            key = resolve_encryption_key(load_project(project_dir).database)
+        except Exception:
+            key = None
     try:
-        result = verify_backup(backup_path, project_dir=project_dir)
+        result = verify_backup(backup_path, project_dir=project_dir, encryption_key=key)
     except BackupError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1)

@@ -22,6 +22,10 @@ class DatabaseConfig(BaseModel):
     data_path: str | None = None              # ducklake: local dir or s3:// URI
     metadata_schema: str | None = None        # ducklake: Postgres schema override (cloud)
     encrypted: bool = False                   # ducklake: Parquet encryption
+    # duckdb backend: at-rest encryption key for the warehouse file. Write it
+    # as ``${HAVN_ENCRYPTION_KEY}`` so the key lives in .env / the environment,
+    # never in project.yml. See engine/backends/encryption.py.
+    encryption_key: str | None = None
     memory_limit: str | None = None           # e.g. "4GB", "75%", "512MB"
     threads: int | None = None                # max DuckDB threads
 

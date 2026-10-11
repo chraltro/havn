@@ -171,6 +171,7 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
     """Run an ad-hoc SQL query with a timeout."""
     user = _require_permission(request, "read")
     sql = req.sql
+    client_ip = request.client.host if request.client else None
 
     # Audit log the query execution
     try:
@@ -178,7 +179,6 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
         from havn.server.deps import _get_shared_conn
 
         _audit_conn = _get_shared_conn()
-        client_ip = request.client.host if request.client else None
         log_audit(
             _audit_conn,
             user=user.get("username", "anonymous"),
@@ -260,6 +260,8 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
     )
 
     try:
+        from havn.server.deps import _get_shared_conn
+
         data = run_governed_query(
             conn,
             sql,
@@ -268,6 +270,8 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
             limit=req.limit,
             offset=req.offset,
             timeout_s=get_timeout_for_role(user.get("role", "viewer")),
+            audit_conn=_get_shared_conn(),
+            ip_address=client_ip,
         )
     except GovernedQueryError as e:
         if e.status_code == 400:
@@ -636,6 +640,7 @@ class ExportRequest(BaseModel):
 def export_csv(request: Request, req: ExportRequest):
     """Stream query results as CSV download. No row limit."""
     user = _require_permission(request, "read")
+    client_ip = request.client.host if request.client else None
     import csv
     import io
 
@@ -684,6 +689,7 @@ def export_csv(request: Request, req: ExportRequest):
         raise
 
     def generate():
+        exported = 0
         try:
             buf = io.StringIO()
             writer = csv.writer(buf)
@@ -703,11 +709,25 @@ def export_csv(request: Request, req: ExportRequest):
                 )
                 for row in serialized:
                     writer.writerow(row)
+                exported += len(serialized)
                 yield buf.getvalue()
                 buf.seek(0)
                 buf.truncate(0)
         finally:
             _release()
+            # Record the export in the data-access log, even on a client
+            # disconnect (the finally runs on GeneratorExit), with the rows
+            # actually streamed out.
+            try:
+                from havn.engine.governed_query import _record_access
+                from havn.server.deps import _get_shared_conn
+
+                _record_access(
+                    _get_shared_conn(), csv_prepared, csv_identity,
+                    exported, 0, client_ip,
+                )
+            except Exception:
+                logger.debug("Failed to write access log for CSV export", exc_info=True)
 
     return StreamingResponse(
         generate(),

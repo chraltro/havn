@@ -79,6 +79,7 @@ havn branch build               # build what this branch changed, against the ba
 havn branch diff --markdown     # data diff vs the base (what CI posts on a PR)
 havn rls list                   # row-level security policies
 havn pii                        # PII classifications, explicit and inherited
+havn access-log --since 2026-10-01   # who read which relations/PII columns (governed reads)
 havn reports send weekly        # deliver a scheduled report now
 havn ask "revenue by region"    # answer from metrics/*.yml
 havn changes list               # agent change sets and their verification
