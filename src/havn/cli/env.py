@@ -148,7 +148,11 @@ def env(
             console.print(
                 f"Defer target: [bold]{config.branch.base_label}[/bold] [dim]({config.branch.base_path})[/dim]"
             )
-            ok, reason = target_lockable(base_path)
+            from havn.engine.backends.encryption import resolve_encryption_key
+
+            ok, reason = target_lockable(
+                base_path, encryption_key=resolve_encryption_key(config.database)
+            )
             if ok:
                 console.print("Defer target readable: [green]yes[/green]")
             else:
@@ -188,12 +192,15 @@ def env(
                 resolved = Path(target_path)
                 if not resolved.is_absolute():
                     resolved = project_dir / resolved
+                from havn.engine.backends.encryption import resolve_encryption_key
+
+                _defer_key = resolve_encryption_key(config.database)
                 console.print(f"Defer target: [bold]{target}[/bold] [dim]({target_path})[/dim]")
                 # Whether a deferred run would start right now is the question
                 # people actually have, and it is answered by opening the file
                 # read-only and closing it again. It is a reading, not a
                 # promise: another process can take the lock a moment later.
-                ok, reason = target_lockable(resolved)
+                ok, reason = target_lockable(resolved, encryption_key=_defer_key)
                 if ok:
                     console.print("Defer target readable: [green]yes[/green]")
                 else:

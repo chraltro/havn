@@ -51,20 +51,28 @@ a file that is not securely encrypted.
 | Backups (`havn backup`) | Yes — a backup is a byte copy of the (encrypted) file. Verifying one needs the key. |
 | The WAL | Yes — DuckDB encrypts the write-ahead log alongside the file. |
 
+## What else is covered
+
+These warehouse-file paths now thread the key through, so an encrypted project
+stays encrypted across them (each assumes the project's one key):
+
+| Path | How |
+|---|---|
+| **Defer / branch** (`havn transform --defer`, `havn branch build`) | The base/defer target is attached read-only with the key. `--defer-snapshot` writes its consistent copy encrypted too. `havn env show`'s "defer target readable" probe uses the key. |
+| **`havn migrate`** | Source and destination open through the backend, so each inherits its own config's key. |
+| **PR builds** (`engine/pr.py`) | The main warehouse is attached read-only with the key, and the clone written into the worktree is encrypted with the same key (so no plaintext clone under `.havn/pr-build/`). |
+
 ## What is not covered yet
 
-These paths open a warehouse file directly and do not yet thread the key
-through. Until they do, do not rely on encryption in combination with them:
-
-- **Defer / branch CI** (`havn transform --defer`, `havn branch build`): the
-  base/defer target is a second file attached read-only and needs its own key
-  passed. An encrypted defer target is not yet supported.
-- **PR builds** and **`havn migrate`** destinations: these write new DuckDB
-  files that are currently plaintext.
-- **Pipeline Rewind snapshots and `_snapshots/` versions**: these are Parquet,
-  not DuckDB files, and are written in the clear. Keep them off shared storage
-  (they are gitignored; see the note below) or disable Rewind
-  (`rewind.enabled: false`) if that matters.
+- **Pipeline Rewind** (`.havn/snapshots/`) writes a Parquet copy of every model.
+  Those are plaintext, so when a key is set havn **skips rewind capture** (with
+  a warning) rather than leak the data. Parquet-level encryption (DuckDB's
+  `ENCRYPTION_CONFIG`, also needing `httpfs`) would let rewind run under
+  encryption; it is a planned follow-up.
+- **`_snapshots/` versions / deploy rollback** still write plaintext Parquet.
+  They are short-lived (cleaned by `havn version cleanup`) and essential for
+  `havn deploy`'s rollback, so they are left as-is for now. Keep `_snapshots/`
+  off shared storage (it is gitignored).
 - The **DuckLake backend** has its own catalog-level `encrypted:` option for
   the Parquet it writes; the file-level `encryption_key` is for the duckdb
   backend only.

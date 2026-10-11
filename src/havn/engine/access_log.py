@@ -28,10 +28,19 @@ from __future__ import annotations
 
 import json
 import logging
+import weakref
 
 import duckdb
 
 logger = logging.getLogger("havn.access_log")
+
+# Connections whose access_log table is known to exist, so the DDL runs once
+# per connection rather than on every governed read. WeakSet so closed
+# connections drop out on their own.
+try:
+    _ensured: "weakref.WeakSet[duckdb.DuckDBPyConnection]" = weakref.WeakSet()
+except TypeError:  # pragma: no cover - if connections are not weak-referenceable
+    _ensured = None  # type: ignore[assignment]
 
 # Statement text is truncated to keep the log small; the resolved relations are
 # the durable record, not the SQL.
@@ -43,8 +52,15 @@ def ensure_access_log_table(conn: duckdb.DuckDBPyConnection) -> None:
 
     A UUID id (not a sequence) so the same DDL works on DuckDB and DuckLake.
     The relation/column sets are JSON arrays of ``schema.table`` /
-    ``schema.table.column`` strings.
+    ``schema.table.column`` strings. The table is ensured once per connection
+    (it is also created at startup by ``ensure_meta_table``).
     """
+    if _ensured is not None:
+        try:
+            if conn in _ensured:
+                return
+        except TypeError:
+            pass
     conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
     conn.execute(
         """
@@ -67,6 +83,11 @@ def ensure_access_log_table(conn: duckdb.DuckDBPyConnection) -> None:
         )
         """
     )
+    if _ensured is not None:
+        try:
+            _ensured.add(conn)
+        except TypeError:
+            pass
 
 
 def log_access(

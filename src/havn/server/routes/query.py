@@ -172,15 +172,14 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
     user = _require_permission(request, "read")
     sql = req.sql
     client_ip = request.client.host if request.client else None
+    from havn.server.deps import _get_shared_conn
 
     # Audit log the query execution
     try:
         from havn.engine.audit import log_audit
-        from havn.server.deps import _get_shared_conn
 
-        _audit_conn = _get_shared_conn()
         log_audit(
-            _audit_conn,
+            _get_shared_conn(),
             user=user.get("username", "anonymous"),
             action="query",
             resource=sql[:500],
@@ -260,8 +259,6 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
     )
 
     try:
-        from havn.server.deps import _get_shared_conn
-
         data = run_governed_query(
             conn,
             sql,

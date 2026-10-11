@@ -842,6 +842,8 @@ def _pr_build_root(project_dir: Path) -> Path:
 def _clone_warehouse_via_attach(
     source_conn: duckdb.DuckDBPyConnection,
     dest_path: Path,
+    *,
+    encryption_key: str | None = None,
 ) -> None:
     """Clone the source warehouse into a new DuckDB file via ATTACH.
 
@@ -859,7 +861,17 @@ def _clone_warehouse_via_attach(
     if dest_path.exists():
         dest_path.unlink()
     attach_path = str(dest_path).replace("'", "''")
-    source_conn.execute(f"ATTACH '{attach_path}' AS pr_build (READ_WRITE)")
+    build_opts = "READ_WRITE"
+    if encryption_key:
+        # The clone of an encrypted warehouse must be encrypted too. Writing
+        # it needs the OpenSSL crypto provider; load it first (raises clearly
+        # if unavailable) rather than writing a plaintext clone.
+        from havn.engine.backends.encryption import load_write_crypto
+
+        load_write_crypto(source_conn)
+        key_lit = encryption_key.replace("'", "''")
+        build_opts = f"READ_WRITE, ENCRYPTION_KEY '{key_lit}'"
+    source_conn.execute(f"ATTACH '{attach_path}' AS pr_build ({build_opts})")
     try:
         source_db = source_conn.execute("SELECT current_database()").fetchone()[0]
         schemas = source_conn.execute(
@@ -982,14 +994,24 @@ def _build_pr_locked(
 
     # Resolve the main warehouse path honouring project.yml's database.path.
     # Never a branch warehouse: a change is diffed against what main has.
+    cfg = None
+    try:
+        from havn.config import load_project
+        cfg = load_project(project_dir, use_branches=False)
+    except Exception:
+        cfg = None
     if db_path is None:
-        try:
-            from havn.config import load_project
-            cfg = load_project(project_dir, use_branches=False)
-            db_path = project_dir / cfg.database.path
-        except Exception:
-            db_path = project_dir / "warehouse.duckdb"
+        db_path = project_dir / (cfg.database.path if cfg is not None else "warehouse.duckdb")
     main_warehouse = Path(db_path)
+
+    # At-rest key, so the clone of an encrypted warehouse is itself encrypted
+    # rather than plaintext in the worktree. None for a plaintext project.
+    from havn.engine.backends.encryption import resolve_encryption_key
+    try:
+        enc_key = resolve_encryption_key(cfg.database) if cfg is not None else None
+    except Exception:
+        enc_key = None
+    enc_key_lit = enc_key.replace("'", "''") if enc_key else None
 
     ensure_pr_builds_table(conn)
 
@@ -1070,21 +1092,24 @@ def _build_pr_locked(
             if _warehouse_key(conn) != str(main_warehouse.resolve()):
                 own_source = duckdb.connect()
                 literal = str(main_warehouse).replace("'", "''")
-                own_source.execute(f"ATTACH '{literal}' AS havn_pr_main (READ_ONLY)")
+                main_opts = "READ_ONLY"
+                if enc_key_lit:
+                    main_opts = f"ENCRYPTION_KEY '{enc_key_lit}', READ_ONLY"
+                own_source.execute(f"ATTACH '{literal}' AS havn_pr_main ({main_opts})")
                 own_source.execute("USE havn_pr_main")
                 source = own_source
             try:
                 source.execute("FORCE CHECKPOINT")
             except Exception:
                 pass
-            _clone_warehouse_via_attach(source, pr_warehouse)
+            _clone_warehouse_via_attach(source, pr_warehouse, encryption_key=enc_key)
 
         # Discover the PR branch's DAG from the worktree BEFORE teardown so
         # new-on-PR models are available for the lineage impact computation.
         pr_branch_dag = _build_dag(_discover_models(worktree_path / "transform"))
 
         # Open a connection on the PR warehouse and run the PR branch's transforms
-        pr_conn = _connect(pr_warehouse, project_dir=worktree_path)
+        pr_conn = _connect(pr_warehouse, project_dir=worktree_path, encryption_key=enc_key)
         _ensure_meta_table(pr_conn)
         try:
             transform_results = _run_transform(
@@ -1115,7 +1140,10 @@ def _build_pr_locked(
 
         # ATTACH the PR warehouse read-only and diff against main
         attach_path = str(pr_warehouse).replace("'", "''")
-        source.execute(f"ATTACH '{attach_path}' AS pr_db (READ_ONLY)")
+        pr_db_opts = "READ_ONLY"
+        if enc_key_lit:
+            pr_db_opts = f"ENCRYPTION_KEY '{enc_key_lit}', READ_ONLY"
+        source.execute(f"ATTACH '{attach_path}' AS pr_db ({pr_db_opts})")
         attached = True
 
         data_diff = _diff_across_attached(source, attached_alias="pr_db")

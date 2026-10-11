@@ -278,14 +278,17 @@ def _defer_status(config) -> dict | None:
     for writing. It is probed by opening and closing the file, so it
     describes this instant and not the one after it.
     """
+    from havn.engine.backends.encryption import resolve_encryption_key
     from havn.engine.defer import defer_target_path, target_lockable
+
+    key = resolve_encryption_key(config.database)
 
     if config.branch.active:
         # A branch warehouse defers to its base, not to an environment's
         # `defer:` (it has no active environment at all).
         from havn.engine.branches import base_warehouse_path
 
-        lockable, reason = target_lockable(base_warehouse_path(config))
+        lockable, reason = target_lockable(base_warehouse_path(config), encryption_key=key)
         return {
             "target": config.branch.base_label,
             "path": config.branch.base_path,
@@ -302,7 +305,7 @@ def _defer_status(config) -> dict | None:
     resolved = None
     if path is not None:
         resolved = path if path.is_absolute() else (config.project_dir / path)
-    lockable, reason = (False, "no database path") if resolved is None else target_lockable(resolved)
+    lockable, reason = (False, "no database path") if resolved is None else target_lockable(resolved, encryption_key=key)
     return {
         "target": target,
         "path": str(path) if path is not None else None,

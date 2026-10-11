@@ -624,7 +624,12 @@ def branch_status(conn, config: Any) -> dict:
     stale: dict[str, list[str]] = {}
     base_built_at = None
     if base_info["exists"]:
-        ok, why = target_lockable(base_warehouse_path(config))
+        from havn.engine.backends.encryption import resolve_encryption_key
+
+        ok, why = target_lockable(
+            base_warehouse_path(config),
+            encryption_key=resolve_encryption_key(config.database),
+        )
         base_info["readable"] = ok
         base_info["reason"] = why
         try:

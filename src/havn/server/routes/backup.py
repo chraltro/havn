@@ -24,6 +24,17 @@ def _validate_backup_path(path_str: str, project_dir: Path) -> Path:
     return resolved
 
 
+def _encryption_key(project_dir: Path) -> str | None:
+    """The warehouse's at-rest key, so backups of an encrypted warehouse work."""
+    try:
+        from havn.config import load_project
+        from havn.engine.backends.encryption import resolve_encryption_key
+
+        return resolve_encryption_key(load_project(project_dir).database)
+    except Exception:
+        return None
+
+
 class BackupRequest(BaseModel):
     note: str = ""
     verify: bool = True
@@ -49,6 +60,7 @@ def create_backup_endpoint(request: Request, req: BackupRequest) -> dict:
             project_dir, db_path,
             verify=req.verify,
             note=req.note,
+            encryption_key=_encryption_key(project_dir),
         )
         return entry
     except BackupError as e:
@@ -75,7 +87,7 @@ def verify_backup_endpoint(request: Request, path: str) -> dict:
 
     project_dir = _get_project_dir()
     safe_path = _validate_backup_path(path, project_dir)
-    result = verify_backup(safe_path)
+    result = verify_backup(safe_path, project_dir=project_dir, encryption_key=_encryption_key(project_dir))
     return result
 
 
@@ -98,6 +110,7 @@ def restore_backup_endpoint(request: Request, req: RestoreRequest) -> dict:
         result = restore_backup(
             project_dir, db_path, safe_path,
             verify=req.verify,
+            encryption_key=_encryption_key(project_dir),
         )
         return result
     except BackupError as e:

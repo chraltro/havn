@@ -242,8 +242,23 @@ class ReadPool:
         self._backend = backend
         self._default_catalog = _default_catalog_for(backend)
         self._pool: queue.Queue = queue.Queue()
-        for _ in range(pool_size):
-            self._pool.put(backend.connect(read_only=True))
+        opened: list[duckdb.DuckDBPyConnection] = []
+        try:
+            for _ in range(pool_size):
+                conn = backend.connect(read_only=True)
+                opened.append(conn)
+                self._pool.put(conn)
+        except Exception:
+            # Opening a later connection failed (e.g. an encrypted file whose
+            # read-only attach conflicts with the open write handle). Close the
+            # ones already opened so the fallback to SharedConnPool does not
+            # leak file handles, then let the caller handle the failure.
+            for conn in opened:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            raise
 
     @contextmanager
     def connection(self) -> Generator[duckdb.DuckDBPyConnection, None, None]:

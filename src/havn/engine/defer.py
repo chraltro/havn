@@ -105,6 +105,10 @@ class DeferSpec:
     # and a downstream model must read what this run just built rather than
     # the other environment's older copy.
     local_models: set[str] = field(default_factory=set)
+    # The at-rest key to attach the (encrypted) target with. Assumed to be the
+    # active environment's key — defer reads another environment of the same
+    # project, which normally shares one key. None for a plaintext target.
+    encryption_key: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +133,10 @@ def resolve_defer(
     if enabled is False:
         return None
 
+    from havn.engine.backends.encryption import resolve_encryption_key
+    db_cfg = getattr(config, "database", None)
+    key = resolve_encryption_key(db_cfg) if db_cfg is not None else None
+
     # A branch warehouse always defers to its base: that is what makes it
     # cheap. The base is whatever engine/branches.py resolved (an
     # environment's warehouse, the top-level one, or a --base file).
@@ -148,6 +156,7 @@ def resolve_defer(
             snapshot=snapshot,
             verbose=verbose,
             project_dir=project_dir,
+            encryption_key=key,
         )
 
     env_name = getattr(config, "active_environment", None)
@@ -195,6 +204,7 @@ def resolve_defer(
         snapshot=snapshot,
         verbose=verbose,
         project_dir=project_dir,
+        encryption_key=key,
     )
 
 
@@ -239,17 +249,23 @@ def attach_defer_target(
     path: Path | str,
     *,
     alias: str = DEFAULT_ALIAS,
+    encryption_key: str | None = None,
 ) -> None:
     """Attach ``path`` read-only under ``alias``.
 
     ``IF NOT EXISTS`` so that a second call, whether from a parallel worker's
     connection or from a second run in the same process, is a no-op rather
-    than an error.
+    than an error. ``encryption_key`` attaches an at-rest-encrypted target
+    (read-only, so the built-in crypto provider suffices).
     """
     _validate_alias(alias)
     literal = str(path).replace("'", "''")
+    opts = "READ_ONLY"
+    if encryption_key:
+        key_lit = encryption_key.replace("'", "''")
+        opts = f"ENCRYPTION_KEY '{key_lit}', READ_ONLY"
     try:
-        conn.execute(f"ATTACH IF NOT EXISTS '{literal}' AS {alias} (READ_ONLY)")
+        conn.execute(f"ATTACH IF NOT EXISTS '{literal}' AS {alias} ({opts})")
     except Exception as e:
         raise _classify_attach_failure(e, Path(path)) from e
 
@@ -273,13 +289,14 @@ def attached_defer_target(
     path: Path | str,
     *,
     alias: str = DEFAULT_ALIAS,
+    encryption_key: str | None = None,
 ) -> Iterator[str]:
     """Attach for the duration of the block, detach on the way out.
 
     The unconditional form, for a single caller that knows it is alone. A
     transform run uses :func:`defer_attachment` instead, which refcounts.
     """
-    attach_defer_target(conn, path, alias=alias)
+    attach_defer_target(conn, path, alias=alias, encryption_key=encryption_key)
     try:
         yield alias
     finally:
@@ -320,6 +337,7 @@ def defer_attachment(
     path: Path | str,
     *,
     alias: str,
+    encryption_key: str | None = None,
 ) -> Iterator[str]:
     """Attach ``path`` for one run, sharing the attach with concurrent runs.
 
@@ -332,7 +350,7 @@ def defer_attachment(
     with _attach_lock:
         # The attach happens under the lock so two runs starting at once
         # cannot both read a count of zero and race on the ATTACH.
-        attach_defer_target(conn, path, alias=alias)
+        attach_defer_target(conn, path, alias=alias, encryption_key=encryption_key)
         _attach_counts[key] = _attach_counts.get(key, 0) + 1
     try:
         yield alias
@@ -390,20 +408,28 @@ def _lock_holder(text: str) -> str | None:
     return None
 
 
-def target_lockable(path: Path | str) -> tuple[bool, str | None]:
+def target_lockable(
+    path: Path | str, *, encryption_key: str | None = None
+) -> tuple[bool, str | None]:
     """Can this process open ``path`` read-only right now?
 
     Returns ``(True, None)`` or ``(False, reason)``. Used by ``havn env show``
     and the environment API to answer "would a deferred run start?" without
     starting one. The check opens and immediately closes its own connection,
-    so it says nothing about the moment after it returns.
+    so it says nothing about the moment after it returns. ``encryption_key``
+    probes an at-rest-encrypted target.
     """
     p = Path(path)
     if not p.exists():
         return False, "no warehouse file at that path"
     conn = None
     try:
-        conn = duckdb.connect(str(p), read_only=True)
+        if encryption_key:
+            from havn.engine.backends.encryption import open_encrypted
+
+            conn = open_encrypted(p, encryption_key, read_only=True)
+        else:
+            conn = duckdb.connect(str(p), read_only=True)
         return True, None
     except Exception as e:
         err = _classify_attach_failure(e, p)
@@ -440,6 +466,7 @@ def snapshot_defer_target(
     path: Path,
     *,
     project_dir: Path | None = None,
+    encryption_key: str | None = None,
 ) -> DeferSnapshot:
     """Produce a consistent, attachable copy of the defer target.
 
@@ -472,11 +499,24 @@ def snapshot_defer_target(
     copier = None
     try:
         copier = duckdb.connect()
-        copier.execute(f"ATTACH '{literal}' AS defer_src (READ_ONLY)")
+        src_opts = "READ_ONLY"
+        snap_opts = "TYPE DUCKDB"
+        if encryption_key:
+            # The snapshot is a copy of (encrypted) prod data; keep it
+            # encrypted with the same key rather than writing plaintext to
+            # a temp dir. Writing the encrypted copy needs the OpenSSL
+            # provider, so load it first (raises a clear error if absent).
+            from havn.engine.backends.encryption import load_write_crypto
+
+            load_write_crypto(copier)
+            key_lit = encryption_key.replace("'", "''")
+            src_opts = f"ENCRYPTION_KEY '{key_lit}', READ_ONLY"
+            snap_opts = f"TYPE DUCKDB, ENCRYPTION_KEY '{key_lit}'"
+        copier.execute(f"ATTACH '{literal}' AS defer_src ({src_opts})")
         # The temp dir comes from the environment (a user called O'Brien has
         # a quote in TEMP), so it is escaped exactly like the source path.
         out_literal = out.as_posix().replace("'", "''")
-        copier.execute(f"ATTACH '{out_literal}' AS defer_snap (TYPE DUCKDB)")
+        copier.execute(f"ATTACH '{out_literal}' AS defer_snap ({snap_opts})")
         copier.execute("COPY FROM DATABASE defer_src TO defer_snap")
         copier.execute("DETACH defer_snap")
         copier.execute("DETACH defer_src")
@@ -491,7 +531,7 @@ def snapshot_defer_target(
         classified = _classify_attach_failure(e, path)
         if not isinstance(classified, DeferLockedError):
             raise classified from e
-        backup = _newest_verified_backup(project_dir)
+        backup = _newest_verified_backup(project_dir, encryption_key=encryption_key)
         if backup is None:
             raise DeferLockedError(
                 f"Cannot snapshot {path}: it is locked by another process and "
@@ -512,8 +552,14 @@ def snapshot_defer_target(
                 logger.debug("Closing snapshot connection failed: %s", close_err)
 
 
-def _newest_verified_backup(project_dir: Path | None) -> Path | None:
-    """The most recent backup that is on disk, verified and still readable."""
+def _newest_verified_backup(
+    project_dir: Path | None, *, encryption_key: str | None = None
+) -> Path | None:
+    """The most recent backup that is on disk, verified and still readable.
+
+    An encrypted project's backups are encrypted byte copies, so verifying one
+    needs the key.
+    """
     if project_dir is None:
         return None
     from havn.engine.backup import list_backups, verify_backup
@@ -531,7 +577,7 @@ def _newest_verified_backup(project_dir: Path | None) -> Path | None:
     for entry in candidates:
         candidate = Path(entry["path"])
         try:
-            result = verify_backup(candidate)
+            result = verify_backup(candidate, project_dir=project_dir, encryption_key=encryption_key)
         except Exception as e:
             logger.debug("Verifying %s failed: %s", candidate, e)
             continue
@@ -659,7 +705,9 @@ def defer_session(
     path = spec.path
     origin = str(spec.path)
     if spec.snapshot:
-        snapshot = snapshot_defer_target(spec.path, project_dir=spec.project_dir)
+        snapshot = snapshot_defer_target(
+            spec.path, project_dir=spec.project_dir, encryption_key=spec.encryption_key,
+        )
         path = snapshot.path
         origin = snapshot.description
 
@@ -676,7 +724,7 @@ def defer_session(
     # before the manager ever yields, and a cleanup that lived only in the
     # inner finally would never run for it.
     try:
-        with defer_attachment(conn, path, alias=alias):
+        with defer_attachment(conn, path, alias=alias, encryption_key=spec.encryption_key):
             say(f"defer: reading unbuilt models from '{spec.target}' ({origin})")
 
             local = catalog_objects(conn) | {m.lower() for m in spec.local_models}

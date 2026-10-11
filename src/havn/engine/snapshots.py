@@ -18,6 +18,40 @@ from havn.engine.utils import validate_identifier
 
 logger = logging.getLogger("havn.snapshots")
 
+# Cache of "is this project encrypted at rest" per project dir, so the config
+# is loaded at most once and the warning is emitted once rather than per model.
+_encrypted_project_cache: dict[str, bool] = {}
+
+
+def _rewind_blocked_by_encryption(project_dir: Path) -> bool:
+    """True when the project encrypts the warehouse at rest.
+
+    Pipeline Rewind writes a Parquet copy of every model to ``.havn/snapshots/``.
+    Those are plaintext, so writing them for an encrypted warehouse would leak
+    the very data encryption protects. Rewind is skipped in that case; encrypting
+    the Parquet stores is a separate, planned step (see docs/encryption.md).
+    """
+    key = str(project_dir)
+    cached = _encrypted_project_cache.get(key)
+    if cached is not None:
+        return cached
+    encrypted = False
+    try:
+        from havn.config import load_project
+        from havn.engine.backends.encryption import resolve_encryption_key
+
+        encrypted = bool(resolve_encryption_key(load_project(project_dir).database))
+    except Exception:
+        encrypted = False
+    _encrypted_project_cache[key] = encrypted
+    if encrypted:
+        logger.warning(
+            "Pipeline Rewind is off: this warehouse is encrypted at rest and "
+            "rewind snapshots would be written as plaintext Parquet. See "
+            "docs/encryption.md."
+        )
+    return encrypted
+
 _MODEL_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
 
 
@@ -343,6 +377,8 @@ def capture_snapshot(
     if config and not config.enabled:
         return False
     if config and model_name in config.exclude:
+        return False
+    if _rewind_blocked_by_encryption(project_dir):
         return False
 
     meta_conn = _ensure_meta_db(project_dir)

@@ -27,9 +27,12 @@ All notable changes to havn are documented in this file.
   encrypted file stay encrypted) need nothing extra; *writing* an encrypted
   file needs DuckDB's OpenSSL crypto provider (the `httpfs` extension), and
   havn refuses to write rather than produce an insecure or plaintext file when
-  it is unavailable. See `docs/encryption.md` for what is and is not covered
-  yet (defer targets, PR-build copies and migration destinations still need the
-  key threaded through).
+  it is unavailable. The key is threaded through the warehouse-file paths:
+  backups, branch warehouses, `havn migrate`, defer targets (read-only attach,
+  and `--defer-snapshot`'s copy is encrypted too), and PR-build clones. When a
+  key is set, Pipeline Rewind is skipped rather than write plaintext Parquet
+  copies of every model. See `docs/encryption.md` for what remains (Parquet
+  rewind/version encryption).
 
 ### Fixed
 

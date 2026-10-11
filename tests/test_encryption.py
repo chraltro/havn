@@ -120,6 +120,54 @@ def test_backup_of_encrypted_warehouse_verifies_with_key(tmp_path):
     assert verify_backup(backup_path, project_dir=tmp_path)["valid"] is False
 
 
+def test_defer_attaches_encrypted_target_with_key(tmp_path):
+    # A dev run deferring to an encrypted prod warehouse must attach it with
+    # the key (read-only), and fail without it rather than reading plaintext.
+    from havn.engine.defer import DeferError, attach_defer_target, target_lockable
+
+    prod = tmp_path / "prod.duckdb"
+    _write_encrypted_fixture(prod)  # has gold.customers
+
+    local = duckdb.connect(":memory:")
+    attach_defer_target(local, prod, alias="havn_defer", encryption_key=KEY)
+    assert local.execute("SELECT count(*) FROM havn_defer.gold.customers").fetchone() == (1,)
+
+    assert target_lockable(prod, encryption_key=KEY) == (True, None)
+    # Without the key the probe reports not-readable, and the attach refuses.
+    ok, _reason = target_lockable(prod)
+    assert ok is False
+    with pytest.raises(DeferError):
+        attach_defer_target(duckdb.connect(":memory:"), prod, alias="havn_defer2")
+
+
+def test_rewind_snapshots_skipped_when_encrypted(tmp_path, monkeypatch):
+    # An encrypted warehouse must not leave plaintext Parquet copies of every
+    # model under .havn/snapshots/. Rewind capture is skipped when a key is set.
+    import havn.engine.snapshots as snaps
+
+    snaps._encrypted_project_cache.clear()
+    monkeypatch.setenv("HAVN_ENC_TEST_KEY", "key-abc-123")
+    (tmp_path / "project.yml").write_text(
+        "name: t\ndatabase:\n  path: warehouse.duckdb\n"
+        "  encryption_key: ${HAVN_ENC_TEST_KEY}\n"
+    )
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE SCHEMA gold")
+    conn.execute("CREATE TABLE gold.t AS SELECT 1 AS x, 'secret' AS s")
+
+    wrote = snaps.capture_snapshot(tmp_path, conn, "gold.t", "run1", 1, None)
+    assert wrote is False
+    assert list((tmp_path / ".havn" / "snapshots").rglob("*.parquet")) == []
+
+    # Control: with no key, the same call does write a snapshot.
+    snaps._encrypted_project_cache.clear()
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "project.yml").write_text("name: t\ndatabase:\n  path: warehouse.duckdb\n")
+    assert snaps.capture_snapshot(plain, conn, "gold.t", "run1", 1, None) is True
+    assert list((plain / ".havn" / "snapshots").rglob("*.parquet"))
+
+
 def test_write_refuses_without_secure_crypto(tmp_path, monkeypatch):
     # Opening read-write must load the OpenSSL provider; if it cannot, havn
     # refuses rather than writing an insecure file.
