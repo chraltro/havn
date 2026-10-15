@@ -71,6 +71,12 @@ All notable changes to havn are documented in this file.
 - **Failures that were only logged now show**, with a retry where it helps:
   loading the sidebar's files and tables, switching environments, the
   scheduler's "Run now", run details, notebook saves and dashboard writes.
+- **Live models work on a plain DuckDB warehouse with current DuckDB.**
+  Checking whether the warehouse is DuckLake ran a query that fails on a
+  plain one, and inside an open transaction DuckDB (1.5.6, which
+  `duckdb>=1.5.2` installs today) aborts the whole transaction on that
+  failure: every live-model advance and refresh failed with "Current
+  transaction is aborted". The check now reads the catalog instead.
 - Overview counted models skipped as unchanged as failed runs. A first-time
   visitor who arrived on a deep link ends up back there after the tour.
   Enter on the tour's Back button went back and then forward again. Clicking
