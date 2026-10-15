@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
+import "./monacoSetup";
 import MonacoEditor, { loader } from "@monaco-editor/react";
 import { useTheme } from "./ThemeProvider";
 import { COLOR_THEMES } from "./themes";
 import { api, getMacros } from "./api";
 import { packageOfPath } from "./FileTree";
 import { notifyFilesChanged } from "./filesChanged";
+import FocusTrap from "./FocusTrap";
 
 // ---------------------------------------------------------------------------
 // Custom Monaco themes derived from havn COLOR_THEMES
@@ -1680,12 +1682,15 @@ function ColumnReferencesPanel({ result, onClose, onJump }) {
  * Renaming past a blocker is allowed but never the default: the index has
  * already said it cannot account for these places, so the person has to say
  * they know.
+ *
+ * The rename waits on the answer with focus still in Monaco, so the trap
+ * takes focus (Cancel first, Tab reaches the confirm) and Escape cancels.
  */
 function BlockerDialog({ blocked, onAnswer }) {
   return (
-    <div style={styles.dialogBackdrop} role="dialog" aria-label="Rename blockers">
+    <FocusTrap style={styles.dialogBackdrop} labelledBy="havn-rename-blockers-title" onEscape={() => onAnswer(false)}>
       <div style={styles.dialog}>
-        <div style={styles.dialogTitle}>
+        <div id="havn-rename-blockers-title" style={styles.dialogTitle}>
           {blocked.length} place{blocked.length === 1 ? "" : "s"} this rename cannot see through
         </div>
         <div style={styles.dialogBody}>
@@ -1701,7 +1706,7 @@ function BlockerDialog({ blocked, onAnswer }) {
           <button style={styles.dialogConfirm} onClick={() => onAnswer(true)}>Rename anyway</button>
         </div>
       </div>
-    </div>
+    </FocusTrap>
   );
 }
 
@@ -1720,9 +1725,9 @@ export function targetPrompt(target) {
  */
 function TargetDialog({ target, onAnswer }) {
   return (
-    <div style={styles.dialogBackdrop} role="dialog" aria-label="Confirm rename target">
+    <FocusTrap style={styles.dialogBackdrop} labelledBy="havn-rename-target-title" onEscape={() => onAnswer(false)}>
       <div style={styles.dialog}>
-        <div style={styles.dialogTitle}>{targetPrompt(target)}</div>
+        <div id="havn-rename-target-title" style={styles.dialogTitle}>{targetPrompt(target)}</div>
         <div style={styles.dialogHint}>
           This column belongs to another model. Every model that reads it is rewritten too.
         </div>
@@ -1731,7 +1736,7 @@ function TargetDialog({ target, onAnswer }) {
           <button style={styles.dialogConfirm} onClick={() => onAnswer(true)}>Rename</button>
         </div>
       </div>
-    </div>
+    </FocusTrap>
   );
 }
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 
 const getEnvironment = vi.fn();
 const switchEnvironment = vi.fn();
@@ -154,5 +154,40 @@ describe("EnvironmentSwitcher branch warehouses", () => {
     const badge = await screen.findByTestId("branch-badge");
     expect(badge.dataset.kind).toBe("pending");
     expect(badge.getAttribute("title")).toContain("transform is running");
+  });
+});
+
+describe("EnvironmentSwitcher switching", () => {
+  beforeEach(() => {
+    getEnvironment.mockReset();
+    switchEnvironment.mockReset();
+  });
+
+  it("says why a switch failed instead of only logging it", async () => {
+    getEnvironment.mockResolvedValue(environment(null));
+    switchEnvironment.mockRejectedValue(new Error("prod.duckdb is locked by another process"));
+    const showConfirm = vi.fn().mockResolvedValue(true);
+    render(<EnvironmentSwitcher showConfirm={showConfirm} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Switch environment/ }));
+    fireEvent.click(screen.getByRole("button", { name: "prod" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("prod");
+    expect(alert.textContent).toContain("locked by another process");
+    expect(switchEnvironment).toHaveBeenCalledWith("prod");
+  });
+
+  it("closes the menu on Escape and puts focus back on its button", async () => {
+    getEnvironment.mockResolvedValue(environment(null));
+    render(<EnvironmentSwitcher showConfirm={vi.fn()} />);
+    const trigger = await screen.findByRole("button", { name: /Switch environment/ });
+
+    fireEvent.click(trigger);
+    expect(screen.getByRole("button", { name: "prod" })).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("button", { name: "prod" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 });

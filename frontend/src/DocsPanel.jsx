@@ -3,17 +3,19 @@ import { api } from "./api";
 
 function NavItem({ table, isActive, onClick }) {
   return (
-    <div
+    <button
+      type="button"
       style={{
         ...s.navItem,
         background: isActive ? "var(--havn-bg-secondary)" : "transparent",
         borderLeft: isActive ? "2px solid var(--havn-accent)" : "2px solid transparent",
       }}
       onClick={onClick}
+      aria-current={isActive ? "true" : undefined}
     >
-      <span style={s.navLabel}>{table.name}</span>
+      <span style={s.navLabel} title={table.name}>{table.name}</span>
       <span style={s.navBadge}>{table.type}</span>
-    </div>
+    </button>
   );
 }
 
@@ -157,13 +159,18 @@ export default function DocsPanel() {
             <div style={s.nav}>
               {data.schemas.map((schema) => (
                 <div key={schema.name}>
-                  <div style={s.schemaRow} onClick={() => toggleSchema(schema.name)}>
-                    <span style={{ ...s.schemaArrow, transform: expandedSchemas[schema.name] ? "rotate(0deg)" : "rotate(-90deg)" }}>
+                  <button
+                    type="button"
+                    style={s.schemaRow}
+                    onClick={() => toggleSchema(schema.name)}
+                    aria-expanded={!!expandedSchemas[schema.name]}
+                  >
+                    <span aria-hidden="true" style={{ ...s.schemaArrow, transform: expandedSchemas[schema.name] ? "rotate(0deg)" : "rotate(-90deg)" }}>
                       {"\u25BE"}
                     </span>
                     <span style={s.schemaName}>{schema.name}</span>
                     <span style={s.schemaCount}>{schema.tables.length}</span>
-                  </div>
+                  </button>
                   {expandedSchemas[schema.name] && schema.tables.map((t) => (
                     <NavItem
                       key={t.full_name}
@@ -194,12 +201,14 @@ const s = {
   loading: { color: "var(--havn-text-secondary)", textAlign: "center", padding: "24px", width: "100%" },
   // Left nav
   nav: { width: "220px", minWidth: "220px", borderRight: "1px solid var(--havn-border)", overflow: "auto", padding: "4px 0" },
-  schemaRow: { display: "flex", alignItems: "center", gap: "6px", padding: "6px 12px", cursor: "pointer", fontSize: "11px", fontWeight: 600, color: "var(--havn-text-dim)", letterSpacing: "0.5px", textTransform: "uppercase" },
+  // The schema rows and table entries are buttons (keyboard-operable) reset to
+  // look like the rows they were: full width, left aligned, the panel's font.
+  schemaRow: { display: "flex", alignItems: "center", gap: "6px", width: "100%", padding: "6px 12px", background: "none", border: "none", font: "inherit", textAlign: "left", cursor: "pointer", fontSize: "11px", fontWeight: 600, color: "var(--havn-text-dim)", letterSpacing: "0.5px", textTransform: "uppercase" },
   schemaArrow: { fontSize: "10px", width: "10px", display: "inline-block", transition: "transform 0.12s ease" },
   schemaName: { flex: 1 },
   schemaCount: { fontSize: "10px", color: "var(--havn-text-dim)", fontWeight: 400 },
-  navItem: { display: "flex", alignItems: "center", gap: "6px", padding: "5px 12px 5px 28px", cursor: "pointer", fontSize: "12px", whiteSpace: "nowrap" },
-  navLabel: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", color: "var(--havn-text)" },
+  navItem: { display: "flex", alignItems: "center", gap: "6px", width: "100%", padding: "5px 12px 5px 28px", border: "none", font: "inherit", color: "inherit", textAlign: "left", cursor: "pointer", fontSize: "12px", whiteSpace: "nowrap" },
+  navLabel: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", color: "var(--havn-text)" },
   navBadge: { fontSize: "10px", color: "var(--havn-text-dim)", flexShrink: 0 },
   // Right content
   content: { flex: 1, overflow: "auto", padding: "20px 28px" },
@@ -214,7 +223,9 @@ const s = {
   depCode: { fontFamily: "var(--havn-font-mono)", fontSize: "11px", color: "var(--havn-accent)" },
   sectionTitle: { fontSize: "13px", fontWeight: 600, margin: "16px 0 8px", color: "var(--havn-text)" },
   colTable: { width: "100%", borderCollapse: "collapse", fontSize: "12px", fontFamily: "var(--havn-font-mono)" },
-  colTh: { textAlign: "left", padding: "6px 12px", borderBottom: "1px solid var(--havn-border-light)", color: "var(--havn-text-secondary)", fontWeight: 600, fontFamily: "var(--havn-font)", fontSize: "11px" },
+  // Sticky inside `content`, which scrolls and has 20px top padding: top -20
+  // pins the header to the visible top edge instead of 20px below it.
+  colTh: { textAlign: "left", padding: "6px 12px", borderBottom: "1px solid var(--havn-border-light)", color: "var(--havn-text-secondary)", fontWeight: 600, fontFamily: "var(--havn-font)", fontSize: "11px", position: "sticky", top: -20, zIndex: 1, background: "var(--havn-bg)" },
   colTd: { padding: "4px 12px", borderBottom: "1px solid var(--havn-border)", color: "var(--havn-text)", fontSize: "12px" },
   colTdName: { padding: "4px 12px", borderBottom: "1px solid var(--havn-border)", color: "var(--havn-accent)", fontSize: "12px" },
   sqlSection: { marginTop: "16px" },

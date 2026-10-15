@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { schemaCompare } from "./schemaOrder";
 import { isPythonModelPath } from "./modelFiles";
+import { clickable } from "./a11y";
 
 // Files under havn_packages/ come from `havn packages install` and are
 // replaced wholesale by the next one, so the tree marks them and the editor
@@ -28,6 +29,15 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [hovered, setHovered] = useState(false);
+  // Keyboard focus on the row or its button: the row's action button (+ or ×)
+  // shows for focus as it does for hover, so Tab never lands on an invisible
+  // control.
+  const [focusWithin, setFocusWithin] = useState(false);
+  const showActions = hovered || focusWithin;
+  const focusHandlers = {
+    onFocus: () => setFocusWithin(true),
+    onBlur: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setFocusWithin(false); },
+  };
   const [dragOver, setDragOver] = useState(false);
   const activeRef = useRef(null);
   const isActive = activeFile && node.path && activeFile.replace(/\\/g, "/") === node.path.replace(/\\/g, "/");
@@ -60,6 +70,7 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
           onClick={() => setExpanded(!expanded)}
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
+          {...focusHandlers}
           onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true); }}
           onDragLeave={(e) => { e.stopPropagation(); setDragOver(false); }}
           onDrop={(e) => {
@@ -77,7 +88,15 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
           <svg width="10" height="10" viewBox="0 0 10 10" style={{ ...styles.icon, transform: expanded ? "rotate(0deg)" : "rotate(-90deg)" }}>
             <path d="M2.5 3L5 6L7.5 3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          <span style={{ ...styles.dirName, opacity: isPackage ? 0.65 : 1 }}>{node.name}</span>
+          {/* The keyboard stop for expanding the folder. It is the name rather
+              than the whole row, because the row also holds the + button and
+              a button inside a button would hide it from assistive tech. A
+              click anywhere on the row still toggles, as before. */}
+          <span
+            style={{ ...styles.dirName, opacity: isPackage ? 0.65 : 1 }}
+            {...clickable(() => setExpanded(!expanded))}
+            aria-expanded={expanded}
+          >{node.name}</span>
           {isPackage ? (
             <span style={styles.packageTag} title={packageTitle}>installed</span>
           ) : (
@@ -88,7 +107,7 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
                 setCreating(true);
                 setNewName("");
               }}
-              style={{ ...styles.addBtn, opacity: hovered ? 1 : 0, pointerEvents: hovered ? "auto" : "none" }}
+              style={{ ...styles.addBtn, opacity: showActions ? 1 : 0, pointerEvents: showActions ? "auto" : "none" }}
               title={`New file in ${node.name}/`}
               aria-label={`New file in ${node.name}`}
             >+</button>
@@ -135,6 +154,9 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
     );
   }
 
+  // Enter or Space opens the file, like a click. The row keeps its treeitem
+  // role, so only the key handling is taken from clickable().
+  const { onKeyDown: openOnKey } = clickable(() => onSelect(node.path));
   const ext = node.name.split(".").pop();
   const iconColor =
     ext === "sql" ? "var(--havn-accent)" :
@@ -149,6 +171,8 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
       data-havn-file=""
       role="treeitem"
       aria-selected={isActive}
+      tabIndex={0}
+      onKeyDown={openOnKey}
       title={packageTitle}
       draggable={!isPackage}
       onDragStart={(e) => {
@@ -166,6 +190,7 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
       onClick={() => onSelect(node.path)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      {...focusHandlers}
     >
       <span style={{ ...styles.dot, background: iconColor }} />
       <span style={isActive ? styles.activeFileName : styles.fileName}>{node.name}</span>
@@ -177,7 +202,7 @@ function FileNode({ node, depth, onSelect, activeFile, onNewFile, onDeleteFile, 
       {onDeleteFile && !isPackage && (
         <button
           onClick={(e) => { e.stopPropagation(); onDeleteFile(node.path); }}
-          style={{ ...styles.deleteBtn, opacity: hovered ? 1 : 0, pointerEvents: hovered ? "auto" : "none" }}
+          style={{ ...styles.deleteBtn, opacity: showActions ? 1 : 0, pointerEvents: showActions ? "auto" : "none" }}
           title={`Delete ${node.name}`}
           aria-label={`Delete ${node.name}`}
         >&times;</button>

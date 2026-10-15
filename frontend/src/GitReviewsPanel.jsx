@@ -40,7 +40,7 @@ export default function GitReviewsPanel({ showConfirm }) {
         ))}
       </div>
       <div style={styles.content}>
-        {sub === "status" && <GitPanel />}
+        {sub === "status" && <GitPanel showConfirm={showConfirm} />}
         {sub === "reviews" && <ReviewsPanel showConfirm={showConfirm} />}
       </div>
     </div>

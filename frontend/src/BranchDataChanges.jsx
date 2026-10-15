@@ -244,7 +244,7 @@ function SampleTable({ rows }) {
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i}>{cols.map((c) => <td key={c} style={st.td}>{r[c] == null ? <i style={st.dimInline}>NULL</i> : String(r[c])}</td>)}</tr>
+            <tr key={i}>{cols.map((c) => <td key={c} style={st.td} title={r[c] == null ? undefined : String(r[c])}>{r[c] == null ? <i style={st.dimInline}>NULL</i> : String(r[c])}</td>)}</tr>
           ))}
         </tbody>
       </table>

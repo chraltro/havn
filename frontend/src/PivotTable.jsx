@@ -134,17 +134,19 @@ export default function PivotTable({ columns, rows, config }) {
                   key={ci}
                   style={{
                     ...st.th,
-                    cursor: "pointer",
                     textAlign: numericCols.has(ci) ? "right" : "left",
                   }}
-                  onClick={() => toggleSort(col)}
+                  aria-sort={sortCol === col ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
                 >
-                  {col}
-                  {sortCol === col && (
-                    <span style={{ marginLeft: 4, fontSize: 10 }}>
-                      {sortDir === "asc" ? "▲" : "▼"}
-                    </span>
-                  )}
+                  {/* A real button, so the sort works from the keyboard too. */}
+                  <button type="button" style={st.headerBtn} onClick={() => toggleSort(col)}>
+                    {col}
+                    {sortCol === col && (
+                      <span aria-hidden="true" style={{ marginLeft: 4, fontSize: 10 }}>
+                        {sortDir === "asc" ? "▲" : "▼"}
+                      </span>
+                    )}
+                  </button>
                 </th>
               ))}
             </tr>
@@ -156,16 +158,20 @@ export default function PivotTable({ columns, rows, config }) {
                 const subtotals = computeSubtotals(groupRows);
                 return (
                   <React.Fragment key={key}>
-                    <tr style={st.groupRow} onClick={() => toggleGroup(key)}>
-                      <td colSpan={columns.length} style={st.groupCell}>
-                        <span style={{ marginRight: 6, fontSize: 10 }}>{collapsed ? "▶" : "▼"}</span>
-                        {key} ({groupRows.length})
-                        {/* Inline subtotals */}
-                        {numericCols.size > 0 && (
-                          <span style={st.subtotalInline}>
-                            {columns.map((_, ci) => numericCols.has(ci) ? `${columns[ci]}: ${fmtNum(subtotals[ci])}` : null).filter(Boolean).join(" | ")}
-                          </span>
-                        )}
+                    <tr style={st.groupRow}>
+                      {/* The toggle is a button filling the cell: keyboard
+                          operable, and it says whether the group is open. */}
+                      <td colSpan={columns.length} style={{ ...st.groupCell, padding: 0 }}>
+                        <button type="button" style={st.groupToggle} onClick={() => toggleGroup(key)} aria-expanded={!collapsed}>
+                          <span aria-hidden="true" style={{ marginRight: 6, fontSize: 10 }}>{collapsed ? "▶" : "▼"}</span>
+                          {key} ({groupRows.length})
+                          {/* Inline subtotals */}
+                          {numericCols.size > 0 && (
+                            <span style={st.subtotalInline}>
+                              {columns.map((_, ci) => numericCols.has(ci) ? `${columns[ci]}: ${fmtNum(subtotals[ci])}` : null).filter(Boolean).join(" | ")}
+                            </span>
+                          )}
+                        </button>
                       </td>
                     </tr>
                     {!collapsed && groupRows.map((row, ri) => (
@@ -248,6 +254,17 @@ const st = {
     whiteSpace: "nowrap",
     userSelect: "none",
   },
+  headerBtn: {
+    background: "none",
+    border: "none",
+    padding: 0,
+    font: "inherit",
+    color: "inherit",
+    textAlign: "inherit",
+    whiteSpace: "nowrap",
+    cursor: "pointer",
+    width: "100%",
+  },
   td: {
     padding: "4px 10px",
     borderBottom: "1px solid var(--havn-border)",
@@ -258,7 +275,16 @@ const st = {
     whiteSpace: "nowrap",
   },
   dataRow: {},
-  groupRow: {
+  groupRow: {},
+  groupToggle: {
+    display: "block",
+    width: "100%",
+    padding: "6px 10px",
+    background: "none",
+    border: "none",
+    font: "inherit",
+    color: "inherit",
+    textAlign: "left",
     cursor: "pointer",
   },
   groupCell: {

@@ -265,7 +265,7 @@ function ToolEntry({ tool }) {
   );
 }
 
-export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFile, onSelectTable, pendingPrompt, onPromptConsumed }) {
+export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFile, onSelectTable, pendingPrompt, onPromptConsumed, showConfirm }) {
   const [selectedAgent, setSelectedAgent] = useState("claude");
   const [availableAgents, setAvailableAgents] = useState(null);
   // Per-agent state: { messages, isConnected, isStreaming, permissionMode, selectedModel }
@@ -703,6 +703,7 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
             return (
               <div key={`cs-${msg.changeset.id}`} style={{ margin: "6px 0" }}>
                 <ChangeSetCard
+                  showConfirm={showConfirm}
                   changeset={msg.changeset}
                   onOpenFile={onOpenFile}
                   onChanged={(next) => {

@@ -21,6 +21,8 @@ export default function DashboardFilterManager({ onClose }) {
   const { dashboard, saveDashboard } = useDashboard();
   const [filters, setFilters] = useState(dashboard?.filters || []);
   const [allColumns, setAllColumns] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
   // Load all warehouse columns for the column picker
   useEffect(() => {
@@ -61,10 +63,16 @@ export default function DashboardFilterManager({ onClose }) {
   }
 
   async function handleSave() {
+    if (saving) return;
     // Validate: each filter needs at least a column and label
     const valid = filters.filter(f => f.column && f.label);
-    await saveDashboard({ filters: valid });
-    onClose();
+    setSaving(true);
+    setSaveError(null);
+    const ok = await saveDashboard({ filters: valid });
+    setSaving(false);
+    // On failure stay open: closing would throw the edits away.
+    if (ok) onClose();
+    else setSaveError("Filters not saved. Your edits are still here; try again.");
   }
 
   // Auto-generate label from column name
@@ -178,8 +186,9 @@ export default function DashboardFilterManager({ onClose }) {
         </div>
 
         <div style={st.footer}>
+          {saveError && <span role="alert" style={st.error}>{saveError}</span>}
           <button style={st.cancelBtn} onClick={onClose}>Cancel</button>
-          <button style={st.saveBtn} onClick={handleSave}>Save Filters</button>
+          <button style={st.saveBtn} onClick={handleSave} disabled={saving}>{saving ? "Saving..." : "Save Filters"}</button>
         </div>
       </div>
     </FocusTrap>
@@ -187,7 +196,7 @@ export default function DashboardFilterManager({ onClose }) {
 }
 
 const st = {
-  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000 },
+  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000 },
   panel: { background: "var(--havn-bg)", border: "1px solid var(--havn-border)", borderRadius: 12, width: 600, maxWidth: "90vw", maxHeight: "80vh", display: "flex", flexDirection: "column" },
   header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderBottom: "1px solid var(--havn-border)" },
   heading: { margin: 0, fontSize: 16, fontWeight: 600, color: "var(--havn-text)" },
@@ -203,7 +212,8 @@ const st = {
   moveBtn: { background: "none", border: "1px solid var(--havn-border)", borderRadius: 4, color: "var(--havn-text-secondary)", cursor: "pointer", padding: "2px 8px", fontSize: 13 },
   removeBtn: { background: "none", border: "1px solid var(--havn-red, #ef4444)", borderRadius: 4, color: "var(--havn-red, #ef4444)", cursor: "pointer", padding: "2px 10px", fontSize: 12 },
   addBtn: { display: "block", width: "100%", padding: 10, border: "1px dashed var(--havn-border)", borderRadius: 8, background: "none", color: "var(--havn-accent)", cursor: "pointer", fontSize: 13, fontWeight: 500 },
-  footer: { display: "flex", gap: 8, justifyContent: "flex-end", padding: "12px 20px", borderTop: "1px solid var(--havn-border)" },
+  footer: { display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center", padding: "12px 20px", borderTop: "1px solid var(--havn-border)" },
+  error: { flex: 1, fontSize: 12, color: "var(--havn-red)" },
   cancelBtn: { background: "none", border: "1px solid var(--havn-border)", color: "var(--havn-text-secondary)", borderRadius: 6, padding: "8px 18px", cursor: "pointer", fontSize: 13 },
   saveBtn: { background: "var(--havn-accent)", color: "#fff", border: "none", borderRadius: 6, padding: "8px 18px", cursor: "pointer", fontSize: 13, fontWeight: 600 },
 };

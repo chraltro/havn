@@ -62,6 +62,10 @@ class FileInfo(BaseModel):
 class SaveFileRequest(BaseModel):
     content: str = Field(..., max_length=5_000_000)
     expected_hash: str | None = None
+    # Refuse (409) when the file exists. "New file" sends it: a PUT alone
+    # creates *or overwrites*, so naming a new file after an existing one
+    # replaced that file's content with the template.
+    create_only: bool = False
 
 
 class MoveFileRequest(BaseModel):
@@ -378,6 +382,8 @@ def save_file(request: Request, file_path: str, req: SaveFileRequest) -> dict:
     full_path = _safe_project_path(project_dir, file_path)
     if full_path.suffix not in (".sql", ".py", ".yml", ".yaml", ".dpnb", ".sqlfluff", ".csv", ".md"):
         raise HTTPException(400, f"Unsupported file type: {full_path.suffix}")
+    if req.create_only and full_path.exists():
+        raise HTTPException(409, f"{file_path} already exists")
     # Conflict detection: if expected_hash is provided and file exists, compare
     if req.expected_hash and full_path.exists():
         try:

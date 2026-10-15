@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "./api";
+import { useDismiss } from "./a11y";
 
 /** How often the top bar asks which git branch is checked out. */
 export const BRANCH_POLL_MS = 5000;
@@ -21,8 +22,10 @@ export default function EnvironmentSwitcher({ showConfirm, onBranchChange }) {
   const [env, setEnv] = useState(null);
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState(null);
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
+  const triggerRef = useRef(null);
   const headRef = useRef(null);
 
   useEffect(() => {
@@ -71,15 +74,9 @@ export default function EnvironmentSwitcher({ showConfirm, onBranchChange }) {
     };
   }, [branchesOn, checkBranch]);
 
-  // Close on outside click
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  // Close on an outside click or Escape (which puts focus back on the trigger).
+  // `ref` wraps the trigger and the menu, so clicking the trigger toggles.
+  useDismiss(open, () => setOpen(false), [ref], triggerRef);
 
   if (loading || !env) return null;
   const branch = env.branch?.enabled ? env.branch : null;
@@ -94,16 +91,22 @@ export default function EnvironmentSwitcher({ showConfirm, onBranchChange }) {
     const confirmed = await showConfirm("Switch Environment", `Switch to environment "${envName}"? This will reload the page and any unsaved changes will be lost.${note}`, "Switch", true);
     if (!confirmed) return;
     setSwitching(true);
+    setSwitchError(null);
     try {
       const result = await api.switchEnvironment(envName);
       setEnv({ ...env, active: result.active, database_path: result.database_path });
       window.location.reload();
     } catch (e) {
-      console.error("Failed to switch environment:", e);
+      // Shown next to the switcher; the bar still names the old environment.
+      setSwitchError(`Could not switch to "${envName}": ${e.message || e}`);
     } finally {
       setSwitching(false);
     }
   };
+
+  const errorNote = switchError && (
+    <span role="alert" style={st.error} title={switchError}>{switchError}</span>
+  );
 
   // On a branch warehouse there is no active environment: the branch is
   // what the bar names, and the defer badge names its base.
@@ -115,6 +118,7 @@ export default function EnvironmentSwitcher({ showConfirm, onBranchChange }) {
         {env.available.length > 0 && (
           <div ref={ref} style={{ position: "relative" }}>
             <button
+              ref={triggerRef}
               onClick={() => setOpen(!open)}
               disabled={switching}
               style={st.trigger}
@@ -138,6 +142,7 @@ export default function EnvironmentSwitcher({ showConfirm, onBranchChange }) {
             )}
           </div>
         )}
+        {errorNote}
       </div>
     );
   }
@@ -168,6 +173,7 @@ export default function EnvironmentSwitcher({ showConfirm, onBranchChange }) {
       {branch && <BranchBadge branch={branch} databasePath={env.database_path} />}
       <div ref={ref} style={{ position: "relative" }}>
         <button
+          ref={triggerRef}
           onClick={() => setOpen(!open)}
           disabled={switching}
           style={{ ...st.trigger, ...pill }}
@@ -198,6 +204,7 @@ export default function EnvironmentSwitcher({ showConfirm, onBranchChange }) {
         )}
       </div>
       <DeferBadge defer={env.defer} />
+      {errorNote}
     </div>
   );
 }
@@ -348,4 +355,8 @@ const st = {
     cursor: "pointer", textAlign: "left",
   },
   check: { fontSize: "10px", color: "var(--havn-accent)" },
+  error: {
+    fontSize: "11px", color: "var(--havn-red)",
+    maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+  },
 };

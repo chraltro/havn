@@ -232,6 +232,10 @@ function buildGroupTree(rows, groupColIndices, allColTypes) {
 const ROW_HEIGHT = 28;
 const VIRTUAL_THRESHOLD = 200;
 const OVERSCAN = 5;
+// Cap for a table that is not told to fill a bounded parent (inline results
+// in Ask, the diff samples): tall enough to read, short enough that the page
+// around it stays usable, and a real scroll container so the header pins.
+const DEFAULT_MAX_HEIGHT = "min(560px, 70vh)";
 
 /* ───────────────── main component ───────────────── */
 
@@ -245,6 +249,16 @@ export default function SortableTable({
   onCellClick,
   conditionalRules,
   showSummary,
+  // `fill`: the parent is a height-bounded flex column (a results pane, a
+  // widget card) and the table should take the remaining height and scroll
+  // inside it. Otherwise the table caps itself at `maxHeight`. Either way the
+  // table owns ONE scroll container for both axes, which is what lets the
+  // header stay pinned: a sticky header only sticks to its nearest scroll
+  // container, and any second scroller in between (including an
+  // overflow-x:auto wrapper, which silently forces overflow-y to auto too)
+  // takes the header away with the rows.
+  fill = false,
+  maxHeight = DEFAULT_MAX_HEIGHT,
 }) {
   /* ─── state ─── */
   const [sortCols, setSortCols] = useState([]);
@@ -267,6 +281,7 @@ export default function SortableTable({
   const [scrollTop, setScrollTop] = useState(0);
   const copiedTimeout = useRef(null);
   const columnMenuRef = useRef(null);
+  const columnMenuBtnRef = useRef(null);
   const contextMenuRef = useRef(null);
   const dragColRef = useRef(null);
   const resizeRef = useRef(null);
@@ -439,7 +454,16 @@ export default function SortableTable({
   /* ─── handlers: context menu (pinning) ─── */
   const handleHeaderContext = useCallback((e, colIndex) => {
     e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, colIndex });
+    let x = e.clientX;
+    let y = e.clientY;
+    // Opened from the keyboard (the menu key, Shift+F10) there is no pointer
+    // position: put the menu under the header instead of the window corner.
+    if (!x && !y && e.currentTarget?.getBoundingClientRect) {
+      const r = e.currentTarget.getBoundingClientRect();
+      x = r.left;
+      y = r.bottom;
+    }
+    setContextMenu({ x, y, colIndex, returnFocus: e.currentTarget || null });
   }, []);
 
   const handlePin = useCallback((colIndex, side) => {
@@ -464,10 +488,15 @@ export default function SortableTable({
   const handleCellClick = useCallback((rowIdx, colIdx, value) => {
     if (onCellClick) onCellClick(rowIdx, colIdx, value);
     const text = value === null || value === undefined ? "" : String(value);
-    navigator.clipboard.writeText(text).catch(() => {});
-    setCopiedCell({ row: rowIdx, col: colIdx });
-    if (copiedTimeout.current) clearTimeout(copiedTimeout.current);
-    copiedTimeout.current = setTimeout(() => setCopiedCell(null), 500);
+    // navigator.clipboard exists only in a secure context: opened over plain
+    // http on a LAN address it is undefined, and every cell click threw.
+    // The "copied" flash shows only once the copy actually happened.
+    if (!navigator.clipboard?.writeText) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedCell({ row: rowIdx, col: colIdx });
+      if (copiedTimeout.current) clearTimeout(copiedTimeout.current);
+      copiedTimeout.current = setTimeout(() => setCopiedCell(null), 500);
+    }).catch(() => {});
   }, [onCellClick]);
 
   /* ─── handlers: row selection ─── */
@@ -507,9 +536,32 @@ export default function SortableTable({
         setContextMenu(null);
       }
     };
+    // Escape closes an open menu and puts focus back on what opened it.
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      if (contextMenu) {
+        e.stopPropagation();
+        const back = contextMenu.returnFocus;
+        setContextMenu(null);
+        back?.focus?.();
+      } else if (showColumnMenu) {
+        e.stopPropagation();
+        setShowColumnMenu(false);
+        columnMenuBtnRef.current?.focus();
+      }
+    };
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("keydown", onKey, true);
+    };
   }, [showColumnMenu, contextMenu]);
+
+  // The pin menu takes focus when it opens, so it works from the keyboard.
+  useEffect(() => {
+    if (contextMenu) contextMenuRef.current?.querySelector("button")?.focus();
+  }, [contextMenu]);
 
   /* ─── virtual scroll handler ─── */
   const handleScroll = useCallback((e) => {
@@ -588,14 +640,16 @@ export default function SortableTable({
     const isPinnedR = pinnedRight.has(ci);
     const pinInfo = pinnedOffsets[ci];
 
+    // The <thead> (or, virtualized, the header <table>) is what sticks to the
+    // top. A cell is only sticky itself when its column is pinned sideways;
+    // otherwise it stays `relative` so the resize handle can position on it.
     const thStyle = {
       ...S.th,
       cursor: "pointer",
       userSelect: "none",
       width: hasFixedWidths ? fixedWidths[ci] : undefined,
       minWidth: hasFixedWidths ? fixedWidths[ci] : undefined,
-      position: pinInfo ? "sticky" : "sticky",
-      top: 0,
+      position: pinInfo ? "sticky" : "relative",
       left: pinInfo?.side === "left" ? pinInfo.offset : undefined,
       right: pinInfo?.side === "right" ? pinInfo.offset : undefined,
       zIndex: pinInfo ? 3 : 2,
@@ -610,6 +664,17 @@ export default function SortableTable({
         style={thStyle}
         onClick={(e) => handleSort(ci, e.shiftKey)}
         onContextMenu={(e) => handleHeaderContext(e, ci)}
+        // Sortable from the keyboard too: Enter or Space sorts (Shift adds
+        // a sort level), the menu key or Shift+F10 opens the pin menu.
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleSort(ci, e.shiftKey);
+          }
+        }}
+        title={`${columns[ci]}: click to sort, Shift+click to sort by several, right-click to pin`}
         draggable
         onDragStart={(e) => handleDragStart(e, ci)}
         onDragOver={handleDragOver}
@@ -652,8 +717,9 @@ export default function SortableTable({
               style={{
                 ...S.th,
                 padding: "2px 4px",
-                top: ROW_HEIGHT + 2,
-                position: pinInfo ? "sticky" : "sticky",
+                // Rides along with the sticky <thead>; no guessed `top`
+                // offset for the header row's height.
+                position: pinInfo ? "sticky" : "relative",
                 left: pinInfo?.side === "left" ? pinInfo.offset : undefined,
                 right: pinInfo?.side === "right" ? pinInfo.offset : undefined,
                 zIndex: pinInfo ? 3 : 2,
@@ -673,6 +739,7 @@ export default function SortableTable({
                   });
                 }}
                 onClick={(e) => e.stopPropagation()}
+                aria-label={`Filter ${columns[ci]}`}
                 style={S.filterInput}
               />
             </th>
@@ -776,6 +843,7 @@ export default function SortableTable({
               type="checkbox"
               checked={selectedRows.has(rowIdx)}
               onChange={() => handleSelectRow(rowIdx)}
+              aria-label={`Select row ${rowIdx + 1}`}
               style={{ cursor: "pointer" }}
             />
           </td>
@@ -808,8 +876,16 @@ export default function SortableTable({
               onClick={() => toggleGroup(key)}
               colSpan={1}
             >
-              <span style={{ marginRight: 6, fontSize: 10 }}>{expanded ? "\u25BC" : "\u25B6"}</span>
-              {node.label}
+              {/* A real button, so a group can be opened from the keyboard. */}
+              <button
+                type="button"
+                style={S.groupToggle}
+                aria-expanded={expanded}
+                onClick={(e) => { e.stopPropagation(); toggleGroup(key); }}
+              >
+                <span style={{ marginRight: 6, fontSize: 10 }} aria-hidden="true">{expanded ? "\u25BC" : "\u25B6"}</span>
+                {node.label}
+              </button>
               <span style={{ ...S.typeSymbol, marginLeft: 8 }}>({node.rowCount})</span>
             </td>
             {effectiveOrder.slice(1).map((ci) => (
@@ -825,6 +901,17 @@ export default function SortableTable({
     });
   }
 
+  /* ─── scroll container (shared by both bodies) ─── */
+  // One element scrolls both ways. In `fill` mode it takes the rest of a
+  // bounded parent; otherwise it caps at `maxHeight`. Without a bound it would
+  // never scroll vertically itself, and the sticky header would have nothing
+  // to stick to.
+  const scrollStyle = {
+    overflow: "auto",
+    position: "relative",
+    ...(fill ? { flex: "1 1 0px", minHeight: 0 } : { maxHeight }),
+  };
+
   /* ─── virtual body ─── */
   function renderVirtualBody() {
     const totalHeight = sortedRows.length * ROW_HEIGHT;
@@ -835,15 +922,21 @@ export default function SortableTable({
     return (
       <div
         ref={scrollRef}
-        style={{ overflowY: "auto", maxHeight: "calc(100vh - 200px)", position: "relative" }}
+        style={scrollStyle}
         onScroll={handleScroll}
       >
-        <table className="havn-sortable-table" style={{ ...S.table, tableLayout: hasFixedWidths ? "fixed" : undefined }}>
-          <thead style={{ position: "sticky", top: 0, zIndex: 4 }}>
+        {/* The header lives in its own <table> here, so the TABLE is what
+            sticks: a sticky <thead> cannot leave its parent table, and this
+            one is a single row tall. */}
+        <table
+          className="havn-sortable-table"
+          style={{ ...S.table, tableLayout: hasFixedWidths ? "fixed" : undefined, position: "sticky", top: 0, zIndex: 4 }}
+        >
+          <thead>
             <tr>
               {showSelectCol && (
                 <th style={{ ...S.th, width: 32, minWidth: 32, textAlign: "center" }}>
-                  <input type="checkbox" checked={selectedRows.size === sortedRows.length && sortedRows.length > 0} onChange={handleSelectAll} style={{ cursor: "pointer" }} />
+                  <input type="checkbox" checked={selectedRows.size === sortedRows.length && sortedRows.length > 0} onChange={handleSelectAll} aria-label="Select all rows" style={{ cursor: "pointer" }} />
                 </th>
               )}
               {effectiveOrder.map((ci, pos) => renderHeaderCell(ci, pos))}
@@ -868,13 +961,13 @@ export default function SortableTable({
   /* ─── regular body ─── */
   function renderRegularBody() {
     return (
-      <div style={{ overflowX: "auto" }}>
+      <div style={scrollStyle}>
         <table className="havn-sortable-table" style={{ ...S.table, tableLayout: hasFixedWidths ? "fixed" : undefined }}>
-          <thead>
+          <thead style={{ position: "sticky", top: 0, zIndex: 4 }}>
             <tr>
               {showSelectCol && (
-                <th style={{ ...S.th, width: 32, minWidth: 32, textAlign: "center", position: "sticky", top: 0, zIndex: 2, background: "var(--havn-bg)" }}>
-                  <input type="checkbox" checked={selectedRows.size === sortedRows.length && sortedRows.length > 0} onChange={handleSelectAll} style={{ cursor: "pointer" }} />
+                <th style={{ ...S.th, width: 32, minWidth: 32, textAlign: "center", zIndex: 2, background: "var(--havn-bg)" }}>
+                  <input type="checkbox" checked={selectedRows.size === sortedRows.length && sortedRows.length > 0} onChange={handleSelectAll} aria-label="Select all rows" style={{ cursor: "pointer" }} />
                 </th>
               )}
               {effectiveOrder.map((ci, pos) => renderHeaderCell(ci, pos))}
@@ -928,9 +1021,12 @@ export default function SortableTable({
         )}
         <div style={{ marginLeft: "auto", position: "relative" }}>
           <button
+            ref={columnMenuBtnRef}
             style={S.toolbarBtn}
             onClick={() => setShowColumnMenu((v) => !v)}
             title="Column visibility"
+            aria-label="Show or hide columns"
+            aria-expanded={showColumnMenu}
           >
             &#9881;
           </button>
@@ -968,17 +1064,36 @@ export default function SortableTable({
     return (
       <div
         ref={contextMenuRef}
+        role="menu"
+        aria-label={`Pin column ${columns[colIndex]}`}
         style={{ ...S.contextMenu, left: x, top: y }}
+        onKeyDown={(e) => {
+          // Up/Down move between the items, like any menu.
+          if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+          e.preventDefault();
+          const items = [...e.currentTarget.querySelectorAll("button")];
+          const i = items.indexOf(document.activeElement);
+          const next = e.key === "ArrowDown" ? (i + 1) % items.length : (i - 1 + items.length) % items.length;
+          items[next]?.focus();
+        }}
       >
-        <div style={S.contextMenuItem} onClick={() => handlePin(colIndex, "left")}>Pin Left</div>
-        <div style={S.contextMenuItem} onClick={() => handlePin(colIndex, "right")}>Pin Right</div>
-        {isPinned && <div style={S.contextMenuItem} onClick={() => handlePin(colIndex, "unpin")}>Unpin</div>}
+        <button type="button" role="menuitem" className="havn-st-ctx-item" style={S.contextMenuItem} onClick={() => handlePin(colIndex, "left")}>Pin Left</button>
+        <button type="button" role="menuitem" className="havn-st-ctx-item" style={S.contextMenuItem} onClick={() => handlePin(colIndex, "right")}>Pin Right</button>
+        {isPinned && <button type="button" role="menuitem" className="havn-st-ctx-item" style={S.contextMenuItem} onClick={() => handlePin(colIndex, "unpin")}>Unpin</button>}
       </div>
     );
   }
 
   return (
-    <div style={{ position: "relative" }}>
+    <div
+      style={{
+        position: "relative",
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+        ...(fill ? { flex: "1 1 0px", height: "100%" } : {}),
+      }}
+    >
       {renderToolbar()}
       {useVirtual ? renderVirtualBody() : renderRegularBody()}
       {renderContextMenu()}
@@ -998,7 +1113,11 @@ const S = {
   th: {
     textAlign: "left",
     padding: "6px 12px",
-    borderBottom: "2px solid var(--havn-border-light)",
+    // A shadow, not a border: with border-collapse the table paints cell
+    // borders itself, so a stuck header row would leave its divider behind
+    // and scroll it away with the first rows.
+    borderBottom: "none",
+    boxShadow: "inset 0 -2px 0 var(--havn-border-light)",
     color: "var(--havn-text-secondary)",
     fontWeight: 600,
     background: "var(--havn-bg)",
@@ -1101,11 +1220,26 @@ const S = {
     boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
   },
   contextMenuItem: {
+    display: "block",
+    width: "100%",
+    background: "none",
+    border: "none",
+    textAlign: "left",
+    font: "inherit",
     padding: "6px 14px",
     cursor: "pointer",
     fontSize: "12px",
     color: "var(--havn-text)",
     whiteSpace: "nowrap",
+  },
+  groupToggle: {
+    background: "none",
+    border: "none",
+    padding: 0,
+    font: "inherit",
+    color: "inherit",
+    cursor: "pointer",
+    textAlign: "left",
   },
 };
 

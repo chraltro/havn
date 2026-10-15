@@ -199,23 +199,64 @@ def _serialize(value: Any) -> Any:
     return str(value)
 
 
+_WRAP_PREFIX = "SELECT * FROM ("
+
+
+def _unwrap_error_context(message: str, wrapped: str, original: str) -> str:
+    """Point DuckDB's ``LINE 1:`` excerpt at the SQL the user wrote.
+
+    A failing query is reported against the paging wrapper, so the error
+    quoted ``SELECT * FROM (`` in front of the user's own first line, and the
+    caret under it was shifted by as much. Both are taken back out.
+    """
+    if wrapped == original or not wrapped.startswith(_WRAP_PREFIX):
+        return message
+    lines = message.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = re.match(r"^(LINE 1: )(.*)$", lines[i])
+        if m and m.group(2).startswith(_WRAP_PREFIX):
+            out.append(m.group(1) + m.group(2)[len(_WRAP_PREFIX):])
+            nxt = lines[i + 1] if i + 1 < len(lines) else None
+            if nxt is not None and nxt.strip() == "^":
+                indent = len(nxt) - len(nxt.lstrip(" "))
+                out.append(" " * max(len(m.group(1)), indent - len(_WRAP_PREFIX)) + "^")
+                i += 2
+                continue
+            i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+
 def _wrap_for_paging(sql: str, limit: int | None, offset: int, row_cap: int | None) -> tuple[str, int | None]:
-    """Return (sql to run, effective limit) with paging and the server cap applied."""
+    """Return (sql to run, effective limit) with paging and the server cap applied.
+
+    The SQL asks for one row more than the effective limit, so the caller can
+    tell "exactly that many rows" from "more rows than that" and only report
+    ``truncated`` for the second.
+    """
+    from havn.engine.sql_safety import strip_sql_comments_and_strings
+
     # Trailing newline before the closing paren so a query that ends with a
     # `-- line comment` can't swallow the wrapper.
     sql_clean = sql.strip().rstrip(";") + "\n"
-    has_limit = bool(re.search(r"\bLIMIT\b", sql, re.IGNORECASE))
+    # A LIMIT inside a comment or a string is not a LIMIT clause: matching it
+    # skipped the cap for `SELECT * FROM big -- TODO limit`.
+    has_limit = bool(re.search(r"\bLIMIT\b", strip_sql_comments_and_strings(sql), re.IGNORECASE))
     if offset > 0 and limit is not None:
-        return f"SELECT * FROM ({sql_clean}) AS _q OFFSET {int(offset)} LIMIT {int(limit)}", limit
+        return f"{_WRAP_PREFIX}{sql_clean}) AS _q OFFSET {int(offset)} LIMIT {int(limit) + 1}", limit
     if limit is not None:
-        return f"SELECT * FROM ({sql_clean}) AS _q LIMIT {int(limit)}", limit
+        return f"{_WRAP_PREFIX}{sql_clean}) AS _q LIMIT {int(limit) + 1}", limit
     if not has_limit and row_cap:
         # Keep the caller's offset: dropping it here re-served page 1 to
         # clients paginating without an explicit limit.
         offset_clause = f"OFFSET {int(offset)} " if offset > 0 else ""
-        return f"SELECT * FROM ({sql_clean}) AS _q {offset_clause}LIMIT {int(row_cap)}", row_cap
+        return f"{_WRAP_PREFIX}{sql_clean}) AS _q {offset_clause}LIMIT {int(row_cap) + 1}", row_cap
     if offset > 0:
-        return f"SELECT * FROM ({sql_clean}) AS _q OFFSET {int(offset)}", None
+        return f"{_WRAP_PREFIX}{sql_clean}) AS _q OFFSET {int(offset)}", None
     return sql, None
 
 
@@ -247,6 +288,10 @@ def run_governed_query(
 
     prepared = prepare_governed_sql(conn, sql, identity, params=params, project_dir=project_dir)
     wrapped, effective_limit = _wrap_for_paging(prepared.sql, limit, offset, row_cap)
+    # What is fetched is capped even when the SQL was left unwrapped because
+    # it has a LIMIT of its own: a LIMIT in a subquery or a CTE does not bound
+    # the outer result, and fetchall() on that sent every row to the browser.
+    fetch_cap = effective_limit if effective_limit is not None else row_cap
     if wrapped != prepared.sql:
         try:
             validate_read_only_query(wrapped)
@@ -263,8 +308,8 @@ def run_governed_query(
             description = result.description or []
             columns = [d[0] for d in description]
             column_types = [str(d[1]) for d in description]
-            if effective_limit is not None:
-                rows = result.fetchmany(effective_limit)
+            if fetch_cap is not None:
+                rows = result.fetchmany(fetch_cap + 1)
             else:
                 rows = result.fetchall()
             holder["columns"] = columns
@@ -306,17 +351,23 @@ def run_governed_query(
             raise GovernedQueryError(err.status_code, str(err)) from err
         if isinstance(err, GovernedQueryError):
             raise err
-        raise GovernedQueryError(400, str(err)) from err
+        raise GovernedQueryError(400, _unwrap_error_context(str(err), wrapped, prepared.sql)) from err
 
     columns = holder["columns"]
-    rows = [[_serialize(v) for v in row] for row in holder["rows"]]
+    raw_rows = holder["rows"]
+    # One row past the cap was asked for; its presence is what "truncated"
+    # means. A result of exactly `limit` rows used to be reported as capped.
+    truncated = fetch_cap is not None and len(raw_rows) > fetch_cap
+    if truncated:
+        raw_rows = raw_rows[:fetch_cap]
+    rows = [[_serialize(v) for v in row] for row in raw_rows]
     rows = apply_post_query_governance(prepared, columns, rows, identity, conn)
     return {
         "columns": columns,
         "column_types": holder["column_types"],
         "rows": rows,
         "row_count": len(rows),
-        "truncated": effective_limit is not None and len(rows) == effective_limit,
+        "truncated": truncated,
         "offset": offset,
         "limit": effective_limit,
         "duration_ms": duration_ms,

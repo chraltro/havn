@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "./api";
 import { GIT_CHECKOUT_EVENT } from "./EnvironmentSwitcher";
+import { clickable } from "./a11y";
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -34,7 +35,7 @@ const STATUS_COLORS = {
 /* GitPanel                                                            */
 /* ------------------------------------------------------------------ */
 
-export default function GitPanel() {
+export default function GitPanel({ showConfirm }) {
   // Data state
   const [status, setStatus] = useState(null);
   const [branches, setBranches] = useState([]);
@@ -58,6 +59,10 @@ export default function GitPanel() {
   const [showStash, setShowStash] = useState(false);
   const [stashMsg, setStashMsg] = useState("");
   const [actionError, setActionError] = useState(null);
+  const [initializing, setInitializing] = useState(false);
+  // Only the latest diff request may fill the viewer; a slow earlier one
+  // would otherwise land under the newer file's name.
+  const diffRequestRef = useRef(0);
 
   // Load all data
   const refresh = useCallback(async () => {
@@ -109,6 +114,12 @@ export default function GitPanel() {
   }
 
   async function handleDiscard(files) {
+    // `git checkout --`: the uncommitted edits are gone for good.
+    const message = `Discard uncommitted changes to ${files.join(", ")}? This cannot be undone.`;
+    const ok = showConfirm
+      ? await showConfirm("Discard Changes", message, "Discard", true)
+      : window.confirm(message);
+    if (!ok) return;
     setActionError(null);
     try {
       await api.gitDiscard(files);
@@ -202,17 +213,19 @@ export default function GitPanel() {
   }
 
   async function handleViewDiff(path) {
+    const request = ++diffRequestRef.current;
     if (diffFile === path) {
       setDiffFile(null);
       setDiffText("");
       return;
     }
     setDiffFile(path);
+    setDiffText("Loading diff...");
     try {
       const d = await api.getGitDiff(path);
-      setDiffText(d?.diff || "No diff available");
+      if (request === diffRequestRef.current) setDiffText(d?.diff || "No diff available");
     } catch {
-      setDiffText("Failed to load diff");
+      if (request === diffRequestRef.current) setDiffText("Failed to load diff");
     }
   }
 
@@ -241,16 +254,20 @@ export default function GitPanel() {
               fontSize: 13,
               fontWeight: 500,
             }}
+            disabled={initializing}
             onClick={async () => {
+              setInitializing(true);
               try {
                 await api.initGit("main");
                 await refresh();
               } catch (e) {
                 setError(e.message || "Failed to initialize git");
+              } finally {
+                setInitializing(false);
               }
             }}
           >
-            Initialize git repository
+            {initializing ? "Initializing..." : "Initialize git repository"}
           </button>
         </div>
       </div>
@@ -378,7 +395,9 @@ export default function GitPanel() {
                   <span
                     style={{ ...st.filePath, cursor: "pointer" }}
                     onClick={() => handleViewDiff(f.path)}
-                    title="View diff"
+                    {...clickable(() => handleViewDiff(f.path), `View diff of ${f.path}`)}
+                    aria-expanded={diffFile === f.path}
+                    title={f.path}
                   >{f.path}</span>
                   <span
                     style={{ ...st.statusBadge, color: STATUS_COLORS[f.status] || "var(--havn-text-dim)" }}
@@ -418,7 +437,9 @@ export default function GitPanel() {
                   <span
                     style={{ ...st.filePath, cursor: "pointer" }}
                     onClick={() => handleViewDiff(f.path)}
-                    title="View diff"
+                    {...clickable(() => handleViewDiff(f.path), `View diff of ${f.path}`)}
+                    aria-expanded={diffFile === f.path}
+                    title={f.path}
                   >{f.path}</span>
                   <span
                     style={{ ...st.statusBadge, color: STATUS_COLORS[f.status] || "var(--havn-text-dim)" }}
@@ -513,7 +534,7 @@ export default function GitPanel() {
               ) : log.map((c) => (
                 <div key={c.hash} style={st.historyItem}>
                   <span style={st.commitHash}>{c.short_hash}</span>
-                  <span style={st.commitMessage}>{c.message}</span>
+                  <span style={st.commitMessage} title={c.message}>{c.message}</span>
                   <span style={st.commitMeta}>{c.author} {"\u00B7"} {timeAgo(c.date)}</span>
                 </div>
               ))}
@@ -554,7 +575,7 @@ export default function GitPanel() {
                   {stashes.map((s) => (
                     <div key={s.index} style={st.stashItem}>
                       <span style={st.stashIndex}>stash@{"{" + s.index + "}"}</span>
-                      <span style={st.stashMessage}>{s.message}</span>
+                      <span style={st.stashMessage} title={s.message}>{s.message}</span>
                     </div>
                   ))}
                 </div>

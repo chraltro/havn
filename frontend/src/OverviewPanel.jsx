@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { api } from "./api";
 import { useHintTriggerFn } from "./HintSystem";
+import { clickable } from "./a11y";
 
 function timeAgo(dateStr) {
   if (!dateStr) return "";
@@ -19,6 +20,20 @@ function timeAgo(dateStr) {
 function formatRows(n) {
   if (n == null) return "-";
   return n.toLocaleString();
+}
+
+function isFailedStatus(status) {
+  return status === "error" || status === "failed";
+}
+
+// A glyph as well as a color, so a running or skipped run does not read as a
+// failure (and the status does not rest on color alone).
+function runStatusMark(status) {
+  if (status === "success") return { glyph: "\u2713", color: "var(--havn-green)" };
+  if (isFailedStatus(status)) return { glyph: "\u2717", color: "var(--havn-red)" };
+  if (status === "running") return { glyph: "\u25CB", color: "var(--havn-accent)" };
+  // skipped (unchanged since the last build), cancelled, unknown
+  return { glyph: "\u2013", color: "var(--havn-text-dim)" };
 }
 
 export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, onRunStream, streams, showConfirm, onClearSample, refreshKey }) {
@@ -110,8 +125,11 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
 
   const recentRuns = data.recent_runs || [];
   const successCount = recentRuns.filter((r) => r.status === "success").length;
-  const failedRuns = recentRuns.filter((r) => r.status !== "success");
+  // Only real failures: a model skipped because it was unchanged, or a run
+  // still in progress, is not one.
+  const failedRuns = recentRuns.filter((r) => isFailedStatus(r.status));
   const errorCount = failedRuns.length;
+  const toggleFailed = () => setShowFailed((v) => !v);
   const schemas = data.schemas || [];
   const lastRun = recentRuns[0];
 
@@ -196,8 +214,15 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
           <span style={st.statDivider} />
           <div
             style={{ ...st.statItem, cursor: errorCount > 0 ? "pointer" : "default" }}
-            onClick={() => { if (errorCount > 0) setShowFailed(!showFailed); }}
+            onClick={() => { if (errorCount > 0) toggleFailed(); }}
             title={errorCount > 0 ? "Click to show failures" : ""}
+            // With failures to show, this is the expander for the list below.
+            {...(errorCount > 0
+              ? {
+                ...clickable(toggleFailed, `Runs: ${successCount} of ${recentRuns.length} succeeded, ${errorCount} failed. Show failures`),
+                "aria-expanded": showFailed,
+              }
+              : {})}
           >
             <span style={st.statLabel}>Runs</span>
             <span style={{
@@ -207,7 +232,7 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
               {recentRuns.length > 0 ? `${successCount}/${recentRuns.length}` : "-"}
             </span>
             {errorCount > 0 && (
-              <span style={{ fontSize: "11px", color: "var(--havn-red)", marginLeft: "2px", cursor: "pointer" }}>
+              <span style={{ fontSize: "11px", color: "var(--havn-red)", marginLeft: "2px", cursor: "pointer" }} aria-hidden="true">
                 {"\u25BE"}
               </span>
             )}
@@ -219,14 +244,15 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
           <div style={st.failedCard}>
             <div style={st.failedHeader}>
               <span style={st.failedTitle}>Failed Runs</span>
-              <button onClick={() => setShowFailed(false)} style={st.failedClose}>{"\u00D7"}</button>
+              <button onClick={() => setShowFailed(false)} style={st.failedClose} aria-label="Close failed runs">{"\u00D7"}</button>
             </div>
             {failedRuns.map((run) => (
               <div key={run.run_id} style={st.failedItem}>
                 <span style={st.failedDot} />
                 <span style={st.failedType}>{run.run_type}</span>
-                <span
-                  style={st.failedTarget}
+                <button
+                  type="button"
+                  style={{ ...st.linkBtn, ...st.failedTarget }}
                   onClick={() => {
                     const target = run.target || "";
                     if (run.run_type === "contract") {
@@ -240,7 +266,7 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
                       onOpenFile(run.run_type + "/" + target);
                     }
                   }}
-                >{run.target}</span>
+                >{run.target}</button>
                 <span style={st.failedTime}>{timeAgo(run.started_at)}</span>
                 {run.error && (
                   <span style={st.failedError} title={run.error}>{run.error}</span>
@@ -259,7 +285,7 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
               {gitStatus.dirty ? `${gitStatus.changed_files?.length || 0} uncommitted` : "clean"}
             </span>
             {gitStatus.last_message && (
-              <span style={{ color: "var(--havn-text-dim)", marginLeft: "auto", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ color: "var(--havn-text-dim)", marginLeft: "auto", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={gitStatus.last_message}>
                 {gitStatus.last_message}
               </span>
             )}
@@ -290,6 +316,21 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
                     return sorted.map((run) => {
                       const showSep = lastType !== null && lastType !== run.run_type;
                       lastType = run.run_type;
+                      const mark = runStatusMark(run.status);
+                      const openTarget = () => {
+                        const target = run.target || "";
+                        if (run.run_type === "contract") {
+                          const filterVal = target.includes(":") ? target.split(":")[0] : target;
+                          onNavigate("Quality:Contracts:" + filterVal);
+                        } else if (run.run_type === "transform" && target.includes(".")) {
+                          const [s, t] = target.split(".", 2);
+                          onSelectTable(s, t);
+                        } else if (run.run_type === "ingest") {
+                          onOpenFile("ingest/" + target);
+                        } else if (run.run_type === "export") {
+                          onOpenFile("export/" + target);
+                        }
+                      };
                       return (
                         <React.Fragment key={run.run_id}>
                           {showSep && <div style={st.runGroupSep} />}
@@ -301,28 +342,14 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
                         title={run.status}
                         aria-label={run.status}
                         role="img"
-                        style={{
-                          ...st.statusDot,
-                          background: run.status === "success" ? "var(--havn-green)" : "var(--havn-red)",
-                        }}
-                      />
+                        style={{ ...st.statusMark, color: mark.color }}
+                      >{mark.glyph}</span>
                       <span style={st.runType}>{run.run_type}</span>
                       <span
                         style={{ ...st.runTarget, cursor: "pointer" }}
-                        onClick={() => {
-                          const target = run.target || "";
-                          if (run.run_type === "contract") {
-                            const filterVal = target.includes(":") ? target.split(":")[0] : target;
-                            onNavigate("Quality:Contracts:" + filterVal);
-                          } else if (run.run_type === "transform" && target.includes(".")) {
-                            const [s, t] = target.split(".", 2);
-                            onSelectTable(s, t);
-                          } else if (run.run_type === "ingest") {
-                            onOpenFile("ingest/" + target);
-                          } else if (run.run_type === "export") {
-                            onOpenFile("export/" + target);
-                          }
-                        }}
+                        title={run.target}
+                        onClick={openTarget}
+                        {...clickable(openTarget, `Open ${run.target}`)}
                       >{run.target}</span>
                       <span style={st.runMeta}>
                         {run.rows_affected > 0 && <span>{formatRows(run.rows_affected)} rows</span>}
@@ -359,10 +386,11 @@ export default function OverviewPanel({ onNavigate, onSelectTable, onOpenFile, o
                 <div style={st.schemaList}>
                   {schemas.map((s) => (
                     <div key={s.name} style={st.schemaItem}>
-                      <span
-                        style={{ ...st.schemaName, cursor: "pointer" }}
+                      <button
+                        type="button"
+                        style={{ ...st.linkBtn, ...st.schemaName }}
                         onClick={() => onNavigate("Tables")}
-                      >{s.name}</span>
+                      >{s.name}</button>
                       <span style={st.schemaStat}>{s.tables} table{s.tables !== 1 ? "s" : ""}</span>
                       {s.views > 0 && <span style={st.schemaStat}>{s.views} view{s.views !== 1 ? "s" : ""}</span>}
                       <span style={st.schemaRows}>{formatRows(s.total_rows)} rows</span>
@@ -609,7 +637,10 @@ const st = {
     fontSize: "12.5px",
     borderBottom: "1px solid var(--havn-border)",
   },
-  statusDot: { width: "6px", height: "6px", borderRadius: "50%", flexShrink: 0 },
+  statusMark: { width: "10px", flexShrink: 0, fontSize: "11px", fontWeight: 700, lineHeight: 1, textAlign: "center" },
+  // A button that looks like the text link it replaced (spread first, then
+  // the text style, so its font settings win over `font: inherit`).
+  linkBtn: { background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer", textAlign: "left" },
   runType: {
     fontSize: "10px",
     fontWeight: 600,

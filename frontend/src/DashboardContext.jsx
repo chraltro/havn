@@ -5,6 +5,28 @@ const DashboardContext = createContext(null);
 
 const MAX_UNDO = 30;
 
+// Undo covers what PUT /api/dashboards/{id} can write back: the dashboard's
+// own fields. Widgets are saved through their own endpoints the moment they
+// change, and that PUT has no widgets field, so restoring a snapshot could
+// never bring back a deleted widget or revert an edit, only claim "Saved".
+// A widget change leaves a marker instead, so Undo says it cannot be undone
+// rather than silently skipping back to an older change.
+const UNDOABLE_FIELDS = ["name", "description", "layout", "filters", "settings"];
+const WIDGET_CHANGE = { widgetChange: true };
+
+function undoableFields(d) {
+  const out = {};
+  for (const k of UNDOABLE_FIELDS) if (d && k in d) out[k] = d[k];
+  return JSON.parse(JSON.stringify(out));
+}
+
+// Saved views are not on the undo stack: a restored snapshot keeps the views
+// the dashboard has now instead of deleting ones saved since.
+function withCurrentViews(snapshot, current) {
+  if (!("settings" in snapshot)) return snapshot;
+  return { ...snapshot, settings: { ...(snapshot.settings || {}), saved_views: current?.settings?.saved_views } };
+}
+
 export function DashboardProvider({ children }) {
   const [dashboard, setDashboard] = useState(null);
   const [editMode, setEditMode] = useState(false);
@@ -29,22 +51,41 @@ export function DashboardProvider({ children }) {
   // Toast notifications
   const [toasts, setToasts] = useState([]);
   const toastIdRef = useRef(0);
-  const showToast = useCallback((message, type = "info", duration = 3000) => {
+  const showToast = useCallback((message, type = "info", duration) => {
     const id = ++toastIdRef.current;
     setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
+    // Errors stay up longer: they are read, not glanced at.
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration ?? (type === "error" ? 6000 : 3000));
   }, []);
 
-  // Push current dashboard state onto undo stack before a mutation
+  // A failed write: the console for debugging, a toast so the user knows.
+  const reportError = useCallback((what, e) => {
+    console.error(`${what}:`, e);
+    showToast(`${what}: ${e?.message || e}`, "error");
+  }, [showToast]);
+
+  // Push the dashboard-level fields onto the undo stack. Called once a write
+  // has succeeded, so a failed save leaves nothing behind to "undo".
   const pushUndo = useCallback(() => {
     setUndoStack(prev => {
-      const snapshot = JSON.parse(JSON.stringify(dashboard));
-      const next = [...prev, snapshot];
+      const next = [...prev, undoableFields(dashboard)];
       if (next.length > MAX_UNDO) next.shift();
       return next;
     });
     setRedoStack([]);
   }, [dashboard]);
+
+  // Mark a widget change on the undo stack (see UNDOABLE_FIELDS). A run of
+  // widget changes shares one marker.
+  const pushWidgetChange = useCallback(() => {
+    setUndoStack(prev => {
+      if (prev[prev.length - 1]?.widgetChange) return prev;
+      const next = [...prev, WIDGET_CHANGE];
+      if (next.length > MAX_UNDO) next.shift();
+      return next;
+    });
+    setRedoStack([]);
+  }, []);
 
   // Load a dashboard by ID
   const loadDashboard = useCallback(async (id) => {
@@ -83,10 +124,10 @@ export function DashboardProvider({ children }) {
       } catch (_) {}
       return full;
     } catch (e) {
-      console.error("Failed to load dashboard:", e);
+      reportError("Couldn't open the dashboard", e);
       return null;
     }
-  }, []);
+  }, [reportError]);
 
   // Close/unload dashboard
   const closeDashboard = useCallback(() => {
@@ -278,26 +319,28 @@ export function DashboardProvider({ children }) {
     };
   }, [autoRefresh, dashboard]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Update dashboard on server
+  // Update dashboard on server. Resolves true once saved, false on failure.
   const saveDashboard = useCallback(async (updates) => {
-    if (!dashboard) return;
-    pushUndo();
+    if (!dashboard) return false;
     try {
       const result = await api.updateDashboard(dashboard.id, updates);
+      if (Object.keys(updates || {}).length > 0) pushUndo();
       setDashboard(prev => ({ ...prev, ...updates, ...result }));
       setIsDirty(false);
       setLastSavedAt(new Date());
+      return true;
     } catch (e) {
-      console.error("Failed to save dashboard:", e);
+      reportError("Couldn't save the dashboard", e);
+      return false;
     }
-  }, [dashboard, pushUndo]);
+  }, [dashboard, pushUndo, reportError]);
 
-  // Add widget
+  // Add widget. Resolves to the new widget, or null on failure.
   const addWidget = useCallback(async (widgetData) => {
     if (!dashboard) return null;
-    pushUndo();
     try {
       const w = await api.addWidget(dashboard.id, widgetData);
+      pushWidgetChange();
       setDashboard(prev => ({
         ...prev,
         widgets: [...(prev.widgets || []), w],
@@ -305,33 +348,35 @@ export function DashboardProvider({ children }) {
       setIsDirty(true);
       return w;
     } catch (e) {
-      console.error("Failed to add widget:", e);
+      reportError("Couldn't add the widget", e);
       return null;
     }
-  }, [dashboard, pushUndo]);
+  }, [dashboard, pushWidgetChange, reportError]);
 
-  // Update widget
+  // Update widget. Resolves to the saved widget, or null on failure.
   const updateWidget = useCallback(async (widgetId, updates) => {
-    if (!dashboard) return;
-    pushUndo();
+    if (!dashboard) return null;
     try {
       const w = await api.updateWidget(dashboard.id, widgetId, updates);
+      pushWidgetChange();
       setDashboard(prev => ({
         ...prev,
         widgets: (prev.widgets || []).map(ww => ww.id === widgetId ? { ...ww, ...w } : ww),
       }));
       setIsDirty(true);
+      return w;
     } catch (e) {
-      console.error("Failed to update widget:", e);
+      reportError("Couldn't save the widget", e);
+      return null;
     }
-  }, [dashboard, pushUndo]);
+  }, [dashboard, pushWidgetChange, reportError]);
 
-  // Delete widget
+  // Delete widget. Resolves true once deleted.
   const removeWidget = useCallback(async (widgetId) => {
-    if (!dashboard) return;
-    pushUndo();
+    if (!dashboard) return false;
     try {
       await api.deleteWidget(dashboard.id, widgetId);
+      pushWidgetChange();
       setDashboard(prev => ({
         ...prev,
         widgets: (prev.widgets || []).filter(w => w.id !== widgetId),
@@ -342,17 +387,20 @@ export function DashboardProvider({ children }) {
         return next;
       });
       setIsDirty(true);
+      return true;
     } catch (e) {
-      console.error("Failed to delete widget:", e);
+      reportError("Couldn't delete the widget", e);
+      return false;
     }
-  }, [dashboard, pushUndo]);
+  }, [dashboard, pushWidgetChange, reportError]);
 
-  // Batch position update
+  // Batch position update. The canvas only previews a drag locally, so on
+  // failure the widget simply stays where the server has it.
   const updatePositions = useCallback(async (positions) => {
-    if (!dashboard) return;
-    pushUndo();
+    if (!dashboard) return false;
     try {
       await api.updateWidgetPositions(dashboard.id, positions);
+      pushWidgetChange();
       setDashboard(prev => ({
         ...prev,
         widgets: (prev.widgets || []).map(w => {
@@ -361,50 +409,78 @@ export function DashboardProvider({ children }) {
         }),
       }));
       setIsDirty(true);
+      return true;
     } catch (e) {
-      console.error("Failed to update positions:", e);
+      reportError("Couldn't save the widget layout", e);
+      return false;
     }
-  }, [dashboard, pushUndo]);
+  }, [dashboard, pushWidgetChange, reportError]);
+
+  // Undo/redo restore a snapshot's dashboard-level fields and write them back.
+  // One restore at a time, so two quick presses cannot land out of order.
+  const restoringRef = useRef(false);
 
   // Undo: pop from undoStack, push current to redoStack, apply popped state and persist
   const undo = useCallback(async () => {
-    if (undoStack.length === 0 || !dashboard) return;
-    const prev = undoStack[undoStack.length - 1];
+    if (undoStack.length === 0 || !dashboard || restoringRef.current) return;
+    const entry = undoStack[undoStack.length - 1];
     setUndoStack(s => s.slice(0, -1));
+    if (entry.widgetChange) {
+      showToast("Widget changes are saved as you make them and can't be undone.", "info", 5000);
+      return;
+    }
+    const current = undoableFields(dashboard);
+    const restored = withCurrentViews(entry, dashboard);
     setRedoStack(s => {
-      const next = [...s, JSON.parse(JSON.stringify(dashboard))];
+      const next = [...s, current];
       if (next.length > MAX_UNDO) next.shift();
       return next;
     });
-    setDashboard(prev);
+    setDashboard(prev => ({ ...prev, ...restored }));
+    restoringRef.current = true;
     try {
-      await api.updateDashboard(prev.id, prev);
+      await api.updateDashboard(dashboard.id, restored);
       setIsDirty(false);
       setLastSavedAt(new Date());
     } catch (e) {
-      console.error("Failed to persist undo:", e);
+      // The server still has the current fields: show them again and keep the
+      // entry so the undo can be retried.
+      setDashboard(prev => ({ ...prev, ...current }));
+      setUndoStack(s => [...s, entry]);
+      setRedoStack(s => s.slice(0, -1));
+      reportError("Couldn't undo", e);
+    } finally {
+      restoringRef.current = false;
     }
-  }, [undoStack, dashboard]);
+  }, [undoStack, dashboard, showToast, reportError]);
 
   // Redo: pop from redoStack, push current to undoStack, apply popped state and persist
   const redo = useCallback(async () => {
-    if (redoStack.length === 0 || !dashboard) return;
-    const next = redoStack[redoStack.length - 1];
+    if (redoStack.length === 0 || !dashboard || restoringRef.current) return;
+    const entry = redoStack[redoStack.length - 1];
+    const current = undoableFields(dashboard);
+    const restored = withCurrentViews(entry, dashboard);
     setRedoStack(s => s.slice(0, -1));
     setUndoStack(s => {
-      const n = [...s, JSON.parse(JSON.stringify(dashboard))];
+      const n = [...s, current];
       if (n.length > MAX_UNDO) n.shift();
       return n;
     });
-    setDashboard(next);
+    setDashboard(prev => ({ ...prev, ...restored }));
+    restoringRef.current = true;
     try {
-      await api.updateDashboard(next.id, next);
+      await api.updateDashboard(dashboard.id, restored);
       setIsDirty(false);
       setLastSavedAt(new Date());
     } catch (e) {
-      console.error("Failed to persist redo:", e);
+      setDashboard(prev => ({ ...prev, ...current }));
+      setRedoStack(s => [...s, entry]);
+      setUndoStack(s => s.slice(0, -1));
+      reportError("Couldn't redo", e);
+    } finally {
+      restoringRef.current = false;
     }
-  }, [redoStack, dashboard]);
+  }, [redoStack, dashboard, reportError]);
 
   const canUndo = undoStack.length > 0;
   const canRedo = redoStack.length > 0;
@@ -425,9 +501,10 @@ export function DashboardProvider({ children }) {
       await api.updateDashboard(dashboard.id, { settings: { ...dashboard.settings, saved_views: updated } });
       setDashboard(prev => ({ ...prev, settings: { ...prev.settings, saved_views: updated } }));
     } catch (e) {
-      console.error("Failed to save view:", e);
+      setSavedViews(prev => prev.filter(v => v.id !== view.id));
+      reportError("Couldn't save the view", e);
     }
-  }, [dashboard, globalFilters, parameters, savedViews]);
+  }, [dashboard, globalFilters, parameters, savedViews, reportError]);
 
   const loadView = useCallback((viewId) => {
     const view = savedViews.find(v => v.id === viewId);
@@ -442,15 +519,20 @@ export function DashboardProvider({ children }) {
 
   const deleteView = useCallback(async (viewId) => {
     if (!dashboard) return;
+    const index = savedViews.findIndex(v => v.id === viewId);
+    if (index < 0) return;
+    const removed = savedViews[index];
     const updated = savedViews.filter(v => v.id !== viewId);
     setSavedViews(updated);
     try {
       await api.updateDashboard(dashboard.id, { settings: { ...dashboard.settings, saved_views: updated } });
       setDashboard(prev => ({ ...prev, settings: { ...prev.settings, saved_views: updated } }));
     } catch (e) {
-      console.error("Failed to delete view:", e);
+      // Put the view back where it was.
+      setSavedViews(prev => prev.some(v => v.id === viewId) ? prev : [...prev.slice(0, index), removed, ...prev.slice(index)]);
+      reportError("Couldn't delete the view", e);
     }
-  }, [dashboard, savedViews]);
+  }, [dashboard, savedViews, reportError]);
 
   const value = {
     dashboard,
@@ -499,7 +581,7 @@ export function DashboardProvider({ children }) {
           display: "flex", flexDirection: "column", gap: 8, pointerEvents: "none",
         }}>
           {toasts.map(t => (
-            <div key={t.id} style={{
+            <div key={t.id} role={t.type === "error" ? "alert" : "status"} style={{
               background: t.type === "error" ? "var(--havn-red)" : t.type === "success" ? "var(--havn-green)" : "var(--havn-bg-secondary, #1e1e2e)",
               color: t.type === "error" || t.type === "success" ? "#fff" : "var(--havn-text)",
               border: "1px solid var(--havn-border)",

@@ -1,8 +1,16 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import FocusTrap from "./FocusTrap";
 
 const MRU_KEY = "havn_palette_mru";
 const MAX_MRU = 20;
 const MAX_RESULTS = 20;
+
+// The search field is a combobox that owns the results listbox; the selected
+// result is announced through aria-activedescendant while focus stays in the
+// field (the same pattern as the query editor's autocomplete).
+const TITLE_ID = "havn-command-palette-title";
+const LIST_ID = "havn-command-palette-list";
+const optionId = (index) => `havn-command-palette-option-${index}`;
 
 function getMRU() {
   try { return JSON.parse(localStorage.getItem(MRU_KEY) || "[]"); } catch { return []; }
@@ -203,8 +211,8 @@ export default function CommandPalette({ isOpen, onClose, files, tables, streams
     if (listRef.current) listRef.current.scrollTop = 0;
   }, [query]);
 
+  // Escape is handled by the FocusTrap around the dialog.
   function handleKeyDown(e) {
-    if (e.key === "Escape") { onClose(); return; }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setSelectedIndex((i) => Math.min(i + 1, results.length - 1));
@@ -238,11 +246,16 @@ export default function CommandPalette({ isOpen, onClose, files, tables, streams
     grouped.push({ type: "item", item, index: i });
   }
 
+  const hasResults = results.length > 0;
+
+  // A modal dialog: the FocusTrap keeps Tab inside it (focus no longer
+  // escapes to the page behind) and closes it on Escape.
   return (
-    <div style={cpStyles.overlay} onClick={onClose} aria-label="Command palette">
+    <FocusTrap labelledBy={TITLE_ID} style={cpStyles.overlay} onClick={onClose} onEscape={onClose}>
       <div style={cpStyles.modal} onClick={(e) => e.stopPropagation()}>
+        <h2 id={TITLE_ID} style={cpStyles.srOnly}>Command palette</h2>
         <div style={cpStyles.inputRow}>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--havn-text-dim)" strokeWidth="1.5" style={{ flexShrink: 0 }}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--havn-text-dim)" strokeWidth="1.5" style={{ flexShrink: 0 }} aria-hidden="true">
             <circle cx="6.5" cy="6.5" r="5"/>
             <path d="M10.5 10.5L14.5 14.5"/>
           </svg>
@@ -253,43 +266,55 @@ export default function CommandPalette({ isOpen, onClose, files, tables, streams
             onKeyDown={handleKeyDown}
             placeholder="Search files, tables, commands..."
             style={cpStyles.input}
+            role="combobox"
             aria-label="Command palette search"
+            aria-autocomplete="list"
+            aria-expanded={hasResults}
+            aria-controls={hasResults ? LIST_ID : undefined}
+            aria-activedescendant={results[selectedIndex] ? optionId(selectedIndex) : undefined}
             autoFocus
           />
-          <kbd style={cpStyles.kbd}>esc</kbd>
+          <kbd style={cpStyles.kbd} aria-hidden="true">esc</kbd>
         </div>
-        <div style={cpStyles.list} ref={listRef}>
-          {grouped.length === 0 && (
-            <div style={cpStyles.empty}>No results</div>
-          )}
-          {grouped.map((entry, gi) => {
-            if (entry.type === "header") {
+        {!hasResults ? (
+          <div style={cpStyles.list}>
+            <div style={cpStyles.empty} role="status">No results</div>
+          </div>
+        ) : (
+          <div style={cpStyles.list} ref={listRef} id={LIST_ID} role="listbox" aria-label="Results">
+            {grouped.map((entry, gi) => {
+              if (entry.type === "header") {
+                // Visual grouping only; each option names its category itself.
+                return (
+                  <div key={`h-${gi}`} style={cpStyles.categoryHeader} aria-hidden="true">
+                    {entry.category}
+                  </div>
+                );
+              }
+              const { item, index } = entry;
+              const isSelected = index === selectedIndex;
               return (
-                <div key={`h-${entry.category}`} style={cpStyles.categoryHeader}>
-                  {entry.category}
+                <div
+                  key={item.id}
+                  id={optionId(index)}
+                  role="option"
+                  aria-selected={isSelected}
+                  data-palette-index={index}
+                  style={isSelected ? cpStyles.resultActive : cpStyles.result}
+                  onClick={() => { addMRU(item.id); item.action(); }}
+                  onMouseEnter={() => setSelectedIndex(index)}
+                >
+                  <span style={cpStyles.resultIcon} aria-hidden="true">{item.icon}</span>
+                  <span style={cpStyles.resultName}>{item.name}</span>
+                  {item.secondary && <span style={cpStyles.resultSecondary}>{item.secondary}</span>}
+                  <span style={cpStyles.resultBadge}>{item.category}</span>
                 </div>
               );
-            }
-            const { item, index } = entry;
-            const isSelected = index === selectedIndex;
-            return (
-              <div
-                key={item.id}
-                data-palette-index={index}
-                style={isSelected ? cpStyles.resultActive : cpStyles.result}
-                onClick={() => { addMRU(item.id); item.action(); }}
-                onMouseEnter={() => setSelectedIndex(index)}
-              >
-                <span style={cpStyles.resultIcon}>{item.icon}</span>
-                <span style={cpStyles.resultName}>{item.name}</span>
-                {item.secondary && <span style={cpStyles.resultSecondary}>{item.secondary}</span>}
-                <span style={cpStyles.resultBadge}>{item.category}</span>
-              </div>
-            );
-          })}
-        </div>
+            })}
+          </div>
+        )}
       </div>
-    </div>
+    </FocusTrap>
   );
 }
 
@@ -297,7 +322,8 @@ const cpStyles = {
   overlay: {
     position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
     display: "flex", alignItems: "flex-start", justifyContent: "center",
-    zIndex: 2000, paddingTop: "min(20vh, 120px)",
+    // Modal tier: Ctrl+K over a fullscreen dashboard (9999) opened it behind.
+    zIndex: 10000, paddingTop: "min(20vh, 120px)",
     backdropFilter: "blur(2px)",
   },
   modal: {
@@ -321,6 +347,11 @@ const cpStyles = {
   },
   list: {
     flex: 1, overflow: "auto", padding: "4px 0",
+  },
+  // Names the dialog for screen readers without showing a heading.
+  srOnly: {
+    position: "absolute", width: 1, height: 1, padding: 0, margin: -1,
+    overflow: "hidden", clip: "rect(0, 0, 0, 0)", whiteSpace: "nowrap", border: 0,
   },
   empty: {
     padding: "24px 16px", color: "var(--havn-text-dim)", fontSize: "13px", textAlign: "center",

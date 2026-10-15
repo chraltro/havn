@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { api } from "./api";
+import { clickable } from "./a11y";
 
 const STATUS_COLORS = {
   pass: "var(--havn-green)",
@@ -164,11 +165,11 @@ export default function UnitTestsPanel() {
           <table style={st.table}>
             <thead>
               <tr>
-                <th style={{ ...st.th, width: 70 }}>Status</th>
-                <th style={st.th}>Model</th>
-                <th style={st.th}>Test</th>
-                <th style={st.th}>Detail</th>
-                <th style={{ ...st.th, textAlign: "right" }}>Time</th>
+                <th style={{ ...st.thSticky, width: 70 }}>Status</th>
+                <th style={st.thSticky}>Model</th>
+                <th style={st.thSticky}>Test</th>
+                <th style={st.thSticky}>Detail</th>
+                <th style={{ ...st.thSticky, textAlign: "right" }}>Time</th>
               </tr>
             </thead>
             <tbody>
@@ -176,11 +177,17 @@ export default function UnitTestsPanel() {
                 const key = `${res.model}::${res.name}`;
                 const failing = res.status === "fail" || res.status === "error";
                 const isOpen = expanded === key;
+                const toggle = () => setExpanded(isOpen ? null : key);
                 return (
                   <React.Fragment key={key}>
                     <tr
-                      onClick={() => setExpanded(isOpen ? null : key)}
+                      onClick={toggle}
                       style={{ cursor: failing ? "pointer" : "default" }}
+                      // Only a failing test has rows to show, so only its row
+                      // is a keyboard-operable expander.
+                      {...(failing
+                        ? { ...clickable(toggle, `Differing rows for ${res.model}: ${res.name} (${statusLabel(res.status)})`), "aria-expanded": isOpen }
+                        : {})}
                     >
                       <td style={st.td}>
                         {res.status ? (
@@ -253,6 +260,11 @@ const st = {
   warning: { padding: "4px 12px", color: "var(--havn-yellow)", fontSize: 11 },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 12 },
   th: { textAlign: "left", padding: "6px 12px", background: "var(--havn-bg-tertiary)", borderBottom: "1px solid var(--havn-border)", fontWeight: 600, fontSize: 11 },
+  // The results table's header stays put while its rows scroll in `body`. That
+  // scroller has 12px padding, which a sticky box sits inside of, so top -12
+  // pins it to the visible top edge. The row-diff tables nested in expanded
+  // rows keep the plain `th`, so they do not stack on top of it.
+  thSticky: { textAlign: "left", padding: "6px 12px", background: "var(--havn-bg-tertiary)", borderBottom: "1px solid var(--havn-border)", fontWeight: 600, fontSize: 11, position: "sticky", top: -12, zIndex: 1 },
   td: { padding: "5px 12px", borderBottom: "1px solid var(--havn-border-light)", fontSize: 12, verticalAlign: "top" },
   badge: { color: "#fff", padding: "1px 6px", borderRadius: 3, fontSize: 10, fontWeight: 700 },
   rowDiff: { marginBottom: 10 },

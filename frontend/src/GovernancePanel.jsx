@@ -418,7 +418,10 @@ const s = {
   note: { fontSize: 12, color: 'var(--havn-text-secondary)', marginBottom: 8, lineHeight: 1.6 },
   dim: { fontSize: 11, color: 'var(--havn-text-dim)' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 13 },
-  th: { textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--havn-border-light)', color: 'var(--havn-text-secondary)', fontSize: 11, textTransform: 'uppercase' },
+  // Sticky, so the column names stay in view in the scrolling "view as"
+  // result and in long policy lists; a shadow rather than a collapsed
+  // border, which would stay behind with the first rows.
+  th: { textAlign: 'left', padding: '8px 12px', boxShadow: 'inset 0 -1px 0 var(--havn-border-light)', color: 'var(--havn-text-secondary)', fontSize: 11, textTransform: 'uppercase', position: 'sticky', top: 0, zIndex: 1, background: 'var(--havn-bg)' },
   td: { padding: '8px 12px', borderBottom: '1px solid var(--havn-border)', color: 'var(--havn-text)', verticalAlign: 'top' },
   code: { background: 'color-mix(in srgb, var(--havn-accent) 8%, transparent)', padding: '1px 5px', borderRadius: 3, fontSize: 12, fontFamily: 'var(--havn-font-mono)', color: 'var(--havn-accent)' },
   badge: { fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'color-mix(in srgb, var(--havn-text-secondary) 15%, transparent)', color: 'var(--havn-text-secondary)' },

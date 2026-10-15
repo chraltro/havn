@@ -127,6 +127,24 @@ describe("UnitTestsPanel", () => {
     expect(screen.getByText("NULL")).toBeInTheDocument();
   });
 
+  it("opens a failing test's differing rows from the keyboard", async () => {
+    render(<UnitTestsPanel />);
+    await screen.findByText("counts orders per customer");
+    fireEvent.click(screen.getByText("Run tests"));
+    await screen.findByText("FAIL");
+
+    // Only a failing test has rows to show, so only its row is an expander.
+    expect(screen.queryByRole("button", { name: /counts orders per customer/ })).toBeNull();
+    const row = screen.getByRole("button", { name: /Differing rows for gold\.orders: drops cancelled orders/ });
+    expect(row.tabIndex).toBe(0);
+    expect(row.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.keyDown(row, { key: "Enter" });
+
+    expect(await screen.findByText("Expected, not produced (1)")).toBeInTheDocument();
+    expect(row.getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("passes the model filter to the run", async () => {
     render(<UnitTestsPanel />);
     await screen.findByText("counts orders per customer");

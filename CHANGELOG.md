@@ -4,6 +4,79 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Result tables keep their column headers.** Scrolling a query result
+  scrolled the header row away with the rows: the table sat in two nested
+  scroll boxes, and its sticky header could only stick to the inner one,
+  which never scrolled. Every result grid now has one bounded scroller with a
+  pinned header: the Query panel, the editor and model previews, Tables,
+  Ask, notebooks, governance, dashboard widgets and the widget editor.
+- **The code editor works offline.** Monaco was fetched from
+  cdn.jsdelivr.net at runtime, so without internet access (an air-gapped
+  install, a proxy that blocks the CDN) every editor sat on "Loading...",
+  and each page load contacted a third party. The build now ships Monaco and
+  havn serves it from `/monaco/vs`.
+- **Queries that return a timestamp with time zone work.** Anything built
+  from `now()` or `current_timestamp` failed in the UI and in `havn query`:
+  DuckDB needs `pytz` to hand those values to Python, and it was not a
+  dependency.
+- **Saving a file no longer overwrites changes made elsewhere.** The editor
+  sends the hash of the version it opened, and asks before overwriting a file
+  that changed since (another tab, an agent, git, a havn command). A new file
+  named after an existing one opens that file instead of replacing it with
+  the template. Jumping to an error in another file, or opening a notebook,
+  asks before discarding unsaved edits; unsaved notebook edits survive a tab
+  switch; the browser asks before a reload or close loses unsaved work.
+- **Query panel.** Results, errors and a run still in progress survive a tab
+  switch. A failed query no longer leaves the previous rows under its error.
+  The automatic LIMIT applies even when "limit" only appears in a comment,
+  and "capped" is shown only when rows were actually left out, saying which
+  limit applied, with a "Run without limit" button. Format keeps undo, keeps
+  DuckDB operators (`->>`, `//`, `**`, `$name` parameters) intact and no
+  longer overwrites what was typed while it ran. Explain and Export have
+  their own busy states, a failed export shows a readable error in the panel,
+  Enter in a parameter box runs, and Ctrl/Cmd+Enter works from anywhere in
+  the panel. History lists every entry and a pick can be undone; Clear asks
+  for a second click. The editor can no longer be resized past the window,
+  hiding the results, and the split handles work from the keyboard.
+- **Row cap and truncation.** The server skipped its row cap for any query
+  containing the word "limit" (even in a comment) and for a LIMIT inside a
+  subquery, and reported `truncated` for a result of exactly `limit` rows.
+  Error excerpts (`LINE 1: ...`) quoted the internal paging wrapper instead
+  of the query that was run.
+- **`havn query`.** `--csv` and `--json` are written verbatim: through Rich,
+  a long value split a CSV row across two lines and text such as `[bold]`
+  vanished. Server errors print the message on stderr, not raw JSON on
+  stdout, and `-n` stops the fetch instead of fetching every row.
+- **Dashboards.** Undo said "Saved" after restoring widget changes the server
+  never received; widget changes are saved as they happen, and Undo now says
+  they cannot be undone. Failures show a message instead of only being
+  logged, the widget editor stays open when a save fails and asks before
+  discarding changes, and a double click no longer adds two widgets. The
+  canvas below the filter bar is no longer cut off at the bottom, and the
+  widget editor, settings and confirm dialogs no longer open behind a
+  fullscreen dashboard.
+- **Keyboard and screen reader access.** Sortable headers, tabs, expanders,
+  file tree rows, the table and column lists, the result grid's pin menu
+  (menu key or Shift+F10) and resize handles (arrow keys) work without a
+  mouse. Dialogs trap focus and close on Escape, the command palette returns
+  focus where it was, and icon-only buttons have names.
+- **Confirmations before one-click data loss.** "Start fresh" (which deletes
+  every project file and the warehouse), discarding a file's git changes,
+  regenerating an ingest script, overwriting an existing secret, cancelling a
+  job run, discarding a change set, and deleting a dashboard page or saved
+  view now ask first. Running, rerunning, posting a review comment and
+  uploading a file can no longer be submitted twice.
+- **Failures that were only logged now show**, with a retry where it helps:
+  loading the sidebar's files and tables, switching environments, the
+  scheduler's "Run now", run details, notebook saves and dashboard writes.
+- Overview counted models skipped as unchanged as failed runs. A first-time
+  visitor who arrived on a deep link ends up back there after the tour.
+  Enter on the tour's Back button went back and then forward again. Clicking
+  a result cell threw when the page was opened over plain http on a LAN
+  address (no clipboard API).
+
 ## [0.3.0] - 2026-10-09
 
 ### Added

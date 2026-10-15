@@ -7,6 +7,7 @@ import ChartPanel from "./ChartPanel";
 import DashboardChart from "./DashboardCharts";
 import SortableTable from "./SortableTable";
 import FocusTrap from "./FocusTrap";
+import { clickable } from "./a11y";
 
 /**
  * Widget Editor — visual query builder + chart configurator.
@@ -177,22 +178,7 @@ function buildSQL(config) {
 // Main Component
 // ---------------------------------------------------------------------------
 
-// Inject global style to kill focus outlines on toggle buttons in widget editor
-const WIDGET_EDITOR_STYLE_ID = "havn-widget-editor-focus-fix";
-function ensureFocusFixStyle() {
-  if (typeof document === "undefined") return;
-  if (document.getElementById(WIDGET_EDITOR_STYLE_ID)) return;
-  const style = document.createElement("style");
-  style.id = WIDGET_EDITOR_STYLE_ID;
-  style.textContent = `
-    .havn-widget-editor button:focus { outline: none !important; box-shadow: none !important; }
-    .havn-widget-editor button:focus-visible { outline: none !important; box-shadow: none !important; }
-  `;
-  document.head.appendChild(style);
-}
-
 export default function WidgetEditor({ widget, onClose, onSave }) {
-  useEffect(() => { ensureFocusFixStyle(); }, []);
   const { updateWidget, addWidget, refreshWidget } = useDashboard();
   const isNew = !widget?.id;
 
@@ -249,6 +235,34 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
   const [previewError, setPreviewError] = useState(null);
   const [previewing, setPreviewing] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
+
+  // Save
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+
+  // Unsaved-change tracking, so dismissing the editor can ask first. The
+  // preview picks a chart type by itself; that is not the user's change, so
+  // the chart type only counts once they choose one.
+  const chartPickedRef = useRef(false);
+  const pickChartType = useCallback((t) => { chartPickedRef.current = true; setChartType(t); }, []);
+  function draftKey() {
+    return JSON.stringify([
+      mode, widgetType, title, widgetConfig, cacheTtl, sqlQuery, selectedTable, selectedColumns,
+      aggregations, dateGrouping, vFilters, orderBy, rowLimit, calculatedFields, columnDisplayNames,
+    ]);
+  }
+  const [initialDraft] = useState(draftKey);
+  function hasUnsavedChanges() {
+    if (draftKey() !== initialDraft) return true;
+    return chartPickedRef.current && chartType !== (widget?.chart_type || "bar");
+  }
+  // Escape, the backdrop, × and Cancel all land here. There is no app confirm
+  // dialog in reach (and App's would render under this one), so ask with the
+  // browser's.
+  function requestClose() {
+    if (hasUnsavedChanges() && !window.confirm("Discard your changes to this widget?")) return;
+    onClose();
+  }
 
   // Load tables on mount
   useEffect(() => {
@@ -357,6 +371,8 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
   }
 
   async function handleSave() {
+    // One save at a time: a double click on "Add to Dashboard" added two.
+    if (saving) return;
     autoTitle();
     const finalSQL = getFinalSQL();
     // Save visual builder state in config so it can be restored on edit
@@ -388,12 +404,18 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
       data.position = widget?.position || { x: 1, y: 1, w: 8, h: 4 };
       data.filters = [];
       data.sort_order = 0;
-      const w = await addWidget(data);
-      if (w) refreshWidget(w.id);
-    } else {
-      await updateWidget(widget.id, data);
-      refreshWidget(widget.id);
     }
+    setSaving(true);
+    setSaveError(null);
+    const w = isNew ? await addWidget(data) : await updateWidget(widget.id, data);
+    setSaving(false);
+    if (!w) {
+      // The dashboard has already said why (a toast). Stay open: closing
+      // here threw the whole widget configuration away.
+      setSaveError(isNew ? "The widget was not added. Your settings are still here; try again." : "Changes not saved. Your settings are still here; try again.");
+      return;
+    }
+    refreshWidget(isNew ? w.id : widget.id);
     onSave?.();
     onClose();
   }
@@ -513,8 +535,8 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
     <FocusTrap
       labelledBy="havn-widget-editor-title"
       style={st.overlay}
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-      onEscape={onClose}
+      onClick={(e) => e.target === e.currentTarget && requestClose()}
+      onEscape={requestClose}
     >
       <div style={st.panel} className="havn-widget-editor">
         {/* Header */}
@@ -539,7 +561,7 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
               </button>
             </div>
           </div>
-          <button style={st.closeBtn} onClick={onClose} aria-label="Close">×</button>
+          <button style={st.closeBtn} onClick={requestClose} aria-label="Close">×</button>
         </div>
 
         <div style={st.body}>
@@ -574,7 +596,7 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
                 widgetType={widgetType}
                 setWidgetType={setWidgetType}
                 chartType={chartType}
-                setChartType={setChartType}
+                setChartType={pickChartType}
                 typeGroups={typeGroups}
                 suggestions={suggestions}
                 title={title}
@@ -598,7 +620,7 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
                 widgetType={widgetType}
                 setWidgetType={setWidgetType}
                 chartType={chartType}
-                setChartType={setChartType}
+                setChartType={pickChartType}
                 typeGroups={typeGroups}
                 suggestions={suggestions}
                 title={title}
@@ -613,9 +635,10 @@ export default function WidgetEditor({ widget, onClose, onSave }) {
 
             {/* Save bar */}
             <div style={st.saveBar}>
-              <button style={st.cancelBtn} onClick={onClose}>Cancel</button>
-              <button style={st.saveBtn} onClick={handleSave}>
-                {isNew ? "Add to Dashboard" : "Save Changes"}
+              {saveError && <span role="alert" style={st.saveError}>{saveError}</span>}
+              <button style={st.cancelBtn} onClick={requestClose}>Cancel</button>
+              <button style={{ ...st.saveBtn, ...(saving ? { opacity: 0.6, cursor: "default" } : {}) }} onClick={handleSave} disabled={saving}>
+                {saving ? (isNew ? "Adding..." : "Saving...") : (isNew ? "Add to Dashboard" : "Save Changes")}
               </button>
             </div>
           </div>
@@ -781,7 +804,7 @@ function VisualBuilder({
                     style={st.checkbox}
                   />
                   <span style={{ ...st.colTypeIcon, color: typeColor(col.type) }}>{typeIcon(col.type)}</span>
-                  <span style={st.colName}>{col.name}</span>
+                  <span style={st.colName} title={col.name}>{col.name}</span>
                   {showDateDropdown && (
                     <select
                       style={st.inlineSelect}
@@ -1117,6 +1140,8 @@ function ChartStylePanel({ widgetConfig, setWidgetConfig, previewData }) {
   const sectionHeader = (key, label) => (
     <div
       onClick={() => toggle(key)}
+      {...clickable(() => toggle(key), label)}
+      aria-expanded={!!openSections[key]}
       style={{ ...st.sectionTitle2, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", paddingRight: 16, userSelect: "none" }}
     >
       <span>{label}</span>
@@ -1180,7 +1205,7 @@ function ChartStylePanel({ widgetConfig, setWidgetConfig, previewData }) {
               <div style={{ padding: "4px 16px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
                 {yCols.map(col => (
                   <div key={col} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 12, color: "var(--havn-text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col}</span>
+                    <span style={{ fontSize: 12, color: "var(--havn-text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={col}>{col}</span>
                     <input
                       type="color"
                       value={(widgetConfig.seriesColors || {})[col] || "#6366f1"}
@@ -1923,12 +1948,12 @@ function PreviewArea({ previewing, previewError, previewData, widgetType, chartT
   }
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: widgetConfig?.bgColor || undefined, borderRadius: widgetConfig?.bgColor ? 6 : undefined }}>
-      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden", background: widgetConfig?.bgColor || undefined, borderRadius: widgetConfig?.bgColor ? 6 : undefined }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {widgetType === "table" ? (
-          <div style={{ flex: 1, overflow: "auto" }}>
-            <SortableTable columns={columns} rows={rows} />
-          </div>
+          // Fills the bounded pane and scrolls itself, header pinned; a
+          // scroll wrapper of our own would take the header away.
+          <SortableTable fill columns={columns} rows={rows} />
         ) : widgetType === "text" ? (
           <div style={{ flex: 1, padding: 16, color: "var(--havn-text)" }}>
             {widgetConfig?.content || "No content"}
@@ -2005,13 +2030,14 @@ function KPIPreview({ columns, rows, config }) {
 // ---------------------------------------------------------------------------
 
 const st = {
-  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000 },
+  // Modal tier: at 2000 the editor opened *behind* a fullscreen dashboard (9999).
+  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000 },
   panel: { background: "var(--havn-bg)", border: "1px solid var(--havn-border)", borderRadius: 12, width: "92vw", maxWidth: 1100, height: "85vh", maxHeight: 760, display: "flex", flexDirection: "column", overflow: "hidden" },
   header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 20px", borderBottom: "1px solid var(--havn-border)", flexShrink: 0 },
   headerLeft: { display: "flex", alignItems: "center", gap: 16 },
   heading: { margin: 0, fontSize: 16, fontWeight: 600, color: "var(--havn-text)" },
   modeToggle: { display: "flex", border: "1px solid var(--havn-border)", borderRadius: 6, overflow: "hidden" },
-  modeBtn: { background: "none", border: "none", color: "var(--havn-text-secondary)", cursor: "pointer", padding: "4px 14px", fontSize: 12, fontWeight: 500, outline: "none" },
+  modeBtn: { background: "none", border: "none", color: "var(--havn-text-secondary)", cursor: "pointer", padding: "4px 14px", fontSize: 12, fontWeight: 500 },
   modeBtnActive: { background: "var(--havn-accent)", color: "#fff" },
   closeBtn: { background: "none", border: "none", color: "var(--havn-text-secondary)", fontSize: 22, cursor: "pointer", padding: "0 4px" },
   body: { display: "flex", flex: 1, overflow: "hidden" },
@@ -2046,7 +2072,7 @@ const st = {
   // Column picker (merged with configuration)
   presets: { display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", marginBottom: 6 },
   presetsLabel: { fontSize: 11, color: "var(--havn-text-secondary)" },
-  presetBtn: { background: "var(--havn-bg-secondary, var(--havn-bg))", border: "1px solid var(--havn-accent)", borderRadius: 12, padding: "3px 10px", fontSize: 11, color: "var(--havn-accent)", cursor: "pointer", whiteSpace: "nowrap", outline: "none" },
+  presetBtn: { background: "var(--havn-bg-secondary, var(--havn-bg))", border: "1px solid var(--havn-accent)", borderRadius: 12, padding: "3px 10px", fontSize: 11, color: "var(--havn-accent)", cursor: "pointer", whiteSpace: "nowrap" },
   bulkActions: { display: "flex", gap: 4, marginBottom: 6 },
   bulkBtn: { background: "none", border: "1px solid var(--havn-border)", borderRadius: 4, padding: "2px 8px", fontSize: 11, color: "var(--havn-text-secondary)", cursor: "pointer" },
   columnList: { maxHeight: 240, overflow: "auto", border: "1px solid var(--havn-border)", borderRadius: 6 },
@@ -2067,7 +2093,7 @@ const st = {
   filterValueInput: { padding: "3px 6px", border: "1px solid var(--havn-border)", borderRadius: 4, background: "var(--havn-bg-secondary, var(--havn-bg))", color: "var(--havn-text)", fontSize: 12, flex: 1, minWidth: 0 },
   removeBtn: { background: "none", border: "none", color: "var(--havn-red)", cursor: "pointer", fontSize: 16, padding: "0 4px", lineHeight: 1, flexShrink: 0 },
   limitRow: { display: "flex", gap: 4, flexWrap: "wrap" },
-  limitBtn: { padding: "4px 10px", border: "1px solid var(--havn-border)", borderRadius: 4, background: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: 12, outline: "none" },
+  limitBtn: { padding: "4px 10px", border: "1px solid var(--havn-border)", borderRadius: 4, background: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: 12 },
   limitBtnActive: { background: "var(--havn-accent)", color: "#fff", borderColor: "var(--havn-accent)" },
 
   // Chart & type config
@@ -2077,18 +2103,19 @@ const st = {
   textarea: { width: "calc(100% - 32px)", margin: "0 16px", padding: "8px 10px", border: "1px solid var(--havn-border)", borderRadius: 5, background: "var(--havn-bg-secondary, var(--havn-bg))", color: "var(--havn-text)", fontSize: 13, fontFamily: "var(--havn-font-mono)", outline: "none", resize: "vertical", boxSizing: "border-box" },
   runPreviewBtn: { margin: "8px 16px", padding: "7px 16px", background: "var(--havn-accent)", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12, fontWeight: 500 },
   typeRow: { display: "flex", gap: 6, padding: "0 16px" },
-  typeBtn: { flex: 1, padding: "8px 0", border: "1px solid var(--havn-border)", borderRadius: 6, background: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: 11, fontWeight: 500, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, outline: "none" },
+  typeBtn: { flex: 1, padding: "8px 0", border: "1px solid var(--havn-border)", borderRadius: 6, background: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: 11, fontWeight: 500, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 },
   typeBtnActive: { background: "var(--havn-accent)", color: "#fff", borderColor: "var(--havn-accent)" },
   suggestions: { display: "flex", alignItems: "center", gap: 4, padding: "0 16px", marginBottom: 8, flexWrap: "wrap" },
-  suggChip: { padding: "2px 10px", border: "1px solid var(--havn-accent)", borderRadius: 12, background: "none", color: "var(--havn-accent)", cursor: "pointer", fontSize: 11, outline: "none" },
+  suggChip: { padding: "2px 10px", border: "1px solid var(--havn-accent)", borderRadius: 12, background: "none", color: "var(--havn-accent)", cursor: "pointer", fontSize: 11 },
   suggChipActive: { background: "var(--havn-accent)", color: "#fff" },
   groupLabel: { fontSize: 10, fontWeight: 600, color: "var(--havn-text-secondary)", textTransform: "uppercase", letterSpacing: 0.5, padding: "0 16px", marginBottom: 3 },
   chartTypeGrid: { display: "flex", flexWrap: "wrap", gap: 4, padding: "0 16px" },
-  chartTypeBtn: { padding: "4px 8px", border: "1px solid var(--havn-border)", borderRadius: 4, background: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: 11, outline: "none" },
+  chartTypeBtn: { padding: "4px 8px", border: "1px solid var(--havn-border)", borderRadius: 4, background: "none", color: "var(--havn-text-secondary)", cursor: "pointer", fontSize: 11 },
   chartTypeBtnActive: { background: "var(--havn-accent)", color: "#fff", borderColor: "var(--havn-accent)" },
 
   // Save bar
-  saveBar: { display: "flex", gap: 8, justifyContent: "flex-end", padding: "10px 16px", borderTop: "1px solid var(--havn-border)", flexShrink: 0 },
+  saveBar: { display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center", padding: "10px 16px", borderTop: "1px solid var(--havn-border)", flexShrink: 0 },
+  saveError: { flex: 1, minWidth: 0, fontSize: 12, color: "var(--havn-red)" },
   cancelBtn: { background: "none", border: "1px solid var(--havn-border)", color: "var(--havn-text-secondary)", borderRadius: 6, padding: "8px 18px", cursor: "pointer", fontSize: 13 },
   saveBtn: { background: "var(--havn-accent)", color: "#fff", border: "none", borderRadius: 6, padding: "8px 18px", cursor: "pointer", fontSize: 13, fontWeight: 600 },
 };

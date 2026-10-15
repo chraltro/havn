@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import "./monacoSetup";
 import MonacoEditor from "@monaco-editor/react";
 import { api } from "./api";
 
@@ -8,7 +9,7 @@ import { api } from "./api";
  * Cell 2: sample output (SELECT * FROM model LIMIT 50)
  * Sidebar: upstream/downstream lineage with column-level details
  */
-export default function ModelNotebookView({ modelName, onClose, onSaved }) {
+export default function ModelNotebookView({ modelName, onClose, onSaved, showConfirm }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [sql, setSql] = useState("");
@@ -35,27 +36,49 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
   useEffect(() => { load(); }, [load]);
 
   const handleSave = async () => {
-    if (!data) return;
+    if (!data) return false;
     setSaving(true);
     try {
       await api.saveFile(data.path, sql);
       setDirty(false);
       if (onSaved) onSaved();
+      return true;
     } catch (e) {
       setError(e.message);
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
+  // Monaco keeps the Ctrl/Cmd+S command from its first mount, when nothing
+  // was dirty yet, so the command reads the current save through this ref.
+  const saveShortcutRef = useRef(null);
+  saveShortcutRef.current = dirty && !saving ? handleSave : null;
+
   const handleRunTransform = async () => {
+    setError(null);
+    // Build what is on screen, as the editor's Run does: save first. After
+    // the build only the sample data is refreshed, so the source is never
+    // reloaded over something typed meanwhile.
+    if (dirty && !(await handleSave())) return;
     try {
-      setError(null);
       await api.runTransform([modelName], false);
-      await load(); // Reload to get fresh sample data
+      setData(await api.getModelNotebookView(modelName));
     } catch (e) {
       setError(e.message);
     }
+  };
+
+  const handleClose = async () => {
+    if (dirty) {
+      const message = `Discard unsaved changes to ${data.path}?`;
+      const ok = showConfirm
+        ? await showConfirm("Unsaved changes", message, "Discard", true)
+        : window.confirm(message);
+      if (!ok) return;
+    }
+    onClose();
   };
 
   if (loading) return <div className="model-notebook loading">Loading model...</div>;
@@ -83,7 +106,7 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
             Run
           </button>
           {onClose && (
-            <button onClick={onClose} className="btn-sm">Close</button>
+            <button onClick={handleClose} className="btn-sm">Close</button>
           )}
         </div>
       </div>
@@ -105,7 +128,7 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
                 onChange={(val) => { setSql(val || ""); setDirty(true); }}
                 onMount={(editor, monaco) => {
                   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-                    if (dirty) handleSave();
+                    saveShortcutRef.current?.();
                   });
                 }}
                 theme="vs-dark"
@@ -134,12 +157,15 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
               <span className="cell-info">SELECT * FROM {data.model} LIMIT 50</span>
             </div>
             {data.sample_data ? (
-              <div className="cell-output" style={{ overflowX: "auto", maxHeight: "400px" }}>
+              // One scroller for both axes, so the sticky header has something
+              // to stick to; the header is a shadow, not a collapsed border,
+              // which would stay behind with the first rows.
+              <div className="cell-output" style={{ overflow: "auto", maxHeight: "400px" }}>
                 <table className="sample-table" style={{ fontSize: "12px", borderCollapse: "collapse", width: "100%" }}>
                   <thead>
                     <tr>
                       {data.sample_data.columns.map((col) => (
-                        <th key={col} style={{ padding: "4px 8px", borderBottom: "1px solid var(--havn-border)", textAlign: "left", whiteSpace: "nowrap" }}>
+                        <th key={col} style={{ padding: "4px 8px", boxShadow: "inset 0 -1px 0 var(--havn-border)", textAlign: "left", whiteSpace: "nowrap", position: "sticky", top: 0, zIndex: 1, background: "var(--havn-bg)" }}>
                           {col}
                         </th>
                       ))}
@@ -149,7 +175,7 @@ export default function ModelNotebookView({ modelName, onClose, onSaved }) {
                     {data.sample_data.rows.map((row, i) => (
                       <tr key={i}>
                         {row.map((val, j) => (
-                          <td key={j} style={{ padding: "3px 8px", borderBottom: "1px solid var(--havn-border-light)", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <td key={j} title={val === null ? undefined : String(val)} style={{ padding: "3px 8px", borderBottom: "1px solid var(--havn-border-light)", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {val === null ? <span style={{ color: "var(--havn-text-dim)" }}>null</span> : String(val)}
                           </td>
                         ))}

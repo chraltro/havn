@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { api } from "./api";
+import { useDashboard } from "./DashboardContext";
+import FocusTrap from "./FocusTrap";
+import { clickable, useDismiss } from "./a11y";
 
 function timeAgo(dateStr) {
   if (!dateStr) return "";
@@ -34,9 +37,11 @@ function saveFavorites(ids) {
 }
 
 export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
+  const { showToast } = useDashboard();
   const [dashboards, setDashboards] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
@@ -57,24 +62,42 @@ export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
 
   useEffect(() => { load(); }, []);
 
+  // A failed action: the console for debugging, a toast so the user knows.
+  function reportError(what, e) {
+    console.error(`${what}:`, e);
+    showToast(`${what}: ${e?.message || e}`, "error");
+  }
+
   async function load() {
     setLoading(true);
+    setLoadError(null);
     try {
       const [dashes, tmpls] = await Promise.all([
         api.listDashboards(),
-        api.listDashboardTemplates(),
+        // Templates are optional: failing to list them must not hide the list.
+        api.listDashboardTemplates().catch(() => []),
       ]);
       setDashboards(dashes || []);
       setTemplates(tmpls || []);
     } catch (e) {
       console.error("Failed to load dashboards:", e);
+      // Shown instead of the list: "No dashboards yet" would be a lie.
+      setLoadError(e?.message || "Failed to load dashboards");
     } finally {
       setLoading(false);
     }
   }
 
+  function closeCreate() {
+    setShowCreate(false);
+    setNewName("");
+    setNewDesc("");
+  }
+
   async function handleCreate(templateId) {
-    if (!newName.trim()) return;
+    // Enter in the name field comes through here too, so the busy guard
+    // lives here and not only on the buttons.
+    if (creating || !newName.trim()) return;
     setCreating(true);
     try {
       const dash = await api.createDashboard(newName.trim(), newDesc.trim(), templateId);
@@ -84,7 +107,7 @@ export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
       setNewDesc("");
       if (dash?.id) onOpenDashboard(dash.id);
     } catch (e) {
-      console.error("Failed to create dashboard:", e);
+      reportError("Couldn't create the dashboard", e);
     } finally {
       setCreating(false);
     }
@@ -97,7 +120,7 @@ export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
         load();
       }
     } catch (e) {
-      console.error("Clone failed:", e);
+      reportError("Couldn't clone the dashboard", e);
     }
   }
 
@@ -110,7 +133,7 @@ export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
       await api.deleteDashboard(id);
       setDashboards(prev => prev.filter(d => d.id !== id));
     } catch (e) {
-      console.error("Delete failed:", e);
+      reportError("Couldn't delete the dashboard", e);
     }
   }
 
@@ -125,7 +148,7 @@ export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      console.error("Export failed:", e);
+      reportError("Couldn't export the dashboard", e);
     }
   }
 
@@ -134,7 +157,12 @@ export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
     if (!file) return;
     try {
       const text = await file.text();
-      const data = JSON.parse(text);
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`${file.name} is not a dashboard export (not valid JSON)`);
+      }
       const dash = await api.importDashboard({
         dashboard: data.dashboard || data,
         widgets: data.widgets || [],
@@ -144,13 +172,31 @@ export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
         load();
       }
     } catch (err) {
-      console.error("Import failed:", err);
+      reportError("Couldn't import the dashboard", err);
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   if (loading) {
     return <div style={st.container}><div style={st.center}>Loading dashboards...</div></div>;
+  }
+
+  if (loadError) {
+    return (
+      <div style={st.container}>
+        <div style={st.empty} role="alert">
+          <div style={{ fontSize: 16, fontWeight: 500, color: "var(--havn-text)" }}>
+            Couldn't load dashboards
+          </div>
+          <div style={{ fontSize: 13, color: "var(--havn-text-secondary)", marginTop: 4 }}>
+            {loadError}
+          </div>
+          <button style={{ ...st.primaryBtn, marginTop: 16 }} onClick={load}>
+            Retry
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -184,9 +230,9 @@ export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
 
       {/* Create dialog */}
       {showCreate && (
-        <div style={st.dialog}>
+        <FocusTrap labelledBy="havn-new-dashboard-title" style={st.dialog} onEscape={closeCreate}>
           <div style={st.dialogInner}>
-            <h3 style={{ margin: "0 0 12px", color: "var(--havn-text)" }}>New Dashboard</h3>
+            <h3 id="havn-new-dashboard-title" style={{ margin: "0 0 12px", color: "var(--havn-text)" }}>New Dashboard</h3>
             <input
               style={st.input}
               placeholder="Dashboard name"
@@ -222,7 +268,7 @@ export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
               </div>
             )}
             <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
-              <button style={st.cancelBtn} onClick={() => { setShowCreate(false); setNewName(""); setNewDesc(""); }}>
+              <button style={st.cancelBtn} onClick={closeCreate}>
                 Cancel
               </button>
               <button
@@ -234,7 +280,7 @@ export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
               </button>
             </div>
           </div>
-        </div>
+        </FocusTrap>
       )}
 
       {/* Dashboard cards */}
@@ -296,18 +342,15 @@ export default function DashboardListPanel({ onOpenDashboard, showConfirm }) {
 function DashboardCard({ dashboard, isFavorite, onToggleFavorite, onOpen, onClone, onExport, onDelete }) {
   const [showActions, setShowActions] = useState(false);
   const actionsRef = useRef(null);
+  const menuBtnRef = useRef(null);
 
-  useEffect(() => {
-    if (!showActions) return;
-    const handler = (e) => {
-      if (actionsRef.current && !actionsRef.current.contains(e.target)) setShowActions(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [showActions]);
+  // Escape or a click outside closes the menu; the ⋯ button counts as inside
+  // so it toggles instead of closing and reopening.
+  useDismiss(showActions, () => setShowActions(false), [actionsRef, menuBtnRef], menuBtnRef);
 
   return (
     <div style={st.card} onClick={onOpen}
+      {...clickable(onOpen, `Open dashboard ${dashboard.name || "Untitled"}`)}
       onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--havn-accent)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.1)"; }}
       onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--havn-border)"; e.currentTarget.style.boxShadow = "none"; }}>
       <div style={st.cardHeader}>
@@ -316,19 +359,24 @@ function DashboardCard({ dashboard, isFavorite, onToggleFavorite, onOpen, onClon
             style={st.starBtn}
             onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
             title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+            aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
           >
             {isFavorite ? "\u2605" : "\u2606"}
           </button>
-          <span style={st.cardName}>{dashboard.name}</span>
+          <span style={st.cardName} title={dashboard.name}>{dashboard.name}</span>
         </div>
         <button
+          ref={menuBtnRef}
           style={st.cardMenuBtn}
           onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }}
+          aria-label={`Actions for ${dashboard.name || "Untitled"}`}
+          aria-expanded={showActions}
         >
           ⋯
         </button>
         {showActions && (
           <div ref={actionsRef} style={st.cardMenu} onClick={(e) => e.stopPropagation()}>
+            <button style={st.cardMenuItem} onClick={() => { setShowActions(false); onOpen(); }}>Open</button>
             <button style={st.cardMenuItem} onClick={() => { setShowActions(false); onClone(); }}>Clone</button>
             <button style={st.cardMenuItem} onClick={() => { setShowActions(false); onExport(); }}>Export</button>
             <button style={{ ...st.cardMenuItem, color: "var(--havn-red)" }} onClick={() => { setShowActions(false); onDelete(); }}>Delete</button>
@@ -336,7 +384,7 @@ function DashboardCard({ dashboard, isFavorite, onToggleFavorite, onOpen, onClon
         )}
       </div>
       {dashboard.description && (
-        <div style={st.cardDesc}>{dashboard.description}</div>
+        <div style={st.cardDesc} title={dashboard.description}>{dashboard.description}</div>
       )}
       <div style={st.cardMeta}>
         <span>{dashboard.widget_count || 0} widget{dashboard.widget_count !== 1 ? "s" : ""}</span>

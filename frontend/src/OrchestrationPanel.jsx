@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { api } from "./api";
 import { usePipeline } from "./PipelineContext";
+import { clickable } from "./a11y";
 
 /* =====================================================================
  * OrchestrationPanel — Plan Jobs (with inline row form, cron wizard,
@@ -1366,6 +1367,8 @@ function DagPickerModal({ initialTargets, onCancel, onSave }) {
                             <button
                               type="button"
                               title="Toggle '+upstream' selector on this target"
+                              aria-label={`Include upstream of ${n.id}`}
+                              aria-pressed={!!markers?.up}
                               style={{
                                 ...s.dagZoneLeft,
                                 background: markers?.up
@@ -1378,7 +1381,12 @@ function DagPickerModal({ initialTargets, onCancel, onSave }) {
                             >
                               {markers?.up ? "+" : "\u25C0"}
                             </button>
-                            <div style={s.dagBoxCenter} onClick={() => toggleNode(n.id)}>
+                            <div
+                              style={s.dagBoxCenter}
+                              onClick={() => toggleNode(n.id)}
+                              {...clickable(() => toggleNode(n.id), n.id)}
+                              aria-pressed={selected}
+                            >
                               <div style={{ fontSize: 11, fontWeight: 600, color: col.color }}>
                                 {n.kind === "ingest" ? "ING" : n.kind === "export" ? "EXP" : n.schema.toUpperCase()}
                               </div>
@@ -1399,6 +1407,8 @@ function DagPickerModal({ initialTargets, onCancel, onSave }) {
                             <button
                               type="button"
                               title="Toggle 'downstream+' selector on this target"
+                              aria-label={`Include downstream of ${n.id}`}
+                              aria-pressed={!!markers?.down}
                               style={{
                                 ...s.dagZoneRight,
                                 background: markers?.down
@@ -1444,7 +1454,7 @@ function DagPickerModal({ initialTargets, onCancel, onSave }) {
                     <code style={{ fontSize: 10 }}>
                       {buildSelector(id, markers.up, markers.down)}
                     </code>
-                    <button style={s.chipRemove} onClick={() => toggleNode(id)}>×</button>
+                    <button style={s.chipRemove} onClick={() => toggleNode(id)} aria-label={`Remove ${buildSelector(id, markers.up, markers.down)}`}>×</button>
                   </span>
                 ))}
                 {selection.size > 20 && (
@@ -1527,6 +1537,9 @@ function PlanJobsTab({ onSwitchToResults, showConfirm }) {
   const [cronWizardIdx, setCronWizardIdx] = useState(null);
   const [showDagPicker, setShowDagPicker] = useState(false);
   const [filterTag, setFilterTag] = useState("");
+  // The job whose Run request is in flight. Run stays disabled meanwhile, so
+  // a double click does not start the job twice.
+  const [startingJob, setStartingJob] = useState(null);
 
   const loadJobs = useCallback(async () => {
     setLoading(true);
@@ -1643,11 +1656,15 @@ function PlanJobsTab({ onSwitchToResults, showConfirm }) {
   };
 
   const handleRun = async (name) => {
+    if (startingJob) return;
+    setStartingJob(name);
     try {
       await api.runJob(name);
       onSwitchToResults();
     } catch (e) {
       setError(e.message || "Failed to run job");
+    } finally {
+      setStartingJob(null);
     }
   };
 
@@ -1715,7 +1732,7 @@ function PlanJobsTab({ onSwitchToResults, showConfirm }) {
       {error && (
         <div style={s.errorBanner}>
           <span>{error}</span>
-          <button style={s.errorClose} onClick={() => setError(null)}>×</button>
+          <button style={s.errorClose} onClick={() => setError(null)} aria-label="Dismiss error">×</button>
         </div>
       )}
 
@@ -1732,7 +1749,10 @@ function PlanJobsTab({ onSwitchToResults, showConfirm }) {
           </div>
         </div>
       ) : (
-        <div style={{ border: "1px solid var(--havn-border)", borderRadius: 4, overflow: "hidden" }}>
+        // overflow: clip, not hidden: it rounds the corners the same way but
+        // is not a scroll container, so the sticky header below still sticks
+        // to the panel's scroller instead of to this box.
+        <div style={{ border: "1px solid var(--havn-border)", borderRadius: 4, overflow: "clip" }}>
           <table style={s.table}>
             <thead>
               <tr>
@@ -1787,6 +1807,7 @@ function PlanJobsTab({ onSwitchToResults, showConfirm }) {
                     onToggle={(enabled) => handleToggle(job.name, enabled)}
                     onTagClick={(tag) => setFilterTag(tag)}
                     disabled={formMode != null}
+                    startingJob={startingJob}
                   />
                 );
               })}
@@ -1865,7 +1886,7 @@ function Sparkline({ runs }) {
 }
 
 /* Single job row (read-only) ----------------------------------------- */
-function JobTableRow({ job, onRun, onEdit, onClone, onDelete, onToggle, onTagClick, disabled }) {
+function JobTableRow({ job, onRun, onEdit, onClone, onDelete, onToggle, onTagClick, disabled, startingJob }) {
   const targets = Array.isArray(job.targets) && job.targets.length > 0
     ? job.targets
     : job.target ? [job.target] : [];
@@ -1963,7 +1984,9 @@ function JobTableRow({ job, onRun, onEdit, onClone, onDelete, onToggle, onTagCli
       </td>
       <td style={{ ...s.td, textAlign: "right" }}>
         <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-          <button style={s.btn} onClick={onRun} disabled={disabled}>Run</button>
+          <button style={s.btn} onClick={onRun} disabled={disabled || startingJob != null}>
+            {startingJob === job.name ? "Starting…" : "Run"}
+          </button>
           <button style={s.btn} onClick={onEdit} disabled={disabled}>Edit</button>
           <button style={s.btn} onClick={onClone} disabled={disabled} title="Clone this job">Clone</button>
           <button
@@ -2082,6 +2105,8 @@ function JobFormRow({ form, setForm, editing, saving, onSave, onCancel, onOpenCr
                           setForm((f) => ({ ...f, targets: next }));
                         }}
                         title={up ? "Remove upstream" : "Include upstream"}
+                        aria-label={`Include upstream of ${inner}`}
+                        aria-pressed={up}
                       >
                         +
                       </button>
@@ -2095,6 +2120,8 @@ function JobFormRow({ form, setForm, editing, saving, onSave, onCancel, onOpenCr
                           setForm((f) => ({ ...f, targets: next }));
                         }}
                         title={down ? "Remove downstream" : "Include downstream"}
+                        aria-label={`Include downstream of ${inner}`}
+                        aria-pressed={down}
                       >
                         +
                       </button>
@@ -2103,6 +2130,7 @@ function JobFormRow({ form, setForm, editing, saving, onSave, onCancel, onOpenCr
                         style={s.chipRemove}
                         onClick={() => removeTarget(i)}
                         title="Remove"
+                        aria-label={`Remove target ${t}`}
                       >
                         ×
                       </button>
@@ -2143,7 +2171,7 @@ function JobFormRow({ form, setForm, editing, saving, onSave, onCancel, onOpenCr
                           <button style={s.btn} onClick={() => onOpenCronWizard(i)} type="button">
                             Wizard
                           </button>
-                          <button style={s.btnDanger} onClick={() => removeSchedule(i)} type="button" title="Remove schedule">
+                          <button style={s.btnDanger} onClick={() => removeSchedule(i)} type="button" title="Remove schedule" aria-label={`Remove schedule ${sched || i + 1}`}>
                             ×
                           </button>
                         </div>
@@ -2186,7 +2214,7 @@ function JobFormRow({ form, setForm, editing, saving, onSave, onCancel, onOpenCr
                   {form.tags.map((t) => (
                     <span key={t} style={s.tagBadge}>
                       #{t}
-                      <button type="button" style={s.chipRemove} onClick={() => removeTag(t)}>×</button>
+                      <button type="button" style={s.chipRemove} onClick={() => removeTag(t)} aria-label={`Remove tag ${t}`}>×</button>
                     </span>
                   ))}
                 </div>
@@ -2242,7 +2270,7 @@ function JobFormRow({ form, setForm, editing, saving, onSave, onCancel, onOpenCr
 /* Job Results Tab (unchanged behavior, restyled)                      */
 /* ------------------------------------------------------------------ */
 
-function JobResultsTab() {
+function JobResultsTab({ showConfirm }) {
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedRun, setSelectedRun] = useState(null);
@@ -2290,9 +2318,12 @@ function JobResultsTab() {
     }
   };
 
-  const handleCancel = async (runId) => {
+  const handleCancel = async (run) => {
+    const msg = `Stop the running "${run.job_name}" job? Steps that have not finished yet will not run.`;
+    if (showConfirm && !(await showConfirm("Cancel Job Run", msg, "Stop run", true))) return;
+    if (!showConfirm && !confirm(msg)) return;
     try {
-      await api.cancelJobRun(runId);
+      await api.cancelJobRun(run.id);
       await loadRuns();
     } catch (e) {
       setError(e.message || "Failed to cancel run");
@@ -2329,7 +2360,7 @@ function JobResultsTab() {
       {error && (
         <div style={s.errorBanner}>
           <span>{error}</span>
-          <button style={s.errorClose} onClick={() => setError(null)}>×</button>
+          <button style={s.errorClose} onClick={() => setError(null)} aria-label="Dismiss error">×</button>
         </div>
       )}
 
@@ -2364,8 +2395,13 @@ function JobResultsTab() {
           </thead>
           <tbody>
             {filteredRuns.map((run) => (
-              <tr key={run.id} style={{ cursor: "pointer" }} onClick={() => openRun(run)}>
-                <td style={{ ...s.td, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><strong>{run.job_name}</strong></td>
+              <tr
+                key={run.id}
+                style={{ cursor: "pointer" }}
+                onClick={() => openRun(run)}
+                {...clickable(() => openRun(run), `Open run of ${run.job_name} (${run.status})`)}
+              >
+                <td style={{ ...s.td, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={run.job_name}><strong>{run.job_name}</strong></td>
                 <td style={s.td}><StatusBadge status={run.status} /></td>
                 <td style={s.td}>
                   {run.steps_completed}/{run.steps_total}
@@ -2389,7 +2425,7 @@ function JobResultsTab() {
                   {run.status === "running" && (
                     <button
                       style={s.btnDanger}
-                      onClick={(e) => { e.stopPropagation(); handleCancel(run.id); }}
+                      onClick={(e) => { e.stopPropagation(); handleCancel(run); }}
                     >
                       Cancel
                     </button>
@@ -2407,6 +2443,7 @@ function JobResultsTab() {
 function JobRunDetail({ run: initialRun, onBack, onRerun }) {
   const [run, setRun] = useState(initialRun);
   const [rerunError, setRerunError] = useState(null);
+  const [rerunning, setRerunning] = useState(false);
 
   // Auto-refresh while the run is still in progress
   useEffect(() => {
@@ -2426,6 +2463,9 @@ function JobRunDetail({ run: initialRun, onBack, onRerun }) {
   const skipped = run.steps_skipped || 0;
 
   const handleRerun = async () => {
+    // Disabled while the request is in flight, so a double click is one run.
+    if (rerunning) return;
+    setRerunning(true);
     setRerunError(null);
     try {
       await api.runJob(run.job_name);
@@ -2433,6 +2473,8 @@ function JobRunDetail({ run: initialRun, onBack, onRerun }) {
       onBack();
     } catch (e) {
       setRerunError(e.message || "Failed to rerun job");
+    } finally {
+      setRerunning(false);
     }
   };
 
@@ -2440,7 +2482,9 @@ function JobRunDetail({ run: initialRun, onBack, onRerun }) {
     <div style={s.content}>
       <div style={s.toolbar}>
         <button style={s.btn} onClick={onBack}>← Back</button>
-        <button style={s.btnPrimary} onClick={handleRerun}>Rerun</button>
+        <button style={s.btnPrimary} onClick={handleRerun} disabled={rerunning}>
+          {rerunning ? "Starting…" : "Rerun"}
+        </button>
       </div>
 
       {rerunError && (
@@ -2535,7 +2579,7 @@ function StepPreview({ target }) {
             {preview.rows.map((row, ri) => (
               <tr key={ri}>
                 {row.map((cell, ci) => (
-                  <td key={ci} style={{ padding: "2px 8px", borderBottom: "1px solid var(--havn-border)", color: cell == null ? "var(--havn-text-dim)" : "var(--havn-text)", fontStyle: cell == null ? "italic" : "normal", whiteSpace: "nowrap", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <td key={ci} title={cell == null ? undefined : String(cell)} style={{ padding: "2px 8px", borderBottom: "1px solid var(--havn-border)", color: cell == null ? "var(--havn-text-dim)" : "var(--havn-text)", fontStyle: cell == null ? "italic" : "normal", whiteSpace: "nowrap", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }}>
                     {cell == null ? "NULL" : String(cell)}
                   </td>
                 ))}
@@ -2556,15 +2600,19 @@ function StepDetailRow({ step }) {
   const canExpand = hasError || hasOutput || (isTransform && step.status === "success");
   const rows = step.rows_affected;
   const prevRows = step.previous_row_count;
+  const toggle = () => setExpanded((v) => !v);
   return (
     <div style={{ borderBottom: "1px solid var(--havn-border)" }}>
       <div
         style={{ display: "flex", alignItems: "center", padding: "8px 12px", fontSize: 13, cursor: canExpand ? "pointer" : "default" }}
-        onClick={() => canExpand && setExpanded(!expanded)}
+        onClick={() => canExpand && toggle()}
+        // Only a step with an error, output or preview behind it expands, and
+        // only then is the row a keyboard-operable button.
+        {...(canExpand ? { ...clickable(toggle, `Step ${step.step}: ${step.target} (${step.status})`), "aria-expanded": expanded } : {})}
       >
         <span style={{ color: "var(--havn-text-dim)", width: 28, flexShrink: 0, textAlign: "right", marginRight: 8 }}>{step.step}.</span>
         <span style={{ width: 40, flexShrink: 0, marginRight: 8 }}><TypeBadge type={step.type} /></span>
-        <code style={{ ...s.codeSm, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{step.target}</code>
+        <code style={{ ...s.codeSm, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={step.target}>{step.target}</code>
         <span style={{ width: 72, flexShrink: 0, textAlign: "center", marginLeft: 8 }}><StatusBadge status={step.status} /></span>
         <span style={{ width: 64, flexShrink: 0, textAlign: "right", fontSize: 11, color: "var(--havn-text-dim)", marginLeft: 8 }}>
           {step.duration_ms != null ? formatDuration(step.duration_ms) : ""}
@@ -2607,23 +2655,26 @@ export default function OrchestrationPanel({ showConfirm }) {
   return (
     <div style={s.container}>
       <div style={s.header}>
-        <div style={s.tabs}>
+        <div style={s.tabs} role="tablist" aria-label="Orchestration views">
           {[
             { id: "plan-jobs", label: "Plan Jobs" },
             { id: "job-results", label: "Job Results" },
           ].map((t) => (
-            <div
+            <button
               key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={subTab === t.id}
               style={{ ...s.tab, ...(subTab === t.id ? s.tabActive : {}) }}
               onClick={() => setSubTab(t.id)}
             >
               {t.label}
-            </div>
+            </button>
           ))}
         </div>
       </div>
       {subTab === "plan-jobs" && <PlanJobsTab onSwitchToResults={() => setSubTab("job-results")} showConfirm={showConfirm} />}
-      {subTab === "job-results" && <JobResultsTab />}
+      {subTab === "job-results" && <JobResultsTab showConfirm={showConfirm} />}
     </div>
   );
 }
@@ -2651,10 +2702,12 @@ const s = {
   tab: {
     padding: "10px 20px",
     cursor: "pointer",
+    font: "inherit",
     fontSize: 13,
     color: "var(--havn-text-secondary)",
-    borderBottom: "2px solid transparent",
     background: "none",
+    border: "none",
+    borderBottom: "2px solid transparent",
     userSelect: "none",
   },
   tabActive: {
@@ -2767,6 +2820,9 @@ const s = {
     borderRadius: 3,
   },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
+  // Both job tables sit in `content`, which scrolls and has 20px padding; a
+  // sticky box stays inside that padding, so top -20 pins the header to the
+  // scroller's visible top edge instead of leaving a gap above it.
   th: {
     textAlign: "left",
     padding: "8px 12px",
@@ -2776,6 +2832,9 @@ const s = {
     textTransform: "uppercase",
     letterSpacing: "0.3px",
     background: "var(--havn-bg-secondary)",
+    position: "sticky",
+    top: -20,
+    zIndex: 1,
   },
   td: {
     padding: "10px 12px",

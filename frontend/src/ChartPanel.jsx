@@ -402,18 +402,23 @@ export default function ChartPanel({ columns, rows, forcedType, compact, xAxisLa
   // Reference lines from config
   const refLines = config?.referenceLines || [];
 
-  // No data guard
-  if (!columns || columns.length < 2 || rows.length === 0) {
-    return <div style={st.empty}>Need at least 2 columns and 1 row to chart.</div>;
-  }
-
-  // Dimensions — compute dynamic padding based on chart data
+  // Dimensions — compute dynamic padding based on chart data. This hook must
+  // run on every render, so it sits ABOVE the no-data guard: returning early
+  // before it changed the hook count when a chartable result was replaced by
+  // a 0-row or 1-column one, and React threw "Rendered fewer hooks", taking
+  // the whole Query panel down.
   const { width: W, height: H } = dims;
   const PAD = useMemo(() => {
     if (isPieType || !chartData?.labels) return PAD_BASE;
     const estPlotW = W - PAD_BASE.left - PAD_BASE.right;
     return dynamicPad(chartData.labels, estPlotW);
   }, [W, chartData?.labels, isPieType]);
+
+  // No data guard
+  if (!columns || columns.length < 2 || rows.length === 0) {
+    return <div style={st.empty}>Need at least 2 columns and 1 row to chart.</div>;
+  }
+
   const plotW = W - PAD.left - PAD.right;
   const plotH = H - PAD.top - PAD.bottom;
 

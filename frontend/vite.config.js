@@ -1,8 +1,50 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { cpSync, createReadStream, existsSync, statSync } from "node:fs";
+import { extname, join, normalize, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = fileURLToPath(new URL(".", import.meta.url));
+const MONACO_VS = resolve(HERE, "node_modules/monaco-editor/min/vs");
+const MONACO_TYPES = { ".js": "application/javascript", ".css": "text/css", ".ttf": "font/ttf", ".json": "application/json" };
+
+// Monaco is served by havn, not fetched from cdn.jsdelivr.net (see
+// src/monacoSetup.js): the build copies its AMD files to dist/monaco/vs, and
+// the dev server serves them straight from node_modules. Two plugins, because
+// Vite also calls closeBundle when a dev or test server shuts down: one
+// plugin with both hooks copied 16 MB on every vitest run.
+function monacoServe() {
+  return {
+    name: "havn-monaco-serve",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use("/monaco/vs", (req, res, next) => {
+        const rel = normalize(decodeURIComponent((req.url || "/").split("?")[0])).replace(/^[/\\]+/, "");
+        const file = join(MONACO_VS, rel);
+        if (!file.startsWith(MONACO_VS + sep) || !existsSync(file) || !statSync(file).isFile()) return next();
+        res.setHeader("Content-Type", MONACO_TYPES[extname(file)] || "application/octet-stream");
+        createReadStream(file).pipe(res);
+      });
+    },
+  };
+}
+
+function monacoCopy() {
+  let outDir = resolve(HERE, "dist");
+  return {
+    name: "havn-monaco-copy",
+    apply: "build",
+    configResolved(config) {
+      outDir = resolve(config.root, config.build.outDir);
+    },
+    closeBundle() {
+      cpSync(MONACO_VS, join(outDir, "monaco", "vs"), { recursive: true });
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), monacoServe(), monacoCopy()],
   build: {
     chunkSizeWarningLimit: 1500,
     rollupOptions: {

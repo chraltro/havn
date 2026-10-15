@@ -11,7 +11,7 @@ import DAGPanel from "./DAGPanel";
 import SentinelPanel from "./SentinelPanel";
 import DiffPanel from "./DiffPanel";
 import DocsPanel from "./DocsPanel";
-import NotebookPanel from "./NotebookPanel";
+import NotebookPanel, { hasUnsavedNotebooks } from "./NotebookPanel";
 import DataSourcesPanel from "./DataSourcesPanel";
 import OverviewPanel from "./OverviewPanel";
 import HomePanel from "./HomePanel";
@@ -33,6 +33,7 @@ import ResizeHandle from "./ResizeHandle";
 import useResizable from "./useResizable";
 import { useFilesChanged } from "./filesChanged";
 import SortableTable from "./SortableTable";
+import { clickable } from "./a11y";
 import Onboarding from "./Onboarding";
 import ErrorBoundary from "./ErrorBoundary";
 import Hint from "./Hint";
@@ -264,7 +265,7 @@ function groupBySchema(tables) {
   return schemas;
 }
 
-function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
+function SchemaTree({ tables, selectedTable, onSelectTable, filter, loadFailed }) {
   const allSchemas = groupBySchema(tables);
   // Apply filter to table names
   const schemas = {};
@@ -305,7 +306,9 @@ function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
   }, [selectedTable]);
 
   if (tables.length === 0) {
-    return <div style={stStyles.empty}>No tables yet</div>;
+    // After a failed load the error above says what happened; "No tables
+    // yet" under it would contradict it.
+    return loadFailed ? null : <div style={stStyles.empty}>No tables yet</div>;
   }
 
   return (
@@ -317,6 +320,8 @@ function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
             <div
               style={stStyles.schemaRow}
               onClick={() => setExpanded((prev) => ({ ...prev, [schema]: !prev[schema] }))}
+              {...clickable(() => setExpanded((prev) => ({ ...prev, [schema]: !prev[schema] })), `Schema ${schema}`)}
+              aria-expanded={Boolean(expanded[schema])}
               title={sys ? "System schema (introspection)" : undefined}
             >
               <span style={{ ...stStyles.arrow, transform: expanded[schema] ? "rotate(0deg)" : "rotate(-90deg)" }}>
@@ -339,6 +344,10 @@ function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
                     borderLeft: isActive ? "2px solid var(--havn-accent)" : "2px solid transparent",
                   }}
                   onClick={() => onSelectTable(t.schema, t.name)}
+                  {...clickable(() => onSelectTable(t.schema, t.name), `Open table ${key}`)}
+                  aria-current={isActive ? "true" : undefined}
+                  // Long names are cut off with an ellipsis; the tooltip has all of it.
+                  title={key}
                 >
                   <span style={{
                     ...stStyles.typeIcon,
@@ -355,7 +364,20 @@ function SchemaTree({ tables, selectedTable, onSelectTable, filter }) {
   );
 }
 
+// A failed load used to leave an empty tree ("No tables yet"), which reads
+// as an empty project rather than a server that did not answer.
+function SidebarLoadError({ message, what, onRetry }) {
+  return (
+    <div role="alert" style={stStyles.loadError}>
+      <span>Could not load {what}: {message}</span>
+      <button onClick={onRetry} style={stStyles.loadErrorRetry}>Retry</button>
+    </div>
+  );
+}
+
 const stStyles = {
+  loadError: { margin: "6px 8px", padding: "6px 8px", fontSize: "11px", color: "var(--havn-red)", background: "color-mix(in srgb, var(--havn-red) 8%, transparent)", borderRadius: "var(--havn-radius)", display: "flex", flexDirection: "column", gap: "4px", wordBreak: "break-word" },
+  loadErrorRetry: { alignSelf: "flex-start", background: "none", border: "1px solid currentColor", borderRadius: "var(--havn-radius)", color: "inherit", cursor: "pointer", fontSize: "10px", padding: "1px 8px" },
   empty: { padding: "12px", color: "var(--havn-text-dim)", fontSize: "12px", textAlign: "center" },
   schemaRow: { display: "flex", alignItems: "center", gap: "6px", padding: "5px 8px", cursor: "pointer", margin: "0 4px", borderRadius: "3px" },
   arrow: { fontSize: "10px", color: "var(--havn-text-dim)", width: "10px", display: "inline-block", transition: "transform 0.12s ease" },
@@ -392,7 +414,10 @@ function DashboardsSection({ showConfirm, embedMode }) {
   }
 
   return (
-    <>
+    // A column, so the canvas gets the height left under the filter bar. As
+    // siblings in a plain box the canvas took the full height *below* the
+    // bar, and its last filter-bar's-worth of widgets was clipped off.
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <DashboardFilterBar />
       <DashboardCanvas
         onBack={closeDashboard}
@@ -407,13 +432,13 @@ function DashboardsSection({ showConfirm, embedMode }) {
           onSave={() => setEditingWidget(null)}
         />
       )}
-    </>
+    </div>
   );
 }
 
 function AppContent() {
   const { currentUser, handleLogout } = useAuth();
-  const { tables, files, streams, loadFiles, refreshAll } = useWarehouse();
+  const { tables, files, streams, loadErrors, loadFiles, refreshAll } = useWarehouse();
   const { running, output, runSummary, progress, addOutput, clearOutput, setRunSummary, runTransformAll, runStream, cancelPipeline, runLint, runCurrentScript, runSingleModel, runSelection, runContracts, runPipeline } = usePipeline();
 
   // A git checkout moved the server onto another warehouse (branch
@@ -442,6 +467,11 @@ function AppContent() {
   const [fileLang, setFileLang] = useState("sql");
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
+  // Hash of the open file as last read or saved. Every save sends it, so the
+  // server refuses to overwrite a file that changed on disk in between
+  // (another tab, an agent, git, a rename) instead of silently clobbering it.
+  const fileHashRef = useRef(null);
+  const fileContentRef = useRef("");
   const [preview, setPreview] = useState(null);
   const [previewError, setPreviewError] = useState(null);
   const [previewRunning, setPreviewRunning] = useState(false);
@@ -510,12 +540,17 @@ function AppContent() {
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [isSampleProject, setIsSampleProject] = useState(false);
   const onboardingProjectRef = useRef(null);
+  // The page a first-time visitor actually asked for. The tour walks them
+  // through other tabs, and a deep link (a colleague's /data/dashboards) used
+  // to end on wherever the tour stopped instead.
+  const tourReturnTabRef = useRef(null);
   useEffect(() => {
     api.getOverview().then((overview) => {
       const name = overview.project_name || "__default__";
       onboardingProjectRef.current = name;
       setIsSampleProject(!!overview.is_sample);
       if (!localStorage.getItem(`havn_onboarding_completed:${name}`)) {
+        tourReturnTabRef.current = pathToTab(window.location.pathname);
         setOnboardingOpen(true);
       }
     }).catch(() => {});
@@ -587,6 +622,25 @@ function AppContent() {
 
   // Command palette state
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Where focus was when the palette opened. Closing it (Escape, or an
+  // action that does not move focus itself) used to drop focus on <body>,
+  // so a keyboard user had to tab in from the top of the page again.
+  const paletteOpenRef = useRef(false);
+  const paletteReturnFocusRef = useRef(null);
+  paletteOpenRef.current = paletteOpen;
+  function rememberFocusForPalette() {
+    if (!paletteOpenRef.current) paletteReturnFocusRef.current = document.activeElement;
+  }
+  const paletteWasOpenRef = useRef(false);
+  useEffect(() => {
+    if (paletteOpen) { paletteWasOpenRef.current = true; return; }
+    if (!paletteWasOpenRef.current) return;
+    paletteWasOpenRef.current = false;
+    const el = paletteReturnFocusRef.current;
+    paletteReturnFocusRef.current = null;
+    const focusLost = !document.activeElement || document.activeElement === document.body;
+    if (focusLost && el && el !== document.body && document.contains(el) && typeof el.focus === "function") el.focus();
+  }, [paletteOpen]);
 
   // Delete confirmation dialog state
   const [deleteConfirm, setDeleteConfirm] = useState(null);
@@ -617,6 +671,9 @@ function AppContent() {
     setOnboardingOpen(false);
     const name = onboardingProjectRef.current || "__default__";
     localStorage.setItem(`havn_onboarding_completed:${name}`, "true");
+    const back = tourReturnTabRef.current;
+    tourReturnTabRef.current = null;
+    if (back && back !== "Overview") setActiveTab(back);
   }
 
   async function handleClearSample() {
@@ -626,6 +683,19 @@ function AppContent() {
     } catch (e) {
       addOutput("error", `Failed to clear sample project: ${e.message || e}`);
     }
+  }
+
+  // Home's "Start fresh" and the tour's last step deleted every project file
+  // and the warehouse on a single click. The Overview banner asks on its own
+  // and calls handleClearSample directly.
+  async function confirmClearSample() {
+    const ok = await showConfirm(
+      "Start fresh?",
+      "This deletes the warehouse, its restore points and everything in ingest/, transform/, export/, macros/, seeds/, contracts/ and notebooks/, including files you added yourself. project.yml is reset to an empty project; .env and .gitignore are kept.",
+      "Delete and start fresh",
+      true,
+    );
+    if (ok) await handleClearSample();
   }
 
   function showGuide() {
@@ -679,6 +749,7 @@ function AppContent() {
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         e.stopPropagation();
+        rememberFocusForPalette();
         setPaletteOpen((v) => !v);
       }
     }
@@ -713,8 +784,16 @@ function AppContent() {
     const seq = ++openFileSeqRef.current;
     path = path.replace(/\\/g, "/");
     if (path.endsWith(".dpnb")) {
+      // Opening a notebook over unsaved edits stranded them: the buffer kept
+      // the text, but coming back to that file meant discarding it.
+      if (dirty && activeFile && activeFile !== path) {
+        const ok = await showConfirm("Unsaved changes", `Discard unsaved changes to ${activeFile} and open ${path}?`, "Discard", true);
+        if (!ok || seq !== openFileSeqRef.current) return;
+        setDirty(false);
+      }
       setNotebookPath(path);
       setActiveFile(path);
+      fileHashRef.current = null; // the notebook panel saves notebooks itself
       setActiveTab("Editor");
       return;
     }
@@ -770,6 +849,7 @@ function AppContent() {
 
       setActiveFile(path);
       setFileContent(content);
+      fileHashRef.current = data.file_hash || null;
       setFileLang(data.language);
       setDirty(false);
       setPreview(null);
@@ -827,28 +907,64 @@ function AppContent() {
   }
 
   async function openFileAtLine(ref, line, col) {
+    const seq = ++openFileSeqRef.current;
     const path = await resolveFilePath(ref);
+    if (seq !== openFileSeqRef.current) return;
     if (activeFile === path) {
       setGoToLine({ line, col: col || 1 });
       setActiveTab("Editor");
-    } else {
-      try {
-        const data = await api.readFile(path);
-        setActiveFile(path);
-        setFileContent(data.content);
-        setFileLang(data.language);
-        setDirty(false);
-        setActiveTab("Editor");
-        setTimeout(() => setGoToLine({ line, col: col || 1 }), 50);
-      } catch (e) {
-        addOutput("error", `Failed to open: ${e.message}`);
-      }
+      return;
     }
+    // The same guard as openFile: jumping to an error or a model in another
+    // file replaced the buffer and dropped unsaved edits without asking.
+    if (dirty && activeFile) {
+      const ok = await showConfirm("Unsaved changes", `Discard unsaved changes to ${activeFile} and open ${path}?`, "Discard", true);
+      if (!ok || seq !== openFileSeqRef.current) return;
+    }
+    try {
+      const data = await api.readFile(path);
+      if (seq !== openFileSeqRef.current) return;
+      setActiveFile(path);
+      setFileContent(data.content);
+      fileHashRef.current = data.file_hash || null;
+      setFileLang(data.language);
+      setDirty(false);
+      setPreview(null);
+      setPreviewError(null);
+      setActiveTab("Editor");
+      setTimeout(() => setGoToLine({ line, col: col || 1 }), 50);
+    } catch (e) {
+      if (seq !== openFileSeqRef.current) return;
+      addOutput("error", `Failed to open: ${e.message}`);
+    }
+  }
+
+  // Something other than a save from this editor wrote the open file (a
+  // format, a lint fix, a rename): adopt the new hash, or the next save
+  // would be refused as a conflict with our own write.
+  async function refreshFileHash(path) {
+    try {
+      const d = await api.readFile(path);
+      if (activeFileRef.current === path) fileHashRef.current = d.file_hash || null;
+    } catch { /* the file may be gone; the save will say so */ }
   }
 
   // Keep refs in sync for use in callbacks with stale closures
   activeFileRef.current = activeFile;
   dirtyRef.current = dirty;
+  fileContentRef.current = fileContent;
+
+  // Reloading or closing the tab threw away unsaved editor and notebook
+  // changes without a word. The browser asks first now.
+  useEffect(() => {
+    function onBeforeUnload(e) {
+      if (!dirtyRef.current && !hasUnsavedNotebooks()) return;
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
 
   // A column rename rewrites files the editor never opened, so the tree and
   // the cached model list both went stale when it returned.
@@ -872,6 +988,7 @@ function AppContent() {
     try {
       const data = await api.readFile(file);
       setFileContent(data.content);
+      fileHashRef.current = data.file_hash || null;
       setDirty(false);
     } catch {
       // file may have been deleted — ignore
@@ -893,22 +1010,44 @@ function AppContent() {
   // flipped the UI to idle mid-run.
   async function saveFile({ runAfter = true } = {}) {
     if (!activeFile) return false;
+    const path = activeFile;
+    const content = fileContent;
     try {
-      await api.saveFile(activeFile, fileContent);
-      setDirty(false);
-      addOutput("info", `Saved ${activeFile}`);
+      let res;
+      try {
+        res = await api.saveFile(path, content, { expectedHash: fileHashRef.current });
+      } catch (e) {
+        if (!e.conflict) throw e;
+        const overwrite = await showConfirm(
+          "File changed on disk",
+          `${path} was changed outside this editor after you opened it (another tab, an agent, git or a havn command). Overwrite it with your version? Cancel keeps your edits here, unsaved.`,
+          "Overwrite",
+          true,
+        );
+        if (!overwrite) {
+          addOutput("warn", `Not saved: ${path} changed on disk. Your edits are still in the editor.`);
+          return false;
+        }
+        res = await api.saveFile(path, content);
+      }
+      if (activeFileRef.current === path) {
+        fileHashRef.current = res?.file_hash || null;
+        // Typing during the save made the buffer newer than what was written.
+        if (fileContentRef.current === content) setDirty(false);
+      }
+      addOutput("info", `Saved ${path}`);
       // Saving is the cue for a lint pass: SQLFluff is too slow to run per
       // keystroke, so the editor listens for this rather than polling.
-      window.dispatchEvent(new CustomEvent("havn-file-saved", { detail: { path: activeFile } }));
+      window.dispatchEvent(new CustomEvent("havn-file-saved", { detail: { path } }));
       setHintTrigger("firstFileEdited", true);
       // Run on save: rebuild this single model / re-run this single
       // script after a successful save, if the toggle is on.
       if (runAfter && runOnSave && !running) {
-        if (isModelFile(activeFile, fileContent)) {
-          const modelName = modelNameFromPath(activeFile);
+        if (isModelFile(path, content)) {
+          const modelName = modelNameFromPath(path);
           runSingleModel(modelName).catch(e => addOutput("error", `Run on save failed: ${e.message}`));
-        } else if ((activeFile.startsWith("ingest/") || activeFile.startsWith("export/")) && activeFile.endsWith(".py")) {
-          runCurrentScript(activeFile).catch(e => addOutput("error", `Run on save failed: ${e.message}`));
+        } else if ((path.startsWith("ingest/") || path.startsWith("export/")) && path.endsWith(".py")) {
+          runCurrentScript(path).catch(e => addOutput("error", `Run on save failed: ${e.message}`));
         }
       }
       return true;
@@ -929,11 +1068,18 @@ function AppContent() {
       ? `-- config: materialized=table\n\nSELECT 1\n`
       : "";
     try {
-      await api.saveFile(path, defaultContent);
+      // createOnly: a PUT also overwrites, so a "new" file named after an
+      // existing one replaced that file's content with the template.
+      await api.saveFile(path, defaultContent, { createOnly: true });
       addOutput("info", `Created ${path}`);
       await loadFiles();
       openFile(path);
     } catch (e) {
+      if (e.conflict) {
+        addOutput("warn", `${path} already exists; opened it instead.`);
+        openFile(path);
+        return;
+      }
       addOutput("error", `Failed to create: ${e.message}`);
     }
   }
@@ -1029,15 +1175,25 @@ function AppContent() {
   async function formatCurrentFile() {
     if (!activeFile || !activeFile.endsWith(".sql")) return;
     addOutput("info", `Formatting ${activeFile}...`);
+    const path = activeFile;
+    const sent = fileContent;
     try {
-      const data = await api.lintFile(activeFile, true, fileContent);
+      const data = await api.lintFile(path, true, sent);
       for (const v of data.violations || []) {
         addOutput("warn", `${activeFile}:${v.line}:${v.col} [${v.code}] ${v.description} (unfixable)`);
       }
       const fixed = data.fixed ?? 0;
       if (fixed > 0) addOutput("info", `${fixed} issue(s) fixed.`);
       else if (data.count === 0) addOutput("info", "No violations found.");
-      if (data.content != null) setFileContent(data.content);
+      if (data.content != null && data.content !== sent) {
+        // The fix was written to disk, unsaved edits included, so the file
+        // and the buffer match again: nothing is left to save.
+        if (fileContentRef.current === sent) {
+          setFileContent(data.content);
+          setDirty(false);
+        }
+        refreshFileHash(path);
+      }
     } catch (e) {
       addOutput("error", e.message);
     }
@@ -1102,10 +1258,20 @@ function AppContent() {
 
   async function handleRunLintWithReload(fix = false) {
     await runLint(fix);
-    if (fix && activeFile) {
-      const d = await api.readFile(activeFile);
+    if (!fix || !activeFile) return;
+    const path = activeFile;
+    try {
+      const d = await api.readFile(path);
+      if (activeFileRef.current !== path || d.file_hash === fileHashRef.current) return;
+      if (dirtyRef.current) {
+        // The fix rewrote the file on disk, not the unsaved edits in the
+        // editor. Reloading here threw those edits away.
+        addOutput("warn", `Lint fixed ${path} on disk. Your unsaved edits are kept (unfixed); saving will ask before overwriting the fixed file.`);
+        return;
+      }
       setFileContent(d.content);
-    }
+      fileHashRef.current = d.file_hash || null;
+    } catch { /* the file may be gone */ }
   }
 
   // SQL files under transform/ and the .py files there that define a model
@@ -1135,6 +1301,7 @@ function AppContent() {
         if (path !== activeFileRef.current) return;
         setFileContent(text);
         setDirty(false);
+        refreshFileHash(path);
       }}
       onMount={(editor) => { editorRef.current = editor; setEditorInstance(editor); }}
       goToLine={goToLine}
@@ -1172,7 +1339,7 @@ function AppContent() {
             files and commands. */}
         <button
           type="button"
-          onClick={() => setPaletteOpen(true)}
+          onClick={() => { rememberFocusForPalette(); setPaletteOpen(true); }}
           style={styles.omnibox}
           aria-label="Search models, tables, files and commands"
           aria-keyshortcuts="Control+K Meta+K"
@@ -1261,6 +1428,7 @@ function AppContent() {
               <button onClick={() => setShowNewDialog(true)} style={styles.sidebarNewBtn} title="Create new file" aria-label="Create new file">+</button>
             </div>
             <div style={styles.sidebarPaneContent}>
+              {loadErrors.files && <SidebarLoadError message={loadErrors.files} what="files" onRetry={refreshAll} />}
               <FileTree files={files} onSelect={openFile} activeFile={activeFile} onNewFile={createFile} onDeleteFile={deleteFile} onMoveFile={moveFile} filter={sidebarFilter} />
             </div>
           </div>
@@ -1272,7 +1440,9 @@ function AppContent() {
               <div style={styles.sidebarPane} data-havn-guide="tables-pane">
                 <div style={styles.sidebarSectionHeader}>TABLES</div>
                 <div style={styles.sidebarPaneContent}>
+                  {loadErrors.tables && <SidebarLoadError message={loadErrors.tables} what="tables" onRetry={refreshAll} />}
                   <SchemaTree
+                    loadFailed={!!loadErrors.tables}
                     tables={tables}
                     selectedTable={selectedTable}
                     onSelectTable={handleSelectTable}
@@ -1380,7 +1550,7 @@ function AppContent() {
                     navigateToTab("Query");
                     window.__havn_prefill_query = { sql, run: true };
                   }}
-                  onClearSample={handleClearSample}
+                  onClearSample={confirmClearSample}
                   onAttentionCount={setAttentionCount}
                   showConfirm={showConfirm}
                   firstRun={
@@ -1468,7 +1638,7 @@ function AppContent() {
                   </div>
                   {(preview || previewError || previewRunning) && (
                     <>
-                      <ResizeHandle direction="vertical" onResize={(d) => onPreviewResize(-d)} onResizeStart={onPreviewResizeStart} />
+                      <ResizeHandle direction="vertical" label="Resize preview" onResize={(d) => onPreviewResize(-d)} onResizeStart={onPreviewResizeStart} />
                       <div style={{ height: previewHeight, flexShrink: 0, borderTop: "1px solid var(--havn-border)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
                         <div style={{ padding: "4px 12px", fontSize: "11px", color: "var(--havn-text-secondary)", borderBottom: "1px solid var(--havn-border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
                           <span>
@@ -1476,10 +1646,12 @@ function AppContent() {
                           </span>
                           <button onClick={() => { setPreview(null); setPreviewError(null); }} style={{ background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", lineHeight: 1 }} aria-label="Close preview">{"\u00D7"}</button>
                         </div>
-                        <div style={{ flex: 1, overflow: "auto" }}>
+                        {/* The table (fill mode) is the only scroller here, so its
+                            header stays pinned; an error message scrolls itself. */}
+                        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: previewError ? "auto" : "hidden" }}>
                           {previewError
                             ? <div style={{ padding: "8px 12px", color: "var(--havn-red)", fontFamily: "var(--havn-font-mono)", fontSize: "12px", whiteSpace: "pre-wrap" }}>{previewError}</div>
-                            : preview && <SortableTable columns={preview.columns} rows={preview.rows} />
+                            : preview && <SortableTable fill columns={preview.columns} rows={preview.rows} />
                           }
                         </div>
                       </div>
@@ -1552,6 +1724,7 @@ function AppContent() {
             <div style={{ ...styles.agentPanel, width: agentWidth }} aria-label="Agent">
               <ErrorBoundary name="Agent Sidebar">
                 <AgentSidebar
+                  showConfirm={showConfirm}
                   isOpen={agentSidebarOpen}
                   onToggle={() => setAgentSidebarOpen(false)}
                   onFileChanged={() => { reloadActiveFile(); refreshAll(); }}
@@ -1567,7 +1740,7 @@ function AppContent() {
       </div>
 
       {!onboardingOpen && <Hint onNavigate={navigateToTab} />}
-      <Onboarding onComplete={handleOnboardingComplete} isOpen={onboardingOpen} onNavigate={navigateToTab} tables={tables} onSelectTable={handleSelectTable} files={files} onOpenFile={openFile} isSample={isSampleProject} onClearSample={handleClearSample} />
+      <Onboarding onComplete={handleOnboardingComplete} isOpen={onboardingOpen} onNavigate={navigateToTab} tables={tables} onSelectTable={handleSelectTable} files={files} onOpenFile={openFile} isSample={isSampleProject} onClearSample={confirmClearSample} />
 
       {/* Dialog priority system: only one dialog visible at a time */}
       {/* Priority: delete > agent > confirm (highest to lowest) */}
@@ -1630,6 +1803,7 @@ function AppContent() {
             modelName={modelNotebookName}
             onClose={() => setModelNotebookName(null)}
             onSaved={() => { loadFiles(); }}
+            showConfirm={showConfirm}
           />
         </div>
       )}
@@ -1805,7 +1979,10 @@ const styles = {
 };
 
 const dcStyles = {
-  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 },
+  // Modal tier (10000, as Share and Reports): above fullscreen surfaces
+  // (9999), so a confirm raised from a fullscreen dashboard is not hidden
+  // behind it. App's dialogs come last in the DOM, so they top other modals.
+  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000 },
   dialog: { background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "8px", padding: "20px", width: "420px", maxWidth: "90vw" },
   title: { fontSize: "14px", fontWeight: 600, color: "var(--havn-text)", marginBottom: "8px" },
   body: { fontSize: "13px", color: "var(--havn-text-secondary)", marginBottom: "16px", lineHeight: 1.5 },

@@ -50,7 +50,7 @@ export default function NewModelDialog({ onClose, onCreated }) {
   };
 
   return (
-    <FocusTrap labelledBy="havn-new-model-dialog-title" className="dialog-overlay" onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+    <FocusTrap labelledBy="havn-new-model-dialog-title" className="dialog-overlay" onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000 }}>
       <div className="dialog" onClick={(e) => e.stopPropagation()} style={{ background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "8px", padding: "20px", width: "400px", color: "var(--havn-text)" }}>
         <h3 id="havn-new-model-dialog-title" style={{ margin: "0 0 16px" }}>New</h3>
 

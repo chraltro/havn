@@ -233,7 +233,7 @@ describe("the target dialog", () => {
     await act(async () => {
       answer = editorContext.confirmTarget({ model: "bronze.line_items", column: "amount", files: 1 });
     });
-    expect(await screen.findByLabelText("Confirm rename target")).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: "Rename bronze.line_items.amount in 1 file?" })).toBeTruthy();
     await userEvent.click(screen.getByText("Cancel"));
     expect(await answer).toBe(false);
   });

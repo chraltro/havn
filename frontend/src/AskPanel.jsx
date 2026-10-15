@@ -161,7 +161,7 @@ function Unanswerable({ answer, onAsk, onAccepted }) {
           <pre style={st.pre}>{answer.exploratory.sql}</pre>
           {answer.exploratory.error && <div style={st.err}>{answer.exploratory.error}</div>}
           {answer.exploratory.result && (
-            <SortableTable columns={answer.exploratory.result.columns} rows={answer.exploratory.result.rows} />
+            <SortableTable maxHeight={280} columns={answer.exploratory.result.columns} rows={answer.exploratory.result.rows} />
           )}
         </div>
       )}
@@ -185,7 +185,7 @@ function Answer({ turn, onAsk, onAccepted }) {
           {a.summary && <div style={st.explain}>{a.summary}</div>}
           <AnswerChart result={a.result} chart={a.chart} />
           <div style={st.tableBox}>
-            <SortableTable columns={a.result.columns} rows={a.result.rows} columnTypes={a.result.column_types} />
+            <SortableTable maxHeight={280} columns={a.result.columns} rows={a.result.rows} columnTypes={a.result.column_types} />
           </div>
           {a.result.truncated && <div style={st.dim}>Result capped at ai.max_rows.</div>}
           <Provenance answer={a} />
@@ -314,7 +314,9 @@ const st = {
   specLine: { fontFamily: "var(--havn-font-mono)", fontSize: 12, color: "var(--havn-text-secondary)" },
   explain: { fontSize: 13, color: "var(--havn-text)" },
   chartBox: { height: 260, border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius, 6px)", overflow: "hidden" },
-  tableBox: { maxHeight: 280, overflow: "auto", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius, 6px)" },
+  // The table caps and scrolls itself (header pinned); scrolling this box
+  // too made the header scroll away with the rows.
+  tableBox: { border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius, 6px)", overflow: "hidden" },
   kpi: { padding: "10px 0" },
   kpiValue: { fontSize: 32, fontWeight: 600, color: "var(--havn-text)", fontVariantNumeric: "tabular-nums" },
   prov: { fontSize: 12 },

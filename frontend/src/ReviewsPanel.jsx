@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { api } from "./api";
 import { useAuth } from "./AuthContext";
+import { clickable } from "./a11y";
 
 /* ------------------------------------------------------------------ */
 /* Formatters                                                          */
@@ -209,15 +210,18 @@ export default function ReviewsPanel({ showConfirm }) {
             Commit and push .havn/prs/ to share with your team.
           </div>
         )}
-        <div style={s.tabs}>
+        <div style={s.tabs} role="tablist" aria-label="Pull request status">
           {LIST_SUB_TABS.map((t) => (
-            <div
+            <button
               key={t}
+              type="button"
+              role="tab"
+              aria-selected={tab === t}
               style={{ ...s.tab, ...(tab === t ? s.tabActive : {}) }}
               onClick={() => setTab(t)}
             >
               {t}
-            </div>
+            </button>
           ))}
         </div>
       </div>
@@ -276,7 +280,12 @@ export default function ReviewsPanel({ showConfirm }) {
             </thead>
             <tbody>
               {filteredPrs.map((pr) => (
-                <tr key={pr.id} onClick={() => setSelectedId(pr.id)} style={s.trClickable}>
+                <tr
+                  key={pr.id}
+                  onClick={() => setSelectedId(pr.id)}
+                  {...clickable(() => setSelectedId(pr.id), `Open pull request ${pr.id}: ${pr.title}`)}
+                  style={s.trClickable}
+                >
                   <td style={s.td}><code style={s.codeSm}>{pr.id}</code></td>
                   <td style={s.td}>
                     <div style={{ fontWeight: 500 }}>{pr.title}</div>
@@ -437,6 +446,7 @@ function PrDetail({ prId, onBack, showConfirm }) {
   const [error, setError] = useState(null);
   const [action, setAction] = useState(null); // "building", "merging", etc.
   const [commentDraft, setCommentDraft] = useState("");
+  const [postingComment, setPostingComment] = useState(false);
   const [changeRequestReason, setChangeRequestReason] = useState("");
   const [showChangeRequestForm, setShowChangeRequestForm] = useState(false);
   const auth = useAuth();
@@ -579,13 +589,17 @@ function PrDetail({ prId, onBack, showConfirm }) {
   };
 
   const handleAddComment = async () => {
-    if (!commentDraft.trim()) return;
+    // A second click while the first post is in flight would add the comment twice.
+    if (!commentDraft.trim() || postingComment) return;
+    setPostingComment(true);
     try {
       await api.addPrComment(prId, { body: commentDraft, author: currentUser });
       setCommentDraft("");
       await loadAll();
     } catch (e) {
       setError(e.message);
+    } finally {
+      setPostingComment(false);
     }
   };
 
@@ -638,9 +652,9 @@ function PrDetail({ prId, onBack, showConfirm }) {
             )}
           </div>
         </div>
-        <div style={s.tabs}>
+        <div style={s.tabs} role="tablist" aria-label="Pull request details">
           {DETAIL_TABS.map((t) => (
-            <button key={t} style={tab === t ? { ...s.tab, ...s.tabActive } : s.tab} onClick={() => setTab(t)}>
+            <button key={t} type="button" role="tab" aria-selected={tab === t} style={tab === t ? { ...s.tab, ...s.tabActive } : s.tab} onClick={() => setTab(t)}>
               {t}
               {t === "Comments" && pr.comments.length > 0 && ` (${pr.comments.length})`}
             </button>
@@ -688,6 +702,7 @@ function PrDetail({ prId, onBack, showConfirm }) {
             commentDraft={commentDraft}
             setCommentDraft={setCommentDraft}
             onAddComment={handleAddComment}
+            posting={postingComment}
           />
         )}
       </div>
@@ -852,7 +867,7 @@ function LineageTab({ lineage }) {
 }
 
 /* --- Comments tab --- */
-function CommentsTab({ pr, commentDraft, setCommentDraft, onAddComment }) {
+function CommentsTab({ pr, commentDraft, setCommentDraft, onAddComment, posting }) {
   return (
     <div>
       {pr.comments.length === 0 ? (
@@ -879,8 +894,8 @@ function CommentsTab({ pr, commentDraft, setCommentDraft, onAddComment }) {
             onChange={(e) => setCommentDraft(e.target.value)}
             placeholder="Leave a comment…"
           />
-          <button style={s.btnPrimary} onClick={onAddComment} disabled={!commentDraft.trim()}>
-            Post comment
+          <button style={s.btnPrimary} onClick={onAddComment} disabled={!commentDraft.trim() || posting}>
+            {posting ? "Posting…" : "Post comment"}
           </button>
         </div>
       )}
@@ -916,7 +931,7 @@ const s = {
     color: "var(--havn-text)",
   },
   tabs: { display: "flex", gap: 0 },
-  tab: { padding: "8px 20px", cursor: "pointer", fontSize: 13, color: "var(--havn-text-secondary)", background: "none", border: "none", borderBottom: "2px solid transparent" },
+  tab: { padding: "8px 20px", cursor: "pointer", font: "inherit", fontSize: 13, color: "var(--havn-text-secondary)", background: "none", border: "none", borderBottom: "2px solid transparent" },
   tabActive: { color: "var(--havn-text)", borderBottom: "2px solid var(--havn-accent)" },
   content: { flex: 1, overflow: "auto", padding: 20 },
   toolbar: { display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap" },
@@ -924,7 +939,9 @@ const s = {
   filterSelect: { padding: "5px 8px", background: "var(--havn-bg-tertiary)", color: "var(--havn-text)", border: "1px solid var(--havn-border-light)", borderRadius: 6, fontSize: 12 },
   count: { fontSize: 12, color: "var(--havn-text-dim)", marginLeft: "auto" },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
-  th: { textAlign: "left", padding: "8px 12px", borderBottom: "1px solid var(--havn-border-light)", color: "var(--havn-text-secondary)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.3px" },
+  // Sticky inside `content`, which scrolls and has 20px padding: top -20 pins
+  // the header to the visible top edge rather than 20px below it.
+  th: { textAlign: "left", padding: "8px 12px", borderBottom: "1px solid var(--havn-border-light)", color: "var(--havn-text-secondary)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.3px", position: "sticky", top: -20, zIndex: 1, background: "var(--havn-bg)" },
   td: { padding: "8px 12px", borderBottom: "1px solid var(--havn-border)", color: "var(--havn-text)", verticalAlign: "top" },
   trClickable: { cursor: "pointer" },
   codeSm: { fontFamily: "var(--havn-font-mono)", fontSize: 11, background: "var(--havn-bg-tertiary)", padding: "1px 5px", borderRadius: 3 },

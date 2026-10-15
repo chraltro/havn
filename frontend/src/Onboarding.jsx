@@ -508,6 +508,15 @@ export default function Onboarding({ onComplete, isOpen, onNavigate, tables, onS
   useEffect(() => {
     if (!isOpen) return;
     function handleKey(e) {
+      // Enter on a focused button already fires its click: Enter on "Back"
+      // went back *and* forward, and on "Skip tour" or "Start Fresh" also
+      // advanced. Text fields keep their own keys. (The same guard as the
+      // guided tour.)
+      const tag = e.target?.tagName;
+      if (e.key !== "Escape") {
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (e.key === "Enter" && (tag === "BUTTON" || tag === "A")) return;
+      }
       if (e.key === "Escape") {
         onComplete();
       } else if (e.key === "ArrowRight" || e.key === "Enter") {
@@ -841,15 +850,17 @@ const styles = {
     fontSize: "12px",
     transition: "border-color 0.15s ease, color 0.15s ease",
   },
+  // Readable: dim text at 65% opacity was the faintest thing on the card,
+  // for the one way out of the tour.
   btnSkip: {
     padding: "2px 0",
     background: "none",
     border: "none",
-    color: "var(--havn-text-dim)",
+    color: "var(--havn-text-secondary)",
     cursor: "pointer",
     fontSize: "11px",
-    opacity: 0.65,
-    transition: "opacity 0.15s ease",
+    textDecoration: "underline",
+    textUnderlineOffset: "2px",
   },
   keyHint: {
     display: "inline-flex",

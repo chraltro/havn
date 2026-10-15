@@ -38,6 +38,10 @@ dependencies = [
     "sqlglot>=26.17,<30",
     "prometheus_client>=0.20",
     "pyarrow>=18",
+    # DuckDB imports pytz to turn TIMESTAMP WITH TIME ZONE values (anything
+    # built from current_timestamp or now()) into Python objects. Without it
+    # every query returning such a column fails, in the UI and the CLI.
+    "pytz>=2023.3",
 ]
 
 [project.optional-dependencies]
