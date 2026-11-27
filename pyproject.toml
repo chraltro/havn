@@ -24,17 +24,22 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "duckdb>=1.5.2",          # DuckLake 1.0 requires DuckDB 1.5.2+
+    # DuckLake 1.0 requires DuckDB 1.5.2+. Capped below 2: DuckDB 2.0 changed
+    # the Python API havn is built on (relations no longer hold a result, a
+    # busy connection refuses a second call instead of waiting), and under it
+    # macros fail to register and live models, Python models and performance
+    # capture break. pip picks 2.x on Python 3.11+ without this cap.
+    "duckdb>=1.5.2,<2",
     "numpy>=1.24",
     "typer>=0.15.0",
     "pyyaml>=6.0",
+    "ruamel.yaml>=0.18,<0.19",  # yamlio.py moves comment tokens through ruamel internals; tested on 0.18
     "rich>=13.0",
     "sqlfluff>=3.0",
     "watchdog>=4.0",
     "fastapi>=0.115.0",
     "python-multipart>=0.0.9",
     "uvicorn[standard]>=0.34.0",
-    "huey>=2.5",
     "sqlglot>=26.17,<30",
     "prometheus_client>=0.20",
     "pyarrow>=18",

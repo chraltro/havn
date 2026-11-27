@@ -718,3 +718,95 @@ class TestAgentWebSocket:
         finally:
             registry.AGENT_REGISTRY.clear()
             registry.AGENT_REGISTRY.update(original)
+
+
+# ---------------------------------------------------------------------------
+# An open socket ends when its user's sessions are revoked
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def auth_server(agent_project):
+    """Auth-enabled server with an admin and a second admin, ``ed``."""
+    from types import SimpleNamespace
+
+    import havn.server.app as server_app
+    from havn.server import deps
+
+    deps.reset_shared_conn()
+    deps._clear_config_cache()
+    deps.invalidate_token_cache()
+    old_dir, old_auth = server_app.PROJECT_DIR, server_app.AUTH_ENABLED
+    server_app.PROJECT_DIR = agent_project
+    server_app.AUTH_ENABLED = True
+    c = TestClient(server_app.app)
+    admin = c.post("/api/auth/setup", json={"username": "admin", "password": "admin-password"})
+    assert admin.status_code == 200, admin.text
+    h = {"Authorization": f"Bearer {admin.json()['token']}"}
+    r = c.post("/api/users", json={"username": "ed", "password": "ed-password-1", "role": "admin"},
+               headers=h)
+    assert r.status_code == 200, r.text
+    ed = c.post("/api/auth/login", json={"username": "ed", "password": "ed-password-1"})
+    assert ed.status_code == 200, ed.text
+    yield SimpleNamespace(client=c, admin_headers=h, ed=ed.json()["token"])
+    deps.reset_shared_conn()
+    deps._clear_config_cache()
+    deps.invalidate_token_cache()
+    server_app.PROJECT_DIR, server_app.AUTH_ENABLED = old_dir, old_auth
+
+
+@pytest.mark.parametrize("revocation", ["password", "delete"])
+def test_open_agent_socket_closes_once_its_user_is_revoked(auth_server, revocation):
+    from starlette.websockets import WebSocketDisconnect
+
+    from havn.engine.agents import registry
+    from havn.server.deps import WS_SESSION_ENDED
+
+    c = auth_server.client
+    original = registry.AGENT_REGISTRY.copy()
+    registry.AGENT_REGISTRY["mock"] = MockAdapter
+    try:
+        with c.websocket_connect(f"/ws/agent?token={auth_server.ed}") as ws:
+            ws.send_json({"type": "start", "agent": "mock"})
+            assert ws.receive_json()["type"] == "ready"
+            ws.send_json({"type": "message", "message": "before"})
+            assert ws.receive_json()["content"] == "Echo: before"
+            assert ws.receive_json()["type"] == "done"
+
+            if revocation == "password":
+                r = c.put("/api/users/ed", json={"password": "ed-password-2"},
+                          headers=auth_server.admin_headers)
+            else:
+                r = c.delete("/api/users/ed", headers=auth_server.admin_headers)
+            assert r.status_code == 200, r.text
+
+            ws.send_json({"type": "message", "message": "after"})
+            with pytest.raises(WebSocketDisconnect) as closed:
+                ws.receive_json()
+            assert closed.value.code == WS_SESSION_ENDED
+    finally:
+        registry.AGENT_REGISTRY.clear()
+        registry.AGENT_REGISTRY.update(original)
+
+
+def test_open_agent_socket_keeps_working_while_the_token_is_valid(auth_server):
+    from havn.engine.agents import registry
+
+    c = auth_server.client
+    original = registry.AGENT_REGISTRY.copy()
+    registry.AGENT_REGISTRY["mock"] = MockAdapter
+    try:
+        with c.websocket_connect(f"/ws/agent?token={auth_server.ed}") as ws:
+            ws.send_json({"type": "start", "agent": "mock"})
+            assert ws.receive_json()["type"] == "ready"
+            # Another user's password change leaves this socket alone.
+            r = c.put("/api/users/admin", json={"password": "admin-password-2"},
+                      headers=auth_server.admin_headers)
+            assert r.status_code == 200, r.text
+            for i in range(3):
+                ws.send_json({"type": "message", "message": f"m{i}"})
+                assert ws.receive_json()["content"] == f"Echo: m{i}"
+                assert ws.receive_json()["type"] == "done"
+    finally:
+        registry.AGENT_REGISTRY.clear()
+        registry.AGENT_REGISTRY.update(original)

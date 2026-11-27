@@ -216,30 +216,31 @@ class DatabaseConfigUpdate(BaseModel):
 def update_database_config(request: Request, body: DatabaseConfigUpdate) -> dict:
     """Update database resource settings in project.yml."""
     _require_permission(request, "write")
-    import yaml
+    from havn import yamlio
 
     project_dir = _get_project_dir()
     yml_path = project_dir / "project.yml"
     if not yml_path.exists():
         raise HTTPException(404, "project.yml not found")
 
-    raw = yaml.safe_load(read_project_text(yml_path)) or {}
-    if "database" not in raw:
-        raw["database"] = {}
+    # Edited in place (comments kept), written atomically.
+    try:
+        with yamlio.edit_yaml(yml_path) as raw:
+            database = yamlio.ensure_map(raw, "database")
 
-    if body.memory_limit is not None:
-        if body.memory_limit.strip():
-            raw["database"]["memory_limit"] = body.memory_limit.strip()
-        elif "memory_limit" in raw["database"]:
-            del raw["database"]["memory_limit"]
+            if body.memory_limit is not None:
+                if body.memory_limit.strip():
+                    yamlio.set_value(database, "memory_limit", body.memory_limit.strip())
+                else:
+                    yamlio.delete_key(raw, "database", "memory_limit")
 
-    if body.threads is not None:
-        if body.threads > 0:
-            raw["database"]["threads"] = body.threads
-        elif "threads" in raw["database"]:
-            del raw["database"]["threads"]
-
-    yml_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False), encoding="utf-8")
+            if body.threads is not None:
+                if body.threads > 0:
+                    yamlio.set_value(database, "threads", body.threads)
+                else:
+                    yamlio.delete_key(raw, "database", "threads")
+    except yamlio.YamlLoadError as e:
+        raise HTTPException(400, str(e))
 
     # Reset shared connection so new settings take effect
     from havn.server.deps import reset_shared_conn, _clear_config_cache

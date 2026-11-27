@@ -281,3 +281,23 @@ class TestParallelSubsetAndGates:
         if siblings:
             assert results["silver.other"] == "built"
         conn.close()
+
+    def test_parallel_first_run_records_lineage_for_every_model(self, tmp_path, transform_dir):
+        """Workers racing CREATE TABLE IF NOT EXISTS _havn.model_lineage on a
+        fresh warehouse hit a catalog write-write conflict, which
+        save_model_lineage swallows, so some models had no lineage row."""
+        db_path = tmp_path / "test.duckdb"
+        conn = duckdb.connect(str(db_path))
+        ensure_meta_table(conn)
+        names = [f"m{i:02d}" for i in range(16)]
+        for name in names:
+            (transform_dir / "bronze" / f"{name}.sql").write_text(
+                f"@config materialized=table, schema=bronze\n\nSELECT {name[1:]} AS id\n"
+            )
+        results = run_transform(
+            conn, transform_dir, force=True, parallel=True, max_workers=4, db_path=str(db_path),
+        )
+        assert set(results.values()) == {"built"}
+        rows = conn.execute("SELECT count(*) FROM _havn.model_lineage").fetchone()[0]
+        conn.close()
+        assert rows == len(names)

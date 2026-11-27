@@ -8,8 +8,6 @@
 
 from __future__ import annotations
 
-from havn.textio import read_project_text
-
 import asyncio
 import json
 from typing import Literal
@@ -98,20 +96,19 @@ def _persist_allocation(body: BudgetUpdate) -> None:
 
     No-op when project.yml is absent (useful in tests).
     """
-    import yaml
+    from havn import yamlio
 
     path = _get_project_dir() / "project.yml"
     if not path.exists():
         return
     try:
-        raw = yaml.safe_load(read_project_text(path)) or {}
-    except Exception:
-        return
-    resources = raw.get("resources") or {}
-    resources[body.category] = {
-        "memory_gb": body.memory_gb,
-        "threads": body.threads,
-        "max_concurrent": body.max_concurrent,
-    }
-    raw["resources"] = resources
-    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+        # Edited in place: the user's comments and formatting survive.
+        with yamlio.edit_yaml(path) as raw:
+            resources = yamlio.ensure_map(raw, "resources")
+            yamlio.set_value(resources, body.category, {
+                "memory_gb": body.memory_gb,
+                "threads": body.threads,
+                "max_concurrent": body.max_concurrent,
+            })
+    except yamlio.YamlLoadError:
+        return  # an unreadable project.yml is left alone, as before

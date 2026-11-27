@@ -6,19 +6,48 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
 
-try:
-    __version__ = _pkg_version("havn")
-except PackageNotFoundError:
-    # Editable install before metadata is generated, or running from a
-    # source checkout without `pip install -e .` first.
-    __version__ = "0.0.0+unknown"
+# The user-facing decorators (``from havn import macro, table_macro, model``)
+# and ``__version__`` are resolved on first access (PEP 562) rather than at
+# import time: the macros module pulls in duckdb and the version lookup pulls
+# in importlib.metadata, together most of a cold ``import havn``. Every CLI
+# invocation imports this package, so that cost was paid even by ``--help``.
+_LAZY_ATTRS = {
+    "macro": "havn.engine.macros",
+    "table_macro": "havn.engine.macros",
+    "model": "havn.engine.model_decorator",
+}
 
-# Re-export decorators for user-facing macros
-from havn.engine.macros import macro, table_macro  # noqa: F401
-# ...and the decorator for Python models (transform/**/*.py)
-from havn.engine.model_decorator import model  # noqa: F401
+__all__ = ["macro", "table_macro", "model", "setup_logging"]
+
+
+def _read_version() -> str:
+    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+    try:
+        return _pkg_version("havn")
+    except PackageNotFoundError:
+        # Editable install before metadata is generated, or running from a
+        # source checkout without `pip install -e .` first.
+        return "0.0.0+unknown"
+
+
+def __getattr__(name: str) -> object:
+    if name == "__version__":
+        value: object = _read_version()
+    elif name in _LAZY_ATTRS:
+        import importlib
+
+        value = getattr(importlib.import_module(_LAZY_ATTRS[name]), name)
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    # Cache on the module so __getattr__ runs once per name.
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_LAZY_ATTRS) | {"__version__"})
 
 
 _TEXT_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"

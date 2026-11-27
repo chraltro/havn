@@ -535,19 +535,18 @@ def transform(
             except Exception as gc_err:
                 logger.warning("Snapshot GC failed: %s", gc_err)
 
-        # Send alerts if configured
-        if config.alerts.slack_webhook_url or config.alerts.webhook_url:
-            from havn.engine.alerts import AlertConfig, alert_pipeline_success, alert_pipeline_failure
-            alert_cfg = AlertConfig(
-                slack_webhook_url=config.alerts.slack_webhook_url,
-                webhook_url=config.alerts.webhook_url,
-                channels=config.alerts.channels,
+        # Send alerts if configured. Through the shared helper, so a project
+        # with only `channels: [log]` (no Slack or webhook URL) alerts here
+        # the same way streams and jobs do, and delivery cannot fail the run.
+        failed = bool(errors or assertions_failed)
+        if failed or built > 0:
+            from havn.engine.pipeline_alerts import send_pipeline_alert
+
+            send_pipeline_alert(
+                config.alerts, "transform", ok=not failed, duration_s=0, conn=conn,
+                error=f"{errors} errors, {assertions_failed} assertion failures",
+                models_built=built,
             )
-            if errors or assertions_failed:
-                if config.alerts.on_failure:
-                    alert_pipeline_failure("transform", 0, f"{errors} errors, {assertions_failed} assertion failures", alert_cfg, conn)
-            elif config.alerts.on_success and built > 0:
-                alert_pipeline_success("transform", 0, alert_cfg, conn, models_built=built)
 
         if errors or assertions_failed:
             raise typer.Exit(1)
@@ -563,11 +562,7 @@ def stream(
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
     """Run a full stream: ingest -> transform -> export as defined in project.yml."""
-    import time as _time
-
-    from havn.engine.database import open_warehouse
-    from havn.engine.runner import run_scripts_in_dir
-    from havn.engine.transform import run_transform
+    from havn.engine.stream_runner import run_stream
 
     project_dir = _resolve_project(project_dir)
     config = _load_config(project_dir, env)
@@ -586,131 +581,44 @@ def stream(
         console.print(f"  [dim]retries: {stream_config.retries}, delay: {stream_config.retry_delay}s[/dim]")
     console.print()
 
-    conn = open_warehouse(config, project_dir)
-    has_error = False
-    start = _time.perf_counter()
+    result = run_stream(config, project_dir, name, force=force, on_event=_print_stream_event)
+    if not result.ok:
+        raise typer.Exit(1)
 
-    # Register Python SQL macros (macros/ directory)
-    macros_dir = project_dir / "macros"
-    if macros_dir.is_dir():
-        from havn.engine.macros import register_macros
-        n_macros = register_macros(conn, project_dir)
-        if n_macros:
-            console.print(f"  [dim]{n_macros} macro(s) registered[/dim]")
-            console.print()
 
-    # Start rewind run tracking for streams
-    run_id = None
-    if config.rewind.enabled:
-        from havn.engine.snapshots import finish_run, run_gc, start_run
-        run_id = start_run(project_dir, trigger=f"stream:{name}")
+_STEP_HEADINGS = {"ingest": "Ingest", "transform": "Transform", "export": "Export", "seed": "Seeds"}
 
-    def _run_step(step, conn_):
-        """Run a single step. Returns True on success."""
-        if step.action == "ingest":
-            console.print("[bold]Ingest:[/bold]")
-            results = run_scripts_in_dir(conn_, project_dir / "ingest", "ingest", step.targets)
-            if any(r["status"] == "error" for r in results):
-                return False
-        elif step.action == "transform":
-            console.print("[bold]Transform:[/bold]")
-            results = run_transform(
-                conn_,
-                project_dir / "transform",
-                targets=step.targets if step.targets != ["all"] else None,
-                force=force,
-                project_dir=project_dir,
-                rewind_config=config.rewind if run_id else None,
-                run_id=run_id,
-            )
-            if any(s == "error" for s in results.values()):
-                return False
-        elif step.action == "export":
-            console.print("[bold]Export:[/bold]")
-            results = run_scripts_in_dir(conn_, project_dir / "export", "export", step.targets)
-            if any(r["status"] == "error" for r in results):
-                return False
-        elif step.action == "seed":
-            console.print("[bold]Seeds:[/bold]")
-            from havn.engine.seeds import run_seeds
-            results = run_seeds(conn_, project_dir / "seeds", force=force)
-            if any(s == "error" for s in results.values()):
-                return False
+
+def _print_stream_event(event: str, data: dict) -> None:
+    """Render the stream runner's progress events as `havn stream` output."""
+    if event == "macros":
+        console.print(f"  [dim]{data['count']} macro(s) registered[/dim]")
         console.print()
-        return True
-
-    try:
-        for step in stream_config.steps:
-            success = _run_step(step, conn)
-            if not success and stream_config.retries > 0:
-                for attempt in range(1, stream_config.retries + 1):
-                    console.print(
-                        f"[yellow]Retrying {step.action} (attempt {attempt}/{stream_config.retries}) "
-                        f"after {stream_config.retry_delay}s...[/yellow]"
-                    )
-                    _time.sleep(stream_config.retry_delay)
-                    success = _run_step(step, conn)
-                    if success:
-                        break
-            if not success:
-                has_error = True
-                break
-
-        duration_s = round(_time.perf_counter() - start, 1)
-        if has_error:
-            console.print(f"[red]Stream failed after {duration_s}s.[/red]")
+    elif event == "step_start":
+        heading = _STEP_HEADINGS.get(data["action"], data["action"])
+        console.print(f"[bold]{heading}:[/bold]")
+    elif event == "step_end":
+        if data["ok"]:
+            console.print()
+        elif data.get("error"):
+            console.print(f"[red]{data['error']}[/red]")
+    elif event == "retry":
+        console.print(
+            f"[yellow]Retrying {data['action']} (attempt {data['attempt']}/{data['retries']}) "
+            f"after {data['delay']}s...[/yellow]"
+        )
+    elif event == "finished":
+        if data["ok"]:
+            console.print(f"[green]Stream completed successfully in {data['duration_s']}s.[/green]")
         else:
-            console.print(f"[green]Stream completed successfully in {duration_s}s.[/green]")
-
-        # Finish rewind run
-        if run_id and config.rewind.enabled:
-            status = "failed" if has_error else "success"
-            models_run = []  # populated by transform step internally
-            finish_run(project_dir, run_id, status, models_run)
-            try:
-                from havn.engine.snapshots import RewindConfig as _RC
-                rw_cfg = _RC(
-                    enabled=config.rewind.enabled,
-                    retention=config.rewind.retention,
-                    max_storage=config.rewind.max_storage,
-                    dedup=config.rewind.dedup,
-                    exclude=config.rewind.exclude,
-                )
-                deleted = run_gc(project_dir, rw_cfg)
-                if deleted:
-                    console.print(f"  [dim]rewind: {deleted} expired snapshot(s) cleaned up[/dim]")
-            except Exception:
-                pass
-
-        # Webhook notification
-        if stream_config.webhook_url:
-            _send_webhook(stream_config.webhook_url, name, "failed" if has_error else "success", duration_s)
-
-        if has_error:
-            raise typer.Exit(1)
-    finally:
-        conn.close()
-
-
-def _send_webhook(url: str, stream_name: str, status: str, duration_s: float) -> None:
-    """Send a POST webhook notification for stream completion."""
-    import json
-    from datetime import datetime
-    from urllib.request import Request, urlopen
-
-    payload = json.dumps({
-        "stream": stream_name,
-        "status": status,
-        "duration_seconds": duration_s,
-        "timestamp": datetime.now().isoformat(),
-    }).encode()
-
-    try:
-        req = Request(url, data=payload, headers={"Content-Type": "application/json"})
-        urlopen(req, timeout=10)
-        console.print(f"[dim]Webhook sent to {url}[/dim]")
-    except Exception as e:
-        console.print(f"[yellow]Webhook failed: {e}[/yellow]")
+            console.print(f"[red]Stream failed after {data['duration_s']}s.[/red]")
+    elif event == "gc":
+        console.print(f"  [dim]rewind: {data['deleted']} expired snapshot(s) cleaned up[/dim]")
+    elif event == "webhook":
+        if data.get("error"):
+            console.print(f"[yellow]Webhook failed: {data['error']}[/yellow]")
+        else:
+            console.print(f"[dim]Webhook sent to {data['url']}[/dim]")
 
 
 @app.command()
@@ -807,23 +715,46 @@ def schedule(
     """Show scheduled streams and start the scheduler."""
     from havn.engine.scheduler import SchedulerThread, get_scheduled_streams
 
+    from havn.engine.orchestration import discover_jobs
+
     project_dir = _resolve_project(project_dir)
     scheduled = get_scheduled_streams(project_dir)
+    # The scheduler also runs orchestration/*.yml jobs. A project that
+    # schedules only jobs used to be told it had nothing scheduled, and the
+    # scheduler never started.
+    scheduled_jobs = [
+        (job, job.schedules or ([job.cron] if job.cron else []))
+        for job in discover_jobs(project_dir)
+        if job.enabled
+    ]
+    scheduled_jobs = [(job, schedules) for job, schedules in scheduled_jobs if schedules]
 
-    if not scheduled:
-        console.print("[yellow]No scheduled streams found in project.yml[/yellow]")
-        console.print("Add a schedule to a stream:")
+    if not scheduled and not scheduled_jobs:
+        console.print("[yellow]No scheduled streams or jobs found[/yellow]")
+        console.print("Add a schedule to a stream in project.yml:")
         console.print('  schedule: "0 6 * * *"  # 6am daily')
+        console.print("or to a job in orchestration/<name>.yml:")
+        console.print('  schedules: ["0 6 * * *"]')
         return
 
-    table = Table(title="Scheduled Streams")
-    table.add_column("Stream", style="bold")
-    table.add_column("Schedule")
-    table.add_column("Description")
-    for s in scheduled:
-        table.add_row(s["name"], s["schedule"], s["description"])
-    console.print(table)
-    console.print()
+    if scheduled:
+        table = Table(title="Scheduled Streams")
+        table.add_column("Stream", style="bold")
+        table.add_column("Schedule")
+        table.add_column("Description")
+        for s in scheduled:
+            table.add_row(s["name"], s["schedule"], s["description"])
+        console.print(table)
+        console.print()
+
+    if scheduled_jobs:
+        table = Table(title="Scheduled Jobs")
+        table.add_column("Job", style="bold")
+        table.add_column("Schedule")
+        for job, schedules in scheduled_jobs:
+            table.add_row(job.name, ", ".join(schedules))
+        console.print(table)
+        console.print()
 
     console.print("[bold]Starting scheduler...[/bold] (Ctrl+C to stop)")
     scheduler = SchedulerThread(project_dir)

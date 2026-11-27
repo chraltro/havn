@@ -563,7 +563,7 @@ havn secrets delete KEY [--project PATH]
 Manage platform users (requires auth enabled).
 
 ```bash
-havn users create --username NAME --password PASS --role ROLE [--project PATH]
+havn users create USERNAME PASSWORD [--role ROLE] [--project PATH]   # password: 8+ characters
 havn users list [--project PATH]
 havn users delete USERNAME [--project PATH]
 ```

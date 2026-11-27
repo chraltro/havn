@@ -7,16 +7,12 @@ contract: a class that can test, discover, and generate scripts.
 
 from __future__ import annotations
 
-from havn.textio import read_project_text
-
 import logging
 import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 from havn.engine.database import connect, ensure_meta_table, log_run
 
@@ -367,13 +363,18 @@ def setup_connector(
             set_secret(project_dir, key, value)
 
     # 7. Update project.yml — add connection and optionally a sync stream
-    _update_project_yml(
-        project_dir,
-        connection_name=connection_name,
-        connection_params=yml_params,
-        script_filename=script_filename,
-        schedule=schedule or connector.default_schedule,
-    )
+    from havn.yamlio import YamlLoadError
+
+    try:
+        _update_project_yml(
+            project_dir,
+            connection_name=connection_name,
+            connection_params=yml_params,
+            script_filename=script_filename,
+            schedule=schedule or connector.default_schedule,
+        )
+    except YamlLoadError as e:
+        return {"status": "error", "error": f"Could not add the connection to project.yml: {e}"}
 
     return {
         "status": "success",
@@ -540,16 +541,25 @@ def remove_connector(
     connection_name: str,
 ) -> dict[str, Any]:
     """Remove a connector: delete script, remove from project.yml."""
+    from havn.yamlio import YamlLoadError
+
     safe_name = _sanitize_name(connection_name)
     script_path = project_dir / "ingest" / f"connector_{safe_name}.py"
+
+    # project.yml first: if it cannot be edited, nothing is removed.
+    try:
+        removed_config = _remove_from_project_yml(project_dir, connection_name)
+    except YamlLoadError as e:
+        return {
+            "status": "error",
+            "error": f"Could not remove the connection from project.yml: {e}",
+            "invalid_config": True,
+        }
 
     removed_script = False
     if script_path.exists():
         script_path.unlink()
         removed_script = True
-
-    # Remove from project.yml
-    removed_config = _remove_from_project_yml(project_dir, connection_name)
 
     if not removed_script and not removed_config:
         return {"status": "error", "error": f"Connector '{connection_name}' not found"}
@@ -592,32 +602,32 @@ def _update_project_yml(
     script_filename: str,
     schedule: str | None = None,
 ) -> None:
-    """Add a connection and sync stream to project.yml."""
+    """Add a connection and sync stream to project.yml.
+
+    The file is edited in place: the user's comments and formatting stay.
+    """
+    from havn import yamlio
+
     config_path = project_dir / "project.yml"
-    if config_path.exists():
-        raw = yaml.safe_load(read_project_text(config_path)) or {}
-    else:
-        raw = {"name": project_dir.name, "database": {"path": "warehouse.duckdb"}}
-
-    # Add connection
-    if "connections" not in raw or raw["connections"] is None:
-        raw["connections"] = {}
-    raw["connections"][connection_name] = connection_params
-
-    # Add sync stream
     stream_name = f"sync-{_sanitize_name(connection_name)}"
-    if "streams" not in raw or raw["streams"] is None:
-        raw["streams"] = {}
-    raw["streams"][stream_name] = {
-        "description": f"Sync data from {connection_name}",
-        "steps": [
-            {"ingest": [script_filename.replace(".py", "")]},
-            {"transform": ["all"]},
-        ],
-        "schedule": schedule,
-    }
+    with yamlio.edit_yaml(
+        config_path,
+        create=lambda: {"name": project_dir.name, "database": {"path": "warehouse.duckdb"}},
+    ) as raw:
+        # Add connection (a missing or null `connections:` becomes a mapping)
+        connections = yamlio.ensure_map(raw, "connections")
+        yamlio.set_value(connections, connection_name, connection_params)
 
-    config_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False), encoding="utf-8")
+        # Add sync stream
+        streams = yamlio.ensure_map(raw, "streams")
+        yamlio.set_value(streams, stream_name, {
+            "description": f"Sync data from {connection_name}",
+            "steps": [
+                {"ingest": [script_filename.replace(".py", "")]},
+                {"transform": ["all"]},
+            ],
+            "schedule": schedule,
+        })
 
 
 def _remove_from_project_yml(project_dir: Path, connection_name: str) -> bool:
@@ -626,23 +636,18 @@ def _remove_from_project_yml(project_dir: Path, connection_name: str) -> bool:
     if not config_path.exists():
         return False
 
-    raw = yaml.safe_load(read_project_text(config_path)) or {}
+    from havn import yamlio
+
     removed = False
-
-    # Remove connection
-    connections = raw.get("connections")
-    if isinstance(connections, dict) and connection_name in connections:
-        del connections[connection_name]
-        removed = True
-
-    # Remove sync stream
     stream_name = f"sync-{_sanitize_name(connection_name)}"
-    streams = raw.get("streams")
-    if isinstance(streams, dict) and stream_name in streams:
-        del streams[stream_name]
-        removed = True
-
-    if removed:
-        config_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False), encoding="utf-8")
+    # Nothing is written unless something was removed (an unchanged
+    # document is never rewritten).
+    with yamlio.edit_yaml(config_path) as raw:
+        # Remove connection
+        if yamlio.delete_key(raw, "connections", connection_name):
+            removed = True
+        # Remove sync stream
+        if yamlio.delete_key(raw, "streams", stream_name):
+            removed = True
 
     return removed

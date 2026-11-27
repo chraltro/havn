@@ -282,6 +282,34 @@ curl -X POST http://localhost:3000/api/secrets \
   -d '{"key": "DB_PASSWORD", "value": "new_password"}'
 ```
 
+## When havn edits project.yml
+
+Some actions change `project.yml` (or a job file in `orchestration/`) for you:
+adding or removing a connector (`havn connect`, the web UI), saving anomaly
+detection or database settings, changing resource allocations, editing a job
+or enabling/disabling it, and `havn migrate`. These edits change only the keys
+involved and leave the rest of the file as you wrote it: comments, commented-out
+examples, key order, blank lines, quoting and `${VAR}` references stay. The file
+is written to a temporary file next to it and then moved into place, so an
+interrupted write never leaves a truncated `project.yml`.
+
+A few things are normalised when a file is rewritten: block indentation follows
+one style for the whole file (taken from the file), YAML 1.1 boolean spellings
+such as `yes` or `On` are written as `true`/`false`, and `null` or `~` as an
+empty value. The meaning of every value is unchanged. A comment on the same line
+as a key that is removed goes with it; comment lines below it are kept. A `<<`
+merge in a mapping that havn changes is written out as the keys it supplied, and
+a mapping with an anchor is replaced rather than edited, so its aliases keep
+their values.
+
+Before the file is replaced, havn reads the new text back and checks that it says
+exactly what was intended. If it does not, the file is written without its
+comments instead (still valid, same data) and a warning is logged.
+
+A file that is not valid YAML, repeats a key, or contains a value havn cannot
+rewrite faithfully is left untouched and the edit fails with a message naming
+the file (HTTP 400 in the web UI, exit code 1 on the command line).
+
 ## Related Pages
 
 - [Getting Started](getting-started) -- Project setup walkthrough

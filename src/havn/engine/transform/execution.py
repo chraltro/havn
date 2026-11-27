@@ -1868,6 +1868,7 @@ def _execute_single_model(
         conn = open_warehouse(db_config, project_dir)
     else:
         conn = duckdb.connect(db_path)
+    py_output: list[str] = []
     try:
         ensure_meta_table(conn)
         model.upstream_hash = _compute_upstream_hash(model, model_map)
@@ -1889,7 +1890,6 @@ def _execute_single_model(
         from havn.engine.instrumentation import instrument_build
 
         schema_changes: list[str] = []
-        py_output: list[str] = []
         with instrument_build(
             conn, model, project_dir=project_dir, pipeline_run_id=pipeline_run_id,
         ) as probe:
@@ -1933,6 +1933,7 @@ def _execute_single_model(
                     row_count=row_count,
                     assertions=assertion_results,
                     schema_changes=schema_changes,
+                    output="".join(py_output),
                 )
 
         _clear_block(conn, model)
@@ -1950,17 +1951,19 @@ def _execute_single_model(
             assertions=assertion_results,
             profile=profile,
             schema_changes=schema_changes,
+            output="".join(py_output),
         )
 
     except Exception as e:
+        printed = "".join(py_output)
         try:
             log_run(
                 conn, "transform", model.full_name, "error", error=str(e),
-                log_output=getattr(e, "output", None) or None,
+                log_output=getattr(e, "output", None) or printed or None,
                 pipeline_run_id=pipeline_run_id,
             )
         except Exception as e2:
             logger.debug("Failed to log run error: %s", e2)
-        return model.full_name, ModelResult(status="error", error=str(e))
+        return model.full_name, ModelResult(status="error", error=str(e), output=printed)
     finally:
         conn.close()

@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-from havn.textio import read_project_text
-
 from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
-import yaml
 from rich.table import Table
 
 from havn.cli import _resolve_project, app, console
@@ -45,6 +42,16 @@ def migrate(
     if src_config.backend == to:
         console.print(f"[yellow]Warehouse is already on {to} backend. Nothing to do.[/yellow]")
         return
+
+    # project.yml is rewritten at the end; refuse now, before copying any
+    # data, if it cannot be edited safely (e.g. it repeats a key).
+    from havn import yamlio
+
+    try:
+        yamlio.check_editable(project_dir / "project.yml")
+    except yamlio.YamlLoadError as e:
+        console.print(f"[red]Cannot migrate: {e}[/red]")
+        raise typer.Exit(code=1)
 
     # Build destination DatabaseConfig
     if to == "ducklake":
@@ -142,7 +149,14 @@ def migrate(
     _cleanup_stage(stage_dir)
 
     # Rewrite project.yml atomically
-    _rewrite_project_yml(project_dir, dest_config)
+    try:
+        _rewrite_project_yml(project_dir, dest_config)
+    except yamlio.YamlLoadError as e:  # changed on disk since the check above
+        console.print(
+            f"[red]The data was copied, but project.yml was not updated: {e}[/red]\n"
+            "The source warehouse is untouched; fix project.yml and run the migration again."
+        )
+        raise typer.Exit(code=1)
 
     # Rename source
     _rename_source(project_dir, src_config)
@@ -165,17 +179,23 @@ def _rewrite_project_yml(project_dir: Path, dest_config) -> None:
     Writes to a temp file first and renames on top of the target so a
     killed process never leaves a truncated project.yml.
     """
+    from havn import yamlio
+
     yml_path = project_dir / "project.yml"
-    raw = yaml.safe_load(read_project_text(yml_path)) or {}
-    raw["database"] = dest_config.model_dump(exclude_none=True, exclude_defaults=False)
+    database = dest_config.model_dump(exclude_none=True, exclude_defaults=False)
     if dest_config.backend == "duckdb":
         for k in ("catalog", "data_path", "metadata_schema", "encrypted"):
-            raw["database"].pop(k, None)
+            database.pop(k, None)
     else:
-        raw["database"].pop("path", None)
-    tmp = yml_path.with_suffix(".yml.tmp")
-    tmp.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
-    tmp.replace(yml_path)  # atomic on POSIX; os.replace semantics on Windows
+        database.pop("path", None)
+    # The rest of the file (comments included) is left as written; the
+    # database block becomes exactly `database`, keeping comments on the
+    # keys that survive. edit_yaml writes through a temp file + os.replace.
+    with yamlio.edit_yaml(yml_path) as raw:
+        if isinstance(raw.get("database"), dict) and database:
+            yamlio.sync_mapping(raw["database"], database)
+        else:
+            yamlio.set_value(raw, "database", database)
 
 
 def _rename_source(project_dir: Path, src_config) -> None:

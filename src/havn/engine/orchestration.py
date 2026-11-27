@@ -1002,6 +1002,8 @@ def execute_job(
         except Exception as e:
             logger.debug("Final run update failed: %s", e)
 
+        _alert_job_result(job, result, conn, project_dir)
+
         _emit("complete", {
             "stream": f"job:{job.name}",
             "status": result.status,
@@ -1016,6 +1018,38 @@ def execute_job(
             logger.debug("Job instrumentation failed to close: %s", e)
 
     return result
+
+
+def _alert_job_result(job: Job, result: JobResult, conn, project_dir: Path) -> None:
+    """Send the project's pipeline success/failure alert for a finished job.
+
+    Every job run (scheduled, CLI, web UI) ends in ``execute_job``, so this
+    is the one place they all alert from. ``alerts.on_failure`` covers
+    ``failure`` and ``timeout``; a cancelled run was stopped by a person and
+    sends nothing. Never raises.
+    """
+    if result.status == "cancelled":
+        return
+    try:
+        from havn.config import load_project
+        from havn.engine.pipeline_alerts import send_pipeline_alert
+
+        alerts = load_project(project_dir).alerts
+        ok = result.status == "success"
+        error = result.error
+        if not ok and not error:
+            failed = [d.get("target") for d in result.step_details if d.get("status") == "error"]
+            error = f"{result.steps_failed} step(s) failed" + (f": {', '.join(failed[:5])}" if failed else "")
+        send_pipeline_alert(
+            alerts, f"job:{job.name}", ok=ok,
+            duration_s=round(result.duration_ms / 1000, 1), conn=conn, error=error,
+            models_built=sum(
+                1 for d in result.step_details
+                if d.get("type") == "transform" and d.get("status") == "success"
+            ),
+        )
+    except Exception as exc:
+        logger.warning("Job alert for %s could not be sent: %s", job.name, exc)
 
 
 def cancel_job_run(run_id: str) -> bool:
@@ -1282,7 +1316,13 @@ def save_job(project_dir: Path, job_data: dict) -> Path:
         out_data["full_refresh"] = False
 
     path = orch_dir / f"{slug}.yml"
-    path.write_text(yaml.dump(out_data, default_flow_style=False, sort_keys=False), encoding="utf-8")
+    # The file ends up holding exactly ``out_data``. When it already exists
+    # it is edited in place rather than regenerated, so comments on keys that
+    # stay survive; the write is atomic.
+    from havn import yamlio
+
+    with yamlio.edit_yaml(path, create=dict) as doc:
+        yamlio.sync_mapping(doc, out_data)
     return path
 
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from havn.textio import read_project_text
-
 import json
 import logging
 import threading
@@ -405,39 +403,46 @@ def create_job(req: CreateJobRequest, request: Request):
 @router.patch("/api/jobs/{name}")
 def update_job(name: str, req: UpdateJobRequest, request: Request):
     _require_permission(request, "write")
-    import yaml
-
+    from havn import yamlio
     from havn.engine.orchestration import _find_job
 
     project_dir = _get_project_dir()
     job = _find_job(project_dir, name)
     if not job:
         raise HTTPException(404, f"Job '{name}' not found")
-    data = yaml.safe_load(read_project_text(job.file_path)) or {}
-    updates = req.model_dump(exclude_none=True)
-    # If `targets` is sent, replace both targets and the mirrored target field
-    if "targets" in updates:
-        data["targets"] = updates["targets"]
-        data["target"] = updates["targets"][0] if updates["targets"] else data.get("target", "")
-        updates.pop("targets", None)
-        updates.pop("target", None)
-    # If `schedules` is sent, replace both schedules and the mirrored cron field
-    if "schedules" in updates:
-        new_schedules = updates["schedules"] or []
-        # Validate each schedule
-        from havn.engine.orchestration import is_valid_schedule
+    # Edited in place: comments and formatting in the job file survive. An
+    # exception inside the block (a bad schedule) leaves the file untouched.
+    try:
+        with yamlio.edit_yaml(job.file_path) as data:
+            updates = req.model_dump(exclude_none=True)
+            # If `targets` is sent, replace both targets and the mirrored target field
+            if "targets" in updates:
+                yamlio.set_value(data, "targets", updates["targets"])
+                yamlio.set_value(
+                    data, "target",
+                    updates["targets"][0] if updates["targets"] else data.get("target", ""),
+                )
+                updates.pop("targets", None)
+                updates.pop("target", None)
+            # If `schedules` is sent, replace both schedules and the mirrored cron field
+            if "schedules" in updates:
+                new_schedules = updates["schedules"] or []
+                # Validate each schedule
+                from havn.engine.orchestration import is_valid_schedule
 
-        for sched in new_schedules:
-            # The shared validator: checks every cron field and accepts
-            # "every N unit" intervals, which a 5-token count rejected.
-            if not is_valid_schedule(sched):
-                raise HTTPException(400, f"Invalid schedule (cron 5-field or 'every N unit'): {sched}")
-        data["schedules"] = new_schedules
-        data["cron"] = new_schedules[0] if new_schedules else ""
-        updates.pop("schedules", None)
-        updates.pop("cron", None)
-    data.update(updates)
-    job.file_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False), encoding="utf-8")
+                for sched in new_schedules:
+                    # The shared validator: checks every cron field and accepts
+                    # "every N unit" intervals, which a 5-token count rejected.
+                    if not is_valid_schedule(sched):
+                        raise HTTPException(400, f"Invalid schedule (cron 5-field or 'every N unit'): {sched}")
+                yamlio.set_value(data, "schedules", new_schedules)
+                yamlio.set_value(data, "cron", new_schedules[0] if new_schedules else "")
+                updates.pop("schedules", None)
+                updates.pop("cron", None)
+            for key, value in updates.items():
+                yamlio.set_value(data, key, value)
+    except yamlio.YamlLoadError as e:
+        raise HTTPException(400, str(e))
     return {"status": "updated", "file": job.file_path.name}
 
 

@@ -123,18 +123,27 @@ def _get_profile_history(
     conn: duckdb.DuckDBPyConnection,
     model_name: str,
     lookback: int,
+    exclude_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch the last N profile snapshots from profile_history."""
+    """Fetch the last N profile snapshots from profile_history.
+
+    ``exclude_id`` is the history row of the profile being tested (see
+    ``ProfileResult.history_id``). It is left out so the baseline is the runs
+    before this one: with the current value inside its own baseline, a single
+    outlier among n values can reach at most |z| = sqrt(n - 1) under the
+    population standard deviation, so with five or fewer runs no spike could
+    cross the default threshold of 2.0, and every later z-score was damped.
+    """
     try:
         rows = conn.execute(
             """
             SELECT row_count, null_percentages, distinct_counts
             FROM _havn.profile_history
-            WHERE model_path = ?
+            WHERE model_path = ? AND id IS DISTINCT FROM ?
             ORDER BY profiled_at DESC
             LIMIT ?
             """,
-            [model_name, lookback],
+            [model_name, exclude_id, lookback],
         ).fetchall()
     except Exception:
         return []
@@ -171,7 +180,10 @@ def detect_anomalies(
     Args:
         conn: DuckDB connection.
         model_name: Fully qualified model name (e.g. "bronze.customers").
-        current_profile: The freshly computed profile.
+        current_profile: The freshly computed profile. If it has been saved
+            already (``_save_profile`` sets ``history_id``), its own history
+            row is excluded from the baseline; an unsaved profile is compared
+            with every stored row.
         lookback: Number of historical profiles to consider.
         threshold: Z-score threshold for anomaly flagging.
 
@@ -179,7 +191,10 @@ def detect_anomalies(
         List of AnomalyResult for metrics that were checked.
         Only includes results where sufficient data exists.
     """
-    history = _get_profile_history(conn, model_name, lookback)
+    history = _get_profile_history(
+        conn, model_name, lookback,
+        exclude_id=getattr(current_profile, "history_id", None),
+    )
 
     if len(history) < MIN_HISTORY:
         return []

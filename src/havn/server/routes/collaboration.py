@@ -12,8 +12,10 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from havn.server.deps import (
     DbConnReadOnly,
     DbConnReadOnlyOptional,
+    WS_SESSION_ENDED,
     _authenticate_websocket,
     _require_permission,
+    _revalidate_websocket,
     _serialize,
 )
 
@@ -236,6 +238,11 @@ def register_websocket(app) -> None:
                             {"type": "error", "message": "Message too large"}
                         )
                         continue
+                    # Checked at connect, and again per message: a password
+                    # change or user deletion ends this socket too.
+                    if _revalidate_websocket(websocket, ws_user) is None:
+                        await websocket.close(code=WS_SESSION_ENDED, reason="Session ended")
+                        return
                     data = json.loads(raw)
                     msg_type = data.get("type", "")
 

@@ -42,13 +42,17 @@ class _HavnTyper(typer.Typer):
     """
 
     def __call__(self, *args, **kwargs):
-        from havn.config import UnknownEnvironmentError
-
         try:
             return super().__call__(*args, **kwargs)
-        except UnknownEnvironmentError as e:
-            console.print(f"[red]{e}[/red]")
-            raise SystemExit(1) from None
+        except Exception as e:
+            # Look the class up only if havn.config was loaded: nothing can
+            # have raised it otherwise, and importing config (pydantic) up
+            # front costs ~100 ms on every invocation, --help included.
+            config_mod = sys.modules.get("havn.config")
+            if config_mod is not None and isinstance(e, config_mod.UnknownEnvironmentError):
+                console.print(f"[red]{e}[/red]")
+                raise SystemExit(1) from None
+            raise
 
 
 app = _HavnTyper(

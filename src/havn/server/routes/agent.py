@@ -12,7 +12,12 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from havn.server.deps import _authenticate_websocket, _require_permission
+from havn.server.deps import (
+    WS_SESSION_ENDED,
+    _authenticate_websocket,
+    _require_permission,
+    _revalidate_websocket,
+)
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -259,6 +264,17 @@ def register_agent_websocket(app) -> None:
                             {"type": "error", "message": "Message too large"}
                         )
                         continue
+
+                    # The token was checked at connect; a password change or
+                    # user deletion since must end this socket too, and a
+                    # demotion below "write" ends the agent's access.
+                    current = _revalidate_websocket(websocket, ws_user)
+                    if current is None or not has_permission(current.get("role", ""), "write"):
+                        await websocket.close(code=WS_SESSION_ENDED, reason="Session ended")
+                        return
+                    session = _active_sessions.get(ws_id)
+                    if session is not None:
+                        session["user"] = current
 
                     data = json.loads(raw)
                     msg_type = data.get("type", "")

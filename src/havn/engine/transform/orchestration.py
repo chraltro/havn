@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -45,6 +46,12 @@ from .quality import (
 
 console = Console()
 logger = logging.getLogger("havn.transform")
+
+# Pipeline Rewind keeps one cached connection to its metadata database per
+# project, and a DuckDB connection must not be used from two threads at once.
+# The CLI captures snapshots from one thread, but the web UI's runner calls
+# ``build_one_model`` from several worker threads, so captures take turns.
+_SNAPSHOT_CAPTURE_LOCK = threading.Lock()
 
 
 def run_transform(
@@ -397,6 +404,12 @@ def build_one_model(
     on when its intervals say they are due, and ``echo=False`` keeps the
     console quiet. Everything else -- change detection, blocking, state --
     is the same code path.
+
+    The web UI's runner calls this from several worker threads with shared
+    ``results`` / ``blocked`` / ``run_profiles``, each on its own cursor.
+    That is safe as long as a model is only built once its parents have
+    finished: this function writes only its own model's entries and reads its
+    parents', each with a single dict or set operation.
     """
     say = console.print if echo else _silent
     if model.full_name in results:
@@ -487,7 +500,7 @@ def build_one_model(
         suffix = f" ({row_count:,} rows, {duration_ms}ms)" if row_count else f" ({duration_ms}ms)"
         say(f"  [green]done[/green]  {label}{suffix}")
         for change in schema_changes:
-            say(f"         [cyan]schema[/cyan]  {change}")
+            say(f"         [cyan]schema[/cyan]  {escape(change)}")
         if echo:
             _print_python_output(py_output)
 
@@ -504,7 +517,8 @@ def build_one_model(
                         dedup=getattr(rewind_config, "dedup", True),
                         exclude=getattr(rewind_config, "exclude", []),
                     )
-                capture_snapshot(project_dir, conn, model.full_name, run_id, row_count, rw_cfg)
+                with _SNAPSHOT_CAPTURE_LOCK:
+                    capture_snapshot(project_dir, conn, model.full_name, run_id, row_count, rw_cfg)
             except Exception as snap_err:
                 logger.warning("Snapshot capture failed for %s: %s", model.full_name, snap_err)
 
@@ -520,17 +534,7 @@ def build_one_model(
                 assertion_results, pipeline_run_id, output="".join(py_output),
             )
         if assertion_results:
-            for ar in assertion_results:
-                if ar.passed:
-                    say(f"         [green]pass[/green]  assert: {ar.expression}")
-                else:
-                    sev = ar.severity or "error"
-                    sev_color = "red" if sev == "error" else "yellow"
-                    sev_label = "FAIL" if sev == "error" else "WARN"
-                    say(
-                        f"         [{sev_color}]{sev_label}[/{sev_color}]  "
-                        f"assert: {ar.expression} ({ar.detail})"
-                    )
+            _print_assertions(say, assertion_results)
 
             failed_error = [ar for ar in assertion_results if not ar.passed and (ar.severity or "error") == "error"]
             if failed_error:
@@ -552,15 +556,7 @@ def build_one_model(
             _save_profile(conn, model, prof)
             if run_profiles is not None:
                 run_profiles[model.full_name] = prof
-            null_alerts = [
-                col for col, pct in prof.null_percentages.items()
-                if pct > 50.0
-            ]
-            if null_alerts:
-                say(
-                    f"         [yellow]warn[/yellow]  high nulls: "
-                    f"{', '.join(f'{c}({prof.null_percentages[c]}%)' for c in null_alerts)}"
-                )
+            _print_null_warning(say, prof)
 
         results[model.full_name] = "built"
         return ModelOutcome("built", duration_ms, row_count, assertion_results=assertion_results)
@@ -578,6 +574,125 @@ def build_one_model(
         results[model.full_name] = "error"
         blocked.add(model.full_name)
         return ModelOutcome("error", error=str(e))
+
+
+def _print_assertions(say: Callable[..., None], assertion_results: list) -> None:
+    """One line per evaluated assertion: pass, FAIL (error) or WARN (warn)."""
+    for ar in assertion_results:
+        if ar.passed:
+            say(f"         [green]pass[/green]  assert: {escape(ar.expression)}")
+        else:
+            sev = ar.severity or "error"
+            sev_color = "red" if sev == "error" else "yellow"
+            sev_label = "FAIL" if sev == "error" else "WARN"
+            say(
+                f"         [{sev_color}]{sev_label}[/{sev_color}]  "
+                f"assert: {escape(ar.expression)} ({escape(str(ar.detail))})"
+            )
+
+
+def _print_null_warning(say: Callable[..., None], prof: object) -> None:
+    """Warn about the columns of a fresh profile that are more than half null."""
+    null_pcts = getattr(prof, "null_percentages", None) or {}
+    null_alerts = [col for col, pct in null_pcts.items() if pct > 50.0]
+    if null_alerts:
+        listed = ", ".join(f"{c}({null_pcts[c]}%)" for c in null_alerts)
+        say(f"         [yellow]warn[/yellow]  high nulls: {escape(listed)}")
+
+
+def _report_worker_result(model: SQLModel | None, model_name: str, result: object) -> None:
+    """Print what a parallel worker's build came to, as ``build_one_model`` would.
+
+    Workers run on their own threads and print nothing; the tier is reported
+    here once every worker is done, with the lines the sequential runner
+    prints: the build line, schema changes, what a Python model printed, every
+    assertion (passed, warned or failed) and the high-null warning.
+    """
+    materialized = f" ({model.materialized})" if model is not None else ""
+    label = f"[bold]{escape(model_name)}[/bold]{materialized}"
+    status = result.status
+    if status == "skipped":
+        console.print(f"  [dim]skip[/dim]  {label}")
+        return
+    if status == "inlined":
+        console.print(f"  [dim]inline[/dim]  {label}")
+        return
+    if status in ("built", "assertion_failed"):
+        if result.row_count:
+            suffix = f" ({result.row_count:,} rows, {result.duration_ms}ms)"
+        else:
+            suffix = f" ({result.duration_ms}ms)"
+        console.print(f"  [green]done[/green]  {label}{suffix}")
+        for change in result.schema_changes:
+            console.print(f"         [cyan]schema[/cyan]  {escape(change)}")
+        _print_python_output([result.output])
+        if result.assertions:
+            _print_assertions(console.print, result.assertions)
+        if result.profile is not None:
+            _print_null_warning(console.print, result.profile)
+        return
+    console.print(f"  [red]fail[/red]  {label}: {escape(str(result.error))}")
+    _print_python_output([result.output])
+
+
+def _blocked_walker(
+    model_map: dict[str, SQLModel],
+    failed_models: set[str],
+) -> Callable[[str], str | None]:
+    """Return ``is_blocked(name)``: an ancestor of ``name`` in ``failed_models``, or None.
+
+    Every model's answer is memoised, so a whole run costs O(models + edges)
+    however many diamonds the DAG has; the plain recursive walk it replaces
+    followed every path, which is exponential in the depth of a layered DAG.
+
+    The memo stays right while ``failed_models`` grows between tiers. A
+    model's answer depends only on its strict ancestors, and it is first
+    computed while some tier is being checked: every selected ancestor then
+    sits in an earlier tier and is final, and an unselected one never changes
+    during the run. What can still change is whether the model *itself*
+    fails, which is why a dependency is looked up in ``failed_models``
+    directly and not only through its memo.
+
+    Iterative, so a long chain of unselected upstreams cannot hit the
+    recursion limit.
+    """
+    memo: dict[str, str | None] = {}
+
+    def is_blocked(name: str) -> str | None:
+        if name in memo:
+            return memo[name]
+        entered: set[str] = set()
+        stack = [name]
+        while stack:
+            current = stack[-1]
+            if current in memo:
+                stack.pop()
+                continue
+            model = model_map.get(current)
+            deps = model.depends_on if model is not None else []
+            if current not in entered:
+                entered.add(current)
+                pending = [
+                    d for d in deps
+                    if d not in failed_models and d in model_map
+                    and d not in memo and d not in entered  # `entered`: cycle guard
+                ]
+                if pending:
+                    stack.extend(pending)
+                    continue
+            found: str | None = None
+            for dep in deps:
+                if dep in failed_models:
+                    found = dep
+                    break
+                if memo.get(dep) is not None:
+                    found = memo[dep]
+                    break
+            memo[current] = found
+            stack.pop()
+        return memo[name]
+
+    return is_blocked
 
 
 _PRINTED_LINES_SHOWN = 20
@@ -741,6 +856,14 @@ def _run_transform_parallel(
             conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
         except Exception as e:
             logger.debug("Pre-create schema %s failed: %s", schema, e)
+    # Same race on _havn.model_lineage, which _update_state creates lazily:
+    # save_model_lineage swallows the conflict, so a model lost its row.
+    try:
+        from havn.engine.governance.lineage import ensure_lineage_table
+
+        ensure_lineage_table(conn)
+    except Exception as e:
+        logger.debug("Pre-create _havn.model_lineage failed: %s", e)
 
     # DuckLake with a local file catalog cannot be attached twice within the
     # same process — parallel workers would all try to attach the same file
@@ -804,17 +927,9 @@ def _run_transform_parallel(
     # selection still blocks its children.
     failed_models |= blocked_models(conn) - {m.full_name for m in models}
 
-    def _is_blocked(model: SQLModel) -> str | None:
-        """Return the upstream that blocks this model, or None."""
-        for dep in model.depends_on:
-            if dep in failed_models:
-                return dep
-            # Walk transitively in case a deeper ancestor failed.
-            if dep in model_map:
-                upstream_block = _is_blocked(model_map[dep])
-                if upstream_block:
-                    return upstream_block
-        return None
+    is_blocked = _blocked_walker(model_map, failed_models)
+    # Profiles of this run's builds, for anomaly detection at the end.
+    run_profiles: dict[str, object] = {}
 
     for tier_idx, tier in enumerate(tiers, 1):
         # Only skip models whose actual upstreams failed.
@@ -822,7 +937,7 @@ def _run_transform_parallel(
         for model in tier:
             if model.full_name in results:
                 continue  # already marked
-            blocker = _is_blocked(model)
+            blocker = is_blocked(model.full_name)
             if blocker is not None:
                 console.print(
                     f"  [dim]skip[/dim]  [bold]{model.full_name}[/bold] "
@@ -862,7 +977,7 @@ def _run_transform_parallel(
                 conn, tier[0], model_map, results, failed_models,
                 force=force, project_dir=project_dir, rewind_config=rewind_config,
                 run_id=run_id, pipeline_run_id=pipeline_run_id, batch_range=batch_range,
-                query_rewriter=query_rewriter,
+                query_rewriter=query_rewriter, run_profiles=run_profiles,
             )
             continue
 
@@ -903,28 +1018,13 @@ def _run_transform_parallel(
 
         # Report all results from this tier
         for model_name, model_result in tier_results:
-            label = f"[bold]{model_name}[/bold]"
-            if model_result.status == "skipped":
-                console.print(f"  [dim]skip[/dim]  {label}")
-            elif model_result.status == "inlined":
-                console.print(f"  [dim]inline[/dim]  {label}")
-            elif model_result.status == "built":
-                suffix = ""
-                if model_result.row_count:
-                    suffix = f" ({model_result.row_count:,} rows, {model_result.duration_ms}ms)"
-                else:
-                    suffix = f" ({model_result.duration_ms}ms)"
-                console.print(f"  [green]done[/green]  {label}{suffix}")
-                for change in model_result.schema_changes:
-                    console.print(f"         [cyan]schema[/cyan]  {change}")
-            elif model_result.status == "assertion_failed":
-                console.print(f"  [red]FAIL[/red]  {label}: assertion(s) failed")
-            else:
-                console.print(f"  [red]fail[/red]  {label}: {model_result.error}")
+            _report_worker_result(model_map.get(model_name), model_name, model_result)
 
             results[model_name] = model_result.status
             if model_result.status in ("error", "assertion_failed"):
                 failed_models.add(model_name)
+            if model_result.status == "built" and model_result.profile is not None:
+                run_profiles[model_name] = model_result.profile
 
             # Capture snapshot for Pipeline Rewind (parallel tier)
             if project_dir and run_id and model_result.status == "built":
@@ -943,5 +1043,7 @@ def _run_transform_parallel(
                         model_result.row_count, _rw)
                 except Exception as snap_err:
                     logger.warning("Snapshot capture failed for %s: %s", model_name, snap_err)
+
+    detect_run_anomalies(conn, run_profiles, project_dir)
 
     return results

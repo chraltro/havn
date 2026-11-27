@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from havn.textio import read_project_text
-
 import json
 
 from fastapi import APIRouter, HTTPException, Request
@@ -421,25 +419,26 @@ def get_anomaly_config(request: Request) -> dict:
 def update_anomaly_config(request: Request, req: AnomalyConfigUpdate) -> dict:
     """Update anomaly detection settings in project.yml."""
     _require_permission(request, "write")
-    import yaml
+    from havn import yamlio
 
     project_dir = _get_project_dir()
     config_path = project_dir / "project.yml"
     if not config_path.exists():
         raise HTTPException(404, "project.yml not found")
 
-    raw = yaml.safe_load(read_project_text(config_path)) or {}
-    quality = raw.setdefault("quality", {})
-    anomaly = quality.setdefault("anomaly_detection", {})
+    # Edited in place, keeping the user's comments and formatting.
+    try:
+        with yamlio.edit_yaml(config_path) as raw:
+            anomaly = yamlio.ensure_map(raw, "quality", "anomaly_detection")
 
-    if req.enabled is not None:
-        anomaly["enabled"] = req.enabled
-    if req.lookback is not None:
-        anomaly["lookback"] = req.lookback
-    if req.threshold is not None:
-        anomaly["threshold"] = req.threshold
-
-    config_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False), encoding="utf-8")
+            if req.enabled is not None:
+                yamlio.set_value(anomaly, "enabled", req.enabled)
+            if req.lookback is not None:
+                yamlio.set_value(anomaly, "lookback", req.lookback)
+            if req.threshold is not None:
+                yamlio.set_value(anomaly, "threshold", req.threshold)
+    except yamlio.YamlLoadError as e:
+        raise HTTPException(400, str(e))
 
     return {
         "status": "updated",

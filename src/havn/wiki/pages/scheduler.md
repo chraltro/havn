@@ -211,14 +211,16 @@ This gives you:
 
 The scheduler runs as a daemon thread with a simple polling loop:
 
-- Checks cron expressions every 30 seconds
-- Reloads `project.yml` on each iteration (picks up config changes)
-- Executes matching streams in the same thread (sequential)
+- Wakes every 30 seconds
+- Reloads `project.yml` and `orchestration/*.yml` on each iteration (picks up config changes)
+- Runs due streams, then due jobs, then due dashboard reports, one at a time in the same thread
 - Logs all activity to the console and Python logging
 
-### Huey Integration
+A cron schedule runs when one of its fire times fell since the scheduler last looked at it. So when a long run holds the loop (a 06:00 job that takes 20 minutes), a stream scheduled for 06:05 still runs once that job ends instead of being skipped. Several missed fires of the same schedule collapse into one run. The clock starts when the scheduler starts: fires from before it was running are never caught up, so restarting the server at 10:00 does not replay a 06:00 schedule. Interval schedules on jobs (`every 2h`) count from the job's last run, which is read back from `_havn.job_runs` at startup.
 
-havn also includes a Huey-based scheduler (SqliteHuey) for more robust task queuing. The SQLite-backed Huey instance stores task state in `.havn_scheduler.db` at the project root.
+There is no queue and no task database: the loop is the whole scheduler, and it only runs while `havn schedule` or `havn serve --schedule` does.
+
+A scheduled stream runs through the same code as `havn stream`: seeds, retries, Pipeline Rewind tracking, the stream's `webhook_url`, and the `alerts:` pipeline success/failure alert all apply. A stream counts as failed when a step fails, including a transform step where a model errored or an error-severity `@assert` rejected it; later steps do not run.
 
 ### FileWatcher
 
@@ -285,7 +287,7 @@ The scheduler runs streams sequentially within a single thread. For parallel exe
 
 - Check `havn history` to verify scheduled runs are completing
 - Use `havn freshness` to detect if scheduled pipelines have stopped running
-- Configure webhook notifications on streams for immediate failure alerts
+- Configure `alerts:` in `project.yml` (or a `webhook_url` on a stream) for immediate failure alerts; scheduled streams and jobs send them too
 - Use the **Overview** tab in the web UI for at-a-glance monitoring
 
 ## Related Pages
