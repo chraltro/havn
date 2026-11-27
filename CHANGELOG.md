@@ -31,6 +31,17 @@ All notable changes to havn are documented in this file.
 
 ### Changed
 
+- **havn upgrades its own metadata tables in a controlled way.** The `_havn`
+  schema now has a version, recorded in `_havn.schema_migrations`. The first
+  time a new release opens your warehouse for writing, it applies the pending
+  migrations, each in its own transaction. A failed upgrade is rolled back and
+  stops with an error that names the step, instead of being skipped silently
+  and breaking something later. Warehouses created by any 0.2.x or 0.3.x
+  release are brought to the same schema, with their rows kept. Read-only
+  commands never change the schema. `havn status` shows the version and any
+  pending migrations, and an older havn opening a warehouse that a newer one
+  has upgraded warns instead of guessing. Taking a backup (`havn backup`)
+  before upgrading is still wise. See docs/upgrading.md.
 - **The scheduler no longer stops ticking during a run.** Due runs are
   handed to worker threads while the scheduler goes on checking schedules,
   so lateness, skips and missed fires are recorded on time. Runs still

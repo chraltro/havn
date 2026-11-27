@@ -56,11 +56,15 @@ arity mismatches. It does not catch value conversions such as
 
 ### havn status
 
-Show project health: git info, warehouse stats, last run.
+Show project health: git info, warehouse stats, metadata schema version, last run.
 
 ```bash
 havn status [--project PATH]
 ```
+
+The `metadata schema` line says whether havn's own tables are up to date, how
+many migrations are pending, or that a newer havn has opened the warehouse.
+It reads only; see [Upgrading](upgrading.md).
 
 ### havn context
 
