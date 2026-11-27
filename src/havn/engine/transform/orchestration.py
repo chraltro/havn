@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -45,6 +46,12 @@ from .quality import (
 
 console = Console()
 logger = logging.getLogger("havn.transform")
+
+# Pipeline Rewind keeps one cached connection to its metadata database per
+# project, and a DuckDB connection must not be used from two threads at once.
+# The CLI captures snapshots from one thread, but the web UI's runner calls
+# ``build_one_model`` from several worker threads, so captures take turns.
+_SNAPSHOT_CAPTURE_LOCK = threading.Lock()
 
 
 def run_transform(
@@ -397,6 +404,12 @@ def build_one_model(
     on when its intervals say they are due, and ``echo=False`` keeps the
     console quiet. Everything else -- change detection, blocking, state --
     is the same code path.
+
+    The web UI's runner calls this from several worker threads with shared
+    ``results`` / ``blocked`` / ``run_profiles``, each on its own cursor.
+    That is safe as long as a model is only built once its parents have
+    finished: this function writes only its own model's entries and reads its
+    parents', each with a single dict or set operation.
     """
     say = console.print if echo else _silent
     if model.full_name in results:
@@ -504,7 +517,8 @@ def build_one_model(
                         dedup=getattr(rewind_config, "dedup", True),
                         exclude=getattr(rewind_config, "exclude", []),
                     )
-                capture_snapshot(project_dir, conn, model.full_name, run_id, row_count, rw_cfg)
+                with _SNAPSHOT_CAPTURE_LOCK:
+                    capture_snapshot(project_dir, conn, model.full_name, run_id, row_count, rw_cfg)
             except Exception as snap_err:
                 logger.warning("Snapshot capture failed for %s: %s", model.full_name, snap_err)
 

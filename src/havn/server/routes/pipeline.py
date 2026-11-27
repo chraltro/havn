@@ -304,921 +304,130 @@ def _run_script_thread(script_path_str, project_dir, force=False, user=None):
         _finish_operation()
 
 
-# --- Background thread: Transform ---
+# --- Background threads: transform, stream, selective pipeline ---
+#
+# All three describe their run as a RunSpec and hand it to the one DAG
+# executor in havn.server.pipeline_runner, which builds models through
+# build_one_model exactly as `havn transform` does.
+
+
+def _run_spec_thread(spec, project_dir):
+    from havn.server.pipeline_runner import run_pipeline
+
+    try:
+        run_pipeline(spec, project_dir, _emit, _cancel_flag)
+    finally:
+        _finish_operation()
 
 
 def _run_transform_thread(targets, force, project_dir):
     """Run SQL transforms in background thread."""
-    import time as _time
-    import uuid as _uuid
-    from havn.server.deps import _get_shared_conn
-
-    pipeline_run_id = str(_uuid.uuid4())
+    from havn.server.pipeline_runner import RunSpec
 
     label = "Transform"
     if targets:
         label += f" ({', '.join(targets)})"
     if force:
         label += " --force"
-
-    start = _time.perf_counter()
-    _emit("start", {"operation": "transform", "label": label, "pipeline_run_id": pipeline_run_id})
-    try:
-        conn = _get_shared_conn()
-        results = run_transform(
-            conn,
-            project_dir / "transform",
-            targets=targets,
-            force=force,
-            pipeline_run_id=pipeline_run_id,
-        )
-
-        for model, status in results.items():
-            _emit("model_end", {
-                "name": model,
-                "action": "transform",
-                "status": status,
-                "duration_ms": 0,
-                "row_count": 0,
-                "num": 0,
-            })
-
-        duration_s = round(_time.perf_counter() - start, 1)
-        has_error = any(s == "error" for s in results.values())
-        _emit("complete", {
-            "operation": "transform",
-            "status": "failed" if has_error else "success",
-            "duration_seconds": duration_s,
-            "pipeline_run_id": pipeline_run_id,
-        })
-    except Exception as e:
-        duration_s = round(_time.perf_counter() - start, 1)
-        _emit("complete", {
-            "operation": "transform", "status": "failed",
-            "duration_seconds": duration_s, "error": str(e),
-            "pipeline_run_id": pipeline_run_id,
-        })
-    finally:
-        _finish_operation()
+    spec = RunSpec(
+        operation="transform", label=label, force=force,
+        transform=list(targets) if targets else ["all"],
+        # This endpoint never ran the pre-build gate; it builds what it is
+        # asked to and reports each model's result.
+        gate=False,
+    )
+    _run_spec_thread(spec, project_dir)
 
 
-# --- Pipeline background thread ---
+class StreamStepError(ValueError):
+    """A stream step this runner cannot run."""
+
+
+_STREAM_ACTIONS = ("seed", "ingest", "transform", "export")
+
+
+def _stream_spec(stream_name, stream_config, force, user):
+    """The RunSpec for a stream: its own steps, targets and retries.
+
+    Every step's nodes go into one DAG, so a step's models start as soon as
+    their own inputs are loaded rather than when the whole previous step is
+    done; the dependency edges keep the order the steps describe. Targets of
+    several steps of one kind are combined.
+    """
+    from havn.server.pipeline_runner import RunSpec
+
+    chosen: dict[str, list[str]] = {}
+    for step in stream_config.steps:
+        if step.action not in _STREAM_ACTIONS:
+            raise StreamStepError(
+                f"stream {stream_name!r}: unknown step action {step.action!r} "
+                "(expected seed, ingest, transform or export)"
+            )
+        chosen.setdefault(step.action, []).extend(step.targets or ["all"])
+    for action, targets in chosen.items():
+        if "all" in targets:
+            chosen[action] = ["all"]
+    return RunSpec(
+        operation="stream",
+        label=f"Pipeline {stream_name}",
+        stream=stream_name,
+        force=force,
+        user=user,
+        seed="seed" in chosen,
+        ingest=chosen.get("ingest"),
+        transform=chosen.get("transform"),
+        export=chosen.get("export"),
+        steps=1,
+        retries=max(0, int(stream_config.retries or 0)),
+        retry_delay=float(stream_config.retry_delay or 0),
+        job=(f"stream ({stream_name})", "stream", stream_name),
+        audit_resource=stream_name,
+        audit_detail="stream completed",
+        rewind_trigger=f"stream:{stream_name}",
+        webhook_url=stream_config.webhook_url,
+        alert=True,
+    )
 
 
 def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, force, user):
-    """Run pipeline in background. Appends events to _pipeline_state["events"]."""
-    global _pipeline_state
-
-    import json as _json
-    import time as _time
-    import uuid as _uuid
-    import queue as _queue
-    from concurrent.futures import ThreadPoolExecutor
-    from graphlib import TopologicalSorter
-
-    from havn.engine.database import log_run as _lr
-    from havn.engine.runner import run_script as _run_script
-    from havn.server.deps import _get_db_resource_limits, _get_shared_conn
-    from havn.engine.transform import discover_models as _dm, build_dag as _bd
-    from havn.engine.transform.discovery import _compute_upstream_hash as _cuh, _needs_build as _hc, _update_state as _us
-    from havn.engine.transform.discovery import _clear_block, _invalidate_state, blocked_models
-    from havn.engine.transform.execution import execute_model as _em, _record_ephemeral as _re
-    from havn.engine.transform.quality import run_assertions as _ra, _save_assertions as _sa, profile_model as _pm, _save_profile as _sp
-
-    # Generate a pipeline_run_id that groups all model executions in this run
-    pipeline_run_id = str(_uuid.uuid4())
-
-    def emit(event_type: str, data: dict):
-        _emit(event_type, data)
-
-    start = _time.perf_counter()
-    has_error = False
-    cancelled = False
-    completed_count = 0
-    failed_count = 0
-    skipped_count = 0
-
-    def _is_cancelled():
-        return _cancel_flag.is_set()
-
+    """Run a stream from project.yml in the background, as `havn stream` would."""
     try:
-        # -- Build unified DAG --
-        # 1. Discover ingest scripts
-        ingest_dir = project_dir / "ingest"
-        ingest_scripts = []
-        if ingest_dir.exists():
-            py = list(ingest_dir.glob("*.py"))
-            nb = list(ingest_dir.glob("*.dpnb"))
-            ingest_scripts = sorted([s for s in py + nb if not s.name.startswith("_")], key=lambda p: p.name)
+        spec = _stream_spec(stream_name, stream_config, force, user)
+    except StreamStepError as e:
+        import uuid as _uuid
 
-        # 2. Discover transform models
-        transform_dir = project_dir / "transform"
-        models = _dm(transform_dir) if transform_dir.exists() else []
-        ordered = _bd(models) if models else []
-        model_map = {m.full_name: m for m in ordered}
-        for model in ordered:
-            model.upstream_hash = _cuh(model, model_map)
-
-        # 3. Discover export scripts
-        export_dir = project_dir / "export"
-        export_scripts = []
-        if export_dir.exists():
-            py = list(export_dir.glob("*.py"))
-            nb = list(export_dir.glob("*.dpnb"))
-            export_scripts = sorted([s for s in py + nb if not s.name.startswith("_")], key=lambda p: p.name)
-
-        # 4. Build node registry and DAG
-        nodes = {}
-        dag_deps = {}
-
-        # Ingest nodes have no dependencies (they're roots)
-        ingest_node_ids = set()
-        for script in ingest_scripts:
-            nid = f"ingest:{script.name}"
-            nodes[nid] = {"type": "ingest", "path": script, "name": script.name}
-            dag_deps[nid] = set()
-            ingest_node_ids.add(nid)
-
-        # Build a mapping from landing table names to their likely ingest script.
-        _landing_to_ingest = {}
-        for ingest_nid in ingest_node_ids:
-            stem = nodes[ingest_nid]["path"].stem
-            _landing_to_ingest[f"landing.{stem}"] = ingest_nid
-
-        # Transform nodes
-        for model in ordered:
-            nid = f"transform:{model.full_name}"
-            nodes[nid] = {"type": "transform", "model": model, "name": model.full_name}
-            deps = set()
-            for dep in model.depends_on:
-                dep_nid = f"transform:{dep}"
-                if dep_nid in nodes:
-                    deps.add(dep_nid)
-                elif dep.startswith("landing."):
-                    mapped = _landing_to_ingest.get(dep)
-                    if mapped:
-                        deps.add(mapped)
-                    elif ingest_node_ids:
-                        deps.update(ingest_node_ids)
-            dag_deps[nid] = deps
-
-        # Export nodes depend on all transforms
-        transform_node_ids = {f"transform:{m.full_name}" for m in ordered}
-        for script in export_scripts:
-            nid = f"export:{script.name}"
-            nodes[nid] = {"type": "export", "path": script, "name": script.name}
-            dag_deps[nid] = transform_node_ids.copy()
-
-        total_items = len(nodes)
-
-        # Record job_run so this stream appears in Job Results
+        logger.error("%s", e)
         try:
-            from havn.engine.orchestration import ensure_job_runs_table
-            _jr_conn = _get_shared_conn()
-            _jr_cur = cursor_for(_jr_conn)
-            try:
-                ensure_job_runs_table(_jr_cur)
-                _jr_cur.execute(
-                    "INSERT INTO _havn.job_runs (id, job_name, job_file, target, status, steps_total, trigger) "
-                    "VALUES (?, ?, ?, ?, 'running', ?, ?)",
-                    [pipeline_run_id, f"stream ({stream_name})", "stream", stream_name, total_items, "pipeline"],
-                )
-            finally:
-                _jr_cur.close()
-        except Exception:
-            logger.debug("Failed to insert job_run for stream pipeline", exc_info=True)
-
-        # Numbering assigned at runtime as nodes START
-        _node_number = {}
-        _next_num = [1]
-
-        emit("start", {"operation": "stream", "label": f"Pipeline {stream_name}", "stream": stream_name, "steps": 1, "total": total_items, "pipeline_run_id": pipeline_run_id})
-
-        if not nodes:
-            emit("complete", {"stream": stream_name, "status": "success", "duration_seconds": 0, "pipeline_run_id": pipeline_run_id})
-            return
-
-        # Use the server's shared connection
-        conn = _get_shared_conn()
-
-        # Ensure metadata tables exist
-        from havn.engine.database import ensure_meta_table as _emt
-        _emt(conn)
-
-        # 5. Pre-build validation for transform models.
-        #
-        # Runs up front when the stream has no ingest steps. When it does, the
-        # landing tables do not exist yet on a fresh database, so the gate is
-        # deferred to just before the first transform node is submitted --
-        # after ingest has created them. See _maybe_run_gate below.
-        from havn.server.prebuild_gate import run_prebuild_gate as _gate
-        has_ingest = bool(ingest_node_ids)
-        _gate_pending = bool(models) and has_ingest
-        _gate_failed = [False]
-        if models and not has_ingest:
-            if not _gate(conn, models, emit, project_dir=project_dir):
-                has_error = True
-                emit("complete", {"stream": stream_name, "status": "failed", "duration_seconds": 0, "pipeline_run_id": pipeline_run_id})
-                return
-
-        # 6. Pre-create schemas
-        schema_cur = cursor_for(conn)
-        for schema in ("landing", "bronze", "silver", "gold"):
-            schema_cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
-        schema_cur.close()
-
-        result_q = _queue.Queue()
-        sorter = TopologicalSorter(dag_deps)
-        sorter.prepare()
-        _, _threads_cfg = _get_db_resource_limits()
-        # DuckLake's catalog cannot tolerate concurrent in-process writes —
-        # multiple threads each calling `conn.cursor().execute("CREATE TABLE ...")`
-        # against the same attached catalog corrupt its metadata. Force
-        # sequential execution on DuckLake; transforms still get full memory
-        # and threads via per-query SET memory_limit / SET threads.
-        from havn.server.deps import _get_backend
-        if _get_backend().name == "ducklake":
-            max_workers = 1
-        else:
-            max_workers = _threads_cfg or 4
-        executor = ThreadPoolExecutor(max_workers=max_workers)
-        active = 0
-
-        def _exec_node(node_id):
-            """Execute a single node on a thread-local cursor."""
-            local = cursor_for(conn)
-            info = nodes[node_id]
-            start_data = {"name": info["name"], "action": info["type"], "num": _node_number.get(node_id, 0)}
-            if info["type"] == "transform":
-                start_data["materialized"] = info["model"].materialized
-            result_q.put(("__start__", start_data))
-            try:
-                if info["type"] == "ingest":
-                    result = _run_script(local, info["path"], "ingest", pipeline_run_id=pipeline_run_id, force=force, run_as=user)
-                    result_q.put((node_id, {
-                        "status": result["status"],
-                        "duration_ms": result.get("duration_ms", 0),
-                        "rows_affected": result.get("rows_affected", 0),
-                        "error": result.get("error"),
-                    }))
-                elif info["type"] == "transform":
-                    m = info["model"]
-                    if m.materialized == "ephemeral":
-                        # Never built: consumers inline its query as a CTE.
-                        _re(local, m, pipeline_run_id)
-                        result_q.put((node_id, {"status": "inlined"}))
-                        return
-                    # A parent whose build an error assertion rejected -- in
-                    # this run or an earlier one -- blocks this model. The
-                    # skipped model is marked blocked too, so its own children
-                    # skip and it is rebuilt once the parent is fixed.
-                    rejected = [d for d in m.depends_on if d in blocked_models(local)]
-                    if rejected:
-                        _invalidate_state(local, m)
-                        try:
-                            _lr(local, "transform", m.full_name, "skipped", 0, 0,
-                                error=f"upstream blocked: {', '.join(rejected)}", pipeline_run_id=pipeline_run_id)
-                        except Exception:
-                            pass
-                        result_q.put((node_id, {"status": "skipped_upstream_blocked"}))
-                        return
-                    if not force and not _hc(local, m):
-                        # Log the skip too, so `havn history` and external
-                        # readers see "12 steps, 12 skipped" instead of an
-                        # empty run_log for a no-op pipeline.
-                        try:
-                            _lr(local, "transform", m.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
-                        except Exception:
-                            pass
-                        result_q.put((node_id, {"status": "skipped"}))
-                        return
-                    duration_ms, row_count = _em(local, m, model_map=model_map)
-                    _us(local, m, duration_ms, row_count)
-                    _lr(local, "transform", m.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
-                    status = "built"
-                    ar = _ra(local, m) if (m.assertions or m.grain) else []
-                    if ar:
-                        _sa(local, m, ar)
-                    if any(not a.passed and (a.severity or "error") == "error" for a in ar):
-                        status = "assertion_failed"
-                        _invalidate_state(local, m)
-                    else:
-                        _clear_block(local, m)
-                    if m.materialized in ("table", "incremental"):
-                        prof = _pm(local, m)
-                        _sp(local, m, prof)
-                    result_q.put((node_id, {
-                        "status": status, "duration_ms": duration_ms,
-                        "row_count": row_count,
-                    }))
-                elif info["type"] == "export":
-                    result = _run_script(local, info["path"], "export", pipeline_run_id=pipeline_run_id, force=force, run_as=user)
-                    result_q.put((node_id, {
-                        "status": result["status"],
-                        "duration_ms": result.get("duration_ms", 0),
-                        "error": result.get("error"),
-                    }))
-            except Exception as e:
-                logger.error("Node %s failed: %s", node_id, e, exc_info=True)
-                # Persist transform failures to _havn.run_log so they survive
-                # the OUTPUT panel scrolling away. Without this row, a query
-                # like `WHERE pipeline_run_id = ?` returns only the success
-                # rows and the failure looks like it never happened.
-                try:
-                    if info["type"] == "transform":
-                        _lr(local, "transform", info["model"].full_name, "error",
-                            error=str(e), pipeline_run_id=pipeline_run_id)
-                except Exception:
-                    pass
-                result_q.put((node_id, {"status": "error", "error": str(e)}))
-            finally:
-                local.close()
-
-        # Pending queue: nodes that are ready but not yet submitted
-        pending = []
-
-        def _maybe_run_gate() -> bool:
-            """Run the deferred pre-build gate once. True when the run may go on.
-
-            Called just before the first transform node is submitted, which on
-            an ingest-plus-transform run is the earliest point where the
-            landing tables exist and the gate has something real to check.
-            """
-            nonlocal _gate_pending
-            if not _gate_pending:
-                return not _gate_failed[0]
-            _gate_pending = False
-            ok = _gate(conn, models, emit, project_dir=project_dir)
-            _gate_failed[0] = not ok
-            return ok
-
-        def _submit_batch():
-            """Submit pending nodes up to max_workers active limit."""
-            nonlocal active
-            while pending and active < max_workers:
-                if nodes[pending[0]]["type"] == "transform" and not _maybe_run_gate():
-                    # Gate failed: submit nothing more. The result loop sees
-                    # _gate_failed on its next pass and shuts down.
-                    return
-                nid = pending.pop(0)
-                if nid not in _node_number:
-                    _node_number[nid] = _next_num[0]
-                    _next_num[0] += 1
-                try:
-                    executor.submit(_exec_node, nid)
-                except RuntimeError:
-                    # Interpreter shutting down — stop submitting
-                    return
-                active += 1
-
-        # Kick off initial ready nodes (roots with no deps)
-        pending.extend(sorter.get_ready())
-        _submit_batch()
-
-        # Process results as they arrive, submit newly ready nodes
-        while sorter.is_active() or active > 0:
-            if _gate_failed[0] and active == 0:
-                has_error = True
-                executor.shutdown(wait=False, cancel_futures=True)
-                break
-            if _is_cancelled():
-                cancelled = True
-                executor.shutdown(wait=False, cancel_futures=True)
-                break
-
-            try:
-                node_id, result = result_q.get(timeout=2)
-            except _queue.Empty:
-                continue
-
-            # Handle start events
-            if node_id == "__start__":
-                emit("model_start", result)
-                continue
-
-            active -= 1
-            info = nodes[node_id]
-            status = result.get("status", "error")
-
-            # Assign number if not already assigned (skipped nodes skip __start__)
-            if node_id not in _node_number:
-                _node_number[node_id] = _next_num[0]
-                _next_num[0] += 1
-
-            # Emit result
-            emit("model_end", {
-                "name": info["name"],
-                "action": info["type"],
-                "status": status,
-                "duration_ms": result.get("duration_ms", 0),
-                "row_count": result.get("row_count", 0),
-                "rows_affected": result.get("rows_affected", 0),
-                "error": result.get("error"),
-                "materialized": info["model"].materialized if info["type"] == "transform" else None,
-                "num": _node_number[node_id],
-            })
-
-            if status in ("error", "assertion_failed"):
-                has_error = True
-                failed_count += 1
-            elif status in ("skipped", "skipped_upstream_blocked"):
-                skipped_count += 1
-            else:
-                completed_count += 1
-
-            # Mark node as done -- this may release dependent nodes
-            sorter.done(node_id)
-
-            # Add newly ready nodes to pending and submit up to max_workers
-            try:
-                pending.extend(sorter.get_ready())
-            except Exception:
-                pass  # sorter exhausted
-            _submit_batch()
-
-        # Shut down executor (don't close conn -- it's the shared singleton)
-        try:
-            executor.shutdown(wait=False)
-        except Exception:
-            pass
-
-        duration_s = round(_time.perf_counter() - start, 1)
-        if cancelled:
-            status = "cancelled"
-        elif has_error:
-            status = "failed"
-        else:
-            status = "success"
-
-        # Audit
-        try:
-            from havn.engine.audit import log_audit
-            audit_cur = cursor_for(conn)
-            log_audit(audit_cur, user=user.get("username", "anonymous"),
-                      action="transform", resource=stream_name,
-                      detail=f"stream completed: {status} in {duration_s}s")
-            audit_cur.close()
-        except Exception:
-            pass
-
-        emit("complete", {
-            "stream": stream_name,
-            "status": status,
-            "duration_seconds": duration_s,
-            "pipeline_run_id": pipeline_run_id,
-        })
-
-    except Exception as e:
-        logger.error("Pipeline thread error: %s", e, exc_info=True)
-        has_error = True
-        duration_s = round(_time.perf_counter() - start, 1)
-        emit("complete", {
-            "stream": stream_name,
-            "status": "failed",
-            "duration_seconds": duration_s,
-            "pipeline_run_id": pipeline_run_id,
-        })
-    finally:
-        # Update job_run with final status
-        try:
-            from havn.engine.orchestration import ensure_job_runs_table
-            _fin_conn = _get_shared_conn()
-            _fin_cur = cursor_for(_fin_conn)
-            try:
-                ensure_job_runs_table(_fin_cur)
-                status_val = "failure" if has_error else ("cancelled" if cancelled else "success")
-                duration_ms = int((_time.perf_counter() - start) * 1000)
-                _fin_cur.execute(
-                    "UPDATE _havn.job_runs SET status = ?, finished_at = current_timestamp, "
-                    "duration_ms = ?, steps_completed = ?, steps_failed = ?, steps_skipped = ? "
-                    "WHERE id = ?",
-                    [status_val, duration_ms, completed_count, failed_count, skipped_count, pipeline_run_id],
-                )
-            finally:
-                _fin_cur.close()
-        except Exception:
-            logger.debug("Failed to update job_run for stream pipeline", exc_info=True)
-        _finish_operation()
-
-
-# --- Background thread: Selective pipeline ---
+            _emit("complete", {"stream": stream_name, "status": "failed",
+                               "duration_seconds": 0, "pipeline_run_id": str(_uuid.uuid4())})
+        finally:
+            _finish_operation()
+        return
+    _run_spec_thread(spec, project_dir)
 
 
 def _run_selective_pipeline_thread(steps, force, project_dir, user):
-    """Run selective pipeline steps in background. Appends events to _pipeline_state["events"]."""
-    global _pipeline_state
-
-    import time as _time
-    import uuid as _uuid
-    import queue as _queue
-    from concurrent.futures import ThreadPoolExecutor
-    from graphlib import TopologicalSorter
-
-    from havn.engine.database import log_run as _lr
-    from havn.engine.runner import run_script as _run_script
-    from havn.server.deps import _get_db_resource_limits, _get_shared_conn
-    from havn.engine.transform import discover_models as _dm, build_dag as _bd
-    from havn.engine.transform.discovery import _compute_upstream_hash as _cuh, _needs_build as _hc, _update_state as _us
-    from havn.engine.transform.discovery import _clear_block, _invalidate_state, blocked_models
-    from havn.engine.transform.execution import execute_model as _em, _record_ephemeral as _re
-    from havn.engine.transform.quality import run_assertions as _ra, _save_assertions as _sa, profile_model as _pm, _save_profile as _sp
-
-    pipeline_run_id = str(_uuid.uuid4())
-
-    def emit(event_type: str, data: dict):
-        _emit(event_type, data)
+    """Run the chosen steps (ingest / transform / export) over everything."""
+    from havn.server.pipeline_runner import RunSpec
 
     step_label = "+".join(steps)
     if force:
         step_label += " --force"
-
-    start = _time.perf_counter()
-    has_error = False
-    cancelled = False
-    completed_count = 0
-    failed_count = 0
-    skipped_count = 0
-
-    def _is_cancelled():
-        return _cancel_flag.is_set()
-
-    try:
-        # -- Discover scripts and models based on requested steps --
-        ingest_scripts = []
-        if "ingest" in steps:
-            ingest_dir = project_dir / "ingest"
-            if ingest_dir.exists():
-                py = list(ingest_dir.glob("*.py"))
-                nb = list(ingest_dir.glob("*.dpnb"))
-                ingest_scripts = sorted([s for s in py + nb if not s.name.startswith("_")], key=lambda p: p.name)
-
-        models = []
-        ordered = []
-        model_map = {}
-        if "transform" in steps:
-            transform_dir = project_dir / "transform"
-            models = _dm(transform_dir) if transform_dir.exists() else []
-            ordered = _bd(models) if models else []
-            model_map = {m.full_name: m for m in ordered}
-            for model in ordered:
-                model.upstream_hash = _cuh(model, model_map)
-
-        export_scripts = []
-        if "export" in steps:
-            export_dir = project_dir / "export"
-            if export_dir.exists():
-                py = list(export_dir.glob("*.py"))
-                nb = list(export_dir.glob("*.dpnb"))
-                export_scripts = sorted([s for s in py + nb if not s.name.startswith("_")], key=lambda p: p.name)
-
-        # -- Build node registry and DAG --
-        nodes = {}
-        dag_deps = {}
-
-        ingest_node_ids = set()
-        for script in ingest_scripts:
-            nid = f"ingest:{script.name}"
-            nodes[nid] = {"type": "ingest", "path": script, "name": script.name}
-            dag_deps[nid] = set()
-            ingest_node_ids.add(nid)
-
-        _landing_to_ingest = {}
-        for ingest_nid in ingest_node_ids:
-            stem = nodes[ingest_nid]["path"].stem
-            _landing_to_ingest[f"landing.{stem}"] = ingest_nid
-
-        for model in ordered:
-            nid = f"transform:{model.full_name}"
-            nodes[nid] = {"type": "transform", "model": model, "name": model.full_name}
-            deps = set()
-            for dep in model.depends_on:
-                dep_nid = f"transform:{dep}"
-                if dep_nid in nodes:
-                    deps.add(dep_nid)
-                elif dep.startswith("landing."):
-                    mapped = _landing_to_ingest.get(dep)
-                    if mapped:
-                        deps.add(mapped)
-                    elif ingest_node_ids:
-                        deps.update(ingest_node_ids)
-            dag_deps[nid] = deps
-
-        transform_node_ids = {f"transform:{m.full_name}" for m in ordered}
-        for script in export_scripts:
-            nid = f"export:{script.name}"
-            nodes[nid] = {"type": "export", "path": script, "name": script.name}
-            dag_deps[nid] = transform_node_ids.copy()
-
-        total_items = len(nodes)
-
-        # Record job_run so this pipeline appears in Job Results
-        try:
-            from havn.engine.orchestration import ensure_job_runs_table
-            _jr_conn = _get_shared_conn()
-            _jr_cur = cursor_for(_jr_conn)
-            try:
-                ensure_job_runs_table(_jr_cur)
-                _jr_cur.execute(
-                    "INSERT INTO _havn.job_runs (id, job_name, job_file, target, status, steps_total, trigger) "
-                    "VALUES (?, ?, ?, ?, 'running', ?, ?)",
-                    [pipeline_run_id, f"pipeline ({step_label})", "pipeline", step_label, total_items, "pipeline"],
-                )
-            finally:
-                _jr_cur.close()
-        except Exception:
-            logger.debug("Failed to insert job_run for selective pipeline", exc_info=True)
-
-        _node_number = {}
-        _next_num = [1]
-
-        emit("start", {
-            "operation": "pipeline",
-            "label": f"Pipeline ({step_label})",
-            "stream": "pipeline",
-            "steps": len(steps),
-            "total": total_items,
-            "pipeline_run_id": pipeline_run_id,
-        })
-
-        if not nodes:
-            emit("complete", {"stream": "pipeline", "status": "success", "duration_seconds": 0, "pipeline_run_id": pipeline_run_id})
-            return
-
-        conn = _get_shared_conn()
-
-        from havn.engine.database import ensure_meta_table as _emt
-        _emt(conn)
-
-        # Pre-build validation for transform models. With ingest in the run the
-        # gate is deferred to just before the first transform, once the landing
-        # tables exist; see _maybe_run_gate below.
-        from havn.server.prebuild_gate import run_prebuild_gate as _gate
-        has_ingest = bool(ingest_node_ids)
-        _gate_pending = bool(models) and has_ingest
-        _gate_failed = [False]
-        if models and not has_ingest:
-            if not _gate(conn, models, emit, project_dir=project_dir):
-                has_error = True
-                emit("complete", {"stream": "pipeline", "status": "failed", "duration_seconds": 0, "pipeline_run_id": pipeline_run_id})
-                return
-
-        # Pre-create schemas
-        schema_cur = cursor_for(conn)
-        for schema in ("landing", "bronze", "silver", "gold"):
-            schema_cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
-        schema_cur.close()
-
-        result_q = _queue.Queue()
-        sorter = TopologicalSorter(dag_deps)
-        sorter.prepare()
-        _, _threads_cfg = _get_db_resource_limits()
-        # DuckLake's catalog cannot tolerate concurrent in-process writes —
-        # multiple threads each calling `conn.cursor().execute("CREATE TABLE ...")`
-        # against the same attached catalog corrupt its metadata. Force
-        # sequential execution on DuckLake; transforms still get full memory
-        # and threads via per-query SET memory_limit / SET threads.
-        from havn.server.deps import _get_backend
-        if _get_backend().name == "ducklake":
-            max_workers = 1
-        else:
-            max_workers = _threads_cfg or 4
-        executor = ThreadPoolExecutor(max_workers=max_workers)
-        active = 0
-
-        def _exec_node(node_id):
-            """Execute a single node on a thread-local cursor."""
-            local = cursor_for(conn)
-            info = nodes[node_id]
-            start_data = {"name": info["name"], "action": info["type"], "num": _node_number.get(node_id, 0)}
-            if info["type"] == "transform":
-                start_data["materialized"] = info["model"].materialized
-            result_q.put(("__start__", start_data))
-            try:
-                if info["type"] == "ingest":
-                    result = _run_script(local, info["path"], "ingest", pipeline_run_id=pipeline_run_id, force=force, run_as=user)
-                    result_q.put((node_id, {
-                        "status": result["status"],
-                        "duration_ms": result.get("duration_ms", 0),
-                        "rows_affected": result.get("rows_affected", 0),
-                        "error": result.get("error"),
-                    }))
-                elif info["type"] == "transform":
-                    m = info["model"]
-                    if m.materialized == "ephemeral":
-                        # Never built: consumers inline its query as a CTE.
-                        _re(local, m, pipeline_run_id)
-                        result_q.put((node_id, {"status": "inlined"}))
-                        return
-                    # A parent whose build an error assertion rejected -- in
-                    # this run or an earlier one -- blocks this model. The
-                    # skipped model is marked blocked too, so its own children
-                    # skip and it is rebuilt once the parent is fixed.
-                    rejected = [d for d in m.depends_on if d in blocked_models(local)]
-                    if rejected:
-                        _invalidate_state(local, m)
-                        try:
-                            _lr(local, "transform", m.full_name, "skipped", 0, 0,
-                                error=f"upstream blocked: {', '.join(rejected)}", pipeline_run_id=pipeline_run_id)
-                        except Exception:
-                            pass
-                        result_q.put((node_id, {"status": "skipped_upstream_blocked"}))
-                        return
-                    if not force and not _hc(local, m):
-                        # Log the skip too, so `havn history` and external
-                        # readers see "12 steps, 12 skipped" instead of an
-                        # empty run_log for a no-op pipeline.
-                        try:
-                            _lr(local, "transform", m.full_name, "skipped", 0, 0, pipeline_run_id=pipeline_run_id)
-                        except Exception:
-                            pass
-                        result_q.put((node_id, {"status": "skipped"}))
-                        return
-                    duration_ms, row_count = _em(local, m, model_map=model_map)
-                    _us(local, m, duration_ms, row_count)
-                    _lr(local, "transform", m.full_name, "success", duration_ms, row_count, pipeline_run_id=pipeline_run_id)
-                    status = "built"
-                    ar = _ra(local, m) if (m.assertions or m.grain) else []
-                    if ar:
-                        _sa(local, m, ar)
-                    if any(not a.passed and (a.severity or "error") == "error" for a in ar):
-                        status = "assertion_failed"
-                        _invalidate_state(local, m)
-                    else:
-                        _clear_block(local, m)
-                    if m.materialized in ("table", "incremental"):
-                        prof = _pm(local, m)
-                        _sp(local, m, prof)
-                    result_q.put((node_id, {
-                        "status": status, "duration_ms": duration_ms,
-                        "row_count": row_count,
-                    }))
-                elif info["type"] == "export":
-                    result = _run_script(local, info["path"], "export", pipeline_run_id=pipeline_run_id, force=force, run_as=user)
-                    result_q.put((node_id, {
-                        "status": result["status"],
-                        "duration_ms": result.get("duration_ms", 0),
-                        "error": result.get("error"),
-                    }))
-            except Exception as e:
-                logger.error("Node %s failed: %s", node_id, e, exc_info=True)
-                try:
-                    if info["type"] == "transform":
-                        _lr(local, "transform", info["model"].full_name, "error",
-                            error=str(e), pipeline_run_id=pipeline_run_id)
-                except Exception:
-                    pass
-                result_q.put((node_id, {"status": "error", "error": str(e)}))
-            finally:
-                local.close()
-
-        pending = []
-
-        def _maybe_run_gate() -> bool:
-            """Run the deferred pre-build gate once, before the first transform."""
-            nonlocal _gate_pending
-            if not _gate_pending:
-                return not _gate_failed[0]
-            _gate_pending = False
-            ok = _gate(conn, models, emit, project_dir=project_dir)
-            _gate_failed[0] = not ok
-            return ok
-
-        def _submit_batch():
-            """Submit pending nodes up to max_workers active limit."""
-            nonlocal active
-            while pending and active < max_workers:
-                if nodes[pending[0]]["type"] == "transform" and not _maybe_run_gate():
-                    return
-                nid = pending.pop(0)
-                if nid not in _node_number:
-                    _node_number[nid] = _next_num[0]
-                    _next_num[0] += 1
-                try:
-                    executor.submit(_exec_node, nid)
-                except RuntimeError:
-                    return
-                active += 1
-
-        pending.extend(sorter.get_ready())
-        _submit_batch()
-
-        while sorter.is_active() or active > 0:
-            if _gate_failed[0] and active == 0:
-                has_error = True
-                executor.shutdown(wait=False, cancel_futures=True)
-                break
-            if _is_cancelled():
-                cancelled = True
-                executor.shutdown(wait=False, cancel_futures=True)
-                break
-
-            try:
-                node_id, result = result_q.get(timeout=2)
-            except _queue.Empty:
-                continue
-
-            if node_id == "__start__":
-                emit("model_start", result)
-                continue
-
-            active -= 1
-            info = nodes[node_id]
-            status = result.get("status", "error")
-
-            if node_id not in _node_number:
-                _node_number[node_id] = _next_num[0]
-                _next_num[0] += 1
-
-            emit("model_end", {
-                "name": info["name"],
-                "action": info["type"],
-                "status": status,
-                "duration_ms": result.get("duration_ms", 0),
-                "row_count": result.get("row_count", 0),
-                "rows_affected": result.get("rows_affected", 0),
-                "error": result.get("error"),
-                "materialized": info["model"].materialized if info["type"] == "transform" else None,
-                "num": _node_number[node_id],
-            })
-
-            if status in ("error", "assertion_failed"):
-                has_error = True
-                failed_count += 1
-            elif status in ("skipped", "skipped_upstream_blocked"):
-                skipped_count += 1
-            else:
-                completed_count += 1
-
-            sorter.done(node_id)
-
-            try:
-                pending.extend(sorter.get_ready())
-            except Exception:
-                pass
-            _submit_batch()
-
-        try:
-            executor.shutdown(wait=False)
-        except Exception:
-            pass
-
-        duration_s = round(_time.perf_counter() - start, 1)
-        if cancelled:
-            status = "cancelled"
-        elif has_error:
-            status = "failed"
-        else:
-            status = "success"
-
-        # Audit
-        try:
-            from havn.engine.audit import log_audit
-            audit_cur = cursor_for(conn)
-            log_audit(audit_cur, user=user.get("username", "anonymous"),
-                      action="transform", resource=f"pipeline({step_label})",
-                      detail=f"selective pipeline completed: {status} in {duration_s}s")
-            audit_cur.close()
-        except Exception:
-            pass
-
-        emit("complete", {
-            "stream": "pipeline",
-            "status": status,
-            "duration_seconds": duration_s,
-            "pipeline_run_id": pipeline_run_id,
-        })
-
-    except Exception as e:
-        logger.error("Selective pipeline thread error: %s", e, exc_info=True)
-        has_error = True
-        duration_s = round(_time.perf_counter() - start, 1)
-        emit("complete", {
-            "stream": "pipeline",
-            "status": "failed",
-            "duration_seconds": duration_s,
-            "pipeline_run_id": pipeline_run_id,
-        })
-    finally:
-        # Update job_run with final status
-        try:
-            from havn.engine.orchestration import ensure_job_runs_table
-            _fin_conn = _get_shared_conn()
-            _fin_cur = cursor_for(_fin_conn)
-            try:
-                ensure_job_runs_table(_fin_cur)
-                status_val = "failure" if has_error else ("cancelled" if cancelled else "success")
-                duration_ms = int((_time.perf_counter() - start) * 1000)
-                _fin_cur.execute(
-                    "UPDATE _havn.job_runs SET status = ?, finished_at = current_timestamp, "
-                    "duration_ms = ?, steps_completed = ?, steps_failed = ?, steps_skipped = ? "
-                    "WHERE id = ?",
-                    [status_val, duration_ms, completed_count, failed_count, skipped_count, pipeline_run_id],
-                )
-            finally:
-                _fin_cur.close()
-        except Exception:
-            logger.debug("Failed to update job_run for selective pipeline", exc_info=True)
-        _finish_operation()
+    spec = RunSpec(
+        operation="pipeline",
+        label=f"Pipeline ({step_label})",
+        stream="pipeline",
+        force=force,
+        user=user,
+        ingest=["all"] if "ingest" in steps else None,
+        transform=["all"] if "transform" in steps else None,
+        export=["all"] if "export" in steps else None,
+        steps=len(steps),
+        job=(f"pipeline ({step_label})", "pipeline", step_label),
+        audit_resource=f"pipeline({step_label})",
+        audit_detail="selective pipeline completed",
+    )
+    _run_spec_thread(spec, project_dir)
 
 
 # --- Pipeline start (selective steps) ---
@@ -1650,10 +859,14 @@ def run_stream_endpoint(
                 targets=step.targets if step.targets != ["all"] else None,
                 force=force_transform,
             )
+            from havn.engine.stream_runner import TRANSFORM_FAILURE_STATUSES
+
             return {
                 "action": "transform",
                 "results": results,
-                "error": any(s == "error" for s in results.values()),
+                # Fails on what `havn transform` exits 1 for, an error
+                # assertion included.
+                "error": any(s in TRANSFORM_FAILURE_STATUSES for s in results.values()),
             }
         elif step.action == "export":
             results = run_scripts_in_dir(
