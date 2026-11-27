@@ -128,9 +128,14 @@ _setup_lock = threading.Lock()
 @router.post("/api/auth/setup")
 def initial_setup(request: Request, req: CreateUserRequest, conn: DbConn) -> dict:
     """Create the first admin user (only works when no users exist)."""
-    # Without --auth there is nothing to set up, and /api/auth/status says so.
-    # Left open, anyone who could reach such a server could plant the first
-    # admin account, which would take effect the day --auth is turned on.
+    # Without --auth there is nothing to set up, and /api/auth/status says so,
+    # so this endpoint is closed rather than left as an unauthenticated way
+    # to create the first admin. It does not stop accounts being made on such
+    # a server: with auth off every caller counts as an admin, so POST
+    # /api/users and PUT /api/users/{username} create and change accounts
+    # (and passwords) that take effect the day --auth is turned on. That is
+    # by design: whoever can reach a server without --auth already controls
+    # it, and tests manage users through these endpoints with auth off.
     if not _get_auth_enabled():
         raise HTTPException(400, "Authentication is not enabled on this server")
     client_ip = request.client.host if request.client else "unknown"

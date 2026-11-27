@@ -483,13 +483,13 @@ def test_websocket_auth_is_served_from_the_token_cache(api, monkeypatch):
     assert c.get("/api/auth/me", headers=_bearer(api.token)).status_code == 200  # primes cache
 
     calls = []
-    real = auth.validate_token
+    real = auth.validate_token_with_expiry
 
     def counting(conn, token):
         calls.append(token)
         return real(conn, token)
 
-    monkeypatch.setattr(auth, "validate_token", counting)
+    monkeypatch.setattr(auth, "validate_token_with_expiry", counting)
     ws = SimpleNamespace(query_params={"token": api.token})
     assert deps._authenticate_websocket(ws)["username"] == "admin"
     assert calls == []
@@ -498,6 +498,153 @@ def test_websocket_auth_is_served_from_the_token_cache(api, monkeypatch):
     assert deps._authenticate_websocket(ws)["username"] == "admin"
     assert calls == [api.token]
     assert deps._authenticate_websocket(SimpleNamespace(query_params={"token": "bogus"})) is None
+
+
+def _make_user(app, admin_token, username, password, role="editor"):
+    r = TestClient(app).post(
+        "/api/users", json={"username": username, "password": password, "role": role},
+        headers=_bearer(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    r = _login(app, username, password)
+    assert r.status_code == 200, r.text
+    return r.json()["token"]
+
+
+@pytest.mark.parametrize("revocation", ["password", "delete"])
+def test_lookup_racing_a_revocation_does_not_recache_the_token(api, monkeypatch, revocation):
+    """A token read as valid just before an admin revokes it must not be put
+    in the cache after the revocation cleared it."""
+    from havn.server import deps
+
+    ann = _make_user(api.app, api.token, "ann", "ann-password-1")
+    deps.invalidate_token_cache()
+    real_decode = auth._decode_attributes
+    fired = []
+
+    def revoke_mid_lookup(raw):
+        # Runs inside validate_token after the token row was read as valid.
+        if not fired:
+            fired.append(1)
+            c = TestClient(api.app)
+            if revocation == "password":
+                r = c.put("/api/users/ann", json={"password": "ann-password-2"},
+                          headers=_bearer(api.token))
+            else:
+                r = c.delete("/api/users/ann", headers=_bearer(api.token))
+            assert r.status_code == 200, r.text
+        return real_decode(raw)
+
+    monkeypatch.setattr(auth, "_decode_attributes", revoke_mid_lookup)
+    c = TestClient(api.app)
+    # The racing request itself was answered from the row it read.
+    assert c.get("/api/auth/me", headers=_bearer(ann)).status_code == 200
+    assert fired
+    monkeypatch.setattr(auth, "_decode_attributes", real_decode)
+    assert c.get("/api/auth/me", headers=_bearer(ann)).status_code == 401
+    ws = SimpleNamespace(query_params={"token": ann})
+    assert deps._authenticate_websocket(ws) is None
+
+
+def test_cached_token_is_not_served_past_its_expiry(api, monkeypatch):
+    from havn.server import deps
+
+    ann = _make_user(api.app, api.token, "ann", "ann-password-1")
+    _server_sql(
+        "UPDATE _havn.tokens SET expires_at = current_timestamp + INTERVAL 5 SECOND "
+        "WHERE username = 'ann'"
+    )
+    deps.invalidate_token_cache()
+    c = TestClient(api.app)
+    assert c.get("/api/auth/me", headers=_bearer(ann)).status_code == 200  # cached now
+
+    # Ten seconds pass: the token has expired in the database, and the cache
+    # entry is still well inside its 30-second TTL.
+    _server_sql(
+        "UPDATE _havn.tokens SET expires_at = current_timestamp - INTERVAL 5 SECOND "
+        "WHERE username = 'ann'"
+    )
+    real_clock = time.monotonic
+    monkeypatch.setattr(deps, "_clock", lambda: real_clock() + 10, raising=False)
+    assert c.get("/api/auth/me", headers=_bearer(ann)).status_code == 401
+
+
+def test_validate_token_with_expiry_reports_the_time_left():
+    conn = _get_conn()
+    create_user(conn, "ann", "ann-password")
+    token = authenticate(conn, "ann", "ann-password")
+    user, left = auth.validate_token_with_expiry(conn, token)
+    assert user == validate_token(conn, token)
+    assert auth.TOKEN_LIFETIME.total_seconds() - 60 < left <= auth.TOKEN_LIFETIME.total_seconds()
+    conn.execute("UPDATE _havn.tokens SET expires_at = NULL")
+    assert auth.validate_token_with_expiry(conn, token)[1] is None
+    assert auth.validate_token_with_expiry(conn, "bogus") == (None, None)
+    conn.close()
+
+
+# --- Legacy rehash vs a concurrent password change ----------------------------
+
+
+def test_legacy_rehash_does_not_undo_a_concurrent_password_change(monkeypatch):
+    """The admin changes the password while the login is re-hashing the old
+    one: the new password must stand and the login must not get a token."""
+    monkeypatch.setattr(auth, "LEGACY_PBKDF2_ITERATIONS", 500)
+    conn = _get_conn()
+    _insert_raw_user(conn, "old", "old-password", 500, None)
+    admin = conn.cursor()
+    real_hash = auth._hash_password
+    fired = []
+
+    def hash_then_change(password, salt=None, iterations=None):
+        result = real_hash(password, salt, iterations)
+        if password == "old-password" and not fired:
+            fired.append(1)  # the rehash in authenticate: the admin acts now
+            update_user(admin, "old", password="admin-set-password")
+        return result
+
+    monkeypatch.setattr(auth, "_hash_password", hash_then_change)
+    assert authenticate(conn, "old", "old-password") is None
+    assert fired
+    monkeypatch.setattr(auth, "_hash_password", real_hash)
+    assert conn.execute("SELECT COUNT(*) FROM _havn.tokens").fetchone()[0] == 0
+    assert authenticate(conn, "old", "old-password") is None
+    assert authenticate(conn, "old", "admin-set-password") is not None
+    conn.close()
+
+
+def test_password_change_after_the_rehash_refuses_the_token(monkeypatch):
+    """The change lands after the upgrade is written but before the token
+    insert: the token must not outlive the change."""
+    monkeypatch.setattr(auth, "LEGACY_PBKDF2_ITERATIONS", 500)
+    conn = _get_conn()
+    _insert_raw_user(conn, "old", "old-password", 500, None)
+    admin = conn.cursor()
+    real_rehash = auth._rehash_password
+
+    def rehash_then_change(*args, **kwargs):
+        result = real_rehash(*args, **kwargs)
+        update_user(admin, "old", password="admin-set-password")
+        return result
+
+    monkeypatch.setattr(auth, "_rehash_password", rehash_then_change)
+    token = authenticate(conn, "old", "old-password")
+    monkeypatch.setattr(auth, "_rehash_password", real_rehash)
+    if token is not None:
+        assert validate_token(conn, token) is None, "a token issued across the change works"
+    assert conn.execute("SELECT COUNT(*) FROM _havn.tokens").fetchone()[0] == 0
+    assert authenticate(conn, "old", "admin-set-password") is not None
+    conn.close()
+
+
+def test_login_inside_an_outer_transaction_joins_it():
+    conn = _get_conn()
+    create_user(conn, "ann", "ann-password")
+    conn.execute("BEGIN TRANSACTION")
+    token = authenticate(conn, "ann", "ann-password")
+    assert token is not None
+    conn.execute("COMMIT")  # still the caller's to commit: nothing was nested
+    assert validate_token(conn, token)["username"] == "ann"
+    conn.close()
 
 
 def test_setup_is_refused_when_auth_is_off(api):

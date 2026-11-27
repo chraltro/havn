@@ -11,7 +11,10 @@ so all responses take that path.
 its whole body in one message (``more_body`` false), which is what
 ``JSONResponse`` and FastAPI's serialised return values do. Anything sent in
 pieces (SSE, NDJSON, CSV and file downloads) passes through untouched, so
-incremental delivery cannot be broken by construction. It must be the
+incremental delivery cannot be broken by construction; a start message
+without ``content-length`` or of a streaming type is forwarded at once
+rather than held for the first chunk. A strong ``ETag`` on a compressed
+response is made weak. It must be the
 innermost user middleware (added to the app first) to see the route's own
 messages before ``BaseHTTPMiddleware`` re-chunks them.
 """
@@ -52,6 +55,24 @@ def is_compressible_type(content_type: str) -> bool:
     if not base or base == "text/event-stream":
         return False
     return base.startswith(_COMPRESSIBLE_PREFIXES) or base in _COMPRESSIBLE_TYPES
+
+
+# Media types that are streamed by nature: never held back, never compressed.
+_STREAMING_TYPES = {"application/x-ndjson", "text/csv", "text/event-stream"}
+
+
+def _may_be_complete(headers: Headers, content_type: str) -> bool:
+    """Whether a start message can be followed by one complete body.
+
+    Starlette's ``Response`` (and so ``JSONResponse``, ``HTMLResponse`` and
+    FastAPI's serialised return values) always sets ``content-length`` from
+    its body; ``StreamingResponse`` never does. Without it, or for a type
+    that is streamed by nature, the response is a stream and its headers go
+    out at once.
+    """
+    if "content-length" not in headers:
+        return False
+    return content_type.split(";", 1)[0].strip().lower() not in _STREAMING_TYPES
 
 
 def accepted_encodings(header: str | None) -> set[str]:
@@ -110,9 +131,14 @@ class ApiGzipMiddleware:
             kind = message["type"]
             if kind == "http.response.start":
                 headers = Headers(raw=message.get("headers", []))
-                if "content-encoding" in headers or not is_compressible_type(
-                    headers.get("content-type", "")
+                content_type = headers.get("content-type", "")
+                if (
+                    "content-encoding" in headers
+                    or not is_compressible_type(content_type)
+                    or not _may_be_complete(headers, content_type)
                 ):
+                    # Sent at once: a stream's headers must not wait for
+                    # its first chunk, which may be slow work away.
                     passthrough = True
                     await send(message)
                 else:
@@ -141,6 +167,12 @@ class ApiGzipMiddleware:
                 if len(compressed) < len(body):
                     headers["Content-Encoding"] = "gzip"
                     headers["Content-Length"] = str(len(compressed))
+                    etag = headers.get("etag")
+                    if etag and not etag.startswith("W/"):
+                        # The route's strong validator names the identity
+                        # bytes; the gzipped bytes are a different
+                        # representation, so only a weak one fits both.
+                        headers["ETag"] = "W/" + etag
                     message = {**message, "body": compressed}
             await send(held)
             await send(message)

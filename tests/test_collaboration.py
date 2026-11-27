@@ -232,3 +232,54 @@ class TestCollaborationSecurity:
         assert s3 is not None
         # At most _max_sessions remain (stale ones evicted)
         assert len(mgr._sessions) <= 3  # Could be less after eviction
+
+
+# --- An open session socket ends when its user's sessions are revoked --------
+
+
+@pytest.mark.parametrize("revocation", ["password", "delete"])
+def test_open_session_socket_closes_once_its_user_is_revoked(project_with_contracts, revocation):
+    from starlette.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+
+    import havn.server.app as server_app
+    from havn.server import deps
+
+    deps.reset_shared_conn()
+    deps._clear_config_cache()
+    deps.invalidate_token_cache()
+    old_dir, old_auth = server_app.PROJECT_DIR, server_app.AUTH_ENABLED
+    server_app.PROJECT_DIR = project_with_contracts
+    server_app.AUTH_ENABLED = True
+    try:
+        c = TestClient(server_app.app)
+        admin = c.post("/api/auth/setup", json={"username": "admin", "password": "admin-password"})
+        assert admin.status_code == 200, admin.text
+        h = {"Authorization": f"Bearer {admin.json()['token']}"}
+        r = c.post("/api/users", json={"username": "ann", "password": "ann-password-1",
+                                       "role": "editor"}, headers=h)
+        assert r.status_code == 200, r.text
+        ann = c.post("/api/auth/login", json={"username": "ann", "password": "ann-password-1"})
+        ann_token = ann.json()["token"]
+        sid = c.post("/api/sessions", json={"name": "S"}, headers=h).json()["session_id"]
+
+        with c.websocket_connect(f"/ws/session/{sid}?token={ann_token}") as ws:
+            assert ws.receive_json()["type"] == "user_joined"
+            ws.send_json({"type": "message", "text": "before"})
+            assert ws.receive_json() == {"type": "message", "user_id": "ann", "text": "before"}
+
+            if revocation == "password":
+                r = c.put("/api/users/ann", json={"password": "ann-password-2"}, headers=h)
+            else:
+                r = c.delete("/api/users/ann", headers=h)
+            assert r.status_code == 200, r.text
+
+            ws.send_json({"type": "message", "text": "after"})
+            with pytest.raises(WebSocketDisconnect) as closed:
+                ws.receive_json()
+            assert closed.value.code == deps.WS_SESSION_ENDED
+    finally:
+        deps.reset_shared_conn()
+        deps._clear_config_cache()
+        deps.invalidate_token_cache()
+        server_app.PROJECT_DIR, server_app.AUTH_ENABLED = old_dir, old_auth

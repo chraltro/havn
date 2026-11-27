@@ -8,8 +8,9 @@ module turns one resolved file into a response:
   Windows ``mimetypes`` reads the registry, which can map ``.js`` to
   ``text/plain`` (module scripts then refuse to load) and maps ``.map`` to
   ``text/plain``; the table wins for every type the build ships.
-- an ``ETag`` from the file's content, per encoding, answering
-  ``If-None-Match`` with 304.
+- an ``ETag`` from the file's content, per encoding (from the sibling's own
+  content when a prebuilt sibling is served), answering ``If-None-Match``
+  with 304.
 - compression for textual types when ``Accept-Encoding`` allows it: a
   ``.br``/``.gz`` sibling written by the build if one is there and not older
   than the file, otherwise gzip done once and kept in a bounded in-memory
@@ -215,7 +216,19 @@ def file_response(
         if encoding is None and "gzip" in accepted and st.st_size >= _MIN_COMPRESS_SIZE:
             encoding = "gzip"
 
-    etag = f'"{content_tag}-{encoding}"' if encoding else f'"{content_tag}"'
+    if sibling is not None:
+        # A prebuilt sibling is its own byte sequence, unrelated to what
+        # on-the-fly gzip would produce: validate it by its own content, so a
+        # client never gets 304 for bytes it does not hold.
+        sst = sibling.stat()
+        sibling_tag, sibling_raw = _content_etag(
+            (str(sibling), sst.st_mtime_ns, sst.st_size), sibling
+        )
+        etag = f'"{sibling_tag}-{encoding}-pre"'
+    elif encoding:
+        etag = f'"{content_tag}-{encoding}"'
+    else:
+        etag = f'"{content_tag}"'
     headers = {"Cache-Control": cache_control, "ETag": etag}
     if compressible:
         headers["Vary"] = "Accept-Encoding"
@@ -224,7 +237,7 @@ def file_response(
         return Response(status_code=304, headers=headers)
 
     if sibling is not None:
-        body = sibling.read_bytes()
+        body = sibling_raw if sibling_raw is not None else sibling.read_bytes()
     elif encoding == "gzip":
         cache_key = key + ("gzip",)
         body = _compressed.get(cache_key)

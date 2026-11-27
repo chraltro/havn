@@ -7,6 +7,7 @@ import logging
 import re
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Any, Generator
 
@@ -389,8 +390,79 @@ def reregister_macros_on_shared_conns(project_dir: Path) -> None:
         macro_logger.warning("Macro hot-reload failed: %s", exc)
 
 
+# Held by the background checkpoint from before it takes the write connection
+# until its cursor is closed, and by reset_shared_conn() around closing the
+# connection, so a reset can never close the connection under a running
+# checkpoint (that crashed the process natively, with no traceback). Lock
+# order: _conn_use_lock first, _init_lock second, on both paths.
+_conn_use_lock = threading.Lock()
+_checkpoint_cursor: duckdb.DuckDBPyConnection | None = None
+# How long a reset waits for an interrupted checkpoint before logging that it
+# is still waiting.
+_RESET_WAIT_WARN_S = 5.0
+
+
+@contextmanager
+def background_write_cursor():
+    """A cursor of the live write connection for background maintenance.
+
+    Yields None when there is no write connection: background work never
+    creates the warehouse or the write queue. While the block runs,
+    reset_shared_conn() cannot close the connection; a reset that arrives
+    interrupts the cursor and waits for the block to end.
+    """
+    global _checkpoint_cursor
+    from havn.engine.write_queue import cursor_for
+
+    with _conn_use_lock:
+        with _init_lock:
+            wq = _write_queue
+        if wq is None:
+            yield None
+            return
+        cur = cursor_for(wq.conn)
+        _checkpoint_cursor = cur
+        try:
+            yield cur
+        finally:
+            _checkpoint_cursor = None
+            try:
+                cur.close()
+            except Exception:
+                logger.debug("Closing the background cursor failed", exc_info=True)
+
+
+def _acquire_conn_use_lock() -> None:
+    """Take _conn_use_lock for a reset, interrupting a running checkpoint.
+
+    The reset is about to close the connection, so the checkpoint's work is
+    moot: interrupting it bounds the wait to how long DuckDB takes to notice
+    the interrupt, instead of the full checkpoint.
+    """
+    if _conn_use_lock.acquire(timeout=0.05):
+        return
+    cur = _checkpoint_cursor
+    if cur is not None:
+        try:
+            cur.interrupt()
+        except Exception:
+            logger.debug("Interrupting the checkpoint failed", exc_info=True)
+    if _conn_use_lock.acquire(timeout=_RESET_WAIT_WARN_S):
+        return
+    logger.warning("Connection reset is waiting for a background checkpoint to stop")
+    _conn_use_lock.acquire()
+
+
 def reset_shared_conn() -> None:
     """Close and reset connections (e.g. after DB file changes)."""
+    _acquire_conn_use_lock()
+    try:
+        _reset_shared_conn_locked()
+    finally:
+        _conn_use_lock.release()
+
+
+def _reset_shared_conn_locked() -> None:
     global _backend, _write_queue, _read_pool
     with _init_lock:
         if _read_pool is not None:
@@ -603,10 +675,17 @@ DbConnReadOnlyOptional = Annotated[
 # ---------------------------------------------------------------------------
 
 
-_token_cache: dict[str, tuple[float, dict | None]] = {}
+# token -> (stored at, user or None, deadline), times on _clock(). The deadline
+# is when the token itself expires (None: no expiry, or an invalid token).
+_token_cache: dict[str, tuple[float, dict | None, float | None]] = {}
 _token_cache_lock = threading.Lock()
 _TOKEN_CACHE_TTL = 30.0
 _TOKEN_CACHE_MAX = 1000
+# Bumped by every invalidation. A lookup that started before an invalidation
+# must not store its (possibly revoked) result afterwards.
+_token_cache_generation = 0
+# The cache's clock; a module attribute so tests can move it.
+_clock = time.monotonic
 
 
 def _cached_validate_token(token: str) -> dict | None:
@@ -615,24 +694,35 @@ def _cached_validate_token(token: str) -> dict | None:
     Token validation queries the write queue on every authenticated request.
     Without a cache, a heavy-traffic server serializes all requests through
     the single write connection just to look up the same token row repeatedly.
+
+    An entry is served for at most ``_TOKEN_CACHE_TTL`` seconds and never past
+    the token's own expiry. A result read before ``invalidate_token_cache()``
+    ran is returned to its caller but not stored, so a password change or
+    user deletion that races a lookup cannot re-cache the revoked token.
     """
-    now = time.monotonic()
+    now = _clock()
     with _token_cache_lock:
         entry = _token_cache.get(token)
-        if entry and (now - entry[0]) < _TOKEN_CACHE_TTL:
+        if entry and (now - entry[0]) < _TOKEN_CACHE_TTL and (
+            entry[2] is None or now < entry[2]
+        ):
             return entry[1]
+        generation = _token_cache_generation
     wq = _get_write_queue()
     cursor = wq.cursor()
     try:
-        from havn.engine.auth import validate_token
-        result = validate_token(cursor, token)
+        from havn.engine import auth
+
+        result, remaining = auth.validate_token_with_expiry(cursor, token)
     finally:
         cursor.close()
+    deadline = now + remaining if remaining is not None else None
     with _token_cache_lock:
-        if len(_token_cache) > _TOKEN_CACHE_MAX:
-            for k in list(_token_cache.keys())[: _TOKEN_CACHE_MAX // 2]:
-                _token_cache.pop(k, None)
-        _token_cache[token] = (now, result)
+        if generation == _token_cache_generation:
+            if len(_token_cache) > _TOKEN_CACHE_MAX:
+                for k in list(_token_cache.keys())[: _TOKEN_CACHE_MAX // 2]:
+                    _token_cache.pop(k, None)
+            _token_cache[token] = (now, result, deadline)
     return result
 
 
@@ -640,9 +730,12 @@ def invalidate_token_cache(token: str | None = None) -> None:
     """Drop one or all entries from the token cache.
 
     Called by logout / revoke flows so a revoked token cannot continue
-    to be accepted until the TTL elapses.
+    to be accepted until the TTL elapses. Also stops lookups already in
+    flight from storing what they read.
     """
+    global _token_cache_generation
     with _token_cache_lock:
+        _token_cache_generation += 1
         if token is None:
             _token_cache.clear()
         else:
@@ -687,6 +780,25 @@ def _authenticate_websocket(websocket) -> dict | None:
     # both paths once the cache is invalidated, and a reconnect storm does not
     # queue a token query per socket.
     return _cached_validate_token(token)
+
+
+# Close code for a socket whose session ended (RFC 6455 "policy violation").
+WS_SESSION_ENDED = 1008
+
+
+def _revalidate_websocket(websocket, ws_user: dict) -> dict | None:
+    """Re-check an open socket's token before handling one of its messages.
+
+    Returns the user as now stored, or None once the token connected with no
+    longer validates (password changed, user deleted, token expired) or now
+    belongs to someone else. Served from the token cache, so the common case
+    costs a dict lookup; with auth off it returns the local admin, as at
+    connect.
+    """
+    current = _authenticate_websocket(websocket)
+    if current is None or current.get("username") != ws_user.get("username"):
+        return None
+    return current
 
 
 def _require_permission(request: Request, permission: str) -> dict:

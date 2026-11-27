@@ -179,6 +179,36 @@ def test_precompressed_sibling_preferred(client, frontend):
     assert r.headers["content-encoding"] == "gzip" and raw == gz
 
 
+def test_precompressed_sibling_has_its_own_etag(client, frontend):
+    """A prebuilt .gz and on-the-fly gzip are different bytes: they must never
+    share a validator, or a client holding one gets 304 for the other."""
+    gz_headers = {"Accept-Encoding": "gzip"}
+    on_the_fly = client.get("/assets/app-abc123.js", headers=gz_headers).headers["etag"]
+
+    sibling = frontend / "assets" / "app-abc123.js.gz"
+    sibling.write_bytes(gzip.compress(APP_JS, compresslevel=1))
+    r = client.get("/assets/app-abc123.js", headers=gz_headers)
+    pre = r.headers["etag"]
+    assert pre != on_the_fly
+    # Holding the on-the-fly validator does not earn a 304 for the sibling.
+    assert client.get("/assets/app-abc123.js",
+                      headers={**gz_headers, "If-None-Match": on_the_fly}).status_code == 200
+    assert client.get("/assets/app-abc123.js",
+                      headers={**gz_headers, "If-None-Match": pre}).status_code == 304
+
+    # Different sibling bytes, same source file: a different validator.
+    import os
+
+    sibling.write_bytes(gzip.compress(APP_JS, compresslevel=9) + b"")
+    st = sibling.stat()
+    os.utime(sibling, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+    again = client.get("/assets/app-abc123.js", headers=gz_headers)
+    assert again.headers["content-encoding"] == "gzip"
+    assert again.headers["etag"] != pre
+    assert client.get("/assets/app-abc123.js",
+                      headers={**gz_headers, "If-None-Match": pre}).status_code == 200
+
+
 def test_already_compressed_formats_not_compressed(client):
     for path in ("/assets/font-9f8e.woff2", "/onboarding/dag.png"):
         r = client.get(path, headers={"Accept-Encoding": "gzip"})
@@ -254,6 +284,83 @@ def test_traversal_guard(client, path):
     assert r.status_code in (200, 404)
     if r.status_code == 200:
         assert r.content == INDEX_HTML
+
+
+# Sent by a real client: httpx keeps percent-escapes in the path, Starlette
+# decodes them, and the route's :path parameter gets the decoded string.
+HOSTILE_PATHS = [
+    "/%2F%2Fattacker.example/share/x.js",
+    "/%2F%2F%2Fattacker.example/share/x.js",
+    "/%5C%5Cattacker.example%5Cshare%5Cx.js",
+    "/%5C%5C%3F%5CUNC%5Cattacker.example%5Cshare%5Cx.js",
+    "/%2F%5Cattacker.example%5Cshare%5Cx.js",
+    "/C:/Windows/win.ini",
+    "/C:%5CWindows%5Cwin.ini",
+    "/c:secret.js",
+    "/%2Fetc/passwd",
+    "/%2e%2e%2fsecret.js",
+    "/%2e%2e%5csecret.js",
+    "/assets/..%5C..%5Csecret.js",
+    "/assets/%2e%2e%2f%2e%2e%2fsecret.js",
+    "/assets/...%5C...%5Csecret.js",
+    "/x%00.js",
+]
+
+
+@pytest.mark.parametrize("path", HOSTILE_PATHS)
+def test_hostile_paths_never_reach_resolve_outside_the_frontend(
+    client, frontend, project, monkeypatch, path
+):
+    """No lookup of a path outside the build, not even one the containment
+    check would refuse afterwards (on Windows, resolving \\\\host\\share opens
+    an SMB connection). The server's own project directory is resolved by
+    the middleware and is not attacker-chosen."""
+    import os
+    from pathlib import Path
+
+    allowed = tuple(os.path.normcase(os.path.abspath(p)) for p in (frontend, project))
+    seen: list[str] = []
+    real_resolve = Path.resolve
+
+    def spy(self, *args, **kwargs):
+        seen.append(str(self))
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", spy)
+    r = client.get(path, headers={"Accept-Encoding": "identity"})
+    monkeypatch.setattr(Path, "resolve", real_resolve)
+    assert b"SECRET" not in r.content
+    assert r.status_code in (200, 404)
+    outside = [
+        p for p in seen
+        if "\x00" in p
+        or not os.path.normcase(os.path.normpath(p)).startswith(allowed)
+    ]
+    assert outside == [], f"resolve() was called on {outside}"
+
+
+@pytest.mark.parametrize("path,size", [
+    ("/onboarding/dag.png", 108),
+    ("/assets/app-abc123.js", len(APP_JS)),
+    ("/assets/sub/deeper/chunk-1.js", 5),
+])
+def test_nested_paths_are_still_served(client, frontend, path, size):
+    (frontend / "assets" / "sub" / "deeper").mkdir(parents=True)
+    (frontend / "assets" / "sub" / "deeper" / "chunk-1.js").write_bytes(b"x=1;\n")
+    r = client.get(path, headers={"Accept-Encoding": "identity"})
+    assert r.status_code == 200
+    assert len(r.content) == size
+
+
+def test_unsafe_static_path_rules():
+    from havn.server.app import _unsafe_static_path
+
+    for bad in ["/x", "\\x", "//h/s/x", "\\\\h\\s\\x", "C:/x", "c:x", "C:\\x",
+                "../x", "a/../x", "a\\..\\x", "a/.../x", "a/.. /x", "x\x00.js"]:
+        assert _unsafe_static_path(bad), bad
+    for ok in ["", "index.html", "assets/app.js", "onboarding/dag.png", "a/b/c.js",
+               "develop/editor", "p/s8b7xYz2", "a..b.js", ".well-known/x"]:
+        assert not _unsafe_static_path(ok), ok
 
 
 def test_unknown_api_and_reserved_paths_404(client):
@@ -384,6 +491,105 @@ def test_api_gzip_passes_streams_through():
     assert len(r.text.splitlines()) == 3
 
 
+def test_gzipped_api_response_weakens_a_strong_etag(client, project):
+    """GET /api/files/... sets a strong ETag for the identity bytes; gzipped,
+    the same strong tag would name a second byte sequence."""
+    (project / "transform" / "bronze").mkdir(parents=True)
+    sql = "SELECT 1 AS a\n" + "-- padding line to make the body compressible\n" * 60
+    (project / "transform" / "bronze" / "x.sql").write_text(sql)
+    plain = client.get("/api/files/transform/bronze/x.sql", headers={"Accept-Encoding": "identity"})
+    assert plain.status_code == 200, plain.text
+    strong = plain.headers["etag"]
+    assert not strong.startswith("W/")
+    gz = client.get("/api/files/transform/bronze/x.sql", headers={"Accept-Encoding": "gzip"})
+    assert gz.headers["content-encoding"] == "gzip"
+    assert gz.headers["etag"] == "W/" + strong
+    # The save path's conflict check uses the body's file_hash, which is
+    # unchanged by compression, so a save from a gzipped read still succeeds.
+    assert gz.json()["file_hash"] == plain.json()["file_hash"]
+    r = client.put("/api/files/transform/bronze/x.sql",
+                   json={"content": sql + "-- edit\n", "expected_hash": gz.json()["file_hash"]})
+    assert r.status_code == 200, r.text
+
+
+def test_gzip_leaves_a_weak_etag_alone():
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    from havn.server.compression import ApiGzipMiddleware
+
+    async def doc(request):
+        return JSONResponse({"pad": "x" * 4000}, headers={"ETag": 'W/"v1"'})
+
+    app = ApiGzipMiddleware(Starlette(routes=[Route("/api/doc", doc)]))
+    r = TestClient(app).get("/api/doc", headers={"Accept-Encoding": "gzip"})
+    assert r.headers["content-encoding"] == "gzip"
+    assert r.headers["etag"] == 'W/"v1"'
+
+
+@pytest.mark.parametrize("media_type,length", [
+    ("application/x-ndjson", False),
+    ("text/csv", False),
+    ("application/json", False),  # compressible type, but no content-length
+    ("text/csv", True),  # a streaming type, even with a length
+])
+def test_stream_headers_are_not_held_for_the_first_chunk(media_type, length):
+    """A stream that does slow work before its first yield must still send
+    its status and headers at once."""
+    from starlette.applications import Starlette
+    from starlette.responses import StreamingResponse
+    from starlette.routing import Route
+
+    from havn.server.compression import ApiGzipMiddleware
+
+    async def slow(request):
+        async def gen():
+            await asyncio.Event().wait()  # never yields: slow work, forever
+            yield b""
+        headers = {"Content-Length": "100"} if length else None
+        return StreamingResponse(gen(), media_type=media_type, headers=headers)
+
+    app = ApiGzipMiddleware(Starlette(routes=[Route("/api/slow", slow)]))
+
+    async def run():
+        sent: list[dict] = []
+        started = asyncio.Event()
+
+        async def receive():
+            await asyncio.Event().wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            sent.append(message)
+            if message["type"] == "http.response.start":
+                started.set()
+
+        scope = {
+            "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+            "method": "GET", "scheme": "http", "path": "/api/slow", "raw_path": b"/api/slow",
+            "query_string": b"", "root_path": "",
+            "headers": [(b"host", b"testserver"), (b"accept-encoding", b"gzip")],
+            "client": ("127.0.0.1", 50000), "server": ("testserver", 80),
+        }
+        task = asyncio.create_task(app(scope, receive, send))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            pass
+        task.cancel()
+        try:
+            await task
+        except BaseException:
+            pass
+        return sent
+
+    sent = asyncio.run(run())
+    assert [m["type"] for m in sent] == ["http.response.start"]
+    headers = {k.decode().lower(): v.decode() for k, v in sent[0]["headers"]}
+    assert "content-encoding" not in headers
+
+
 def test_accepted_encodings_parsing():
     from havn.server.compression import accepted_encodings
 
@@ -456,6 +662,176 @@ def test_force_checkpoint_on_real_warehouse(client):
     import havn.server.app as server_app
     from havn.server import deps
 
-    server_app._force_checkpoint()
+    from contextlib import contextmanager
+
+    deps._get_shared_conn()  # the checkpoint only uses a connection that exists
+    calls = []
+    real = deps.background_write_cursor
+
+    @contextmanager
+    def watching():
+        with real() as cur:
+            calls.append(cur)
+            yield cur
+
+    deps.background_write_cursor = watching
+    try:
+        server_app._force_checkpoint()
+    finally:
+        deps.background_write_cursor = real
+    assert calls and calls[0] is not None
     assert deps._get_shared_conn().execute("SELECT 1").fetchone() == (1,)
     assert deps._inflight["count"] == 0
+
+
+def test_checkpoint_never_opens_the_warehouse(client):
+    import havn.server.app as server_app
+    from havn.server import deps
+
+    deps.reset_shared_conn()
+    server_app._force_checkpoint()
+    assert deps._write_queue is None
+
+
+def test_running_checkpoint_counts_as_in_flight(client, monkeypatch):
+    """While a checkpoint runs, after the request that started it has
+    finished, a branch switch must see the warehouse as busy."""
+    import havn.server.app as server_app
+    from havn.server import deps
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocked_checkpoint():
+        started.set()
+        release.wait(timeout=30)
+
+    monkeypatch.setattr(server_app, "_force_checkpoint", blocked_checkpoint)
+    monkeypatch.setattr(server_app, "_last_checkpoint", 0.0)
+    try:
+        assert client.get("/api/x").status_code == 404
+        assert started.wait(timeout=5)
+        # The request is over; only the checkpoint is left in flight.
+        for _ in range(100):
+            if deps._inflight["count"] == 1:
+                break
+            threading.Event().wait(0.02)
+        assert deps._inflight["count"] == 1
+        assert deps._switch_blocker(0) is not None
+    finally:
+        release.set()
+    for _ in range(100):
+        if not server_app._checkpoint_running and deps._inflight["count"] == 0:
+            break
+        threading.Event().wait(0.05)
+    assert deps._inflight["count"] == 0
+    assert deps._switch_blocker(0) is None
+
+
+def test_failed_thread_start_releases_the_in_flight_count(client, monkeypatch):
+    import havn.server.app as server_app
+    from havn.server import deps
+
+    class NoThread:
+        def __init__(self, *a, **k):
+            pass
+
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(server_app._threading, "Thread", NoThread)
+    monkeypatch.setattr(server_app, "_last_checkpoint", 0.0)
+    assert server_app._maybe_start_checkpoint() is False
+    assert deps._inflight["count"] == 0
+    assert not server_app._checkpoint_running
+
+
+def test_reset_waits_for_a_running_checkpoint_and_interrupts_it(client):
+    """reset_shared_conn() must not close the connection while the background
+    cursor is in use; it interrupts the checkpoint and waits for it."""
+    from havn.server import deps
+
+    deps._get_shared_conn()
+    inside = threading.Event()
+    leave = threading.Event()
+    interrupted = []
+    order: list[str] = []
+
+    def background():
+        with deps.background_write_cursor() as cur:
+            assert cur is not None
+            # Record the interrupt instead of delivering it: nothing runs yet.
+            deps._checkpoint_cursor = _InterruptSpy(interrupted)
+            inside.set()
+            leave.wait(timeout=30)
+            cur.execute("SELECT 1").fetchone()  # the connection is still open
+            order.append("checkpoint done")
+
+    t = threading.Thread(target=background)
+    t.start()
+    assert inside.wait(timeout=5)
+    resetter = threading.Thread(target=lambda: (deps.reset_shared_conn(), order.append("reset")))
+    resetter.start()
+    for _ in range(100):
+        if interrupted:
+            break
+        threading.Event().wait(0.02)
+    assert interrupted, "the reset did not interrupt the checkpoint"
+    assert order == []  # still waiting
+    leave.set()
+    t.join(timeout=10)
+    resetter.join(timeout=10)
+    assert order == ["checkpoint done", "reset"]
+    assert deps._write_queue is None
+
+
+class _InterruptSpy:
+    def __init__(self, calls):
+        self._calls = calls
+
+    def interrupt(self):
+        self._calls.append(1)
+
+
+_RESET_RACE_SCRIPT = r"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+import duckdb
+from fastapi.testclient import TestClient
+
+import havn.server.app as server_app
+from havn.server import deps
+
+proj = Path(sys.argv[2])
+server_app.PROJECT_DIR = proj
+server_app.AUTH_ENABLED = False
+server_app._CHECKPOINT_INTERVAL = -1  # every request starts a checkpoint
+server_app._last_checkpoint = 0.0
+client = TestClient(server_app.app)
+for i in range(int(sys.argv[3])):
+    client.get("/api/tables")  # starts a background checkpoint...
+    deps.reset_shared_conn()   # ...which a reset then races, as between tests
+deps.reset_shared_conn()
+print("clean exit")
+"""
+
+
+def test_connection_resets_racing_checkpoints_do_not_crash(project):
+    """Each request starts a background checkpoint and a reset follows at
+    once. Before the fix this killed the process natively (no traceback)
+    within a few iterations, so it runs in a subprocess."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import havn
+
+    src = str(Path(havn.__file__).resolve().parents[1])
+    proc = subprocess.run(
+        [sys.executable, "-c", _RESET_RACE_SCRIPT, src, str(project), "60"],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert proc.returncode == 0, (proc.returncode, proc.stdout[-2000:], proc.stderr[-4000:])
+    assert "clean exit" in proc.stdout

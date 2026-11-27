@@ -8,8 +8,9 @@ Shared dependencies (DB injection, auth, caching) live in havn.server.deps.
 from __future__ import annotations
 
 import logging
+import re
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from contextlib import asynccontextmanager
 
@@ -217,25 +218,24 @@ _CHECKPOINT_INTERVAL = 60  # seconds between checkpoints
 def _force_checkpoint() -> None:
     """Run FORCE CHECKPOINT on a cursor of the shared write connection.
 
-    Counted as an in-flight request so a branch switch waits for it instead
-    of closing the connection underneath it.
+    Uses deps.background_write_cursor(), so a connection reset (environment
+    switch, backup restore, branch switch, database settings) cannot close
+    the connection while the checkpoint uses it, and the checkpoint never
+    opens the warehouse when no write connection exists.
     """
-    from havn.engine.write_queue import cursor_for
-    from havn.server.deps import _get_shared_conn, request_finished, request_started
+    from havn.server.deps import background_write_cursor
 
-    request_started()
-    try:
-        cur = cursor_for(_get_shared_conn())
-        try:
-            cur.execute("FORCE CHECKPOINT")
-        finally:
-            cur.close()
-    finally:
-        request_finished()
+    with background_write_cursor() as cur:
+        if cur is None:
+            return
+        cur.execute("FORCE CHECKPOINT")
 
 
 def _run_checkpoint() -> None:
+    """Thread body; the caller has already counted it as in flight."""
     global _checkpoint_running
+    from havn.server.deps import request_finished
+
     try:
         _force_checkpoint()
     except Exception as e:
@@ -243,22 +243,33 @@ def _run_checkpoint() -> None:
     finally:
         with _checkpoint_lock:
             _checkpoint_running = False
+        request_finished()
 
 
 def _maybe_start_checkpoint() -> bool:
-    """Start a background checkpoint if one is due and none is running."""
+    """Start a background checkpoint if one is due and none is running.
+
+    The checkpoint is counted as an in-flight request here, on the request's
+    own thread, before the thread starts: counted inside the thread, the
+    request that started it could finish first and leave the count at zero,
+    and a branch switch would see an idle warehouse mid-checkpoint.
+    """
     global _last_checkpoint, _checkpoint_running
+    from havn.server.deps import request_finished, request_started
+
     now = _time.time()
     with _checkpoint_lock:
         if _checkpoint_running or now - _last_checkpoint <= _CHECKPOINT_INTERVAL:
             return False
         _last_checkpoint = now
         _checkpoint_running = True
+    request_started()
     try:
         _threading.Thread(target=_run_checkpoint, name="havn-checkpoint", daemon=True).start()
     except Exception:
         with _checkpoint_lock:
             _checkpoint_running = False
+        request_finished()
         return False
     return True
 
@@ -448,6 +459,27 @@ _FRONTEND_DIR = _find_frontend_dir()
 _RESERVED_PATHS = {"docs", "redoc", "openapi.json"}
 
 
+def _unsafe_static_path(path: str) -> bool:
+    """True when a requested frontend path must not reach the filesystem.
+
+    Refused, under POSIX and Windows rules alike: absolute paths, a leading
+    ``/`` or ``\\``, drive or UNC anchors (``C:x``, ``//host/share``), NUL
+    bytes, and any ``..`` segment (also ``...`` and ``.. ``, which Windows
+    trims to ``..``) under either separator.
+    """
+    if not path:
+        return False
+    if "\x00" in path or path[0] in "/\\":
+        return True
+    win = PureWindowsPath(path)
+    if PurePosixPath(path).is_absolute() or win.is_absolute() or win.drive or win.anchor:
+        return True
+    for segment in re.split(r"[\\/]", path):
+        if ".." in segment and not segment.strip(". "):
+            return True
+    return False
+
+
 @app.get("/", response_class=HTMLResponse)
 @app.get("/{path:path}", response_class=HTMLResponse)
 def serve_frontend(request: Request, path: str = "") -> Response:
@@ -482,15 +514,21 @@ def serve_frontend(request: Request, path: str = "") -> Response:
 
     # Path-traversal guard. Starlette decodes %2e%2e%2f into a literal "../"
     # *after* normalization, so the :path converter can hand us "../../etc/passwd".
-    # Resolve the candidate and require it to stay inside the frontend dir, or
-    # we'd serve any file the server process can read (.env, warehouse.duckdb,
-    # SSH keys) to an unauthenticated client. An escape is treated as a miss.
-    frontend_root = _FRONTEND_DIR.resolve()
-    file_path = (_FRONTEND_DIR / path).resolve()
-    try:
-        file_path.relative_to(frontend_root)
-    except ValueError:
-        file_path = None
+    # A path that could leave the frontend dir is a miss before it touches
+    # the filesystem: joining an absolute or UNC path replaces the directory,
+    # and resolving "\\host\share\x" on Windows opens an SMB connection
+    # (leaking the NTLM hash and stalling the worker) even though the
+    # containment check below would refuse the file afterwards. The check
+    # stays as the backstop (symlinks), so we never serve .env,
+    # warehouse.duckdb or SSH keys to an unauthenticated client.
+    file_path: Path | None = None
+    if not _unsafe_static_path(path):
+        frontend_root = _FRONTEND_DIR.resolve()
+        file_path = (_FRONTEND_DIR / path).resolve()
+        try:
+            file_path.relative_to(frontend_root)
+        except ValueError:
+            file_path = None
     if file_path is not None and file_path.is_file():
         rel_parts = file_path.relative_to(frontend_root).parts
         if rel_parts and rel_parts[0] == "assets":
