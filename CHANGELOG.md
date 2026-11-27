@@ -4,6 +4,85 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Anomaly detection could not fire.** Each build was compared with a
+  baseline that already contained it, so with five or fewer recorded runs no
+  spike of any size reached the threshold, and later ones were damped. The
+  baseline is now the runs before the current one. Anomaly detection also
+  never ran in parallel mode, which is what `havn transform` uses by default;
+  it runs there now.
+- **Scheduled runs were skipped while another run was in progress.** The
+  scheduler only fired a schedule if it looked during the matching minute, so
+  a 06:05 stream was lost when a 06:00 job took 20 minutes. A schedule now
+  fires when a fire time fell since it was last evaluated; several missed
+  fires become one run, and nothing from before the scheduler started is
+  caught up.
+- **A failed scheduled stream or job was reported as completed.**
+- **`havn stream` carried on after a failed assertion.** A model rejected by
+  an error-severity `@assert` did not fail the transform step, so the export
+  step ran and the command exited 0.
+- **`havn schedule` did not start for a project with only scheduled jobs.**
+- **Runs started from the web UI** now build models the way `havn transform`
+  does. They include models from installed packages, check
+  `@source_freshness`, record performance data, take Pipeline Rewind
+  snapshots, profile snapshot models and run anomaly detection. A stream
+  started from the UI runs the steps and targets it defines (it used to run
+  every ingest script, model and export), runs `seed` steps and retries per
+  the stream's settings. Nothing downstream of a failed ingest script, seed
+  or model runs, and no export runs after a failed load or transform. A UI
+  transform run with a failed assertion is reported as failed.
+- **The output panel** says why a model was skipped (stale source, upstream
+  failure) where it used to say "(no changes)".
+- **Editing settings from the UI or CLI wiped the comments in
+  `project.yml`.** Adding or removing a connector, saving anomaly or database
+  settings, editing a job and `havn migrate` now change the file in place:
+  comments, key order, quoting and `${VAR}` references are kept, and the
+  write is atomic. If an edit cannot be made without changing what the file
+  means, havn falls back to a plain rewrite and logs a warning.
+- **Changing a password did not end that user's sessions.** Existing tokens
+  stayed valid for up to 30 days. They are now revoked, open WebSocket
+  sessions close, and a token revoked while a request was in flight can no
+  longer be re-cached.
+- **First-run setup was reachable on a server running without `--auth`**, and
+  two concurrent setup calls could both create an admin.
+- **The static file route looked up network paths.** A crafted request made
+  the server resolve a UNC path before rejecting it.
+- **Parallel transform output** now shows each assertion with its detail, the
+  high-null warning and what a Python model printed, as sequential output
+  does. An error message containing Rich markup no longer crashes the report.
+- **Model lineage rows could be lost** when several models were first built
+  in parallel on a fresh warehouse.
+- **`havn transform` ignored `alerts: channels: [log]`** unless a Slack or
+  webhook URL was also set.
+
+### Changed
+
+- **Alerts cover every kind of run.** `alerts:` in `project.yml` was only
+  honoured by `havn transform`. Streams (manual, scheduled and from the UI)
+  and jobs now send the pipeline success or failure alert too. With
+  `on_success` left at its default, a project with alerts configured gets a
+  success alert per stream and job run.
+- **The frontend is cached and compressed.** Hashed assets are served as
+  immutable, `index.html` is revalidated by ETag, and text assets and API
+  JSON are gzipped. A cold load of the app transfers about a quarter of the
+  bytes it did. Missing assets return 404 where they used to return the app
+  shell.
+- **The periodic checkpoint runs off the request path**, so a large
+  checkpoint no longer stalls every request.
+- **The CLI starts faster.** `import havn.cli` dropped from about 360 ms to
+  210 ms, and `havn --help` by about 240 ms, by deferring DuckDB, pydantic and
+  package metadata until a command needs them.
+- **Sign-in hardening.** Passwords are hashed with 600,000 PBKDF2 iterations
+  (stored per user; existing users are upgraded at their next sign-in, which
+  now takes about a third of a second). New passwords need at least 8
+  characters; existing shorter ones still sign in. Ten failed sign-ins for
+  one username within 15 minutes lock that username out until the window
+  passes, from any address.
+- **Dependencies.** `huey` is removed (it was never used: the scheduler is an
+  in-process loop). `ruamel.yaml` is added for comment-preserving config
+  edits.
+
 ## [0.3.0] - 2026-10-09
 
 ### Added
