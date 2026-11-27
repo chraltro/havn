@@ -293,6 +293,10 @@ def _toggle_enabled(name: str, enabled: bool, project_dir: Path | None) -> None:
         console.print(f"[red]Job '{name}' not found[/red]")
         raise typer.Exit(1)
     # Edited in place: the job file's comments and formatting survive.
-    with yamlio.edit_yaml(job.file_path) as data:
-        yamlio.set_value(data, "enabled", enabled)
+    try:
+        with yamlio.edit_yaml(job.file_path) as data:
+            yamlio.set_value(data, "enabled", enabled)
+    except yamlio.YamlLoadError as e:
+        console.print(f"[red]Cannot change job '{name}': {e}[/red]")
+        raise typer.Exit(1)
     console.print(f"Job '{name}' {'enabled' if enabled else 'disabled'}")

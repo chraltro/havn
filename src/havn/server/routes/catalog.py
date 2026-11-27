@@ -224,20 +224,23 @@ def update_database_config(request: Request, body: DatabaseConfigUpdate) -> dict
         raise HTTPException(404, "project.yml not found")
 
     # Edited in place (comments kept), written atomically.
-    with yamlio.edit_yaml(yml_path) as raw:
-        database = yamlio.ensure_map(raw, "database")
+    try:
+        with yamlio.edit_yaml(yml_path) as raw:
+            database = yamlio.ensure_map(raw, "database")
 
-        if body.memory_limit is not None:
-            if body.memory_limit.strip():
-                yamlio.set_value(database, "memory_limit", body.memory_limit.strip())
-            else:
-                yamlio.delete_key(raw, "database", "memory_limit")
+            if body.memory_limit is not None:
+                if body.memory_limit.strip():
+                    yamlio.set_value(database, "memory_limit", body.memory_limit.strip())
+                else:
+                    yamlio.delete_key(raw, "database", "memory_limit")
 
-        if body.threads is not None:
-            if body.threads > 0:
-                yamlio.set_value(database, "threads", body.threads)
-            else:
-                yamlio.delete_key(raw, "database", "threads")
+            if body.threads is not None:
+                if body.threads > 0:
+                    yamlio.set_value(database, "threads", body.threads)
+                else:
+                    yamlio.delete_key(raw, "database", "threads")
+    except yamlio.YamlLoadError as e:
+        raise HTTPException(400, str(e))
 
     # Reset shared connection so new settings take effect
     from havn.server.deps import reset_shared_conn, _clear_config_cache

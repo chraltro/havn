@@ -363,13 +363,18 @@ def setup_connector(
             set_secret(project_dir, key, value)
 
     # 7. Update project.yml — add connection and optionally a sync stream
-    _update_project_yml(
-        project_dir,
-        connection_name=connection_name,
-        connection_params=yml_params,
-        script_filename=script_filename,
-        schedule=schedule or connector.default_schedule,
-    )
+    from havn.yamlio import YamlLoadError
+
+    try:
+        _update_project_yml(
+            project_dir,
+            connection_name=connection_name,
+            connection_params=yml_params,
+            script_filename=script_filename,
+            schedule=schedule or connector.default_schedule,
+        )
+    except YamlLoadError as e:
+        return {"status": "error", "error": f"Could not add the connection to project.yml: {e}"}
 
     return {
         "status": "success",
@@ -536,16 +541,25 @@ def remove_connector(
     connection_name: str,
 ) -> dict[str, Any]:
     """Remove a connector: delete script, remove from project.yml."""
+    from havn.yamlio import YamlLoadError
+
     safe_name = _sanitize_name(connection_name)
     script_path = project_dir / "ingest" / f"connector_{safe_name}.py"
+
+    # project.yml first: if it cannot be edited, nothing is removed.
+    try:
+        removed_config = _remove_from_project_yml(project_dir, connection_name)
+    except YamlLoadError as e:
+        return {
+            "status": "error",
+            "error": f"Could not remove the connection from project.yml: {e}",
+            "invalid_config": True,
+        }
 
     removed_script = False
     if script_path.exists():
         script_path.unlink()
         removed_script = True
-
-    # Remove from project.yml
-    removed_config = _remove_from_project_yml(project_dir, connection_name)
 
     if not removed_script and not removed_config:
         return {"status": "error", "error": f"Connector '{connection_name}' not found"}

@@ -43,6 +43,16 @@ def migrate(
         console.print(f"[yellow]Warehouse is already on {to} backend. Nothing to do.[/yellow]")
         return
 
+    # project.yml is rewritten at the end; refuse now, before copying any
+    # data, if it cannot be edited safely (e.g. it repeats a key).
+    from havn import yamlio
+
+    try:
+        yamlio.check_editable(project_dir / "project.yml")
+    except yamlio.YamlLoadError as e:
+        console.print(f"[red]Cannot migrate: {e}[/red]")
+        raise typer.Exit(code=1)
+
     # Build destination DatabaseConfig
     if to == "ducklake":
         dest_catalog = catalog or ".havn/catalog.ducklake"
@@ -139,7 +149,14 @@ def migrate(
     _cleanup_stage(stage_dir)
 
     # Rewrite project.yml atomically
-    _rewrite_project_yml(project_dir, dest_config)
+    try:
+        _rewrite_project_yml(project_dir, dest_config)
+    except yamlio.YamlLoadError as e:  # changed on disk since the check above
+        console.print(
+            f"[red]The data was copied, but project.yml was not updated: {e}[/red]\n"
+            "The source warehouse is untouched; fix project.yml and run the migration again."
+        )
+        raise typer.Exit(code=1)
 
     # Rename source
     _rename_source(project_dir, src_config)

@@ -33,9 +33,18 @@ of block mappings and sequences is normalised to one style per file (guessed
 from the file); YAML 1.1 boolean spellings other than true/false (``yes``,
 ``On``) are written back as ``true``/``false``, sexagesimal numbers as plain
 integers and ``null``/``~`` as an empty value; all mean the same to PyYAML.
+A ``<<`` merge in a mapping that is edited is written out as plain keys.
+
+Because the comment handling leans on ruamel internals, every result is
+checked before it replaces the file: the text is loaded with PyYAML and must
+equal the edited data, value for value and type for type. If it does not
+(or rendering failed), the file is written with ``yaml.dump`` as havn did
+before, losing the comments but never the data, and a warning is logged.
 """
 from __future__ import annotations
 
+import datetime
+import logging
 import os
 import re
 import tempfile
@@ -48,7 +57,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from ruamel.yaml import YAML
-from ruamel.yaml.comments import CommentedMap, CommentedSeq
+from ruamel.yaml.anchor import Anchor
+from ruamel.yaml.comments import CommentedMap, CommentedSeq, merge_attrib
 from ruamel.yaml.error import CommentMark, YAMLError
 from ruamel.yaml.nodes import ScalarNode
 from ruamel.yaml.representer import RoundTripRepresenter
@@ -58,6 +68,8 @@ from ruamel.yaml.scalarstring import ScalarString
 from ruamel.yaml.tokens import CommentToken
 
 from havn.textio import read_project_text
+
+logger = logging.getLogger("havn.yamlio")
 
 __all__ = [
     "YamlLoadError",
@@ -201,11 +213,14 @@ def _guess_indent(text: str) -> tuple[int, int, int]:
 # ---------------------------------------------------------------------------
 
 class YamlLoadError(ValueError):
-    """The file is not valid YAML (or has a duplicate key); it was not changed.
+    """The file cannot be edited safely; it was not changed.
 
-    Duplicate keys are refused rather than resolved: PyYAML keeps the last
-    value, ruamel would keep the first, and a rewrite must not change which
-    one havn sees.
+    Raised when the file is not valid YAML, its top level is not a mapping,
+    it repeats a key, or the round-trip parser would read a value differently
+    from PyYAML (``-012``, a ``%YAML 1.2`` document with ``1:30``). Duplicate
+    keys are refused rather than resolved: PyYAML keeps the last value,
+    ruamel would keep the first, and a rewrite must not decide silently. The
+    message names the file and the problem.
     """
 
 
@@ -241,8 +256,12 @@ def atomic_write_text(path: str | Path, text: str, *, newline: str = "\n") -> No
     and is removed if anything fails. The file mode of an existing target is
     kept, and the new file's mtime is made to differ from the old one so
     mtime-keyed caches notice the change even on coarse-grained filesystems.
+
+    A symlink is followed: its target is replaced and the link stays. A
+    hardlink cannot survive an atomic replace: the path gets a new file and
+    the other links keep the old content.
     """
-    path = Path(path)
+    path = Path(os.path.realpath(path))
     data = text.replace("\r\n", "\n")
     if newline != "\n":
         data = data.replace("\n", newline)
@@ -326,8 +345,16 @@ def edit_yaml(
     comments are kept at the top of the result. If the file does not exist,
     ``create()`` supplies the initial content, or ``FileNotFoundError`` is
     raised. If the block raises, the file is not touched. Nothing is written
-    when the result is identical to the file.
+    when the edited data equals what the file already says.
+
+    A file that cannot be edited safely raises :class:`YamlLoadError` before
+    the block runs. The text written is checked by loading it with PyYAML;
+    if it is not exactly the edited data, the file is written with a plain
+    ``yaml.dump`` instead (valid and correct, comments lost, a warning
+    logged), so an edit never leaves a file worse than havn's old writer.
     """
+    import yaml  # PyYAML: the reader the rest of havn uses, and the referee
+
     path = Path(path)
     with _lock_for(path):
         exists = path.exists()
@@ -340,24 +367,11 @@ def edit_yaml(
         else:
             raise FileNotFoundError(str(path))
 
-        y = _make_yaml(text)
-        try:
-            doc = y.load(text) if text.strip() else None
-        except YAMLError as e:
-            raise YamlLoadError(f"{path.name}: {e}") from e
-        header = ""
-        if doc is None:
-            # Empty, only comments, or an explicit null: ruamel returns None
-            # and drops the comments, so they are carried over as text.
-            lines = [ln for ln in text.splitlines() if ln.strip()]
-            if lines and all(ln.lstrip().startswith("#") for ln in lines):
-                header = text if text.endswith("\n") else text + "\n"
-            doc = CommentedMap()
-            if not exists and create is not None:
-                for k, v in create().items():
-                    doc[k] = to_roundtrip(v)
-        elif not isinstance(doc, CommentedMap):
-            raise ValueError(f"{path.name}: the top level is not a mapping")
+        doc, header, before = _load(path.name, text, yaml)
+        if not exists and create is not None and not len(doc):
+            for k, v in create().items():
+                doc[k] = to_roundtrip(v)
+            before = None  # a new file is always written
 
         root_token = _ROOT.set(doc)
         try:
@@ -365,15 +379,143 @@ def edit_yaml(
         finally:
             _ROOT.reset(root_token)
 
-        if len(doc) == 0 and exists and header:
-            return  # comment-only file, nothing added: leave it alone
-        body = dumps(doc, like=text) if len(doc) else ""
-        if body.strip() == "{}":
-            body = ""
-        out = header + body
-        if exists and out == text:
-            return
+        intended = _plain(doc)
+        if exists and _equal(intended, before if before is not None else {}):
+            return  # same data: leave the file exactly as it is
+        out = _render_checked(path.name, doc, text, header, intended, yaml)
         atomic_write_text(path, out, newline=newline)
+
+
+def check_editable(path: str | Path) -> None:
+    """Raise :class:`YamlLoadError` now if ``edit_yaml(path)`` would refuse it.
+
+    For commands that do expensive work before editing the file (``havn
+    migrate``), so they can fail before starting rather than after.
+    """
+    import yaml
+
+    path = Path(path)
+    _load(path.name, read_project_text(path), yaml)
+
+
+def _load(name: str, text: str, yaml: Any) -> tuple[CommentedMap, str, Any]:
+    """(round-trip document, carried-over header, PyYAML's reading of ``text``)."""
+    try:
+        before = yaml.safe_load(text) if text.strip() else None
+    except yaml.YAMLError as e:
+        raise YamlLoadError(f"{name} is not valid YAML: {e}") from e
+    try:
+        doc = _make_yaml(text).load(text) if text.strip() else None
+    except (YAMLError, ValueError, TypeError) as e:
+        raise YamlLoadError(f"{name} cannot be edited safely: {e}") from e
+    header = ""
+    if doc is None:
+        # Empty, only comments, or an explicit null: ruamel returns None and
+        # drops the comments, so they are carried over as text.
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        if lines and all(ln.lstrip().startswith("#") for ln in lines):
+            header = text if text.endswith("\n") else text + "\n"
+        doc = CommentedMap()
+    elif not isinstance(doc, CommentedMap):
+        raise YamlLoadError(f"{name}: the top level is not a mapping")
+    if not _equal(_plain(doc), before if before is not None else {}):
+        raise YamlLoadError(
+            f"{name} cannot be edited safely: a value in it reads differently "
+            "to the round-trip parser than to PyYAML"
+        )
+    return doc, header, before
+
+
+def _render(doc: CommentedMap, text: str, header: str) -> str:
+    """The comment-preserving rendering of ``doc`` (may be wrong; checked)."""
+    return header + dumps(doc, like=text) if len(doc) or not header else header
+
+
+def _render_checked(name: str, doc: CommentedMap, text: str, header: str,
+                    intended: Any, yaml: Any) -> str:
+    """Render ``doc``; fall back to a plain dump if the result is not right.
+
+    The round trip depends on ruamel.yaml's comment internals. Whatever it
+    produces is loaded back with PyYAML and compared with ``intended`` (the
+    edited data as PyYAML would see it); if it does not load, differs in any
+    value or type, or rendering raised, the file is written the way havn did
+    before this module existed (``yaml.dump``): valid and correct, without
+    the comments.
+    """
+    try:
+        out = _render(doc, text, header)
+        reread = yaml.safe_load(out)
+        if _equal(reread if reread is not None else {}, intended):
+            return out
+        reason = "the rewritten text reads back differently"
+    except Exception as e:  # noqa: BLE001 - any failure here means "fall back"
+        reason = f"{type(e).__name__}: {e}"
+    logger.warning("%s: comments could not be preserved (%s); rewrote it without them", name, reason)
+    return yaml.dump(intended, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+
+def _plain(value: Any, _memo: dict[int, Any] | None = None) -> Any:
+    """The edited document as plain Python values, as PyYAML would read it.
+
+    Shared (aliased) containers stay shared, so a plain dump writes them as
+    anchors the way PyYAML did.
+    """
+    memo = {} if _memo is None else _memo
+    if isinstance(value, dict):
+        if id(value) in memo:
+            return memo[id(value)]
+        out: dict = {}
+        memo[id(value)] = out
+        for k, v in value.items():
+            out[_plain(k, memo)] = _plain(v, memo)
+        return out
+    if isinstance(value, (list, tuple)):
+        if id(value) in memo:
+            return memo[id(value)]
+        seq: list = []
+        memo[id(value)] = seq
+        seq.extend(_plain(v, memo) for v in value)
+        return seq
+    if isinstance(value, (set, frozenset)) or type(value).__name__ == "CommentedSet":
+        return {_plain(v, memo) for v in value}
+    if value is None or type(value) in (bool, int, float, str, bytes):
+        return value
+    if isinstance(value, bool) or type(value).__name__ == "ScalarBoolean":
+        return bool(value)
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        return float(value)
+    if isinstance(value, str):
+        return str(value)
+    if isinstance(value, datetime.datetime):
+        return datetime.datetime(
+            value.year, value.month, value.day, value.hour, value.minute,
+            value.second, value.microsecond, value.tzinfo,
+        )
+    return value
+
+
+def _equal(a: Any, b: Any, _seen: set[tuple[int, int]] | None = None) -> bool:
+    """Equal values of the same YAML type (``1`` is not ``1.0`` or ``True``)."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        seen = set() if _seen is None else _seen
+        if (id(a), id(b)) in seen:
+            return True
+        seen.add((id(a), id(b)))
+        return a.keys() == b.keys() and all(_equal(a[k], b[k], seen) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        seen = set() if _seen is None else _seen
+        return len(a) == len(b) and all(_equal(x, y, seen) for x, y in zip(a, b))
+    kinds = (bool, int, float, str, bytes, datetime.datetime, datetime.date, dict, list, set)
+    for kind in kinds:  # bool before int, datetime before date
+        if isinstance(a, kind) or isinstance(b, kind):
+            if not (isinstance(a, kind) and isinstance(b, kind)):
+                return False
+            if kind is float and a != a and b != b:
+                return True  # .nan
+            return a == b
+    return a == b
 
 
 # ---------------------------------------------------------------------------
@@ -419,6 +561,56 @@ def _is_flow(node: Any) -> bool:
         return False
 
 
+def _quietly(default: Any, fn: Callable[..., Any], *args: Any) -> Any:
+    """Run a comment-moving step; on any failure, skip it.
+
+    Moving comments goes through ruamel internals. A failure there must not
+    abort an edit whose data change is already made: the data is what
+    matters, and edit_yaml checks the rendered result (falling back to a
+    plain dump) anyway.
+    """
+    try:
+        return fn(*args)
+    except Exception:  # noqa: BLE001
+        logger.debug("yamlio: comment step %s failed", getattr(fn, "__name__", fn), exc_info=True)
+        return default
+
+
+def _own_keys(mapping: CommentedMap) -> list[Any]:
+    """Keys written in this mapping (not ones it only gets from a ``<<`` merge)."""
+    if _has_merge(mapping):
+        return [k for k in mapping.keys() if k in mapping._ok]
+    return list(mapping.keys())
+
+
+def _has_merge(node: Any) -> bool:
+    return isinstance(node, CommentedMap) and bool(getattr(node, merge_attrib, None))
+
+
+def _has_anchor(node: Any) -> bool:
+    anchor = getattr(node, Anchor.attrib, None)
+    return anchor is not None and anchor.value is not None
+
+
+def _unmerge(mapping: CommentedMap) -> None:
+    """Replace a ``<<`` merge by the keys it supplied, written out.
+
+    The data PyYAML sees is unchanged; the mapping becomes an ordinary one
+    that can be edited key by key (a merge would otherwise bring back keys
+    that were deleted, or hide edits behind the merged values).
+    """
+    if not _has_merge(mapping):
+        return
+    for k in list(mapping.keys()):
+        mapping._ok.add(k)
+    for source in getattr(mapping, merge_attrib):
+        src = source[1] if isinstance(source, tuple) else source
+        refs = getattr(src, "_ref", None)
+        if refs is not None and mapping in refs:
+            refs.remove(mapping)
+    delattr(mapping, merge_attrib)
+
+
 def _leaf(container: Any, key: Any) -> tuple[Any, Any]:
     """The (container, key) whose comment token follows this entry's text.
 
@@ -426,8 +618,8 @@ def _leaf(container: Any, key: Any) -> tuple[Any, Any]:
     last scalar inside it, so that is where to look for (or put) them.
     """
     value = container[key]
-    if isinstance(value, CommentedMap) and len(value) and not _is_flow(value):
-        return _leaf(value, list(value.keys())[-1])
+    if isinstance(value, CommentedMap) and _own_keys(value) and not _is_flow(value):
+        return _leaf(value, _own_keys(value)[-1])
     if isinstance(value, CommentedSeq) and len(value) and not _is_flow(value):
         return _leaf(value, len(value) - 1)
     return container, key
@@ -494,16 +686,17 @@ def _append_before_first(parent: Any, parent_key: Any, mapping: CommentedMap, li
 
 
 def ensure_map(doc: CommentedMap, *path: str) -> CommentedMap:
-    """Return the mapping at ``path``, creating it when missing or null.
+    """Return the mapping at ``path``, creating it when missing or empty.
 
-    A key that is present with a null value (``connections:``) is given an
-    empty mapping in place, keeping its position and comments. A value that
-    is present but is not a mapping raises ``TypeError``.
+    A key that is present with a null or other empty value (``connections:``,
+    ``resources: []``, ``""``, ``false``) is given an empty mapping in place,
+    keeping its position and comments, as havn's call sites did before. A
+    non-empty value that is not a mapping raises ``TypeError``.
     """
     node: Any = doc
     for key in path:
         value = node.get(key) if key in node else None
-        if key not in node or value is None:
+        if key not in node or value is None or (not isinstance(value, dict) and not value):
             set_value(node, key, CommentedMap())
             value = node[key]
         elif not isinstance(value, dict):
@@ -525,6 +718,11 @@ def set_value(mapping: CommentedMap, key: str, value: Any) -> None:
       entry (often a commented-out example, or a paragraph about the next
       section) move down so they still follow the block.
     - dicts and lists become block YAML.
+    - A mapping value is updated key by key (keeping the comments inside it)
+      only when it is a plain block mapping. One with an anchor is replaced
+      instead, so its aliases keep the old data (as with PyYAML, where an
+      alias was the same object and assigning a new value left it alone);
+      one with a ``<<`` merge is replaced, so merged keys do not linger.
     """
     if not isinstance(mapping, CommentedMap):
         mapping[key] = value
@@ -535,25 +733,27 @@ def set_value(mapping: CommentedMap, key: str, value: Any) -> None:
             return
         if (
             isinstance(old, CommentedMap) and isinstance(value, dict) and value
-            and not _is_flow(old)
+            and not _is_flow(old) and not _has_anchor(old) and not _has_merge(old)
         ):
             _sync(old, value)
             return
         if isinstance(old, ScalarString) and isinstance(value, str) and not isinstance(value, ScalarString):
             value = type(old)(value)
-        trailing = "" if _is_flow(mapping) else _take_trailing(mapping, key)
+        own = key in _own_keys(mapping)
+        trailing = "" if _is_flow(mapping) or not own else _quietly("", _take_trailing, mapping, key)
         mapping[key] = to_roundtrip(value)
         if trailing:
-            _reattach(mapping, key, trailing)
+            _quietly(None, _reattach, mapping, key, trailing)
         return
     trailing = ""
-    if len(mapping) and not _is_flow(mapping):
-        trailing = _take_trailing(mapping, list(mapping.keys())[-1])
+    own_keys = _own_keys(mapping)
+    if own_keys and not _is_flow(mapping):
+        trailing = _quietly("", _take_trailing, mapping, own_keys[-1])
     if _is_flow(mapping):
         mapping.fa.set_block_style()
     mapping[key] = to_roundtrip(value)
     if trailing:
-        _reattach(mapping, key, trailing)
+        _quietly(None, _reattach, mapping, key, trailing)
 
 
 def _renders_empty(value: Any) -> bool:
@@ -601,22 +801,91 @@ def _delete(node: Any, key: Any) -> None:
     if not isinstance(node, CommentedMap):
         del node[key]
         return
+    # A merge would bring a deleted key back (or keep supplying it).
+    _unmerge(node)
     keys = list(node.keys())
     idx = keys.index(key)
-    trailing = _take_trailing(node, key) if not _is_flow(node) else ""
+    trailing = "" if _is_flow(node) else _quietly("", _take_trailing, node, key)
     del node[key]
     node.ca.items.pop(key, None)
+    _quietly(None, _move_comments_after_delete, node, keys, idx, trailing)
+
+
+def _move_comments_after_delete(node: CommentedMap, keys: list[Any], idx: int, trailing: str) -> None:
+    chain = _chain(node)
+    if not len(node) and chain:
+        # Left empty, the mapping is written as ``key: {}``. Comment lines
+        # held for "before the first key" would be written before the
+        # ``{}`` (invalid YAML), so they move in front of whatever follows,
+        # together with the lines that trailed the deleted entry.
+        lines = _take_before_first(chain[-1][0], chain[-1][1], node) + trailing
+        if lines:
+            _place_before_next(chain, lines)
+        return
     if not trailing:
         return
     if idx > 0:
         _append_after(node, keys[idx - 1], trailing)
-        return
-    chain = _chain(node)
-    if len(node) or not chain:
+    else:
         parent, parent_key = chain[-1] if chain else (None, None)
         _append_before_first(parent, parent_key, node, trailing)
-    else:
-        _place_before_next(chain, trailing)
+
+
+def _token_text(token: Any) -> str:
+    value = token.value
+    if value.startswith("#"):
+        col = getattr(token, "column", None)
+        if col is None:
+            col = getattr(getattr(token, "start_mark", None), "column", 0) or 0
+        value = " " * col + value
+    return value if value.endswith("\n") else value + "\n"
+
+
+def _take_before_first(parent: Any, parent_key: Any, mapping: CommentedMap) -> str:
+    """Detach the comment lines between a mapping's key line and its first key.
+
+    ruamel keeps them in the parent's entry (index 2 after an end-of-line
+    comment on the key line, index 3 otherwise) and in the mapping's own
+    ``ca.comment``. An end-of-line comment on the key line comes along as a
+    full line: next to ``{}`` it has nowhere to go.
+    """
+    parts: list[str] = []
+    seen: set[int] = set()
+    entry = parent.ca.items.get(parent_key) if isinstance(parent, CommentedMap) else None
+    candidates: list[Any] = []
+    if entry:
+        candidates.append(entry[2])
+        if len(entry) > 3:
+            candidates.append(entry[3])
+    if mapping.ca.comment:
+        candidates.extend(mapping.ca.comment[:2])
+    for cand in candidates:
+        tokens = cand if isinstance(cand, list) else [cand]
+        for tok in tokens:
+            if tok is None or id(tok) in seen:
+                continue
+            seen.add(id(tok))
+            text = tok.value
+            if text.startswith("#"):
+                # End-of-line comment (possibly followed by full lines).
+                head, tail = _split(tok)
+                indent = ""
+                for ln in tail.splitlines():
+                    if ln.strip():
+                        indent = ln[: len(ln) - len(ln.lstrip())]
+                        break
+                if isinstance(cand, list):
+                    parts.append(_token_text(tok))
+                else:
+                    parts.append(indent + head.strip() + "\n" + tail)
+            else:
+                parts.append(text.lstrip("\n") if not isinstance(cand, list) else text)
+    if entry:
+        entry[2] = None
+        if len(entry) > 3:
+            entry[3] = None
+    mapping.ca.comment = None
+    return "".join(p if p.endswith("\n") or not p else p + "\n" for p in parts)
 
 
 def _chain(target: Any) -> list[tuple[Any, Any]]:
@@ -625,9 +894,14 @@ def _chain(target: Any) -> list[tuple[Any, Any]]:
     if root is None or target is root:
         return []
 
+    visited: set[int] = set()
+
     def walk(node: Any, trail: list[tuple[Any, Any]]) -> list[tuple[Any, Any]] | None:
+        if id(node) in visited:
+            return None  # an alias: its first occurrence is where it is written
+        visited.add(id(node))
         if isinstance(node, CommentedMap):
-            items = list(node.items())
+            items = [(k, node[k]) for k in _own_keys(node)]
         elif isinstance(node, CommentedSeq):
             items = list(enumerate(node))
         else:
@@ -649,7 +923,9 @@ def _place_before_next(chain: list[tuple[Any, Any]], lines: str) -> None:
     for parent, parent_key in reversed(chain):
         if not isinstance(parent, CommentedMap):
             break
-        keys = list(parent.keys())
+        keys = _own_keys(parent)
+        if parent_key not in keys:
+            break
         i = keys.index(parent_key)
         if i + 1 < len(keys):
             entry = parent.ca.items.setdefault(keys[i + 1], [None, None, None, None])
@@ -682,6 +958,9 @@ def sync_mapping(mapping: CommentedMap, data: dict) -> None:
 
 
 def _sync(mapping: CommentedMap, data: dict) -> None:
+    # The result must be exactly ``data``: keys a ``<<`` merge supplies are
+    # written out first, so the ones not in ``data`` can be deleted.
+    _unmerge(mapping)
     for key, value in data.items():
         set_value(mapping, key, value)
     for key in [k for k in mapping.keys() if k not in data]:

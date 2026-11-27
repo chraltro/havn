@@ -341,7 +341,9 @@ def remove_connector_endpoint(request: Request, connection_name: str) -> dict:
 
     result = remove_connector(_get_project_dir(), connection_name)
     if result["status"] == "error":
-        raise HTTPException(404, result.get("error", "Not found"))
+        # An unreadable project.yml is the client's to fix, not a 404.
+        status = 400 if result.get("invalid_config") else 404
+        raise HTTPException(status, result.get("error", "Not found"))
     return result
 
 

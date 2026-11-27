@@ -650,16 +650,24 @@ def test_concurrent_edits_do_not_lose_updates(tmp_path):
     _assert_comments_kept(RICH_PROJECT, _read(path))
 
 
-def test_replace_changes_mtime(tmp_path):
+def test_replace_changes_mtime_even_on_a_coarse_clock(tmp_path, monkeypatch):
+    # NTFS and ext4 timestamps are fine-grained, so simulate a filesystem
+    # whose clock gives the new file the old file's mtime: the bump must
+    # still make the config cache (keyed on mtime) see a change.
     path = tmp_path / "project.yml"
     path.write_text("a: 1\n", encoding="utf-8")
-    seen = {path.stat().st_mtime}
-    for i in range(5):  # back-to-back rewrites, faster than a coarse clock
-        with yamlio.edit_yaml(path) as doc:
-            yamlio.set_value(doc, "a", i + 2)
-        m = path.stat().st_mtime
-        assert m not in seen
-        seen.add(m)
+    old = path.stat()
+    real_replace = yamlio._replace
+
+    def coarse_replace(src, dst):
+        real_replace(src, dst)
+        os.utime(dst, ns=(old.st_atime_ns, old.st_mtime_ns))
+
+    monkeypatch.setattr(yamlio, "_replace", coarse_replace)
+    with yamlio.edit_yaml(path) as doc:
+        yamlio.set_value(doc, "a", 2)
+    assert path.stat().st_mtime_ns != old.st_mtime_ns
+    assert path.stat().st_mtime != old.st_mtime  # what _get_config_cached compares
 
 
 def test_file_mode_is_kept(tmp_path):
@@ -751,3 +759,428 @@ def test_cli_import_does_not_load_ruamel():
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False"
+
+
+# ---------------------------------------------------------------------------
+# Emptying a nested mapping that has comments before its first key
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("src", [
+    "name: p\nconnections:\n  # the warehouse\n  pg:\n    type: postgres\n",
+    "name: p\nconnections:   # eol on the key\n  # the warehouse\n  pg:\n    type: postgres\nlint: 1\n",
+    "name: p\nconnections:\n  # the warehouse\n\n  # second paragraph\n  pg:\n    type: postgres  # pg eol\n  # after pg\n# top level\nlint: 1\n",
+])
+def test_removing_the_only_connector_keeps_the_file_valid(tmp_path, src):
+    from havn.engine.connector import _remove_from_project_yml
+
+    project = _project(tmp_path, src)
+    assert _remove_from_project_yml(project, "pg") is True
+    text = _read(project / "project.yml")
+    expected = yaml.safe_load(src)
+    expected["connections"] = {}
+    assert yaml.safe_load(text) == expected
+    assert "# the warehouse" in text
+    if "second paragraph" in src:
+        assert "# second paragraph" in text and "# after pg" in text and "# top level" in text
+
+
+def test_database_endpoint_removing_the_only_database_key(tmp_path):
+    import havn.server.app as server_app
+    from havn.server.deps import _clear_config_cache, reset_shared_conn
+
+    src = "name: p\ndatabase:\n  # resource limits\n  memory_limit: 4GB\nlint:\n  dialect: duckdb\n"
+    project = _project(tmp_path, src)
+    duckdb.connect(str(project / "warehouse.duckdb")).close()
+    reset_shared_conn()
+    _clear_config_cache()
+    server_app.PROJECT_DIR = project
+    server_app.AUTH_ENABLED = False
+    try:
+        resp = TestClient(server_app.app).put("/api/config/database", json={"memory_limit": ""})
+        assert resp.status_code == 200
+    finally:
+        reset_shared_conn()
+        _clear_config_cache()
+    text = _read(project / "project.yml")
+    assert yaml.safe_load(text) == {"name": "p", "database": {}, "lint": {"dialect": "duckdb"}}
+    assert "# resource limits" in text
+
+
+# ---------------------------------------------------------------------------
+# Anchors, aliases and merge keys
+# ---------------------------------------------------------------------------
+
+
+def test_editing_an_anchored_mapping_leaves_its_alias_alone(tmp_path):
+    path = tmp_path / "project.yml"
+    path.write_text(
+        "# shared defaults\nresources:\n  transform: &d\n    threads: 2\n    memory_gb: 1.0\n"
+        "  ingest: *d   # same as transform\n",
+        encoding="utf-8",
+    )
+    with yamlio.edit_yaml(path) as doc:
+        yamlio.set_value(doc["resources"], "transform", {"threads": 4, "memory_gb": 1.0})
+    data = yaml.safe_load(_read(path))
+    # As with PyYAML + dump: the alias keeps the old data, the key gets the new.
+    assert data["resources"] == {
+        "transform": {"threads": 4, "memory_gb": 1.0},
+        "ingest": {"threads": 2, "memory_gb": 1.0},
+    }
+    assert "# shared defaults" in _read(path)
+
+
+def test_resetting_a_connection_built_on_a_merge_drops_merged_keys(tmp_path):
+    from havn.engine.connector import _update_project_yml
+
+    src = (
+        "defaults: &def\n  type: postgres\n  port: 5432\n"
+        "connections:\n  pg:  # built on defaults\n    <<: *def\n    host: h\n"
+    )
+    project = _project(tmp_path, src)
+    _update_project_yml(project, "pg", {"type": "postgres", "host": "h2"}, "connector_pg.py", None)
+    data = yaml.safe_load(_read(project / "project.yml"))
+    assert data["connections"]["pg"] == {"type": "postgres", "host": "h2"}
+    assert data["defaults"] == {"type": "postgres", "port": 5432}
+
+
+def test_save_job_over_a_file_with_a_top_level_merge(tmp_path):
+    from havn.engine.orchestration import save_job
+
+    (tmp_path / "orchestration").mkdir()
+    (tmp_path / "orchestration" / "merged.yml").write_text(
+        "# base settings\n_base: &b\n  retry: 1\n  resolve: upstream\n<<: *b\nname: merged\n"
+        "targets:\n  - silver.orders\n",
+        encoding="utf-8",
+    )
+    path = save_job(tmp_path, {"name": "merged", "targets": ["silver.orders"], "resolve": "upstream"})
+    assert yaml.safe_load(_read(path)) == {
+        "name": "merged", "targets": ["silver.orders"], "resolve": "upstream",
+        "target": "silver.orders", "cron": "", "tags": [],
+    }
+
+
+def test_deleting_a_key_from_a_mapping_with_a_merge(tmp_path):
+    path = tmp_path / "f.yml"
+    path.write_text("base: &b\n  a: 1\n  b: 2\nm:\n  <<: *b\n  c: 3\n", encoding="utf-8")
+    with yamlio.edit_yaml(path) as doc:
+        assert yamlio.delete_key(doc, "m", "a")  # supplied by the merge
+    assert yaml.safe_load(_read(path)) == {"base": {"a": 1, "b": 2}, "m": {"b": 2, "c": 3}}
+
+
+# ---------------------------------------------------------------------------
+# Files the helper cannot load faithfully
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("src", ["v: -012\nkeep: 1\n", "%YAML 1.2\n---\nv: 1:30\n"])
+def test_awkward_numbers_never_raise_a_bare_error(tmp_path, src):
+    path = tmp_path / "f.yml"
+    path.write_text(src, encoding="utf-8")
+    try:
+        with yamlio.edit_yaml(path) as doc:
+            yamlio.set_value(doc, "added", "x")
+    except yamlio.YamlLoadError as e:
+        assert "f.yml" in str(e)
+        assert _read(path) == src
+    else:
+        data = yaml.safe_load(_read(path))
+        expected = yaml.safe_load(src)
+        expected["added"] = "x"
+        assert data == expected
+
+
+def test_resources_allocation_skips_an_unloadable_file(tmp_path):
+    import havn.server.app as server_app
+    from havn.server.deps import reset_shared_conn
+
+    src = "%YAML 1.2\n---\nname: p\nv: 1:30\n"
+    project = _project(tmp_path, src)
+    duckdb.connect(str(project / "warehouse.duckdb")).close()
+    reset_shared_conn()
+    server_app.PROJECT_DIR = project
+    server_app.AUTH_ENABLED = False
+    try:
+        resp = TestClient(server_app.app).put("/api/resources/allocation", json={
+            "category": "query", "memory_gb": 2.0, "threads": 2, "max_concurrent": 3,
+        })
+    finally:
+        reset_shared_conn()
+    assert resp.status_code == 200
+    assert _read(project / "project.yml") == src
+
+
+# ---------------------------------------------------------------------------
+# An empty root keeps its comments
+# ---------------------------------------------------------------------------
+
+
+def test_unchanged_empty_root_with_comments_is_not_rewritten(tmp_path):
+    path = tmp_path / "f.yml"
+    path.write_text("# c\n{}\n", encoding="utf-8")
+    with yamlio.edit_yaml(path):
+        pass
+    assert _read(path) == "# c\n{}\n"
+
+
+def test_deleting_the_last_root_key_keeps_comments(tmp_path):
+    path = tmp_path / "f.yml"
+    path.write_text("# c\na: 1\n# tail\n", encoding="utf-8")
+    with yamlio.edit_yaml(path) as doc:
+        yamlio.delete_key(doc, "a")
+    text = _read(path)
+    assert "# c" in text and "# tail" in text
+    assert (yaml.safe_load(text) or {}) == {}
+
+
+# ---------------------------------------------------------------------------
+# Links
+# ---------------------------------------------------------------------------
+
+
+def test_symlinked_project_yml_stays_a_link(tmp_path):
+    real = tmp_path / "shared" / "project.yml"
+    real.parent.mkdir()
+    real.write_text("# shared config\nname: p\n", encoding="utf-8")
+    link = tmp_path / "proj" / "project.yml"
+    link.parent.mkdir()
+    try:
+        link.symlink_to(real)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not available here")
+    with yamlio.edit_yaml(link) as doc:
+        yamlio.set_value(doc, "description", "x")
+    assert link.is_symlink()
+    assert yaml.safe_load(_read(real)) == {"name": "p", "description": "x"}
+    assert "# shared config" in _read(real)
+    assert not list(link.parent.glob(".*.tmp")) and not list(real.parent.glob(".*.tmp"))
+
+
+# ---------------------------------------------------------------------------
+# Old call-site behaviour: empty non-mappings, unloadable files
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("empty", ["[]", '""', "false", "0"])
+def test_resources_empty_non_mapping_is_replaced(client, empty):
+    c, project = client
+    (project / "project.yml").write_text(RICH_PROJECT + f"resources: {empty}\n", encoding="utf-8")
+    resp = c.put("/api/resources/allocation", json={
+        "category": "query", "memory_gb": 2.0, "threads": 2, "max_concurrent": 3,
+    })
+    assert resp.status_code == 200
+    data = yaml.safe_load(_read(project / "project.yml"))
+    assert data["resources"] == {"query": {"memory_gb": 2.0, "threads": 2, "max_concurrent": 3}}
+
+
+DUPLICATE = RICH_PROJECT + "lint:\n  dialect: postgres\n"
+
+
+def test_routes_answer_400_for_an_unloadable_project_yml(client):
+    c, project = client
+    path = project / "project.yml"
+    path.write_text(DUPLICATE, encoding="utf-8")
+    for method, url, body in [
+        ("put", "/api/anomalies/config", {"lookback": 10}),
+        ("put", "/api/config/database", {"threads": 2}),
+        ("post", "/api/connectors/setup", {
+            "connector_type": "webhook", "connection_name": "hook", "config": {"table_name": "events"},
+        }),
+    ]:
+        resp = getattr(c, method)(url, json=body)
+        assert resp.status_code == 400, (url, resp.text)
+        assert "project.yml" in resp.json()["detail"], url
+    assert _read(path) == DUPLICATE
+
+    (project / "ingest" / "connector_prod_pg.py").write_text("# script\n", encoding="utf-8")
+    resp = c.delete("/api/connectors/prod_pg")
+    assert resp.status_code == 400
+    assert "project.yml" in resp.json()["detail"]
+    assert (project / "ingest" / "connector_prod_pg.py").exists()  # nothing removed
+    assert _read(path) == DUPLICATE
+
+
+def test_job_routes_answer_400_for_an_unloadable_job_file(job_project):
+    import havn.server.app as server_app
+    from havn.server.deps import reset_shared_conn
+
+    path = job_project / "orchestration" / "test-job.yml"
+    path.write_text(JOB + "retry: 2\n", encoding="utf-8")
+    reset_shared_conn()
+    server_app.PROJECT_DIR = job_project
+    server_app.AUTH_ENABLED = False
+    try:
+        c = TestClient(server_app.app)
+        resp = c.patch("/api/jobs/test-job", json={"enabled": False})
+        assert resp.status_code == 400, resp.text
+        assert "test-job.yml" in resp.json()["detail"]
+        resp = c.post("/api/jobs", json={"name": "test-job", "targets": ["silver.orders"]})
+        assert resp.status_code == 400, resp.text
+    finally:
+        reset_shared_conn()
+    assert _read(path) == JOB + "retry: 2\n"
+
+
+def test_cli_paths_exit_1_for_an_unloadable_file(job_project):
+    from typer.testing import CliRunner
+
+    from havn.cli import app
+
+    job = job_project / "orchestration" / "test-job.yml"
+    job.write_text(JOB + "retry: 2\n", encoding="utf-8")
+    r = CliRunner().invoke(app, ["jobs", "disable", "test-job", "--project", str(job_project)])
+    assert r.exit_code == 1, r.output
+    assert "test-job.yml" in r.output
+
+    (job_project / "project.yml").write_text(
+        "name: jobs\ndatabase:\n  path: warehouse.duckdb\nname: jobs\n", encoding="utf-8")
+    r = CliRunner().invoke(app, ["connect", "webhook", "--name", "hook", "--set", "table_name=events",
+                                 "--project", str(job_project)])
+    assert r.exit_code == 1, r.output
+    assert "project.yml" in r.output
+
+    r = CliRunner().invoke(app, ["migrate", "--to", "ducklake", "--project", str(job_project)])
+    assert r.exit_code == 1, r.output
+    assert "project.yml" in r.output
+    assert not (job_project / ".havn" / "catalog.ducklake").exists()
+
+
+# ---------------------------------------------------------------------------
+# Safety net: a bad round trip falls back to a plain, correct dump
+# ---------------------------------------------------------------------------
+
+
+def test_bad_round_trip_text_falls_back_to_a_plain_dump(tmp_path, monkeypatch, caplog):
+    path = tmp_path / "project.yml"
+    path.write_text(RICH_PROJECT, encoding="utf-8")
+    monkeypatch.setattr(yamlio, "_render", lambda doc, text, header: "connections:\n  # x\n{}\n")
+    with caplog.at_level("WARNING", logger="havn.yamlio"):
+        with yamlio.edit_yaml(path) as doc:
+            yamlio.set_value(yamlio.ensure_map(doc, "connections"), "c1", {"type": "csv", "flag": "on"})
+    expected = yaml.safe_load(RICH_PROJECT)
+    expected["connections"]["c1"] = {"type": "csv", "flag": "on"}
+    assert yaml.safe_load(_read(path)) == expected
+    assert "comments could not be preserved" in caplog.text and "project.yml" in caplog.text
+
+
+def test_wrong_data_from_round_trip_falls_back(tmp_path, monkeypatch):
+    path = tmp_path / "project.yml"
+    path.write_text("a: 1\nflag: 'on'\n", encoding="utf-8")
+    monkeypatch.setattr(yamlio, "_render", lambda doc, text, header: "a: 1\nflag: on\nb: 2\n")
+    with yamlio.edit_yaml(path) as doc:
+        yamlio.set_value(doc, "b", 2)
+    data = yaml.safe_load(_read(path))
+    assert data == {"a": 1, "flag": "on", "b": 2} and type(data["flag"]) is str
+
+
+def test_round_trip_exception_falls_back(tmp_path, monkeypatch, caplog):
+    path = tmp_path / "project.yml"
+    path.write_text(RICH_PROJECT, encoding="utf-8")
+
+    def boom(doc, text, header):
+        raise RuntimeError("emitter broke")
+
+    monkeypatch.setattr(yamlio, "_render", boom)
+    with caplog.at_level("WARNING", logger="havn.yamlio"):
+        with yamlio.edit_yaml(path) as doc:
+            yamlio.delete_key(doc, "connections", "prod_pg")
+    expected = yaml.safe_load(RICH_PROJECT)
+    expected["connections"] = {}
+    assert yaml.safe_load(_read(path)) == expected
+    assert "emitter broke" in caplog.text
+
+
+def test_comment_step_failure_does_not_abort_the_edit(tmp_path, monkeypatch):
+    path = tmp_path / "project.yml"
+    path.write_text(RICH_PROJECT, encoding="utf-8")
+
+    def broken(*a, **k):
+        raise AttributeError("ruamel internals moved")
+
+    monkeypatch.setattr(yamlio, "_take_trailing", broken)
+    monkeypatch.setattr(yamlio, "_move_comments_after_delete", broken)
+    with yamlio.edit_yaml(path) as doc:
+        yamlio.set_value(yamlio.ensure_map(doc, "connections"), "c1", {"type": "csv"})
+        yamlio.delete_key(doc, "connections", "prod_pg")
+    data = yaml.safe_load(_read(path))
+    assert data["connections"] == {"c1": {"type": "csv"}}
+
+
+# ---------------------------------------------------------------------------
+# Fuzz: random edits on commented documents always load and match a model
+# ---------------------------------------------------------------------------
+
+FUZZ_DOCS = [
+    RICH_PROJECT,
+    JOB,
+    DELETE_SRC,
+    "# anchors\ndefaults: &def\n  type: postgres\n  port: 5432\nconnections:\n  a: *def\n"
+    "  b:\n    <<: *def\n    host: h   # merged\n  # after b\nresources: {query: {threads: 2}}\n# end\n",
+    "x: {}\n  # comment after flow\ny:\n  # before first\n  z: 1\n  w: [1, 2]\n# trailing\n",
+    "# header only\n",
+]
+
+FUZZ_VALUES = [
+    "on", "yes", "0 6 * * *", "${VAR}", "plain", "", "012", "1:30", True, False, None, 0, 7, 2.5,
+    {"k": "v", "n": 1}, {"nested": {"deep": "on"}}, [], ["a", "b"], [{"ingest": ["all"]}], {},
+]
+
+
+def _model_maps(node, path=()):
+    """Every mapping in the model, with its key path."""
+    out = [path]
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if isinstance(v, dict) and isinstance(k, str):
+                out.extend(_model_maps(v, (*path, k)))
+    return out
+
+
+def _at(node, path):
+    for k in path:
+        node = node[k]
+    return node
+
+
+def test_fuzz_random_edits_keep_files_valid(tmp_path):
+    import random
+
+    rng = random.Random(20261127)
+    path = tmp_path / "f.yml"
+    steps = 0
+    for doc_i, src in enumerate(FUZZ_DOCS):
+        path.write_text(src, encoding="utf-8")
+        model = yaml.safe_load(src) or {}
+        for _ in range(25):
+            maps = [p for p in _model_maps(model) if len(p) < 4]
+            target = rng.choice(maps)
+            node = _at(model, target)
+            op = rng.choice(["set", "set", "delete", "ensure"])
+            keys = [k for k in node if isinstance(k, str)]
+            if op == "delete" and not keys:
+                op = "set"
+            if op == "set":
+                key = rng.choice(keys + ["new_a", "new_b", "c1"]) if keys else rng.choice(["new_a", "c1"])
+                value = copy.deepcopy(rng.choice(FUZZ_VALUES))
+                node[key] = copy.deepcopy(value)
+                with yamlio.edit_yaml(path) as doc:
+                    yamlio.set_value(_at(doc, target), key, value)
+            elif op == "delete":
+                key = rng.choice(keys)
+                del node[key]
+                with yamlio.edit_yaml(path) as doc:
+                    assert yamlio.delete_key(doc, *target, key)
+            else:
+                key = rng.choice(keys + ["fresh"])
+                current = node.get(key)
+                if key not in node or current is None or (not isinstance(current, dict) and not current):
+                    node[key] = {}
+                elif not isinstance(current, dict):
+                    continue  # ensure_map refuses a non-empty scalar; the model agrees
+                with yamlio.edit_yaml(path) as doc:
+                    yamlio.ensure_map(doc, *target, key)
+            steps += 1
+            text = _read(path)
+            loaded = yaml.safe_load(text) or {}
+            assert yamlio._equal(loaded, model), (doc_i, steps, op, target, text)
+    assert steps > 100

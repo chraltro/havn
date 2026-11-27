@@ -412,34 +412,37 @@ def update_job(name: str, req: UpdateJobRequest, request: Request):
         raise HTTPException(404, f"Job '{name}' not found")
     # Edited in place: comments and formatting in the job file survive. An
     # exception inside the block (a bad schedule) leaves the file untouched.
-    with yamlio.edit_yaml(job.file_path) as data:
-        updates = req.model_dump(exclude_none=True)
-        # If `targets` is sent, replace both targets and the mirrored target field
-        if "targets" in updates:
-            yamlio.set_value(data, "targets", updates["targets"])
-            yamlio.set_value(
-                data, "target",
-                updates["targets"][0] if updates["targets"] else data.get("target", ""),
-            )
-            updates.pop("targets", None)
-            updates.pop("target", None)
-        # If `schedules` is sent, replace both schedules and the mirrored cron field
-        if "schedules" in updates:
-            new_schedules = updates["schedules"] or []
-            # Validate each schedule
-            from havn.engine.orchestration import is_valid_schedule
+    try:
+        with yamlio.edit_yaml(job.file_path) as data:
+            updates = req.model_dump(exclude_none=True)
+            # If `targets` is sent, replace both targets and the mirrored target field
+            if "targets" in updates:
+                yamlio.set_value(data, "targets", updates["targets"])
+                yamlio.set_value(
+                    data, "target",
+                    updates["targets"][0] if updates["targets"] else data.get("target", ""),
+                )
+                updates.pop("targets", None)
+                updates.pop("target", None)
+            # If `schedules` is sent, replace both schedules and the mirrored cron field
+            if "schedules" in updates:
+                new_schedules = updates["schedules"] or []
+                # Validate each schedule
+                from havn.engine.orchestration import is_valid_schedule
 
-            for sched in new_schedules:
-                # The shared validator: checks every cron field and accepts
-                # "every N unit" intervals, which a 5-token count rejected.
-                if not is_valid_schedule(sched):
-                    raise HTTPException(400, f"Invalid schedule (cron 5-field or 'every N unit'): {sched}")
-            yamlio.set_value(data, "schedules", new_schedules)
-            yamlio.set_value(data, "cron", new_schedules[0] if new_schedules else "")
-            updates.pop("schedules", None)
-            updates.pop("cron", None)
-        for key, value in updates.items():
-            yamlio.set_value(data, key, value)
+                for sched in new_schedules:
+                    # The shared validator: checks every cron field and accepts
+                    # "every N unit" intervals, which a 5-token count rejected.
+                    if not is_valid_schedule(sched):
+                        raise HTTPException(400, f"Invalid schedule (cron 5-field or 'every N unit'): {sched}")
+                yamlio.set_value(data, "schedules", new_schedules)
+                yamlio.set_value(data, "cron", new_schedules[0] if new_schedules else "")
+                updates.pop("schedules", None)
+                updates.pop("cron", None)
+            for key, value in updates.items():
+                yamlio.set_value(data, key, value)
+    except yamlio.YamlLoadError as e:
+        raise HTTPException(400, str(e))
     return {"status": "updated", "file": job.file_path.name}
 
 

@@ -427,15 +427,18 @@ def update_anomaly_config(request: Request, req: AnomalyConfigUpdate) -> dict:
         raise HTTPException(404, "project.yml not found")
 
     # Edited in place, keeping the user's comments and formatting.
-    with yamlio.edit_yaml(config_path) as raw:
-        anomaly = yamlio.ensure_map(raw, "quality", "anomaly_detection")
+    try:
+        with yamlio.edit_yaml(config_path) as raw:
+            anomaly = yamlio.ensure_map(raw, "quality", "anomaly_detection")
 
-        if req.enabled is not None:
-            yamlio.set_value(anomaly, "enabled", req.enabled)
-        if req.lookback is not None:
-            yamlio.set_value(anomaly, "lookback", req.lookback)
-        if req.threshold is not None:
-            yamlio.set_value(anomaly, "threshold", req.threshold)
+            if req.enabled is not None:
+                yamlio.set_value(anomaly, "enabled", req.enabled)
+            if req.lookback is not None:
+                yamlio.set_value(anomaly, "lookback", req.lookback)
+            if req.threshold is not None:
+                yamlio.set_value(anomaly, "threshold", req.threshold)
+    except yamlio.YamlLoadError as e:
+        raise HTTPException(400, str(e))
 
     return {
         "status": "updated",
