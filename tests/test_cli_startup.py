@@ -212,3 +212,42 @@ def test_help_lists_every_top_level_command():
     assert proc.returncode == 0, proc.stderr
     for name in (c for c in BASELINE_COMMANDS if " " not in c):
         assert name in proc.stdout, f"{name} missing from havn --help"
+
+
+def test_unknown_environment_from_a_command_exits_1_with_a_message(capsys):
+    """``_HavnTyper.__call__`` turns UnknownEnvironmentError into exit 1.
+
+    CliRunner calls the click command directly and never reaches
+    ``__call__``, so this drives the Typer object the way the ``havn``
+    entry point does.
+    """
+    import pytest
+
+    from havn.cli import _HavnTyper
+    from havn.config import UnknownEnvironmentError
+
+    cli = _HavnTyper()
+
+    @cli.command()
+    def boom() -> None:
+        raise UnknownEnvironmentError("Unknown environment 'prdo'")
+
+    with pytest.raises(SystemExit) as exc:
+        cli(args=[], standalone_mode=False)
+    assert exc.value.code == 1
+    assert "Unknown environment 'prdo'" in capsys.readouterr().out
+
+
+def test_other_errors_from_a_command_are_not_swallowed():
+    import pytest
+
+    from havn.cli import _HavnTyper
+
+    cli = _HavnTyper()
+
+    @cli.command()
+    def boom() -> None:
+        raise RuntimeError("not an environment problem")
+
+    with pytest.raises(RuntimeError, match="not an environment problem"):
+        cli(args=[], standalone_mode=False)
