@@ -61,6 +61,8 @@ describe("a lazily loaded panel", () => {
         <Wiki />
       </Suspense>,
     );
+    // The panel itself is there on the first render; it never suspended.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Welcome" })).toBeInTheDocument();
   });
 

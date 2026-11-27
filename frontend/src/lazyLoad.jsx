@@ -19,18 +19,34 @@ import React, { lazy, useEffect, useState } from "react";
  */
 export function lazyWithPreload(factory) {
   let promise = null;
+  let loaded = null;
   const load = () => {
     if (!promise) {
-      promise = factory().catch((err) => {
-        promise = null;
-        throw err;
-      });
+      promise = factory().then(
+        (mod) => {
+          loaded = mod;
+          return mod;
+        },
+        (err) => {
+          promise = null;
+          throw err;
+        },
+      );
     }
     return promise;
   };
-  const Component = lazy(load);
-  Component.preload = () => load().catch(() => {});
-  return Component;
+  const Lazy = lazy(load);
+  // A chunk that has already arrived is rendered directly. Through
+  // React.lazy it would still suspend once (React has to await the promise
+  // itself), and React holds a fallback it has shown for at least 300 ms, so
+  // a preloaded page would flash the loading state anyway. The choice is made
+  // once per mount, so a mounted page never changes component type.
+  function LazyPage(props) {
+    const [Impl] = useState(() => (loaded ? loaded.default : Lazy));
+    return <Impl {...props} />;
+  }
+  LazyPage.preload = () => load().catch(() => {});
+  return LazyPage;
 }
 
 /**
