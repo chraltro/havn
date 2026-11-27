@@ -7,17 +7,15 @@ Shared dependencies (DB injection, auth, caching) live in havn.server.deps.
 
 from __future__ import annotations
 
-from havn.textio import read_project_text
-
 import logging
 
 from pathlib import Path
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 from havn import setup_logging
 
@@ -129,6 +127,14 @@ from havn import __version__ as _havn_version
 
 app = FastAPI(title="havn", version=_havn_version, lifespan=_lifespan)
 
+# Added first so it is the innermost middleware: it must see a route's own
+# body messages, before the @app.middleware("http") layers re-send every body
+# as a stream. It gzips complete API bodies only; streams (SSE, NDJSON, CSV,
+# downloads) pass through untouched. See havn.server.compression.
+from havn.server.compression import ApiGzipMiddleware  # noqa: E402
+
+app.add_middleware(ApiGzipMiddleware, prefix="/api/")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -149,7 +155,9 @@ app.add_middleware(
 async def security_headers(request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
+    # "0" disables the legacy XSS auditor, which could itself be abused to
+    # leak data from a page (OWASP Secure Headers guidance).
+    response.headers["X-XSS-Protection"] = "0"
     if request.url.path.startswith(_PUBLISHED_PAGE_PREFIX):
         # Published dashboard pages (/p/<key>) are the one document that may
         # be framed, and only by the origins in sharing.embed.allowed_origins.
@@ -202,24 +210,68 @@ import threading as _threading
 
 _last_checkpoint = _time.time()
 _checkpoint_lock = _threading.Lock()
+_checkpoint_running = False
 _CHECKPOINT_INTERVAL = 60  # seconds between checkpoints
+
+
+def _force_checkpoint() -> None:
+    """Run FORCE CHECKPOINT on a cursor of the shared write connection.
+
+    Counted as an in-flight request so a branch switch waits for it instead
+    of closing the connection underneath it.
+    """
+    from havn.engine.write_queue import cursor_for
+    from havn.server.deps import _get_shared_conn, request_finished, request_started
+
+    request_started()
+    try:
+        cur = cursor_for(_get_shared_conn())
+        try:
+            cur.execute("FORCE CHECKPOINT")
+        finally:
+            cur.close()
+    finally:
+        request_finished()
+
+
+def _run_checkpoint() -> None:
+    global _checkpoint_running
+    try:
+        _force_checkpoint()
+    except Exception as e:
+        logger.debug("Periodic checkpoint skipped: %s", e)
+    finally:
+        with _checkpoint_lock:
+            _checkpoint_running = False
+
+
+def _maybe_start_checkpoint() -> bool:
+    """Start a background checkpoint if one is due and none is running."""
+    global _last_checkpoint, _checkpoint_running
+    now = _time.time()
+    with _checkpoint_lock:
+        if _checkpoint_running or now - _last_checkpoint <= _CHECKPOINT_INTERVAL:
+            return False
+        _last_checkpoint = now
+        _checkpoint_running = True
+    try:
+        _threading.Thread(target=_run_checkpoint, name="havn-checkpoint", daemon=True).start()
+    except Exception:
+        with _checkpoint_lock:
+            _checkpoint_running = False
+        return False
+    return True
+
 
 @app.middleware("http")
 async def memory_management_middleware(request, call_next):
-    """After heavy API calls, periodically force DuckDB to release buffer memory."""
+    """Periodically force DuckDB to release buffer memory, off the request path.
+
+    Request activity sets the cadence (at most one checkpoint a minute); the
+    checkpoint runs on its own thread, one at a time, so no response waits.
+    """
     response = await call_next(request)
-    global _last_checkpoint
-    now = _time.time()
-    if now - _last_checkpoint > _CHECKPOINT_INTERVAL:
-        with _checkpoint_lock:
-            if now - _last_checkpoint > _CHECKPOINT_INTERVAL:
-                _last_checkpoint = now
-                try:
-                    from havn.server.deps import _get_shared_conn
-                    conn = _get_shared_conn()
-                    conn.execute("FORCE CHECKPOINT")
-                except Exception:
-                    pass
+    _maybe_start_checkpoint()
     return response
 
 # ---------------------------------------------------------------------------
@@ -398,9 +450,23 @@ _RESERVED_PATHS = {"docs", "redoc", "openapi.json"}
 
 @app.get("/", response_class=HTMLResponse)
 @app.get("/{path:path}", response_class=HTMLResponse)
-def serve_frontend(path: str = "") -> HTMLResponse:
-    """Serve the frontend SPA (skips /docs, /redoc, /openapi.json, /api/*)."""
+def serve_frontend(request: Request, path: str = "") -> Response:
+    """Serve the frontend SPA (skips /docs, /redoc, /openapi.json, /api/*).
+
+    Caching: files under ``assets/`` carry Vite's content hash in their name
+    and are immutable; ``index.html`` (and the SPA fallback) is always
+    revalidated by ETag so a new release is picked up; other root files get
+    a short max-age. See havn.server.static_files for types and compression.
+    """
     from fastapi import HTTPException
+
+    from havn.server.static_files import (
+        CACHE_IMMUTABLE,
+        CACHE_REVALIDATE,
+        CACHE_SHORT,
+        file_response,
+        looks_like_asset,
+    )
 
     if path in _RESERVED_PATHS:
         raise HTTPException(404, "Not found")
@@ -411,12 +477,14 @@ def serve_frontend(path: str = "") -> HTMLResponse:
     if path == "api" or path.startswith("api/"):
         raise HTTPException(404, "API endpoint not found")
 
+    accept_encoding = request.headers.get("accept-encoding")
+    if_none_match = request.headers.get("if-none-match")
+
     # Path-traversal guard. Starlette decodes %2e%2e%2f into a literal "../"
     # *after* normalization, so the :path converter can hand us "../../etc/passwd".
     # Resolve the candidate and require it to stay inside the frontend dir, or
     # we'd serve any file the server process can read (.env, warehouse.duckdb,
-    # SSH keys) to an unauthenticated client. Fall through to the SPA index on
-    # any escape so client-side routes still work.
+    # SSH keys) to an unauthenticated client. An escape is treated as a miss.
     frontend_root = _FRONTEND_DIR.resolve()
     file_path = (_FRONTEND_DIR / path).resolve()
     try:
@@ -424,19 +492,35 @@ def serve_frontend(path: str = "") -> HTMLResponse:
     except ValueError:
         file_path = None
     if file_path is not None and file_path.is_file():
-        content_type = {
-            ".html": "text/html",
-            ".js": "application/javascript",
-            ".css": "text/css",
-            ".svg": "image/svg+xml",
-            ".png": "image/png",
-            ".ico": "image/x-icon",
-        }.get(file_path.suffix, "application/octet-stream")
-        return HTMLResponse(content=file_path.read_bytes(), media_type=content_type)
+        rel_parts = file_path.relative_to(frontend_root).parts
+        if rel_parts and rel_parts[0] == "assets":
+            cache_control = CACHE_IMMUTABLE
+        elif file_path.name == "index.html":
+            cache_control = CACHE_REVALIDATE
+        else:
+            cache_control = CACHE_SHORT
+        return file_response(
+            file_path,
+            cache_control=cache_control,
+            accept_encoding=accept_encoding,
+            if_none_match=if_none_match,
+        )
+
+    # A missing file is a 404, not the SPA shell: a stale tab importing an old
+    # hashed chunk (main.jsx lazy-loads App and PublishedDashboard) must get
+    # a failed load, not HTML where it expected JavaScript. Client-side routes
+    # (/develop/editor, /p/<key>) have no file extension and still fall back.
+    if looks_like_asset(path):
+        raise HTTPException(404, "Not found")
 
     index = _FRONTEND_DIR / "index.html"
-    if index.exists():
-        return HTMLResponse(content=read_project_text(index))
+    if index.is_file():
+        return file_response(
+            index,
+            cache_control=CACHE_REVALIDATE,
+            accept_encoding=accept_encoding,
+            if_none_match=if_none_match,
+        )
     return HTMLResponse(
         content="<h1>havn</h1><p>Frontend not built. Run <code>cd frontend && npm run build</code></p>",
         status_code=200,
