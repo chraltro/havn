@@ -24,7 +24,7 @@ class _FakeScheduler:
 
     started: list = []
 
-    def __init__(self, project_dir):
+    def __init__(self, project_dir, **kwargs):
         self.project_dir = project_dir
 
     def start(self):

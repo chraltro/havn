@@ -509,6 +509,9 @@ class SchedulerThread(threading.Thread):
         # WarehouseLease for the DuckDB instance-teardown race it prevents.
         self._lease = WarehouseLease(self._connect)
         self._history = HistoryStore(self._lease, self.scheduler_id)
+        # The warehouse's scheduler lock, held from start()/_startup() until
+        # the scheduler stops.
+        self._sched_lock = None
 
     # -- configuration -------------------------------------------------
 
@@ -544,9 +547,46 @@ class SchedulerThread(threading.Thread):
         return max(1, config.scheduler.max_concurrent)
 
     def start(self) -> None:
-        """Validate the settings, then start the loop thread."""
+        """Validate the settings, take the warehouse's scheduler lock, start the loop.
+
+        Raises :class:`SchedulerConfigError` when the settings cannot be used
+        or another scheduler already runs against the same warehouse.
+        """
+        from havn.engine.scheduler_lock import SchedulerLockedError
+
         self.check_config()
-        super().start()
+        try:
+            self.acquire_lock()
+        except SchedulerLockedError as e:
+            raise SchedulerConfigError(str(e)) from e
+        try:
+            super().start()
+        except BaseException:
+            self.release_lock()
+            raise
+
+    # -- one scheduler per warehouse ---------------------------------------
+
+    def acquire_lock(self) -> None:
+        """Hold the warehouse's scheduler lock (``engine/scheduler_lock.py``).
+
+        Raises ``SchedulerLockedError`` naming the process that holds it.
+        Idempotent; released by :meth:`stop` (via ``_shutdown``).
+        """
+        from havn.engine.scheduler_lock import SchedulerLock, warehouse_key
+
+        if self._sched_lock is not None and self._sched_lock.held:
+            return
+        config = self._config or self._load_config()
+        lock = SchedulerLock(self.project_dir, warehouse_key(config, self.project_dir),
+                             warehouse=str(getattr(config.database, "path", "") or ""))
+        lock.acquire()
+        self._sched_lock = lock
+
+    def release_lock(self) -> None:
+        if self._sched_lock is not None:
+            self._sched_lock.release()
+            self._sched_lock = None
 
     # -- time ------------------------------------------------------------
 
@@ -618,6 +658,13 @@ class SchedulerThread(threading.Thread):
         return self._pool
 
     def _shutdown(self) -> None:
+        """Stop the runs (see ``_shutdown_runs``), then give up the scheduler lock."""
+        try:
+            self._shutdown_runs()
+        finally:
+            self.release_lock()
+
+    def _shutdown_runs(self) -> None:
         """Cancel runs that have not started; wait ``shutdown_grace`` for running ones."""
         from havn.engine.schedule_history import STATUS_CANCELLED
 
@@ -721,6 +768,9 @@ class SchedulerThread(threading.Thread):
         if self._started_at is None:
             self._started_at = now
         config = self._load_config()
+        # Before touching history: marking "interrupted" rows is only right
+        # when no other scheduler is alive on this warehouse.
+        self.acquire_lock()
         specs, errors, _ = collect_schedules(self.project_dir, config)
         self._log_problems(errors)
         self._restore_interval_clocks(specs)

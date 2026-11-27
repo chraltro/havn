@@ -277,6 +277,8 @@ def init(
         ".havn/branches/\n"
         # The `havn serve` lockfile: runtime state, never shared.
         ".havn/serve.json\n"
+        # The scheduler's one-per-warehouse lock files: runtime state.
+        ".havn/scheduler/\n"
         # Agent change sets and `havn ask --continue` history: local state.
         ".havn/changesets/\n.havn/ask/\n"
         # Installed package sources are reproducible from havn_packages.lock,
