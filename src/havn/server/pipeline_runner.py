@@ -37,6 +37,8 @@ _EVENT_STATUS = {
     "source_stale": "skipped",
     "skipped_upstream_blocked": "skipped",
     "policy_denied": "error",
+    # A script a cancelled run stopped mid-way.
+    "cancelled": "skipped",
 }
 
 

@@ -63,7 +63,8 @@ STEP_ACTIONS = ("seed", "ingest", "transform", "export")
 # denial, which run_log records as an error and the run history therefore
 # shows as failed.
 FAILED = frozenset({"error", "assertion_failed", "policy_denied"})
-SKIPPED = frozenset({"skipped", "skipped_upstream_blocked", "source_stale"})
+# "cancelled": a script the run's cancel stopped mid-way (run_script).
+SKIPPED = frozenset({"skipped", "skipped_upstream_blocked", "source_stale", "cancelled"})
 
 
 class RunSpecError(ValueError):
@@ -729,7 +730,8 @@ class _Run:
                 from havn.engine.runner import run_script
 
                 res = run_script(cur, node.path, node.kind, pipeline_run_id=self.run_id,
-                                 force=spec.force, run_as=spec.user or None)
+                                 force=spec.force, run_as=spec.user or None,
+                                 cancel=self.cancel)
                 out = {
                     "status": res["status"], "duration_ms": res.get("duration_ms", 0),
                     "error": res.get("error"), "orphaned": bool(res.get("orphaned")),
@@ -773,6 +775,7 @@ class _Run:
             node = nodes[nid]
             cur = cursor_for(self.conn)
             result_q.put(("__start__", nid, None))
+            res: dict = {}
             try:
                 attempt = 0
                 while True:
@@ -800,9 +803,17 @@ class _Run:
                         results.pop(node.name, None)
                         blocked.discard(node.name)
                 res["attempts"] = attempt + 1
-                result_q.put(("__end__", nid, res))
             finally:
-                cur.close()
+                # A script still running after its timeout owns the cursor;
+                # closing it under a running query is not safe.
+                if not res.get("orphaned"):
+                    try:
+                        cur.close()
+                    except Exception:
+                        pass
+                # Reported only once the cursor is closed: the run (and the
+                # server's run gate) must not end while a node still holds it.
+                result_q.put(("__end__", nid, res or {"status": "error", "error": "node crashed"}))
 
         sorter = TopologicalSorter(phase.deps)
         sorter.prepare()
@@ -922,6 +933,16 @@ class _Run:
                     return  # interpreter shutting down
                 active += 1
 
+        def stopping() -> bool:
+            """Cancelled: start nothing new, but let what runs finish."""
+            if self.cancel.is_set() and not tally.cancelled:
+                tally.cancelled = True
+                if active:
+                    logger.info("Pipeline run %s cancelled; waiting for %d running node(s)",
+                                self.run_id, active)
+                    self.emit("cancelling", run_id=self.run_id, running=active)
+            return tally.cancelled
+
         try:
             admit(sorter.get_ready())
             submit_ready()
@@ -929,8 +950,11 @@ class _Run:
                 if tally.gate_failed and active == 0:
                     tally.has_error = True
                     break
-                if self.cancel.is_set():
-                    tally.cancelled = True
+                # On cancel, drain: running nodes (a script is interrupted
+                # by run_script; a model build finishes) report normally,
+                # and the run ends only when none is left, so the caller
+                # never frees the warehouse while a node still writes.
+                if stopping() and active == 0:
                     break
                 try:
                     tag, nid, res = result_q.get(timeout=2)
@@ -976,11 +1000,15 @@ class _Run:
                     tally.completed += 1
 
                 sorter.done(nid)
+                if stopping():
+                    continue
                 admit(sorter.get_ready())
                 submit_ready()
         finally:
             try:
-                executor.shutdown(wait=False, cancel_futures=True)
+                # Every submitted node has reported its end by now (or the
+                # loop itself broke); wait for the threads to be gone too.
+                executor.shutdown(wait=True, cancel_futures=True)
             except Exception:
                 pass
 
