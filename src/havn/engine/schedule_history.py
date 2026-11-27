@@ -50,37 +50,15 @@ _write_lock = threading.Lock()
 
 
 def ensure_schedule_tables(conn) -> None:
-    """Create the scheduler's metadata tables. All of their DDL lives here.
+    """Make sure the scheduler's metadata tables exist.
 
-    No PRIMARY KEY and no function defaults, so the same DDL works on the
-    DuckLake backend. Values are always supplied by the writer.
+    ``_havn.schedule_history`` and ``_havn.scheduler_state`` are defined in
+    :mod:`havn.engine.migrations` (baseline), with every other ``_havn``
+    table.
     """
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS _havn.schedule_history (
-            id             VARCHAR NOT NULL,
-            schedule_kind  VARCHAR NOT NULL,   -- 'stream' or 'job'
-            schedule_name  VARCHAR NOT NULL,
-            cron_expr      VARCHAR NOT NULL,   -- the expression that fired
-            timezone       VARCHAR,            -- IANA name; NULL = server local time
-            scheduled_for  TIMESTAMP NOT NULL, -- UTC
-            recorded_at    TIMESTAMP NOT NULL, -- UTC
-            started_at     TIMESTAMP,          -- UTC
-            finished_at    TIMESTAMP,          -- UTC
-            lateness_ms    BIGINT,             -- started_at - scheduled_for
-            status         VARCHAR NOT NULL,
-            trigger        VARCHAR NOT NULL,   -- 'schedule' or 'catchup'
-            error          VARCHAR,
-            scheduler_id   VARCHAR NOT NULL
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS _havn.scheduler_state (
-            name          VARCHAR NOT NULL,
-            last_seen     TIMESTAMP NOT NULL,  -- UTC
-            scheduler_id  VARCHAR NOT NULL
-        )
-    """)
+    from havn.engine.database import ensure_meta_table
+
+    ensure_meta_table(conn)
 
 
 def utc_naive(instant: datetime.datetime | None) -> datetime.datetime | None:

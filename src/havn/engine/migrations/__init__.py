@@ -24,6 +24,12 @@ One process-wide lock serializes the work, so threads sharing a connection
 migration exactly once: the second thread re-reads the applied versions after
 taking the lock and finds nothing to do.
 
+DuckDB 2 rules the code here keeps to: a failed statement aborts the
+surrounding transaction, so the one statement that can fail by design (reading
+a missing ``schema_migrations``) only runs outside a transaction; and a
+half-read result blocks the connection, so every query is read with
+``fetchall()``.
+
 A warehouse written by a newer havn (its highest applied version is above
 ``CURRENT_VERSION``) is left alone: nothing is applied and a warning is
 logged once per process. Migrations are additive by policy (new tables and
@@ -110,12 +116,12 @@ def _normalize(path: str) -> str:
 
 def _database_info(conn: duckdb.DuckDBPyConnection) -> tuple[str | None, bool]:
     """``(normalized path or None for in-memory, read_only)`` of the current database."""
-    row = conn.execute(
+    rows = conn.execute(
         "SELECT path, readonly FROM duckdb_databases() WHERE database_name = current_database()"
-    ).fetchone()
-    if row is None:
+    ).fetchall()
+    if not rows:
         return None, False
-    path, readonly = row
+    path, readonly = rows[0]
     return (_normalize(str(path)) if path else None), bool(readonly)
 
 
@@ -128,8 +134,8 @@ def _in_transaction(conn: duckdb.DuckDBPyConnection) -> bool:
     caller's transaction in DuckDB. (current_transaction_id, not txid_current:
     the latter hits an internal error on DuckLake.)
     """
-    first = conn.execute("SELECT current_transaction_id()").fetchone()[0]
-    second = conn.execute("SELECT current_transaction_id()").fetchone()[0]
+    first = conn.execute("SELECT current_transaction_id()").fetchall()[0][0]
+    second = conn.execute("SELECT current_transaction_id()").fetchall()[0][0]
     return first == second
 
 
@@ -148,8 +154,8 @@ def _read_applied(conn: duckdb.DuckDBPyConnection) -> set[int] | None:
         row = conn.execute(
             "SELECT count(*) FROM duckdb_tables() WHERE database_name = current_database() "
             "AND schema_name = '_havn' AND table_name = 'schema_migrations'"
-        ).fetchone()
-        if not (row and row[0]):
+        ).fetchall()
+        if not row[0][0]:
             return None
         return {int(r[0]) for r in conn.execute(query).fetchall()}
     try:
@@ -164,8 +170,8 @@ def _has_metadata_tables(conn: duckdb.DuckDBPyConnection) -> bool:
     row = conn.execute(
         "SELECT count(*) FROM duckdb_tables() WHERE database_name = current_database() "
         "AND schema_name = '_havn' AND table_name <> 'schema_migrations'"
-    ).fetchone()
-    return bool(row and row[0])
+    ).fetchall()
+    return bool(row[0][0])
 
 
 def applied_versions(conn: duckdb.DuckDBPyConnection) -> set[int]:

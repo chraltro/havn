@@ -492,6 +492,33 @@ TABLES: tuple[Table, ...] = (
         "updated_by VARCHAR",
         "updated_at TIMESTAMP",
     )),
+    # -- scheduler (engine/schedule_history.py) ---------------------------------
+    # One row per schedule fire. No PRIMARY KEY and no function defaults, so
+    # the same DDL works on DuckLake; writers supply every value. Timestamps
+    # are naive UTC.
+    Table("schedule_history", (
+        "id VARCHAR NOT NULL",
+        "schedule_kind VARCHAR NOT NULL",      # 'stream' or 'job'
+        "schedule_name VARCHAR NOT NULL",
+        "cron_expr VARCHAR NOT NULL",          # the expression that fired
+        "timezone VARCHAR",                    # IANA name; NULL = server local time
+        "scheduled_for TIMESTAMP NOT NULL",
+        "recorded_at TIMESTAMP NOT NULL",
+        "started_at TIMESTAMP",
+        "finished_at TIMESTAMP",
+        "lateness_ms BIGINT",                  # started_at - scheduled_for
+        "status VARCHAR NOT NULL",
+        "trigger VARCHAR NOT NULL",            # 'schedule' or 'catchup'
+        "error VARCHAR",
+        "scheduler_id VARCHAR NOT NULL",
+    )),
+    # The scheduler's heartbeat: how a restart knows from when to look for
+    # fires that passed while it was down.
+    Table("scheduler_state", (
+        "name VARCHAR NOT NULL",
+        "last_seen TIMESTAMP NOT NULL",
+        "scheduler_id VARCHAR NOT NULL",
+    )),
     # -- live models --------------------------------------------------------------
     Table("live_sources", (
         "source VARCHAR PRIMARY KEY",
