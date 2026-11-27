@@ -1316,7 +1316,13 @@ def save_job(project_dir: Path, job_data: dict) -> Path:
         out_data["full_refresh"] = False
 
     path = orch_dir / f"{slug}.yml"
-    path.write_text(yaml.dump(out_data, default_flow_style=False, sort_keys=False), encoding="utf-8")
+    # The file ends up holding exactly ``out_data``. When it already exists
+    # it is edited in place rather than regenerated, so comments on keys that
+    # stay survive; the write is atomic.
+    from havn import yamlio
+
+    with yamlio.edit_yaml(path, create=dict) as doc:
+        yamlio.sync_mapping(doc, out_data)
     return path
 
 

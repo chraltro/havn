@@ -28,6 +28,7 @@ dependencies = [
     "numpy>=1.24",
     "typer>=0.15.0",
     "pyyaml>=6.0",
+    "ruamel.yaml>=0.18,<0.19",  # yamlio.py moves comment tokens through ruamel internals; tested on 0.18
     "rich>=13.0",
     "sqlfluff>=3.0",
     "watchdog>=4.0",
