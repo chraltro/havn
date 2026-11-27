@@ -9,10 +9,9 @@ Periodic housekeeping for DuckLake-backed warehouses:
 On a DuckDB-backend warehouse every operation is a no-op — we short-circuit
 without opening a connection.
 
-The scheduler is a single daemon thread driven by ``time.monotonic()``.
-Integrates with the existing Huey scheduler only loosely: it's simpler to run
-an in-process loop than register three Huey tasks that also need DuckDB
-access. Huey stays the job runner; this thread owns DuckLake housekeeping.
+The scheduler is a single daemon thread driven by ``time.monotonic()``,
+separate from the cron scheduler in ``engine/scheduler.py``: that one runs
+streams, jobs and reports; this thread owns DuckLake housekeeping.
 """
 
 from __future__ import annotations

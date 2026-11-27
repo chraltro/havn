@@ -535,19 +535,18 @@ def transform(
             except Exception as gc_err:
                 logger.warning("Snapshot GC failed: %s", gc_err)
 
-        # Send alerts if configured
-        if config.alerts.slack_webhook_url or config.alerts.webhook_url:
-            from havn.engine.alerts import AlertConfig, alert_pipeline_success, alert_pipeline_failure
-            alert_cfg = AlertConfig(
-                slack_webhook_url=config.alerts.slack_webhook_url,
-                webhook_url=config.alerts.webhook_url,
-                channels=config.alerts.channels,
+        # Send alerts if configured. Through the shared helper, so a project
+        # with only `channels: [log]` (no Slack or webhook URL) alerts here
+        # the same way streams and jobs do, and delivery cannot fail the run.
+        failed = bool(errors or assertions_failed)
+        if failed or built > 0:
+            from havn.engine.pipeline_alerts import send_pipeline_alert
+
+            send_pipeline_alert(
+                config.alerts, "transform", ok=not failed, duration_s=0, conn=conn,
+                error=f"{errors} errors, {assertions_failed} assertion failures",
+                models_built=built,
             )
-            if errors or assertions_failed:
-                if config.alerts.on_failure:
-                    alert_pipeline_failure("transform", 0, f"{errors} errors, {assertions_failed} assertion failures", alert_cfg, conn)
-            elif config.alerts.on_success and built > 0:
-                alert_pipeline_success("transform", 0, alert_cfg, conn, models_built=built)
 
         if errors or assertions_failed:
             raise typer.Exit(1)
@@ -716,23 +715,46 @@ def schedule(
     """Show scheduled streams and start the scheduler."""
     from havn.engine.scheduler import SchedulerThread, get_scheduled_streams
 
+    from havn.engine.orchestration import discover_jobs
+
     project_dir = _resolve_project(project_dir)
     scheduled = get_scheduled_streams(project_dir)
+    # The scheduler also runs orchestration/*.yml jobs. A project that
+    # schedules only jobs used to be told it had nothing scheduled, and the
+    # scheduler never started.
+    scheduled_jobs = [
+        (job, job.schedules or ([job.cron] if job.cron else []))
+        for job in discover_jobs(project_dir)
+        if job.enabled
+    ]
+    scheduled_jobs = [(job, schedules) for job, schedules in scheduled_jobs if schedules]
 
-    if not scheduled:
-        console.print("[yellow]No scheduled streams found in project.yml[/yellow]")
-        console.print("Add a schedule to a stream:")
+    if not scheduled and not scheduled_jobs:
+        console.print("[yellow]No scheduled streams or jobs found[/yellow]")
+        console.print("Add a schedule to a stream in project.yml:")
         console.print('  schedule: "0 6 * * *"  # 6am daily')
+        console.print("or to a job in orchestration/<name>.yml:")
+        console.print('  schedules: ["0 6 * * *"]')
         return
 
-    table = Table(title="Scheduled Streams")
-    table.add_column("Stream", style="bold")
-    table.add_column("Schedule")
-    table.add_column("Description")
-    for s in scheduled:
-        table.add_row(s["name"], s["schedule"], s["description"])
-    console.print(table)
-    console.print()
+    if scheduled:
+        table = Table(title="Scheduled Streams")
+        table.add_column("Stream", style="bold")
+        table.add_column("Schedule")
+        table.add_column("Description")
+        for s in scheduled:
+            table.add_row(s["name"], s["schedule"], s["description"])
+        console.print(table)
+        console.print()
+
+    if scheduled_jobs:
+        table = Table(title="Scheduled Jobs")
+        table.add_column("Job", style="bold")
+        table.add_column("Schedule")
+        for job, schedules in scheduled_jobs:
+            table.add_row(job.name, ", ".join(schedules))
+        console.print(table)
+        console.print()
 
     console.print("[bold]Starting scheduler...[/bold] (Ctrl+C to stop)")
     scheduler = SchedulerThread(project_dir)
