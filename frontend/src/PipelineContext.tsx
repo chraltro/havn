@@ -117,7 +117,14 @@ function createEventProcessor(
         const details = [rowStr, durStr].filter(Boolean).join(" ");
         const displayName = (action === "ingest" || action === "export") && !mName.includes("/") ? `${action}/${mName}` : mName;
 
-        if (status === "skipped") {
+        // A skip that carries a reason was held back, not unchanged: its
+        // source is stale, or something upstream of it failed in this run.
+        // "skipped_upstream_blocked" is the older spelling of the same thing.
+        const isSkip = status === "skipped" || status === "skipped_upstream_blocked";
+        const heldBack = isSkip && (!!err || status === "skipped_upstream_blocked");
+        if (heldBack) {
+          msg = `${prefix}Skipped ${displayName} — ${err || "upstream blocked"}`;
+        } else if (isSkip) {
           msg = `${prefix}Skipped ${displayName} (no changes)`;
         } else if (status === "inlined") {
           // Ephemeral: never materialized, carried into consumers as a CTE.
@@ -131,11 +138,12 @@ function createEventProcessor(
 
         if (rowCount) totalRows += rowCount;
         const level = status === "error" || status === "assertion_failed" ? "error"
-          : status === "skipped" || status === "inlined" ? "log"
+          : heldBack ? "warn"
+          : isSkip || status === "inlined" ? "log"
           : "success";
         addOutput(level as OutputEntry["type"], msg, serverTs);
 
-        if (status !== "skipped") {
+        if (!isSkip) {
           models.push({ name: mName, result: status });
         }
         if (status === "error" || status === "assertion_failed") hasError = true;
