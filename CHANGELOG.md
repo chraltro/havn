@@ -42,6 +42,42 @@ All notable changes to havn are documented in this file.
   stopping `havn serve --schedule`) cancels runs that have not started and
   gives running ones 30 seconds to finish; a second Ctrl+C quits at once.
   A run cut off this way is marked `interrupted` in the history.
+- **A stream runs the same way from the terminal, the scheduler and the web
+  UI.** All three now go through one pipeline engine, so a stream behaves
+  identically wherever it is started:
+  - Steps run in the order they are listed in project.yml. Streams started
+    from the web UI used to merge all steps into one graph, so a step could
+    start before the one listed above it had finished.
+  - The scripts and seeds of one step run one at a time, in name order, and a
+    failed ingest script stops the rest of its step. The web UI used to run
+    them side by side.
+  - Models inside a transform step build in parallel as soon as their own
+    upstream models are done, also for `havn stream` and scheduled streams,
+    which used to build them one at a time.
+  - `havn stream` and scheduled streams now validate the models before
+    building them, as the web UI already did, and stop the stream on an
+    error-severity finding.
+  - Retries apply to the failed script or model, not to the whole step, so a
+    retried ingest step no longer runs its successful scripts a second time.
+  - A model refused by a `policies.deny` rule fails the stream everywhere.
+  - Every run of a stream logs its scripts and models in `_havn.run_log` under
+    one pipeline run id and appears in Job Results (`_havn.job_runs`), also
+    when it was started with `havn stream` or by the scheduler.
+  - A stream with an unknown step action fails before anything runs.
+  - The blocking `POST /api/stream/{name}` endpoint runs through the same
+    engine. It no longer forces a full rebuild of every model after an
+    ingest; models whose inputs got new data are rebuilt by change detection,
+    as in every other run.
+- **The web UI and the scheduler no longer run at the same time.** Under
+  `havn serve --schedule`, a scheduled run that comes due while a run started
+  from the UI is in progress waits for it to finish (the wait shows as
+  lateness in the schedule history), and starting a UI run while a scheduled
+  run is in progress is refused with a message naming the scheduled run.
+  Blocking endpoints that write to the warehouse (`POST /api/stream/{name}`,
+  `/api/transform`, `/api/run`, `/api/seeds`) answer 409 while another run
+  holds it, and starting a job from the UI while another run is in progress
+  now answers 409 instead of running it alongside. Scheduled runs can still
+  overlap each other when `scheduler.max_concurrent` is above 1.
 
 - **havn runs on DuckDB 2.x as well as 1.5.** The dependency is now
   `duckdb>=1.5.2,<3`. On Python 3.11 and newer pip installs DuckDB 2; Python

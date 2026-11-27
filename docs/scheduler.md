@@ -132,7 +132,7 @@ An unknown time zone name, an `overlap` other than `skip` or `queue`, or a `max_
 The scheduler is a dispatch loop and a pool of worker threads:
 
 1. Every 30 seconds the loop re-reads `project.yml` and `orchestration/*.yml` (so schedule changes take effect without a restart), works out which schedules have a fire time since it last looked, and hands those runs to the pool. It never runs a stream or job itself, so it keeps ticking while a long run executes.
-2. Workers run streams through the same code as `havn stream` (seeds, retries, Pipeline Rewind, the stream's `webhook_url`, the `alerts:` success/failure alert) and jobs as `havn jobs run` would. A stream counts as failed when a step fails, including a transform step where a model errored or an error-severity `@assert` rejected it.
+2. Workers run streams through the same pipeline engine as `havn stream` and the web UI (steps in their listed order, the pre-build validation gate, retries, Pipeline Rewind, the stream's `webhook_url`, the `alerts:` success/failure alert) and jobs as `havn jobs run` would. A stream counts as failed when a step fails, including a transform step where a model errored or an error-severity `@assert` rejected it.
 3. Every fire is written to `_havn.schedule_history`, with how late the run started and how it ended.
 
 Dashboard reports that are due are checked once per tick, also in the pool.
@@ -161,7 +161,16 @@ Raising it is possible, but runs that overlap in one warehouse can fail. DuckDB 
 
 So set `max_concurrent` above 1 only when the streams and jobs that can overlap write different tables and the schemas they use already exist. A conflict shows up as a failed run in the history; stream `retries` can absorb an occasional one.
 
-The `havn serve` web UI runs one pipeline at a time on its own, independently of the scheduler: a run started from the UI can still overlap a scheduled one.
+### With the web UI (`havn serve --schedule`)
+
+The web UI and the scheduler share one run gate per project, so a run started from the UI and a scheduled run never execute at the same time:
+
+- A UI run (a stream, pipeline, transform, script, contracts or job run started from the browser, and the blocking `POST /api/stream/{name}`, `POST /api/transform`, `POST /api/run` and `POST /api/seeds`) holds the gate alone. Lint does not touch the warehouse and does not take the gate.
+- A scheduled run that comes due while a UI run is in progress stays queued and starts as soon as the UI run ends. The wait counts towards its lateness in the history.
+- Starting a UI run while a scheduled run is in progress (or about to start) is refused straight away: the UI says a scheduled run is in progress and names it, and the blocking endpoints answer 409.
+- Scheduled runs share the gate with each other, so `max_concurrent` above 1 still lets them overlap as described above.
+
+`havn stream` and `havn jobs run` in a terminal are separate processes; DuckDB's file lock keeps them out of a warehouse a server has open.
 
 ### Missed fires and restarts
 
