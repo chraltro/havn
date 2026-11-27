@@ -498,3 +498,20 @@ def test_websocket_auth_is_served_from_the_token_cache(api, monkeypatch):
     assert deps._authenticate_websocket(ws)["username"] == "admin"
     assert calls == [api.token]
     assert deps._authenticate_websocket(SimpleNamespace(query_params={"token": "bogus"})) is None
+
+
+def test_setup_is_refused_when_auth_is_off(api):
+    """A server without --auth must not let anyone plant the first admin."""
+    import havn.server.app as server_app
+
+    _server_sql("DELETE FROM _havn.tokens")
+    _server_sql("DELETE FROM _havn.users")
+    server_app.AUTH_ENABLED = False
+    try:
+        r = TestClient(api.app).post(
+            "/api/auth/setup", json={"username": "planted", "password": "long-enough"}
+        )
+    finally:
+        server_app.AUTH_ENABLED = True
+    assert r.status_code == 400, r.text
+    assert _server_sql("SELECT COUNT(*) FROM _havn.users")[0][0] == 0

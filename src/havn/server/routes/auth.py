@@ -128,6 +128,11 @@ _setup_lock = threading.Lock()
 @router.post("/api/auth/setup")
 def initial_setup(request: Request, req: CreateUserRequest, conn: DbConn) -> dict:
     """Create the first admin user (only works when no users exist)."""
+    # Without --auth there is nothing to set up, and /api/auth/status says so.
+    # Left open, anyone who could reach such a server could plant the first
+    # admin account, which would take effect the day --auth is turned on.
+    if not _get_auth_enabled():
+        raise HTTPException(400, "Authentication is not enabled on this server")
     client_ip = request.client.host if request.client else "unknown"
     _check_rate_limit(f"setup:{client_ip}")
     from havn.engine.auth import authenticate, create_user, has_any_users
