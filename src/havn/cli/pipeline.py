@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Optional
 
 import typer
+from rich.markup import escape
 from rich.table import Table
 
 from havn.cli import _load_config, _resolve_project, _warehouse_exists, app, console
@@ -603,10 +604,30 @@ def _print_stream_event(event: str, data: dict) -> None:
         elif data.get("error"):
             console.print(f"[red]{data['error']}[/red]")
     elif event == "retry":
+        what = f"{data['action']} {data['name']}" if data.get("name") else data["action"]
         console.print(
-            f"[yellow]Retrying {data['action']} (attempt {data['attempt']}/{data['retries']}) "
+            f"[yellow]Retrying {what} (attempt {data['attempt']}/{data['retries']}) "
             f"after {data['delay']}s...[/yellow]"
         )
+    elif event == "validation":
+        colour = "red" if data.get("severity") == "error" else "yellow"
+        line = f":{data['line']}" if data.get("line") is not None else ""
+        console.print(f"  [{colour}]{data.get('severity')}[/{colour}]  {data.get('model')}{line}: "
+                      f"{escape(str(data.get('message')))}")
+    elif event == "node_end":
+        # Scripts and models print their own lines as they run; seeds, and
+        # anything held back by a failure above it, are reported here.
+        if data.get("held"):
+            console.print(f"  [yellow]skip[/yellow]  [bold]{data['name']}[/bold]: {escape(str(data['error']))}")
+        elif data.get("kind") == "seed":
+            label = f"[bold]{data['name']}[/bold]"
+            if data["status"] == "skipped":
+                console.print(f"  [dim]skip[/dim]  {label}")
+            elif data["status"] == "error":
+                console.print(f"  [red]fail[/red]  {label}: {escape(str(data.get('error')))}")
+            else:
+                console.print(f"  [green]done[/green]  {label} "
+                              f"({data.get('row_count', 0):,} rows, {data.get('duration_ms', 0)}ms)")
     elif event == "finished":
         if data["ok"]:
             console.print(f"[green]Stream completed successfully in {data['duration_s']}s.[/green]")

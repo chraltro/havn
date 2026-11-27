@@ -219,7 +219,9 @@ The scheduler is a daemon thread running a dispatch loop, plus a pool of daemon 
 - On start, fires that passed while no scheduler was running are recorded as `missed`; with `catchup: true` the newest runs once
 - Stopping cancels queued runs and waits up to 30 seconds for running ones
 
-A scheduled stream runs through the same code as `havn stream`: seeds, retries, Pipeline Rewind tracking, the stream's `webhook_url`, and the `alerts:` pipeline success/failure alert all apply. A stream counts as failed when a step fails, including a transform step where a model errored or an error-severity `@assert` rejected it; later steps do not run.
+A scheduled stream runs through the same pipeline engine as `havn stream` and the web UI: steps in their listed order, the pre-build validation gate, seeds, retries, Pipeline Rewind tracking, the stream's `webhook_url`, and the `alerts:` pipeline success/failure alert all apply. A stream counts as failed when a step fails, including a transform step where a model errored or an error-severity `@assert` rejected it; later steps do not run.
+
+Under `havn serve --schedule` the web UI and the scheduler share a run gate: a scheduled run waits while a UI run is in progress, and a UI run is refused while a scheduled one is in progress. Scheduled runs share the gate with each other, so `max_concurrent` still applies.
 
 ### FileWatcher
 

@@ -65,10 +65,12 @@ def run_seeds_endpoint(request: Request, req: SeedRequest, conn: DbConn) -> dict
     """Load all seeds."""
     _require_permission(request, "execute")
     from havn.engine.seeds import run_seeds
+    from havn.server.routes.pipeline import exclusive_run
 
-    results = run_seeds(
-        conn, _get_project_dir() / "seeds", schema=req.schema_name, force=req.force
-    )
+    with exclusive_run("seeds"):
+        results = run_seeds(
+            conn, _get_project_dir() / "seeds", schema=req.schema_name, force=req.force
+        )
     return {"results": results}
 
 

@@ -566,6 +566,15 @@ def _switch_blocker(own_requests: int) -> str | None:
     except Exception:
         pass
     try:
+        # A scheduled run (`havn serve --schedule`) holds the run gate.
+        from havn.engine.run_gate import gate_for
+
+        busy = gate_for(_get_project_dir()).busy()
+        if busy is not None:
+            return f"{', '.join(busy.labels) or 'a run'} is running"
+    except Exception:
+        pass
+    try:
         from havn.engine.deploy import _deploy_lock
 
         if _deploy_lock.locked():

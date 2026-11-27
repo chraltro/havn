@@ -940,20 +940,33 @@ class SchedulerThread(threading.Thread):
             self._release(task)
             return
 
-        started = self._now()
-        lateness_ms = max(0, int((started - task.scheduled_for).total_seconds() * 1000))
-        self._history.mark_started(task.row_id, started, lateness_ms)
-        try:
-            status, error = self._runner(task)
-        except Exception as e:
-            logger.exception("Scheduled %s %s raised", task.spec.kind, task.spec.name)
-            status, error = STATUS_FAILED, str(e)
-        if status != STATUS_SUCCESS:
-            status = STATUS_FAILED
-        self._history.mark_finished(task.row_id, status, self._now(), error)
-        # Released before the run stops counting as in flight, so anyone
-        # waiting for idle (tests, shutdown) never races the close.
-        self._release(task)
+        # The project's run gate (engine/run_gate.py), shared with the other
+        # scheduled runs: a run that fires while a web UI run is in progress
+        # (`havn serve --schedule`) waits here until it ends, and the wait
+        # counts towards its lateness.
+        ticket = self._acquire_gate(task)
+        if ticket is None:
+            self._history.mark_status([task.row_id], STATUS_CANCELLED,
+                                      "The scheduler stopped before this run started")
+            self._release(task)
+        else:
+            try:
+                started = self._now()
+                lateness_ms = max(0, int((started - task.scheduled_for).total_seconds() * 1000))
+                self._history.mark_started(task.row_id, started, lateness_ms)
+                try:
+                    status, error = self._runner(task)
+                except Exception as e:
+                    logger.exception("Scheduled %s %s raised", task.spec.kind, task.spec.name)
+                    status, error = STATUS_FAILED, str(e)
+                if status != STATUS_SUCCESS:
+                    status = STATUS_FAILED
+                self._history.mark_finished(task.row_id, status, self._now(), error)
+            finally:
+                ticket.release()
+            # Released before the run stops counting as in flight, so anyone
+            # waiting for idle (tests, shutdown) never races the close.
+            self._release(task)
 
         with self._changed:
             self._inflight.pop(key, None)
@@ -974,6 +987,22 @@ class SchedulerThread(threading.Thread):
             self._history.mark_status([nxt_cancelled.row_id], STATUS_CANCELLED,
                                       "The scheduler stopped before this run started")
             self._release(nxt_cancelled)
+
+    def _acquire_gate(self, task: _RunTask):
+        """Take the run gate for ``task`` (shared), or None when stopping meanwhile.
+
+        Shared: scheduled runs may overlap each other up to
+        ``scheduler.max_concurrent``; a web UI run holds the gate alone, and
+        a scheduled run waits for it rather than being skipped.
+        """
+        from havn.engine.run_gate import gate_for
+
+        gate = gate_for(self.project_dir)
+        label = f"{task.spec.kind} '{task.spec.name}'"
+        busy = gate.busy()
+        if busy is not None and busy.kind != "shared":
+            logger.info("Scheduler: %s waits for %s", label, ", ".join(busy.labels) or "a run")
+        return gate.acquire_shared(label, should_stop=lambda: self._stopping)
 
     def _release(self, task) -> None:
         if getattr(task, "leased", False):

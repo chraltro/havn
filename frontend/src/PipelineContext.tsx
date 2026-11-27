@@ -485,7 +485,9 @@ export function PipelineProvider({ children, onTablesChanged, onPipelineComplete
       try {
         const startResult = await startFn();
         if (startResult.status === "already_running") {
-          addOutput("warn", "An operation is already running.");
+          // The server says what holds it: a UI run, or a scheduled one.
+          const msg = (startResult as { message?: string }).message;
+          addOutput("warn", msg || "An operation is already running.");
           setRunning(false);
           resolve();
           return;

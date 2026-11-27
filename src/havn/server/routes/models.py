@@ -207,16 +207,21 @@ def run_transform_endpoint(
             else "No models matched the given selectors.",
         )
 
+    from havn.server.routes.pipeline import exclusive_run
+
     try:
-        results = run_transform(
-            conn,
-            _get_project_dir() / "transform",
-            targets=req.targets,
-            exclude=req.exclude,
-            force=req.force,
-            batch_range=batch_range,
-            defer=defer_spec,
-        )
+        with exclusive_run("transform"):
+            results = run_transform(
+                conn,
+                _get_project_dir() / "transform",
+                targets=req.targets,
+                exclude=req.exclude,
+                force=req.force,
+                batch_range=batch_range,
+                defer=defer_spec,
+            )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Transform failed")
         raise HTTPException(400, f"Transform failed: {e}")

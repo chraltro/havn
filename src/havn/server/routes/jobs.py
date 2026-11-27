@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
@@ -325,51 +324,19 @@ def run_job(name: str, request: Request, conn: DbConn, force: bool = False):
         resolve=job.resolve, exclude=job.exclude or None,
     )
 
-    # Try to use the pipeline SSE infrastructure so the UI sees live output.
-    # Falls back to a plain background thread if the pipeline is already busy.
-    try:
-        from havn.server.routes.pipeline import _start_operation, _emit, _finish_operation
+    # Through the pipeline SSE infrastructure, so the UI sees live output and
+    # the job holds the run gate: it never overlaps another UI run or a
+    # scheduled one (it used to start anyway, without output, when busy).
+    from havn.server.routes.pipeline import _start_operation, _emit, _finish_operation
 
-        def _run_with_sse():
-            from havn.server.deps import _get_shared_conn
-
-            cursor = None
-            try:
-                cursor = cursor_for(_get_shared_conn())
-                execute_job(job, plan, cursor, project_dir, trigger="manual", emit=_emit, force=force,
-                            run_as=user)
-            except Exception as e:
-                logger.error("Job '%s' failed: %s", name, e)
-            finally:
-                if cursor is not None:
-                    try:
-                        cursor.close()
-                    except Exception:
-                        pass
-                _finish_operation()
-
-        result = _start_operation("job", f"Job: {name}", _run_with_sse, ())
-        if result.get("status") == "already_running":
-            # Pipeline is busy — fall back to background thread without SSE
-            _run_job_background(job, plan, project_dir, name, force, user)
-        return {"status": "started", "job": name, "steps": len(plan.steps)}
-    except ImportError:
-        # Pipeline routes not available — fall back
-        _run_job_background(job, plan, project_dir, name, force, user)
-        return {"status": "started", "job": name, "steps": len(plan.steps)}
-
-
-def _run_job_background(job, plan, project_dir, name, force=False, user=None):
-    """Run a job on a background thread without SSE (fallback)."""
-    from havn.engine.orchestration import execute_job
-
-    def _run():
+    def _run_with_sse():
         from havn.server.deps import _get_shared_conn
 
         cursor = None
         try:
             cursor = cursor_for(_get_shared_conn())
-            execute_job(job, plan, cursor, project_dir, trigger="manual", force=force, run_as=user)
+            execute_job(job, plan, cursor, project_dir, trigger="manual", emit=_emit, force=force,
+                        run_as=user)
         except Exception as e:
             logger.error("Job '%s' failed: %s", name, e)
         finally:
@@ -378,10 +345,12 @@ def _run_job_background(job, plan, project_dir, name, force=False, user=None):
                     cursor.close()
                 except Exception:
                     pass
+            _finish_operation()
 
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-
+    result = _start_operation("job", f"Job: {name}", _run_with_sse, ())
+    if result.get("status") == "already_running":
+        raise HTTPException(409, result.get("message") or "An operation is already running.")
+    return {"status": "started", "job": name, "steps": len(plan.steps)}
 
 @router.post("/api/jobs")
 def create_job(req: CreateJobRequest, request: Request):

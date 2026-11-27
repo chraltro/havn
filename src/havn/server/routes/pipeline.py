@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import time
+from contextlib import contextmanager
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -15,7 +15,6 @@ from havn.server.deps import (
     _get_project_dir,
     _require_permission,
     ensure_meta_table,
-    run_transform,
 )
 from havn.engine.write_queue import cursor_for
 
@@ -37,33 +36,42 @@ class PipelineStartRequest(BaseModel):
     force: bool = False
 
 
-# --- Helpers ---
+# --- The run gate ---
+#
+# Every operation that writes to the warehouse holds the project's run gate
+# (engine/run_gate.py) while it runs, exclusively: the scheduler's worker
+# pool takes the same gate (shared) for its runs under `havn serve
+# --schedule`, so a UI run and a scheduled run never overlap.
 
 
-def _send_webhook_notification(
-    url: str, stream_name: str, status: str, duration_s: float
-) -> None:
-    """Send a POST webhook notification for stream completion."""
-    from datetime import datetime
-    from urllib.request import Request, urlopen
+@contextmanager
+def exclusive_run(label: str):
+    """Hold the run gate for a blocking endpoint's run; HTTP 409 when busy."""
+    from havn.engine.run_gate import GateBusy, gate_for
 
-    payload = json.dumps(
-        {
-            "stream": stream_name,
-            "status": status,
-            "duration_seconds": duration_s,
-            "timestamp": datetime.now().isoformat(),
-        }
-    ).encode()
-
+    taken = gate_for(_get_project_dir()).try_exclusive(label)
+    if isinstance(taken, GateBusy):
+        raise HTTPException(409, taken.message)
     try:
-        req = Request(
-            url, data=payload, headers={"Content-Type": "application/json"}
-        )
-        urlopen(req, timeout=10)
-        logger.info("Webhook sent to %s for stream %s", url, stream_name)
-    except Exception as e:
-        logger.warning("Webhook failed for stream %s: %s", stream_name, e)
+        yield
+    finally:
+        taken.release()
+
+
+def _busy_response(busy) -> dict:
+    """The "already running" answer, saying what holds the gate."""
+    from havn.engine.run_gate import SHARED
+
+    scheduled = busy.kind == SHARED
+    return {
+        "status": "already_running",
+        # Held here by a blocking endpoint (a background UI operation is
+        # caught earlier, by the "running" flag): name what holds it.
+        "operation": "scheduled" if scheduled else "run",
+        "operation_label": ", ".join(busy.labels),
+        "scheduled": scheduled,
+        "message": busy.message,
+    }
 
 
 # --- Script execution ---
@@ -90,7 +98,8 @@ def run_script_endpoint(
     if not script_path.exists():
         raise HTTPException(404, f"Script not found: {req.script_path}")
     script_type = "ingest" if "ingest" in req.script_path else "export"
-    result = run_script(conn, script_path, script_type, force=req.force, run_as=user)
+    with exclusive_run(f"script '{req.script_path}'"):
+        result = run_script(conn, script_path, script_type, force=req.force, run_as=user)
     from havn.engine.secrets import mask_output
 
     if result.get("log_output"):
@@ -112,6 +121,7 @@ _pipeline_state = {
     "started_at": None,
     "events": [],       # list of {"event": str, "data": dict}
     "finished": False,   # True when pipeline completes (events still available)
+    "gate_ticket": None,  # the run gate, held while a warehouse operation runs
 }
 _pipeline_lock = threading.Lock()
 _pipeline_cond = threading.Condition(_pipeline_lock)
@@ -119,20 +129,34 @@ _pipeline_cond = threading.Condition(_pipeline_lock)
 _STALE_TIMEOUT = 600  # 10 minutes
 
 
-def _start_operation(operation: str, label: str, target_fn, args: tuple) -> dict:
+def _start_operation(operation: str, label: str, target_fn, args: tuple, *, gated: bool = True) -> dict:
     """Start a background operation. Returns status dict.
 
     Atomic check-and-set under a single lock acquisition: returns
-    'already_running' if a pipeline is in progress, otherwise reserves
-    the slot and starts the worker thread.
+    'already_running' if a UI operation is in progress, or if the project's
+    run gate is held by scheduled runs (``"scheduled": true`` and a
+    ``message`` saying which); otherwise reserves the slot, takes the gate
+    (``gated``: every operation that writes to the warehouse) and starts
+    the worker thread. ``_finish_operation`` gives the gate back.
     """
+    from havn.engine.run_gate import GateBusy, gate_for
+
     with _pipeline_cond:
         if _pipeline_state["running"]:
             return {
                 "status": "already_running",
                 "operation": _pipeline_state["operation"],
                 "operation_label": _pipeline_state["operation_label"],
+                "scheduled": False,
+                "message": f"An operation is already running ({_pipeline_state['operation_label']}).",
             }
+        ticket = None
+        if gated:
+            taken = gate_for(_get_project_dir()).try_exclusive(f"{operation} '{label}'")
+            if isinstance(taken, GateBusy):
+                return _busy_response(taken)
+            ticket = taken
+        _pipeline_state["gate_ticket"] = ticket
         _cancel_flag.clear()
         _pipeline_state["running"] = True
         _pipeline_state["operation"] = operation
@@ -144,7 +168,11 @@ def _start_operation(operation: str, label: str, target_fn, args: tuple) -> dict
         _pipeline_cond.notify_all()
 
     t = threading.Thread(target=target_fn, args=args, daemon=True)
-    t.start()
+    try:
+        t.start()
+    except BaseException:
+        _finish_operation()
+        raise
     return {"status": "started", "operation": operation, "operation_label": label}
 
 
@@ -173,9 +201,13 @@ def _finish_operation():
     except Exception:
         pass
     with _pipeline_cond:
+        ticket = _pipeline_state.get("gate_ticket")
+        _pipeline_state["gate_ticket"] = None
         _pipeline_state["running"] = False
         _pipeline_state["finished"] = True
         _pipeline_cond.notify_all()
+    if ticket is not None:
+        ticket.release()
 
 
 # --- Background thread: Lint ---
@@ -327,9 +359,10 @@ def _run_script_thread(script_path_str, project_dir, force=False, user=None):
 
 # --- Background threads: transform, stream, selective pipeline ---
 #
-# All three describe their run as a RunSpec and hand it to the one DAG
-# executor in havn.server.pipeline_runner, which builds models through
-# build_one_model exactly as `havn transform` does.
+# All three describe their run as a RunSpec and hand it to the pipeline
+# engine (havn.engine.pipeline_engine) through havn.server.pipeline_runner,
+# which turns the engine's events into the browser's. `havn stream` and
+# scheduled streams run through the same engine.
 
 
 def _run_spec_thread(spec, project_dir):
@@ -343,7 +376,7 @@ def _run_spec_thread(spec, project_dir):
 
 def _run_transform_thread(targets, force, project_dir):
     """Run SQL transforms in background thread."""
-    from havn.server.pipeline_runner import RunSpec
+    from havn.engine.pipeline_engine import RunSpec, Step
 
     label = "Transform"
     if targets:
@@ -352,10 +385,12 @@ def _run_transform_thread(targets, force, project_dir):
         label += " --force"
     spec = RunSpec(
         operation="transform", label=label, force=force,
-        transform=list(targets) if targets else ["all"],
+        steps=[Step("transform", list(targets) if targets else ["all"])],
+        ordered=False,
         # This endpoint never ran the pre-build gate; it builds what it is
         # asked to and reports each model's result.
         gate=False,
+        rewind_trigger="ui",
         # Alerts as `havn transform` does, under the same target name.
         alert="when_built",
         alert_target="transform",
@@ -363,77 +398,28 @@ def _run_transform_thread(targets, force, project_dir):
     _run_spec_thread(spec, project_dir)
 
 
-class StreamStepError(ValueError):
-    """A stream step this runner cannot run."""
-
-
-_STREAM_ACTIONS = ("seed", "ingest", "transform", "export")
-
-
 def _stream_spec(stream_name, stream_config, force, user):
-    """The RunSpec for a stream: its own steps, targets and retries.
+    """The RunSpec for a stream run from the UI: the engine's, plus audit."""
+    from havn.engine.pipeline_engine import stream_spec
 
-    Every step's nodes go into one DAG, so a step's models start as soon as
-    their own inputs are loaded rather than when the whole previous step is
-    done; the dependency edges keep the order the steps describe. Targets of
-    several steps of one kind are combined.
-    """
-    from havn.server.pipeline_runner import RunSpec
-
-    chosen: dict[str, list[str]] = {}
-    for step in stream_config.steps:
-        if step.action not in _STREAM_ACTIONS:
-            raise StreamStepError(
-                f"stream {stream_name!r}: unknown step action {step.action!r} "
-                "(expected seed, ingest, transform or export)"
-            )
-        chosen.setdefault(step.action, []).extend(step.targets or ["all"])
-    for action, targets in chosen.items():
-        if "all" in targets:
-            chosen[action] = ["all"]
-    return RunSpec(
-        operation="stream",
-        label=f"Pipeline {stream_name}",
-        stream=stream_name,
-        force=force,
-        user=user,
-        seed="seed" in chosen,
-        ingest=chosen.get("ingest"),
-        transform=chosen.get("transform"),
-        export=chosen.get("export"),
-        steps=1,
-        retries=max(0, int(stream_config.retries or 0)),
-        retry_delay=float(stream_config.retry_delay or 0),
-        job=(f"stream ({stream_name})", "stream", stream_name),
-        audit_resource=stream_name,
-        audit_detail="stream completed",
-        rewind_trigger=f"stream:{stream_name}",
-        webhook_url=stream_config.webhook_url,
-        alert="always",
-        alert_target=stream_name,
-    )
+    spec = stream_spec(stream_name, stream_config, force=force, user=user, trigger="ui")
+    spec.audit_resource = stream_name
+    spec.audit_detail = "stream completed"
+    return spec
 
 
 def _run_pipeline_thread(stream_name, stream_config, project_dir, db_path_str, force, user):
     """Run a stream from project.yml in the background, as `havn stream` would."""
-    try:
-        spec = _stream_spec(stream_name, stream_config, force, user)
-    except StreamStepError as e:
-        import uuid as _uuid
-
-        logger.error("%s", e)
-        try:
-            _emit("complete", {"stream": stream_name, "status": "failed",
-                               "duration_seconds": 0, "pipeline_run_id": str(_uuid.uuid4())})
-        finally:
-            _finish_operation()
-        return
-    _run_spec_thread(spec, project_dir)
+    _run_spec_thread(_stream_spec(stream_name, stream_config, force, user), project_dir)
 
 
 def _run_selective_pipeline_thread(steps, force, project_dir, user):
-    """Run the chosen steps (ingest / transform / export) over everything."""
-    from havn.server.pipeline_runner import RunSpec
+    """Run the chosen steps (ingest / transform / export) over everything.
+
+    Not a stream: the chosen steps go into one DAG (``ordered=False``), so a
+    failed load holds back only the models that read it, plus the exports.
+    """
+    from havn.engine.pipeline_engine import RunSpec, Step
 
     step_label = "+".join(steps)
     if force:
@@ -441,16 +427,16 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
     spec = RunSpec(
         operation="pipeline",
         label=f"Pipeline ({step_label})",
-        stream="pipeline",
+        name="pipeline",
+        steps=[Step(s, ["all"]) for s in steps],
+        ordered=False,
         force=force,
         user=user,
-        ingest=["all"] if "ingest" in steps else None,
-        transform=["all"] if "transform" in steps else None,
-        export=["all"] if "export" in steps else None,
-        steps=len(steps),
         job=(f"pipeline ({step_label})", "pipeline", step_label),
+        job_trigger="pipeline",
         audit_resource=f"pipeline({step_label})",
         audit_detail="selective pipeline completed",
+        rewind_trigger="ui",
         alert="when_built",
         alert_target="pipeline",
     )
@@ -558,7 +544,12 @@ def start_stream(request: Request, stream_name: str, force: bool = False) -> dic
         (stream_name, stream_config, project_dir, db_path_str, force, user),
     )
     if result.get("status") == "already_running":
-        return {"status": "already_running", "stream_name": _pipeline_state["stream_name"]}
+        return {
+            "status": "already_running",
+            "stream_name": result["operation_label"] if result.get("scheduled") else _pipeline_state["stream_name"],
+            "scheduled": result.get("scheduled", False),
+            "message": result.get("message"),
+        }
     return {"status": "started", "operation": "stream", "stream_name": stream_name}
 
 
@@ -576,7 +567,9 @@ def start_lint(request: Request, fix: bool = False) -> dict:
     _require_permission(request, "execute")
     config = _get_config()
     project_dir = _get_project_dir()
-    return _start_operation("lint", f"Lint{' --fix' if fix else ''}", _run_lint_thread, (fix, project_dir, config))
+    # Lint reads and fixes SQL files, never the warehouse: no run gate.
+    return _start_operation("lint", f"Lint{' --fix' if fix else ''}", _run_lint_thread,
+                            (fix, project_dir, config), gated=False)
 
 
 @router.post("/api/contracts/run/start")
@@ -833,7 +826,12 @@ async def run_stream_sse(
 def run_stream_endpoint(
     request: Request, stream_name: str, conn: DbConn, force: bool = False
 ) -> dict:
-    """Run a full stream with retry support."""
+    """Run a full stream and wait for it; 409 while another run holds the gate.
+
+    Runs through the pipeline engine like every other stream run (steps in
+    listed order, retries, Rewind, webhook, alerts), on the server's shared
+    connection.
+    """
     user = _require_permission(request, "execute")
     logger.info("Stream run requested: %s (force=%s)", stream_name, force)
 
@@ -855,106 +853,22 @@ def run_stream_endpoint(
     config = _get_config()
     if stream_name not in config.streams:
         raise HTTPException(404, f"Stream '{stream_name}' not found")
-    stream_config = config.streams[stream_name]
 
-    step_results = []
-    has_error = False
-    ingest_ran = False
-    start = time.perf_counter()
+    from havn.engine.stream_runner import run_stream
+    from havn.server.deps import _get_shared_conn
 
-    def _run_step(step):
-        nonlocal ingest_ran
-        from havn.engine.runner import run_scripts_in_dir
-
-        if step.action == "ingest":
-            results = run_scripts_in_dir(
-                conn, _get_project_dir() / "ingest", "ingest", step.targets, run_as=user
-            )
-            if any(r["status"] == "success" for r in results):
-                ingest_ran = True
-            return {
-                "action": "ingest",
-                "results": results,
-                "error": any(r["status"] == "error" for r in results),
-            }
-        elif step.action == "transform":
-            # Force rebuild if ingest ran (upstream data changed)
-            force_transform = force or ingest_ran
-            results = run_transform(
-                conn,
-                _get_project_dir() / "transform",
-                targets=step.targets if step.targets != ["all"] else None,
-                force=force_transform,
-            )
-            from havn.engine.stream_runner import TRANSFORM_FAILURE_STATUSES
-
-            return {
-                "action": "transform",
-                "results": results,
-                # Fails on what `havn transform` exits 1 for, an error
-                # assertion included.
-                "error": any(s in TRANSFORM_FAILURE_STATUSES for s in results.values()),
-            }
-        elif step.action == "export":
-            results = run_scripts_in_dir(
-                conn, _get_project_dir() / "export", "export", step.targets, run_as=user
-            )
-            return {
-                "action": "export",
-                "results": results,
-                "error": any(r["status"] == "error" for r in results),
-            }
-        elif step.action == "seed":
-            from havn.engine.seeds import run_seeds
-
-            results = run_seeds(
-                conn, _get_project_dir() / "seeds", force=force
-            )
-            return {
-                "action": "seed",
-                "results": results,
-                "error": any(s == "error" for s in results.values()),
-            }
-        return {"action": step.action, "results": {}, "error": False}
-
-    import time as _time
-
-    for step in stream_config.steps:
-        result = _run_step(step)
-        if result["error"] and stream_config.retries > 0:
-            for attempt in range(1, stream_config.retries + 1):
-                logger.info(
-                    "Retrying %s step (attempt %d/%d)",
-                    step.action,
-                    attempt,
-                    stream_config.retries,
-                )
-                _time.sleep(stream_config.retry_delay)
-                result = _run_step(step)
-                if not result["error"]:
-                    break
-        step_results.append(
-            {"action": result["action"], "results": result["results"]}
-        )
-        if result["error"]:
-            has_error = True
-            break
-
-    duration_s = round(time.perf_counter() - start, 1)
-    status = "failed" if has_error else "success"
-
-    if stream_config.webhook_url:
-        _send_webhook_notification(
-            stream_config.webhook_url, stream_name, status, duration_s
+    with exclusive_run(f"stream '{stream_name}'"):
+        result = run_stream(
+            config, _get_project_dir(), stream_name, force=force, trigger="ui",
+            conn=_get_shared_conn(), user=user,
         )
 
     return {
         "stream": stream_name,
-        "steps": step_results,
-        "status": status,
-        "duration_seconds": duration_s,
+        "steps": [{"action": s.action, "results": s.results} for s in result.steps],
+        "status": "success" if result.ok else "failed",
+        "duration_seconds": result.duration_s,
     }
-
 
 # --- Streams config ---
 
