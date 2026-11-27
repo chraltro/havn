@@ -14,7 +14,6 @@ Two entry points into the warehouse:
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import duckdb
@@ -128,6 +127,12 @@ def connect(
 
     db_path = str(db_path)
     conn = duckdb.connect(db_path, read_only=read_only)
+    if not read_only and db_path != ":memory:":
+        # The file may have been replaced since this process last checked
+        # its metadata schema (a restored backup); check again on next use.
+        from havn.engine.migrations import forget_database
+
+        forget_database(db_path)
     if _progress_bar_enabled():
         conn.execute("SET enable_progress_bar = true")
     else:
@@ -295,389 +300,22 @@ def _strip_pk(ddl: str, is_ducklake: bool) -> str:
 
 
 def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create the internal metadata tables for change tracking, profiling, and assertions."""
-    is_lake = _is_ducklake_connection(conn)
+    """Make sure the ``_havn`` metadata schema is at the current version.
 
-    def _exec(ddl: str) -> None:
-        conn.execute(_strip_pk(ddl, is_lake))
-
-    conn.execute("""
-        CREATE SCHEMA IF NOT EXISTS _havn
-    """)
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.model_state (
-            model_path   VARCHAR PRIMARY KEY,
-            content_hash VARCHAR NOT NULL,
-            upstream_hash VARCHAR NOT NULL,
-            materialized_as VARCHAR NOT NULL,
-            last_run_at  TIMESTAMP DEFAULT current_timestamp,
-            run_duration_ms BIGINT DEFAULT 0,
-            row_count    BIGINT DEFAULT 0
-        )
-    """)
-    # Models whose last build was rejected by a severity=error assertion.
-    # Kept apart from model_state on purpose: model_state answers "is this
-    # SQL what was last built" (the UI shows "edited since build" from it),
-    # while this answers "was that build accepted". Change detection needs
-    # both, so a rejected model is rebuilt and re-checked on the next run
-    # instead of being skipped as unchanged. No primary key so the same DDL
-    # works on DuckLake; writers delete before they insert.
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.model_blocked (
-            model_path VARCHAR NOT NULL,
-            blocked_at TIMESTAMP DEFAULT current_timestamp
-        )
-    """)
-    # Column names and types of each model as last built. Nothing else in the
-    # warehouse records inferred types: model_profiles has names only, and the
-    # catalog holds the last successful build, which disappears the moment a
-    # model is dropped or renamed. The editor and the bind pass both want a
-    # cheap answer for "what columns does this upstream have", so the
-    # DESCRIBE taken at build time is kept here, keyed by the content hash it
-    # belongs to.
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.model_columns (
-            model_path   VARCHAR PRIMARY KEY,
-            content_hash VARCHAR NOT NULL,
-            columns      JSON NOT NULL,
-            bound_at     TIMESTAMP DEFAULT current_timestamp
-        )
-    """)
-    # One row per microbatch window a model has processed. This is what makes
-    # a backfill resumable: a 30-window run that dies at window 17 leaves
-    # sixteen `done` rows and one `failed` row, and the next run picks up from
-    # the first window that is not `done` rather than starting over. No
-    # primary key: the writer replaces a window's row by deleting it first,
-    # which works the same on DuckDB and on DuckLake.
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.batch_state (
-            model_path   VARCHAR NOT NULL,
-            window_start TIMESTAMP NOT NULL,
-            window_end   TIMESTAMP NOT NULL,
-            status       VARCHAR NOT NULL,
-            "rows"       BIGINT DEFAULT 0,
-            run_id       VARCHAR,
-            finished_at  TIMESTAMP DEFAULT current_timestamp
-        )
-    """)
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.run_log (
-            run_id       VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
-            pipeline_run_id VARCHAR,
-            run_type     VARCHAR NOT NULL,
-            target       VARCHAR NOT NULL,
-            status       VARCHAR NOT NULL,
-            started_at   TIMESTAMP DEFAULT current_timestamp,
-            finished_at  TIMESTAMP,
-            duration_ms  BIGINT,
-            rows_affected BIGINT DEFAULT 0,
-            error        VARCHAR,
-            log_output   VARCHAR
-        )
-    """)
-    # Migration for existing databases
-    try:
-        conn.execute("""
-            ALTER TABLE _havn.run_log ADD COLUMN IF NOT EXISTS pipeline_run_id VARCHAR
-        """)
-    except Exception:
-        pass  # column already exists or ALTER not supported
-    # Model profiling stats (auto-computed after each build)
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.model_profiles (
-            model_path       VARCHAR PRIMARY KEY,
-            row_count        BIGINT DEFAULT 0,
-            column_count     INTEGER DEFAULT 0,
-            null_percentages JSON,
-            distinct_counts  JSON,
-            profiled_at      TIMESTAMP DEFAULT current_timestamp
-        )
-    """)
-    # Data quality assertion results
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.assertion_results (
-            id          VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
-            model_path  VARCHAR NOT NULL,
-            expression  VARCHAR NOT NULL,
-            passed      BOOLEAN NOT NULL,
-            detail      VARCHAR,
-            checked_at  TIMESTAMP DEFAULT current_timestamp
-        )
-    """)
-    # Migrations: add severity + owner columns if missing.
-    try:
-        _exec("ALTER TABLE _havn.assertion_results ADD COLUMN IF NOT EXISTS severity VARCHAR DEFAULT 'error'")
-    except Exception:
-        pass
-    try:
-        _exec("ALTER TABLE _havn.assertion_results ADD COLUMN IF NOT EXISTS owner VARCHAR DEFAULT ''")
-    except Exception:
-        pass
-    # Source-freshness check results — populated by the @source_freshness pre-build hook.
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.source_freshness (
-            id              VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
-            model_path      VARCHAR NOT NULL,
-            source_table    VARCHAR NOT NULL,
-            on_column       VARCHAR,
-            max_age_seconds BIGINT NOT NULL,
-            age_seconds     DOUBLE,
-            is_stale        BOOLEAN NOT NULL,
-            severity        VARCHAR NOT NULL DEFAULT 'error',
-            error           VARCHAR,
-            checked_at      TIMESTAMP DEFAULT current_timestamp
-        )
-    """)
-    # Masking policies
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.masking_policies (
-            id               VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
-            schema_name      VARCHAR NOT NULL,
-            table_name       VARCHAR NOT NULL,
-            column_name      VARCHAR NOT NULL,
-            method           VARCHAR NOT NULL,
-            method_config    JSON,
-            condition_column VARCHAR,
-            condition_value  VARCHAR,
-            exempted_roles   JSON DEFAULT '["admin"]',
-            created_at       TIMESTAMP DEFAULT current_timestamp
-        )
-    """)
-    # Audit log — DuckLake doesn't support sequences, so use uuid VARCHAR id there
-    if is_lake:
-        _exec("""
-            CREATE TABLE IF NOT EXISTS _havn.audit_log (
-                id VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
-                "user" VARCHAR NOT NULL,
-                action VARCHAR NOT NULL,
-                resource VARCHAR,
-                detail VARCHAR,
-                ip_address VARCHAR,
-                "timestamp" TIMESTAMP DEFAULT current_timestamp
-            )
-        """)
-    else:
-        try:
-            conn.execute("CREATE SEQUENCE IF NOT EXISTS _havn.audit_log_seq START 1")
-        except Exception:
-            pass  # sequence already exists
-        _exec("""
-            CREATE TABLE IF NOT EXISTS _havn.audit_log (
-                id INTEGER PRIMARY KEY DEFAULT nextval('_havn.audit_log_seq'),
-                "user" VARCHAR NOT NULL,
-                action VARCHAR NOT NULL,
-                resource VARCHAR,
-                detail VARCHAR,
-                ip_address VARCHAR,
-                "timestamp" TIMESTAMP DEFAULT current_timestamp
-            )
-        """)
-    # Slow query tracking
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.slow_queries (
-            id           VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
-            query_text   VARCHAR NOT NULL,
-            duration_ms  BIGINT NOT NULL,
-            row_count    BIGINT DEFAULT 0,
-            executed_at  TIMESTAMP DEFAULT current_timestamp
-        )
-    """)
-    # Alert/notification log
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.alert_log (
-            id          VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
-            alert_type  VARCHAR NOT NULL,
-            channel     VARCHAR NOT NULL,
-            target      VARCHAR,
-            message     VARCHAR NOT NULL,
-            status      VARCHAR NOT NULL,
-            sent_at     TIMESTAMP DEFAULT current_timestamp,
-            error       VARCHAR
-        )
-    """)
-    # Profile history (append-only for anomaly detection baselines)
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.profile_history (
-            id              VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
-            model_path      VARCHAR NOT NULL,
-            row_count       BIGINT DEFAULT 0,
-            column_count    INTEGER DEFAULT 0,
-            null_percentages JSON,
-            distinct_counts  JSON,
-            profiled_at     TIMESTAMP DEFAULT current_timestamp
-        )
-    """)
-    # Anomaly detection log
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.anomaly_log (
-            id            VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
-            model_name    VARCHAR NOT NULL,
-            metric        VARCHAR NOT NULL,
-            current_value DOUBLE,
-            mean_value    DOUBLE,
-            stddev_value  DOUBLE,
-            z_score       DOUBLE,
-            direction     VARCHAR,
-            message       VARCHAR,
-            detected_at   TIMESTAMP DEFAULT current_timestamp
-        )
-    """)
-    # Dashboard definitions
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.dashboards (
-            id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
-            name         VARCHAR NOT NULL,
-            description  VARCHAR DEFAULT '',
-            layout       JSON NOT NULL DEFAULT '{"columns":24,"rowHeight":64,"gap":12}',
-            filters      JSON DEFAULT '[]',
-            settings     JSON DEFAULT '{}',
-            created_by   VARCHAR DEFAULT 'anonymous',
-            updated_by   VARCHAR DEFAULT 'anonymous',
-            created_at   TIMESTAMP DEFAULT current_timestamp,
-            updated_at   TIMESTAMP DEFAULT current_timestamp,
-            is_template  BOOLEAN DEFAULT FALSE
-        )
-    """)
-    # Dashboard widget instances
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.dashboard_widgets (
-            id            VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
-            dashboard_id  VARCHAR NOT NULL,
-            widget_type   VARCHAR NOT NULL,
-            chart_type    VARCHAR,
-            title         VARCHAR DEFAULT '',
-            sql_query     VARCHAR,
-            config        JSON DEFAULT '{}',
-            position      JSON NOT NULL,
-            filters       JSON DEFAULT '[]',
-            cache_ttl     INTEGER DEFAULT 0,
-            sort_order    INTEGER DEFAULT 0,
-            created_at    TIMESTAMP DEFAULT current_timestamp
-        )
-    """)
-    # Dashboard query result cache
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.dashboard_cache (
-            cache_key   VARCHAR PRIMARY KEY,
-            result_json JSON NOT NULL,
-            row_count   INTEGER DEFAULT 0,
-            cached_at   TIMESTAMP DEFAULT current_timestamp,
-            expires_at  TIMESTAMP NOT NULL
-        )
-    """)
-    # Orchestration job runs
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.job_runs (
-            id              VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
-            job_name        VARCHAR NOT NULL,
-            job_file        VARCHAR NOT NULL,
-            target          VARCHAR NOT NULL,
-            status          VARCHAR NOT NULL DEFAULT 'running',
-            steps_total     INTEGER NOT NULL DEFAULT 0,
-            steps_completed INTEGER NOT NULL DEFAULT 0,
-            steps_failed    INTEGER NOT NULL DEFAULT 0,
-            steps_skipped   INTEGER NOT NULL DEFAULT 0,
-            started_at      TIMESTAMP DEFAULT current_timestamp,
-            finished_at     TIMESTAMP,
-            duration_ms     BIGINT,
-            trigger         VARCHAR DEFAULT 'manual',
-            error           VARCHAR,
-            step_details    JSON
-        )
-    """)
-    # Migration for databases that predate steps_skipped
-    try:
-        conn.execute(
-            "ALTER TABLE _havn.job_runs ADD COLUMN IF NOT EXISTS steps_skipped INTEGER DEFAULT 0"
-        )
-    except Exception:
-        pass
-    # Pull request build records
-    _exec("""
-        CREATE TABLE IF NOT EXISTS _havn.pr_builds (
-            id               VARCHAR PRIMARY KEY,
-            pr_id            VARCHAR NOT NULL,
-            branch_head      VARCHAR,
-            status           VARCHAR NOT NULL DEFAULT 'running',
-            started_at       TIMESTAMP DEFAULT current_timestamp,
-            finished_at      TIMESTAMP,
-            duration_ms      BIGINT,
-            data_diff        JSON,
-            lineage_impact   JSON,
-            contract_results JSON,
-            error            VARCHAR
-        )
-    """)
-
-    _lowercase_model_keys(conn)
-
-
-_KEYED_MODEL_TABLES = (
-    "model_state", "model_columns", "model_profiles", "model_blocked", "batch_state",
-)
-_HISTORY_MODEL_TABLES = (
-    ("assertion_results", "model_path"),
-    ("profile_history", "model_path"),
-    ("source_freshness", "model_path"),
-    ("anomaly_log", "model_name"),
-)
-
-
-def _lowercase_model_keys(conn: duckdb.DuckDBPyConnection) -> None:
-    """One-time migration: model names became lowercase.
-
-    Discovery used to keep a file name's case (``silver.Customers``), so
-    metadata recorded under it would no longer be found: the model would
-    rebuild as new and, worse, a microbatch model would reprocess from
-    ``begin``. Rows are renamed to the lowercase key unless a lowercase row
-    for that model already exists, in which case the mixed-case row is stale
-    and dropped. Cheap after the first time: one indexed probe of
-    ``model_state`` finds nothing to do.
+    Kept for the many callers that predate the migration system: the tables
+    themselves are defined once, in :mod:`havn.engine.migrations`. Cheap after
+    the first call in a process (a single catalog lookup), and a no-op on a
+    read-only connection, which cannot run DDL; readers there handle an
+    absent table themselves.
     """
-    try:
-        pending = conn.execute(
-            "SELECT 1 FROM _havn.model_state WHERE model_path <> lower(model_path) LIMIT 1"
-        ).fetchone()
-    except duckdb.Error:
-        return
-    if pending is None:
-        return
-    for table in _KEYED_MODEL_TABLES:
-        try:
-            conn.execute(
-                f"DELETE FROM _havn.{table} AS t WHERE t.model_path <> lower(t.model_path) "
-                f"AND EXISTS (SELECT 1 FROM _havn.{table} AS l "
-                f"WHERE l.model_path = lower(t.model_path))"
-            )
-            conn.execute(
-                f"UPDATE _havn.{table} SET model_path = lower(model_path) "
-                f"WHERE model_path <> lower(model_path)"
-            )
-        except duckdb.Error as e:
-            logging.getLogger(__name__).debug("Could not lowercase model keys in %s: %s", table, e)
-    for table, column in _HISTORY_MODEL_TABLES:
-        try:
-            conn.execute(
-                f"UPDATE _havn.{table} SET {column} = lower({column}) "
-                f"WHERE {column} <> lower({column})"
-            )
-        except duckdb.Error as e:
-            logging.getLogger(__name__).debug("Could not lowercase model keys in %s: %s", table, e)
+    from havn.engine.migrations import ensure_migrated
+
+    ensure_migrated(conn)
 
 
 def ensure_circuit_state_table(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create the circuit breaker state table if it doesn't exist."""
-    is_lake = _is_ducklake_connection(conn)
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute(_strip_pk("""
-        CREATE TABLE IF NOT EXISTS _havn.circuit_state (
-            name            VARCHAR PRIMARY KEY,
-            state           VARCHAR NOT NULL,
-            failure_count   INTEGER NOT NULL DEFAULT 0,
-            last_failure_at DOUBLE,
-            opens_at        DOUBLE
-        )
-    """, is_lake))
+    """Kept for compatibility; ``_havn.circuit_state`` is created by the migrations."""
+    ensure_meta_table(conn)
 
 
 def log_run(

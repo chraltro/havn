@@ -659,6 +659,7 @@ def status(
                 except Exception:
                     pass
             console.print(f"[bold]warehouse:[/bold] {total_tables} tables, {total_rows:,} rows")
+            _print_metadata_schema(conn)
 
             # Last run (skip if meta tables don't exist yet)
             try:
@@ -694,6 +695,31 @@ def status(
             conn.close()
     else:
         console.print("[bold]warehouse:[/bold] [yellow]not created yet[/yellow]")
+
+
+def _print_metadata_schema(conn) -> None:
+    """One line on the ``_havn`` schema version, read without migrating."""
+    from havn.engine.migrations import migration_status
+
+    try:
+        st = migration_status(conn)
+    except Exception as e:
+        console.print(f"[bold]metadata schema:[/bold] [yellow]unreadable ({e})[/yellow]")
+        return
+    if st.newer_than_code:
+        console.print(
+            f"[bold]metadata schema:[/bold] [yellow]version {st.version}, newer than this havn "
+            f"(knows {st.latest}); the warehouse was last opened by a newer release[/yellow]"
+        )
+    elif st.pending:
+        names = ", ".join(f"{m.version} {m.name}" for m in st.pending)
+        console.print(
+            f"[bold]metadata schema:[/bold] version {st.version} of {st.latest}, "
+            f"[yellow]{len(st.pending)} pending ({names})[/yellow]; "
+            f"applied the next time havn opens the warehouse for writing"
+        )
+    else:
+        console.print(f"[bold]metadata schema:[/bold] version {st.version} (up to date)")
 
 
 @app.command()

@@ -50,3 +50,18 @@ class WarehouseBackend(Protocol):
     def close(self) -> None:
         """Release any cached handles. No-op for DuckDB."""
         ...
+
+
+def migrate_or_close(conn: duckdb.DuckDBPyConnection) -> None:
+    """Bring a writable warehouse connection's ``_havn`` schema up to date.
+
+    The connection is closed when a migration fails, so a caller that gets
+    the MigrationError does not also leak a file lock.
+    """
+    from havn.engine.migrations import on_writable_connect
+
+    try:
+        on_writable_connect(conn)
+    except BaseException:
+        conn.close()
+        raise

@@ -7,7 +7,7 @@ from pathlib import Path
 import duckdb
 
 from havn.config import DatabaseConfig
-from havn.engine.backends.base import BackendStatus
+from havn.engine.backends.base import BackendStatus, migrate_or_close
 
 
 class DuckDBBackend:
@@ -43,6 +43,8 @@ class DuckDBBackend:
         cpu = os.cpu_count() or 2
         max_threads = threads if (threads is not None and threads > 0) else max(1, cpu // 2)
         conn.execute(f"SET threads = {max_threads}")
+        if not read_only:
+            migrate_or_close(conn)
 
         if self._project_dir is not None:
             from havn.engine.macros import register_macros
@@ -65,3 +67,4 @@ class DuckDBBackend:
 
     def close(self) -> None:
         pass
+
