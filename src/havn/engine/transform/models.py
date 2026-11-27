@@ -85,6 +85,11 @@ class ProfileResult:
     column_count: int = 0
     null_percentages: dict[str, float] = field(default_factory=dict)
     distinct_counts: dict[str, int] = field(default_factory=dict)
+    # The ``_havn.profile_history`` row this profile was saved as, set by
+    # ``_save_profile``. Anomaly detection leaves that row out of the
+    # baseline so a build is never compared against itself. None for a
+    # profile that was never saved.
+    history_id: str | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass
@@ -393,6 +398,8 @@ class ModelResult:
     # e.g. ["added column region VARCHAR", "dropped column legacy_id"]. Empty
     # for every other materialization and for runs that changed nothing.
     schema_changes: list[str] = field(default_factory=list)
+    # What a Python model printed while it ran, for the console report.
+    output: str = ""
 
 
 @dataclass

@@ -484,15 +484,20 @@ def _save_profile(
             distinct_json,
         ],
     )
-    # Append to profile_history for anomaly detection baselines
+    # Append to profile_history for anomaly detection baselines. The row id is
+    # chosen here and kept on the profile so anomaly detection can leave this
+    # build's own row out of its baseline without relying on timestamps.
+    import uuid
+    history_id = str(uuid.uuid4())
     try:
         conn.execute(
             """
             INSERT INTO _havn.profile_history
-                (model_path, row_count, column_count, null_percentages, distinct_counts, profiled_at)
-            VALUES (?, ?, ?, ?::JSON, ?::JSON, current_timestamp)
+                (id, model_path, row_count, column_count, null_percentages, distinct_counts, profiled_at)
+            VALUES (?, ?, ?, ?, ?::JSON, ?::JSON, current_timestamp)
             """,
             [
+                history_id,
                 model.full_name,
                 profile.row_count,
                 profile.column_count,
@@ -500,6 +505,7 @@ def _save_profile(
                 distinct_json,
             ],
         )
+        profile.history_id = history_id
     except Exception:
         pass  # profile_history table may not exist in older databases
 
