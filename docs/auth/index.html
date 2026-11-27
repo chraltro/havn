@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -31,10 +31,10 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -2633,7 +2633,7 @@
 <span class="s1">    "display_name": "Data Analyst"</span>
 <span class="s1">  }'</span>
 </code></pre></div>
-<p>Username constraints: alphanumeric, underscores, dots, and hyphens. Password minimum: 4 characters.</p>
+<p>Username constraints: alphanumeric, underscores, dots, and hyphens. Password minimum: 8 characters when a password is set (creating a user, changing a password, first-run setup, <code>havn users create</code>). Sign-in accepts any length, so accounts created under the older 4-character rule still work; give them a longer password when convenient.</p>
 <h3 id="update-user">Update User<a class="headerlink" href="#update-user" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>http://localhost:3000/api/users/analyst<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer &lt;admin-token&gt;"</span><span class="w"> </span><span class="se">\</span>
@@ -2641,20 +2641,28 @@
 <span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"role": "editor", "display_name": "Senior Analyst"}'</span>
 </code></pre></div>
 <p>You can update <code>role</code>, <code>password</code>, and <code>display_name</code> independently.</p>
+<p>Changing a password signs the user out everywhere: every token issued before the change is revoked. When admins change their own password, the session that sent the request stays signed in and their other sessions end.</p>
 <h3 id="delete-user">Delete User<a class="headerlink" href="#delete-user" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>DELETE<span class="w"> </span>http://localhost:3000/api/users/analyst<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer &lt;admin-token&gt;"</span>
 </code></pre></div>
 <p>Deleting a user also revokes all their active tokens.</p>
 <h2 id="password-security">Password Security<a class="headerlink" href="#password-security" title="Permanent link">&para;</a></h2>
-<p>Passwords are stored using PBKDF2 with SHA-256 and 100,000 iterations:</p>
+<p>Passwords are stored using PBKDF2 with SHA-256 and 600,000 iterations (current OWASP guidance):</p>
 <ul>
 <li>A 32-byte random salt is generated per user</li>
-<li>The password is hashed with <code>PBKDF2(SHA256, password, salt, 100000)</code></li>
-<li>Only the hash and salt are stored -- passwords are never stored in plaintext</li>
+<li>The password is hashed with <code>PBKDF2(SHA256, password, salt, 600000)</code></li>
+<li>The hash, the salt and the iteration count are stored -- passwords are never stored in plaintext</li>
+<li>Accounts created before havn stored the count were hashed with 100,000 iterations. Their next successful sign-in re-hashes the password at 600,000; nothing else changes for the user. A hash at a higher count than the default is left as it is.</li>
 </ul>
 <h2 id="rate-limiting">Rate Limiting<a class="headerlink" href="#rate-limiting" title="Permanent link">&para;</a></h2>
-<p>The login endpoint is rate-limited to prevent brute-force attacks. Each client IP is limited in its login attempt frequency.</p>
+<p>The login endpoint is rate-limited to prevent brute-force attacks, with two limits:</p>
+<ul>
+<li><strong>Per client address:</strong> 5 attempts per 60 seconds.</li>
+<li><strong>Per username:</strong> 10 failed attempts per 15 minutes, counted across all addresses. The username is compared case-insensitively. A successful sign-in does not count. This limit holds when attempts are spread over many addresses, or when havn runs behind a reverse proxy and every client appears to come from the same address.</li>
+</ul>
+<p>Either limit returns <code>429 Too many login attempts. Try again later.</code> The per-username limit applies the same way whether the username exists or not, so it does not reveal which accounts exist. Someone who knows a username can still use up its limit and keep that user from signing in for up to 15 minutes; the audit log records each failed attempt with its address.</p>
+<p>First-run setup (<code>POST /api/auth/setup</code>) is limited to 5 attempts per 60 seconds per address, and creates the first admin only once even if two requests arrive together.</p>
 <h2 id="secrets-management">Secrets Management<a class="headerlink" href="#secrets-management" title="Permanent link">&para;</a></h2>
 <p>Admin users can manage secrets (<code>.env</code> variables) through the API:</p>
 <h3 id="list-secrets">List Secrets<a class="headerlink" href="#list-secrets" title="Permanent link">&para;</a></h3>
@@ -2733,10 +2741,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

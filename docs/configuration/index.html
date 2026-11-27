@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -31,10 +31,10 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -1215,6 +1215,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#when-havn-edits-projectyml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When havn edits project.yml
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#related-pages" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2301,6 +2312,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#when-havn-edits-projectyml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When havn edits project.yml
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#related-pages" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2576,6 +2598,29 @@ havn<span class="w"> </span>secrets<span class="w"> </span>delete<span class="w"
 <span class="w">  </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"key": "DB_PASSWORD", "value": "new_password"}'</span>
 </code></pre></div>
+<h2 id="when-havn-edits-projectyml">When havn edits project.yml<a class="headerlink" href="#when-havn-edits-projectyml" title="Permanent link">&para;</a></h2>
+<p>Some actions change <code>project.yml</code> (or a job file in <code>orchestration/</code>) for you:
+adding or removing a connector (<code>havn connect</code>, the web UI), saving anomaly
+detection or database settings, changing resource allocations, editing a job
+or enabling/disabling it, and <code>havn migrate</code>. These edits change only the keys
+involved and leave the rest of the file as you wrote it: comments, commented-out
+examples, key order, blank lines, quoting and <code>${VAR}</code> references stay. The file
+is written to a temporary file next to it and then moved into place, so an
+interrupted write never leaves a truncated <code>project.yml</code>.</p>
+<p>A few things are normalised when a file is rewritten: block indentation follows
+one style for the whole file (taken from the file), YAML 1.1 boolean spellings
+such as <code>yes</code> or <code>On</code> are written as <code>true</code>/<code>false</code>, and <code>null</code> or <code>~</code> as an
+empty value. The meaning of every value is unchanged. A comment on the same line
+as a key that is removed goes with it; comment lines below it are kept. A <code>&lt;&lt;</code>
+merge in a mapping that havn changes is written out as the keys it supplied, and
+a mapping with an anchor is replaced rather than edited, so its aliases keep
+their values.</p>
+<p>Before the file is replaced, havn reads the new text back and checks that it says
+exactly what was intended. If it does not, the file is written without its
+comments instead (still valid, same data) and a warning is logged.</p>
+<p>A file that is not valid YAML, repeats a key, or contains a value havn cannot
+rewrite faithfully is left untouched and the edit fails with a message naming
+the file (HTTP 400 in the web UI, exit code 1 on the command line).</p>
 <h2 id="related-pages">Related Pages<a class="headerlink" href="#related-pages" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="getting-started">Getting Started</a> -- Project setup walkthrough</li>
@@ -2634,10 +2679,10 @@ havn<span class="w"> </span>secrets<span class="w"> </span>delete<span class="w"
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

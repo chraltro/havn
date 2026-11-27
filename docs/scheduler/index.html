@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -31,10 +31,10 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -1708,17 +1708,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#huey-integration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Huey Integration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#filewatcher" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2420,17 +2409,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#huey-integration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Huey Integration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#filewatcher" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2689,13 +2667,14 @@ Watcher: Transform completed
 <h3 id="schedulerthread">SchedulerThread<a class="headerlink" href="#schedulerthread" title="Permanent link">&para;</a></h3>
 <p>The scheduler runs as a daemon thread with a simple polling loop:</p>
 <ul>
-<li>Checks cron expressions every 30 seconds</li>
-<li>Reloads <code>project.yml</code> on each iteration (picks up config changes)</li>
-<li>Executes matching streams in the same thread (sequential)</li>
+<li>Wakes every 30 seconds</li>
+<li>Reloads <code>project.yml</code> and <code>orchestration/*.yml</code> on each iteration (picks up config changes)</li>
+<li>Runs due streams, then due jobs, then due dashboard reports, one at a time in the same thread</li>
 <li>Logs all activity to the console and Python logging</li>
 </ul>
-<h3 id="huey-integration">Huey Integration<a class="headerlink" href="#huey-integration" title="Permanent link">&para;</a></h3>
-<p>havn also includes a Huey-based scheduler (SqliteHuey) for more robust task queuing. The SQLite-backed Huey instance stores task state in <code>.havn_scheduler.db</code> at the project root.</p>
+<p>A cron schedule runs when one of its fire times fell since the scheduler last looked at it. So when a long run holds the loop (a 06:00 job that takes 20 minutes), a stream scheduled for 06:05 still runs once that job ends instead of being skipped. Several missed fires of the same schedule collapse into one run. The clock starts when the scheduler starts: fires from before it was running are never caught up, so restarting the server at 10:00 does not replay a 06:00 schedule. Interval schedules on jobs (<code>every 2h</code>) count from the job's last run, which is read back from <code>_havn.job_runs</code> at startup.</p>
+<p>There is no queue and no task database: the loop is the whole scheduler, and it only runs while <code>havn schedule</code> or <code>havn serve --schedule</code> does.</p>
+<p>A scheduled stream runs through the same code as <code>havn stream</code>: seeds, retries, Pipeline Rewind tracking, the stream's <code>webhook_url</code>, and the <code>alerts:</code> pipeline success/failure alert all apply. A stream counts as failed when a step fails, including a transform step where a model errored or an error-severity <code>@assert</code> rejected it; later steps do not run.</p>
 <h3 id="filewatcher">FileWatcher<a class="headerlink" href="#filewatcher" title="Permanent link">&para;</a></h3>
 <p>The file watcher runs as a separate daemon thread using the <code>watchdog</code> library. It:</p>
 <ul>
@@ -2796,10 +2775,10 @@ nohup<span class="w"> </span>havn<span class="w"> </span>schedule<span class="w"
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>
