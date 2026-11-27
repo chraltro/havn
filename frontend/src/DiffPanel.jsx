@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import SortableTable from "./SortableTable";
 import { useHintTriggerFn } from "./HintSystem";
 import { useWarehouse } from "./WarehouseContext";
+import { clickable } from "./a11y";
 
 const MODES = [
   { id: "changed", label: "Changed Only" },
@@ -197,6 +198,11 @@ export default function DiffPanel({ api, addOutput }) {
                       onClick={() =>
                         setExpandedModel(expandedModel === r.model ? null : r.model)
                       }
+                      {...clickable(
+                        () => setExpandedModel(expandedModel === r.model ? null : r.model),
+                        `Diff details for ${r.model}`,
+                      )}
+                      aria-expanded={expandedModel === r.model}
                       style={{
                         borderBottom: "1px solid var(--havn-border)",
                         cursor: "pointer",
@@ -389,7 +395,9 @@ function ExpandedDiff({ result }) {
   );
 }
 
-const thStyle = { padding: "8px 12px", fontWeight: 600 };
+// Sticky so the column labels stay visible while the results scroll; the
+// results div is the scroller and has no padding, so top 0 is its edge.
+const thStyle = { padding: "8px 12px", fontWeight: 600, position: "sticky", top: 0, zIndex: 1, background: "var(--havn-bg)" };
 const tdStyle = { padding: "8px 12px" };
 
 const segStyles = {

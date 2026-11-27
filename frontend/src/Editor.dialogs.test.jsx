@@ -1,6 +1,7 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 const h = vi.hoisted(() => {
   class FakeRange {
@@ -71,21 +72,21 @@ describe("a dialog nobody can answer", () => {
     const v = view(A);
     let answer;
     await act(async () => { answer = editorContext.confirmBlockers(BLOCKED); });
-    expect(await screen.findByLabelText("Rename blockers")).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: /cannot see through/ })).toBeTruthy();
 
     await act(async () => {
       v.rerender(<Editor content="SELECT 2" language="sql" onChange={() => {}} activeFile={B} />);
     });
 
     expect(await answer).toBe(false);
-    expect(screen.queryByLabelText("Rename blockers")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("refuses the blockers when the editor unmounts", async () => {
     const v = view(A);
     let answer;
     await act(async () => { answer = editorContext.confirmBlockers(BLOCKED); });
-    expect(await screen.findByLabelText("Rename blockers")).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: /cannot see through/ })).toBeTruthy();
 
     await act(async () => { v.unmount(); });
 
@@ -98,7 +99,7 @@ describe("a dialog nobody can answer", () => {
     await act(async () => {
       answer = editorContext.confirmTarget({ model: "bronze.customers", column: "email", files: 3 });
     });
-    expect(await screen.findByLabelText("Confirm rename target")).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: "Rename bronze.customers.email in 3 files?" })).toBeTruthy();
 
     await act(async () => {
       v.rerender(<Editor content="SELECT 2" language="sql" onChange={() => {}} activeFile={B} />);
@@ -127,6 +128,50 @@ describe("a dialog nobody can answer", () => {
       v.rerender(<Editor content="SELECT 1 + 1" language="sql" onChange={() => {}} activeFile={A} />);
     });
     expect(settled).toBe(false);
-    expect(screen.getByLabelText("Rename blockers")).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: /cannot see through/ })).toBeTruthy();
+  });
+});
+
+// F2 leaves focus in Monaco while the rename waits on these answers, so the
+// dialogs have to take focus themselves or a keyboard user cannot reply.
+describe("answering a dialog from the keyboard", () => {
+  it("focuses the blocker dialog and answers no on Escape", async () => {
+    view(A);
+    let answer;
+    await act(async () => { answer = editorContext.confirmBlockers(BLOCKED); });
+    const cancel = await screen.findByRole("button", { name: "Cancel" });
+    await waitFor(() => expect(cancel).toHaveFocus());
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(await answer).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("reaches Rename anyway with Tab and answers yes on Enter", async () => {
+    view(A);
+    let answer;
+    await act(async () => { answer = editorContext.confirmBlockers(BLOCKED); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus());
+
+    await userEvent.tab();
+    expect(screen.getByRole("button", { name: "Rename anyway" })).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+
+    expect(await answer).toBe(true);
+  });
+
+  it("answers no to the target confirmation on Escape", async () => {
+    view(A);
+    let answer;
+    await act(async () => {
+      answer = editorContext.confirmTarget({ model: "bronze.customers", column: "email", files: 3 });
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus());
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(await answer).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

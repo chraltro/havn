@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { api } from "./api";
+import { clickable } from "./a11y";
 
 const PAGE_SIZE = 50;
 
@@ -57,6 +58,7 @@ export default function HistoryPanel({ onOpenFile }) {
   const [runs, setRuns] = useState([]);
   const [expandedRun, setExpandedRun] = useState(null);
   const [runDetail, setRunDetail] = useState(null);
+  const [runDetailError, setRunDetailError] = useState(null);
   const [comparison, setComparison] = useState(null);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -149,12 +151,14 @@ export default function HistoryPanel({ onOpenFile }) {
       expandRequestRef.current = null;
       setExpandedRun(null);
       setRunDetail(null);
+      setRunDetailError(null);
       setComparison(null);
       return;
     }
     expandRequestRef.current = pipelineRunId;
     setExpandedRun(pipelineRunId);
     setRunDetail(null);
+    setRunDetailError(null);
     setComparison(null);
     try {
       const [detail, comp] = await Promise.all([
@@ -165,7 +169,10 @@ export default function HistoryPanel({ onOpenFile }) {
       setRunDetail(detail);
       setComparison(comp);
     } catch (e) {
-      console.error("Failed to load run detail:", e);
+      // Shown in place of "Loading..." in the expanded row, which would
+      // otherwise spin forever.
+      if (expandRequestRef.current !== pipelineRunId) return;
+      setRunDetailError(e.message || "Failed to load run detail");
     }
   }
 
@@ -316,16 +323,23 @@ export default function HistoryPanel({ onOpenFile }) {
               { key: "status", label: "Status", flex: "0 0 80px" },
               { key: "started_at", label: "Time", flex: "0 0 80px" },
             ].map((col) => (
-              <span
-                key={col.key}
-                style={{ ...styles.sortCol, flex: col.flex, cursor: "pointer" }}
-                onClick={() => toggleSort(col.key)}
-              >
-                {col.label}
-                {sortKey === col.key && (
-                  <span style={{ marginLeft: "3px", opacity: 0.7 }}>{sortDir === "asc" ? "\u25B4" : "\u25BE"}</span>
-                )}
-              </span>
+              <React.Fragment key={col.key}>
+                {/* Rows carry a 44px error-count cell before Time. Without
+                    the same spacer here every label after Target sat 54px
+                    (cell + gap) to the right of its column. */}
+                {col.key === "started_at" && <span style={styles.errorCount} aria-hidden="true" />}
+                <button
+                  type="button"
+                  style={{ ...styles.sortBtn, ...styles.sortCol, flex: col.flex }}
+                  onClick={() => toggleSort(col.key)}
+                  aria-label={`Sort by ${col.label}${sortKey === col.key ? (sortDir === "asc" ? ", ascending" : ", descending") : ""}`}
+                >
+                  {col.label}
+                  {sortKey === col.key && (
+                    <span style={{ marginLeft: "3px", opacity: 0.7 }} aria-hidden="true">{sortDir === "asc" ? "\u25B4" : "\u25BE"}</span>
+                  )}
+                </button>
+              </React.Fragment>
             ))}
           </div>
           {sortItems(filteredRuns, sortKey, sortDir).map((run) => {
@@ -338,12 +352,14 @@ export default function HistoryPanel({ onOpenFile }) {
                 <div
                   style={styles.runRow}
                   onClick={() => toggleExpand(run.pipeline_run_id)}
+                  {...clickable(() => toggleExpand(run.pipeline_run_id))}
+                  aria-expanded={isExpanded}
                   onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--havn-accent) 6%, transparent)"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = ""; }}
                 >
-                  <span style={styles.expandArrow}>{isExpanded ? "\u25BC" : "\u25B6"}</span>
+                  <span style={styles.expandArrow} aria-hidden="true">{isExpanded ? "\u25BC" : "\u25B6"}</span>
                   <span style={styles.runTypeBadge}>{run.run_type}</span>
-                  <span style={styles.runTarget}>{run.target || ""}</span>
+                  <span style={styles.runTarget} title={run.target || undefined}>{run.target || ""}</span>
                   <span style={styles.runModels}>{run.model_count} model{run.model_count !== 1 ? "s" : ""}</span>
                   <span style={styles.runDuration}>{formatDuration(run.total_duration_ms)}</span>
                   <span style={{
@@ -364,8 +380,13 @@ export default function HistoryPanel({ onOpenFile }) {
                 {/* Expanded detail */}
                 {isExpanded && (
                   <div style={styles.detailContainer}>
-                    {!runDetail && (
+                    {!runDetail && !runDetailError && (
                       <div style={{ padding: "8px 16px 8px 40px", color: "var(--havn-text-dim)", fontSize: "11px" }}>Loading...</div>
+                    )}
+                    {runDetailError && (
+                      <div role="alert" style={{ padding: "8px 16px 8px 40px", color: "var(--havn-red)", fontSize: "11px" }}>
+                        Failed to load run detail: {runDetailError}
+                      </div>
                     )}
                     {runDetail && runDetail.length === 0 && (
                       <div style={{ padding: "8px 16px 8px 40px", color: "var(--havn-text-dim)", fontSize: "11px" }}>No model details available.</div>
@@ -396,6 +417,7 @@ export default function HistoryPanel({ onOpenFile }) {
                           <span
                             style={styles.detailTarget}
                             onClick={(e) => { e.stopPropagation(); openModelFile(row.target); }}
+                            {...clickable(() => openModelFile(row.target), `Open ${row.target}`)}
                             onMouseEnter={(e) => { e.currentTarget.style.color = "var(--havn-accent)"; e.currentTarget.style.textDecoration = "underline"; }}
                             onMouseLeave={(e) => { e.currentTarget.style.color = ""; e.currentTarget.style.textDecoration = ""; }}
                             title={`Open ${row.target}`}
@@ -491,13 +513,17 @@ export default function HistoryPanel({ onOpenFile }) {
                     ].map((col, i) => (
                       <th
                         key={i}
-                        style={{ ...styles.th, cursor: col.key ? "pointer" : "default" }}
-                        onClick={() => col.key && toggleSort(col.key)}
+                        style={styles.th}
+                        aria-sort={col.key && sortKey === col.key ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
                       >
-                        {col.label}
-                        {col.key && sortKey === col.key && (
-                          <span style={{ marginLeft: "3px", opacity: 0.7 }}>{sortDir === "asc" ? "\u25B4" : "\u25BE"}</span>
-                        )}
+                        {col.key ? (
+                          <button type="button" style={styles.sortBtn} onClick={() => toggleSort(col.key)}>
+                            {col.label}
+                            {sortKey === col.key && (
+                              <span style={{ marginLeft: "3px", opacity: 0.7 }} aria-hidden="true">{sortDir === "asc" ? "\u25B4" : "\u25BE"}</span>
+                            )}
+                          </button>
+                        ) : col.label}
                       </th>
                     ))}
                   </tr>
@@ -514,15 +540,18 @@ export default function HistoryPanel({ onOpenFile }) {
                       </td>
                       <td style={{ ...styles.td, fontFamily: "var(--havn-font-mono)", fontWeight: 500 }}>
                         {onOpenFile && row.target ? (
-                          <span
+                          <button
+                            type="button"
                             style={styles.fileLink}
                             onClick={() => openModelFile(row.target)}
                             onMouseEnter={(e) => { e.currentTarget.style.color = "var(--havn-accent)"; e.currentTarget.style.textDecoration = "underline"; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.color = ""; e.currentTarget.style.textDecoration = ""; }}
+                            // Back to "inherit", not "": a button with no color of
+                            // its own falls back to the browser's button text color.
+                            onMouseLeave={(e) => { e.currentTarget.style.color = "inherit"; e.currentTarget.style.textDecoration = ""; }}
                             title={`Open ${row.target}`}
                           >
                             {row.target}
-                          </span>
+                          </button>
                         ) : row.target}
                       </td>
                       <td style={styles.td}>
@@ -543,7 +572,7 @@ export default function HistoryPanel({ onOpenFile }) {
                       <td style={{ ...styles.td, textAlign: "right", fontFamily: "var(--havn-font-mono)" }}>
                         {formatRows(row.rows_affected)}
                       </td>
-                      <td style={{ ...styles.td, color: "var(--havn-red)", maxWidth: "300px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <td style={{ ...styles.td, color: "var(--havn-red)", maxWidth: "300px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={row.error || undefined}>
                         {row.error || ""}
                       </td>
                     </tr>
@@ -596,6 +625,8 @@ const styles = {
     background: "var(--havn-bg-secondary)", zIndex: 1, userSelect: "none",
   },
   sortCol: { fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap" },
+  // Sort controls are buttons that look like the plain header text.
+  sortBtn: { background: "none", border: "none", padding: 0, font: "inherit", color: "inherit", cursor: "pointer", textAlign: "left", userSelect: "none" },
 
   // Grouped runs list
   listWrap: { flex: 1, overflow: "auto" },
@@ -633,5 +664,5 @@ const styles = {
   th: { textAlign: "left", padding: "6px 12px", borderBottom: "2px solid var(--havn-border-light)", color: "var(--havn-text-secondary)", fontSize: "11px", fontWeight: 600, position: "sticky", top: 0, background: "var(--havn-bg-secondary)", userSelect: "none" },
   td: { padding: "5px 12px", borderBottom: "1px solid var(--havn-border)", color: "var(--havn-text)", fontSize: "12px" },
   typeBadge: { background: "var(--havn-btn-bg)", padding: "2px 8px", borderRadius: "var(--havn-radius)", fontSize: "11px", fontWeight: 500, textTransform: "capitalize" },
-  fileLink: { cursor: "pointer", transition: "color 0.15s" },
+  fileLink: { background: "none", border: "none", padding: 0, font: "inherit", color: "inherit", cursor: "pointer", textAlign: "left", transition: "color 0.15s" },
 };

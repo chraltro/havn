@@ -444,8 +444,10 @@ function PreviewTab({ preview, error, running, label, onPreview, onClear, langua
         meta={`${n.toLocaleString()} row${n === 1 ? "" : "s"}${preview.truncated ? " (limited)" : ""} · ${preview.columns.length} col${preview.columns.length === 1 ? "" : "s"}`}
         onClear={onClear}
       />
-      <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-        <SortableTable columns={preview.columns} rows={preview.rows} />
+      {/* The table (fill mode) is the one scroller, so its header stays
+          pinned; a scrolling wrapper here defeated that. */}
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <SortableTable fill columns={preview.columns} rows={preview.rows} />
       </div>
     </div>
   );
@@ -454,7 +456,7 @@ function PreviewTab({ preview, error, running, label, onPreview, onClear, langua
 function PreviewHeader({ label, meta, onClear }) {
   return (
     <div style={s.previewHead}>
-      <span style={s.ellipsis}><b style={{ fontWeight: 500, color: "var(--havn-text)" }}>{label || "Preview"}</b>{meta ? ` · ${meta}` : ""}</span>
+      <span style={s.ellipsis} title={`${label || "Preview"}${meta ? ` · ${meta}` : ""}`}><b style={{ fontWeight: 500, color: "var(--havn-text)" }}>{label || "Preview"}</b>{meta ? ` · ${meta}` : ""}</span>
       <button onClick={onClear} style={s.link} aria-label="Clear preview">Clear</button>
     </div>
   );

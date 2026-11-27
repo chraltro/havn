@@ -400,7 +400,10 @@ const st = {
   btnSmall: { padding: "2px 10px", marginLeft: 6, background: "var(--havn-btn-bg)", color: "var(--havn-text)", border: "1px solid var(--havn-btn-border)", borderRadius: "var(--havn-radius)", cursor: "pointer", fontSize: 11 },
   btnSmallGhost: { padding: "2px 10px", marginLeft: 6, background: "transparent", color: "var(--havn-text-secondary)", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius)", cursor: "pointer", fontSize: 11 },
   body: { flex: 1, overflow: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 12 },
-  card: { border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius-lg)", background: "var(--havn-bg-secondary)", overflowX: "auto" },
+  // flexShrink 0: overflowX makes a flex item shrinkable to nothing, so with
+  // several live models the cards were squashed into tiny inner scrollers
+  // instead of the panel scrolling.
+  card: { border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius-lg)", background: "var(--havn-bg-secondary)", overflowX: "auto", flexShrink: 0 },
   cardTitle: { padding: "8px 12px", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--havn-text-secondary)", borderBottom: "1px solid var(--havn-border)" },
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12, alignItems: "start" },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 12 },

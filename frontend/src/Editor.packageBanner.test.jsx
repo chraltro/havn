@@ -95,7 +95,7 @@ describe("package banner", () => {
     });
     expect(await screen.findByLabelText("Column references")).toBeTruthy();
     editorContext.confirmBlockers([{ path: "transform/gold/x.sql", message: "expands SELECT *" }]);
-    expect(await screen.findByLabelText("Rename blockers")).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: /cannot see through/ })).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("From installed package");
   });
 });

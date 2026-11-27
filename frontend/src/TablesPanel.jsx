@@ -536,7 +536,10 @@ const st = {
   previewSection: {
     padding: "12px 4px 0",
   },
+  // Its natural height, not "whatever is left": the panel scrolls as a page,
+  // and as a flex: 1 scroller the preview was squeezed to nothing under a
+  // table with many columns. The table scrolls itself, header pinned.
   previewWrap: {
-    overflow: "auto", flex: 1,
+    flexShrink: 0, display: "flex", flexDirection: "column",
   },
 };

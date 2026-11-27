@@ -95,6 +95,7 @@ function SchedulerSection() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     loadData();
@@ -102,6 +103,7 @@ function SchedulerSection() {
 
   const loadData = async () => {
     setLoading(true);
+    setError(null);
     try {
       const [sched, hist] = await Promise.all([
         api.getScheduler(),
@@ -110,7 +112,7 @@ function SchedulerSection() {
       setStreams(sched.streams || []);
       setHistory(hist || []);
     } catch (e) {
-      console.error('Failed to load scheduler data:', e);
+      setError(e.message || 'Failed to load scheduler data');
     }
     setLoading(false);
   };
@@ -134,11 +136,12 @@ function SchedulerSection() {
 
   const handleRunNow = async (streamName) => {
     setRunning(streamName);
+    setError(null);
     try {
       await api.runStream(streamName);
       await loadData();
     } catch (e) {
-      console.error('Failed to run stream:', e);
+      setError(`Failed to run stream "${streamName}": ${e.message || e}`);
     }
     setRunning(null);
   };
@@ -147,6 +150,7 @@ function SchedulerSection() {
     <div style={sec.section}>
       <h3 style={sec.heading}>Scheduler</h3>
       <p style={sec.desc}>Configured pipeline schedules and their status.</p>
+      {error && <p role="alert" style={{ color: "var(--havn-red)", fontSize: "12px", margin: "4px 0" }}>{error}</p>}
       {loading ? <p style={{ color: 'var(--havn-text-secondary)' }}>Loading...</p> : streams.length === 0 ? (
         <p style={{ color: 'var(--havn-text-secondary)' }}>No streams configured in project.yml</p>
       ) : (
@@ -207,10 +211,18 @@ function SecretsSection({ showConfirm }) {
   }
 
   async function addSecret() {
-    if (!newKey.trim()) return;
+    const key = newKey.trim();
+    if (!key) return;
+    // Setting a key that already exists replaces its value, and the old one
+    // cannot be read back (values are never exposed), so ask first.
+    if (secrets.some((s) => s.key === key)) {
+      const msg = `A secret named "${key}" already exists. Replace its value? The current value cannot be recovered.`;
+      if (showConfirm && !(await showConfirm("Overwrite Secret", msg, "Overwrite", true))) return;
+      if (!showConfirm && !confirm(msg)) return;
+    }
     setError(null);
     try {
-      await api.setSecret(newKey.trim(), newVal);
+      await api.setSecret(key, newVal);
       setNewKey("");
       setNewVal("");
       loadSecrets();

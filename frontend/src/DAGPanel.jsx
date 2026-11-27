@@ -326,7 +326,7 @@ function DetailPanel({ modelName, runId, runs, snapshotsByRun, onClose, onRestor
                   <tbody>
                     {sample.rows.slice(0, 10).map((row, ri) => (
                       <tr key={ri}>
-                        {row.map((v, ci) => <td key={ci} style={ds.td}>{v ?? ""}</td>)}
+                        {row.map((v, ci) => <td key={ci} style={ds.td} title={v == null ? undefined : String(v)}>{v ?? ""}</td>)}
                       </tr>
                     ))}
                   </tbody>
@@ -1156,7 +1156,7 @@ export default function DAGPanel({ onOpenFile, showConfirm }) {
                 </span>
               )}
               {selectorError && (
-                <span style={styles.selectorError} data-testid="dag-selector-error">{selectorError}</span>
+                <span style={styles.selectorError} data-testid="dag-selector-error" role="alert" title={selectorError}>{selectorError}</span>
               )}
             </div>
           )}

@@ -30,10 +30,15 @@ function sortData(data, key, dir, getter) {
 }
 
 function SortTh({ label, sortKey, current, dir, onToggle, style }) {
-  const arrow = current === sortKey ? (dir === 'asc' ? ' \u25B4' : ' \u25BE') : '';
+  const active = current === sortKey;
+  const arrow = active ? (dir === 'asc' ? ' \u25B4' : ' \u25BE') : '';
+  // The sort control is a real button so it can be reached and used from the
+  // keyboard; aria-sort on the header says which way the column is sorted.
   return (
-    <th style={{ ...style, cursor: 'pointer', userSelect: 'none' }} onClick={() => onToggle(sortKey)}>
-      {label}{arrow}
+    <th style={style} aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}>
+      <button type="button" style={s.sortBtn} onClick={() => onToggle(sortKey)}>
+        {label}<span aria-hidden="true">{arrow}</span>
+      </button>
     </th>
   );
 }
@@ -340,9 +345,9 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
             <div style={{ ...s.cardValue, color: anomalyCount > 0 ? 'var(--havn-yellow)' : 'var(--havn-text-dim)' }}>{anomalyCount}</div>
           </div>
         </div>
-        <div style={s.tabs}>
+        <div style={s.tabs} role="tablist" aria-label="Quality views">
           {SUB_TABS.map(t => (
-            <div key={t} style={{ ...s.tab, ...(tab === t ? s.tabActive : {}) }} onClick={() => setTab(t)}>{t}</div>
+            <button key={t} type="button" role="tab" aria-selected={tab === t} style={{ ...s.tab, ...(tab === t ? s.tabActive : {}) }} onClick={() => setTab(t)}>{t}</button>
           ))}
         </div>
       </div>
@@ -418,9 +423,9 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                           <tr>
                             <td style={s.td}>
                               {cols.length > 0 ? (
-                                <span style={{ cursor: 'pointer', color: 'var(--havn-accent)' }} onClick={() => setExpandedProfile(expandedProfile === i ? null : i)}>
-                                  {expandedProfile === i ? '\u25BE' : '\u25B8'} {p.model}
-                                </span>
+                                <button type="button" style={s.expander} aria-expanded={expandedProfile === i} onClick={() => setExpandedProfile(expandedProfile === i ? null : i)}>
+                                  <span aria-hidden="true">{expandedProfile === i ? '\u25BE' : '\u25B8'}</span> {p.model}
+                                </button>
                               ) : p.model}
                             </td>
                             <td style={s.td}>{p.row_count != null ? p.row_count.toLocaleString() : '\u2014'}</td>
@@ -488,9 +493,9 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                         <React.Fragment key={g.model}>
                           <tr>
                             <td style={s.td}>
-                              <span style={{ cursor: 'pointer', color: 'var(--havn-accent)' }} onClick={() => setExpandedAssertionModel(isExpanded ? null : g.model)}>
-                                {isExpanded ? '\u25BE' : '\u25B8'} {g.model}
-                              </span>
+                              <button type="button" style={s.expander} aria-expanded={isExpanded} onClick={() => setExpandedAssertionModel(isExpanded ? null : g.model)}>
+                                <span aria-hidden="true">{isExpanded ? '\u25BE' : '\u25B8'}</span> {g.model}
+                              </button>
                             </td>
                             <td style={s.td}>
                               <span style={s.badge(allPassed)}>{allPassed ? 'PASS' : 'FAIL'}</span>
@@ -579,9 +584,9 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                             <tr>
                               <td style={s.td}>
                                 {hasDetail ? (
-                                  <span style={{ cursor: 'pointer', color: 'var(--havn-accent)' }} onClick={() => setExpandedContract(isExpanded ? null : `h-${i}`)}>
-                                    {isExpanded ? '\u25BE' : '\u25B8'} {c.contract_name}
-                                  </span>
+                                  <button type="button" style={s.expander} aria-expanded={isExpanded} onClick={() => setExpandedContract(isExpanded ? null : `h-${i}`)}>
+                                    <span aria-hidden="true">{isExpanded ? '\u25BE' : '\u25B8'}</span> {c.contract_name}
+                                  </button>
                                 ) : c.contract_name}
                               </td>
                               <td style={s.td}>{c.model}</td>
@@ -663,9 +668,9 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                           <React.Fragment key={i}>
                             <tr>
                               <td style={s.td}>
-                                <span style={{ cursor: 'pointer', color: 'var(--havn-accent)' }} onClick={() => setExpandedContract(isExpanded ? null : `d-${i}`)}>
-                                  {isExpanded ? '\u25BE' : '\u25B8'} {c.name}
-                                </span>
+                                <button type="button" style={s.expander} aria-expanded={isExpanded} onClick={() => setExpandedContract(isExpanded ? null : `d-${i}`)}>
+                                  <span aria-hidden="true">{isExpanded ? '\u25BE' : '\u25B8'}</span> {c.name}
+                                </button>
                                 {c.description && <div style={{ fontSize: 11, color: 'var(--havn-text-dim)', marginTop: 2 }}>{c.description}</div>}
                               </td>
                               <td style={s.td}>{c.model}</td>
@@ -782,9 +787,9 @@ export default function QualityPanel({ addOutput: addOutputProp } = {}) {
                           <React.Fragment key={i}>
                             <tr>
                               <td style={s.td}>
-                                <span style={{ cursor: 'pointer', color: 'var(--havn-accent)' }} onClick={() => { setExpandedAnomaly(isExpanded ? null : i); if (!isExpanded) loadProfileHistory(a.model); }}>
-                                  {isExpanded ? '\u25BE' : '\u25B8'} {a.model}
-                                </span>
+                                <button type="button" style={s.expander} aria-expanded={isExpanded} onClick={() => { setExpandedAnomaly(isExpanded ? null : i); if (!isExpanded) loadProfileHistory(a.model); }}>
+                                  <span aria-hidden="true">{isExpanded ? '\u25BE' : '\u25B8'}</span> {a.model}
+                                </button>
                               </td>
                               <td style={s.td}>
                                 <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text-secondary)' }}>
@@ -941,15 +946,23 @@ const s = {
   cardValue: { fontSize: 22, fontWeight: 700, color: 'var(--havn-text)', lineHeight: 1.2 },
   cardDetail: { fontSize: 11, color: 'var(--havn-text-dim)', marginTop: 2 },
   tabs: { display: 'flex', gap: 0 },
-  tab: { padding: '8px 20px', cursor: 'pointer', fontSize: 13, color: 'var(--havn-text-secondary)', borderBottom: '2px solid transparent', background: 'none' },
+  tab: { padding: '8px 20px', cursor: 'pointer', font: 'inherit', fontSize: 13, color: 'var(--havn-text-secondary)', background: 'none', border: 'none', borderBottom: '2px solid transparent' },
   tabActive: { color: 'var(--havn-text)', borderBottom: '2px solid var(--havn-accent)' },
   content: { flex: 1, overflow: 'auto', padding: 20 },
+  // Row expanders and sort headers are buttons styled to look like the text
+  // they replaced, so they can be reached and used from the keyboard.
+  expander: { background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'var(--havn-accent)', cursor: 'pointer', textAlign: 'left' },
+  sortBtn: { background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer', textAlign: 'left', textTransform: 'inherit', letterSpacing: 'inherit', userSelect: 'none' },
   toolbar: { display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' },
   filterInput: { padding: '5px 10px', background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text)', border: '1px solid var(--havn-border-light)', borderRadius: 6, fontSize: 12, width: 220 },
   filterSelect: { padding: '5px 8px', background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text)', border: '1px solid var(--havn-border-light)', borderRadius: 6, fontSize: 12 },
   count: { fontSize: 12, color: 'var(--havn-text-dim)', marginLeft: 'auto' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 13 },
-  th: { textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--havn-border-light)', color: 'var(--havn-text-secondary)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.3px' },
+  // Sticky so the column labels stay put while the rows scroll. `content` is
+  // the scroller and has 20px padding, which a sticky box sits inside of, so
+  // top: -20 pins the header to the scroller's visible top edge instead of
+  // leaving a 20px strip where rows show through above it.
+  th: { textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--havn-border-light)', color: 'var(--havn-text-secondary)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.3px', position: 'sticky', top: -20, zIndex: 1, background: 'var(--havn-bg)' },
   td: { padding: '8px 12px', borderBottom: '1px solid var(--havn-border)', color: 'var(--havn-text)' },
   badge: (ok) => ({ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, background: ok ? 'color-mix(in srgb, var(--havn-green) 15%, transparent)' : 'color-mix(in srgb, var(--havn-red) 15%, transparent)', color: ok ? 'var(--havn-green)' : 'var(--havn-red)' }),
   severityBadge: () => ({ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, background: 'var(--havn-bg-tertiary)', color: 'var(--havn-text-secondary)' }),

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { api } from './api';
 import { useAuth } from './AuthContext';
 import { schemaCompare } from './schemaOrder';
@@ -63,10 +63,15 @@ function sortData(data, key, dir, getter) {
 }
 
 function SortTh({ label, sortKey, current, dir, onToggle, style }) {
-  const arrow = current === sortKey ? (dir === 'asc' ? ' \u25B4' : ' \u25BE') : '';
+  const active = current === sortKey;
+  const arrow = active ? (dir === 'asc' ? ' \u25B4' : ' \u25BE') : '';
+  // A real button, so sorting works from the keyboard; aria-sort on the
+  // header says which way the column is sorted.
   return (
-    <th style={{ ...style, cursor: 'pointer', userSelect: 'none' }} onClick={() => onToggle(sortKey)}>
-      {label}{arrow}
+    <th style={style} aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}>
+      <button type="button" style={s.sortBtn} onClick={() => onToggle(sortKey)}>
+        {label}<span aria-hidden="true">{arrow}</span>
+      </button>
     </th>
   );
 }
@@ -98,6 +103,17 @@ function PolicyFormRow({ initial, methods, onSave, onCancel, saving, colSpan }) 
   const [form, setForm] = useState(initial);
   const [showCondition, setShowCondition] = useState(!!(initial.condition_column));
   const isEdit = !!(initial.id);
+  const formRef = useRef(null);
+  const firstFieldRef = useRef(null);
+  const conditionId = `masking-condition-${initial.id || 'new'}`;
+
+  // The form opens at the top of the table (new) or in place of a row (edit),
+  // which may be scrolled out of view, and the button that opened it is gone
+  // or disabled. Bring the form into view and start the keyboard in it.
+  useEffect(() => {
+    formRef.current?.scrollIntoView?.({ block: 'nearest' });
+    firstFieldRef.current?.focus({ preventScroll: true });
+  }, []);
 
   // Cascading dropdowns: schemas -> tables -> columns
   const [schemas, setSchemas] = useState([]);
@@ -192,7 +208,7 @@ function PolicyFormRow({ initial, methods, onSave, onCancel, saving, colSpan }) 
   return (
     <tr>
       <td colSpan={colSpan} style={{ padding: 0, borderBottom: '1px solid var(--havn-border)' }}>
-        <div style={s.formRow}>
+        <div style={s.formRow} ref={formRef}>
           <div style={s.formRowHeader}>
             <span style={s.formRowTitle}>{isEdit ? 'Edit Policy' : 'New Policy'}</span>
           </div>
@@ -201,28 +217,28 @@ function PolicyFormRow({ initial, methods, onSave, onCancel, saving, colSpan }) 
             <div style={s.formFieldRow}>
               <div style={s.formField}>
                 <label style={s.label}>Schema</label>
-                <select style={s.select} value={form.schema_name} onChange={e => { updateForm('schema_name', e.target.value); updateForm('table_name', ''); updateForm('column_name', ''); }}>
+                <select ref={firstFieldRef} aria-label="Schema" style={s.select} value={form.schema_name} onChange={e => { updateForm('schema_name', e.target.value); updateForm('table_name', ''); updateForm('column_name', ''); }}>
                   <option value="">Select...</option>
                   {schemas.map(sc => <option key={sc} value={sc}>{sc}</option>)}
                 </select>
               </div>
               <div style={s.formField}>
                 <label style={s.label}>Table</label>
-                <select style={s.select} value={form.table_name} onChange={e => { updateForm('table_name', e.target.value); updateForm('column_name', ''); }} disabled={!form.schema_name}>
+                <select aria-label="Table" style={s.select} value={form.table_name} onChange={e => { updateForm('table_name', e.target.value); updateForm('column_name', ''); }} disabled={!form.schema_name}>
                   <option value="">Select...</option>
                   {tablesForSchema.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
               <div style={s.formField}>
                 <label style={s.label}>Column</label>
-                <select style={s.select} value={form.column_name} onChange={e => updateForm('column_name', e.target.value)} disabled={!form.table_name}>
+                <select aria-label="Column" style={s.select} value={form.column_name} onChange={e => updateForm('column_name', e.target.value)} disabled={!form.table_name}>
                   <option value="">Select...</option>
                   {columnsForTable.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div style={{ ...s.formField, flex: 1.5 }}>
                 <label style={s.label}>Masking Method</label>
-                <select style={s.select} value={form.method} onChange={e => handleMethodChange(e.target.value)}>
+                <select aria-label="Masking method" style={s.select} value={form.method} onChange={e => handleMethodChange(e.target.value)}>
                   {CATEGORY_ORDER.map(cat => (
                     grouped[cat]?.length > 0 && (
                       <optgroup key={cat} label={CATEGORY_LABELS[cat]}>
@@ -277,13 +293,19 @@ function PolicyFormRow({ initial, methods, onSave, onCancel, saving, colSpan }) 
                 </div>
               </div>
               <div style={s.formField}>
-                <label style={{ ...s.label, cursor: 'pointer', userSelect: 'none' }} onClick={() => setShowCondition(v => !v)}>
-                  {showCondition ? '\u25BE' : '\u25B8'} Condition
-                </label>
+                <button
+                  type="button"
+                  style={{ ...s.sortBtn, ...s.label, cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => setShowCondition(v => !v)}
+                  aria-expanded={showCondition}
+                  aria-controls={showCondition ? conditionId : undefined}
+                >
+                  <span aria-hidden="true">{showCondition ? '\u25BE' : '\u25B8'}</span> Condition
+                </button>
                 {showCondition && (
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <input style={{ ...s.input, flex: 1 }} value={form.condition_column} onChange={e => updateForm('condition_column', e.target.value)} placeholder="column" />
-                    <input style={{ ...s.input, flex: 1 }} value={form.condition_value} onChange={e => updateForm('condition_value', e.target.value)} placeholder="value" />
+                  <div id={conditionId} style={{ display: 'flex', gap: 6 }}>
+                    <input style={{ ...s.input, flex: 1 }} value={form.condition_column} onChange={e => updateForm('condition_column', e.target.value)} placeholder="column" aria-label="Condition column" />
+                    <input style={{ ...s.input, flex: 1 }} value={form.condition_value} onChange={e => updateForm('condition_value', e.target.value)} placeholder="value" aria-label="Condition value" />
                   </div>
                 )}
               </div>
@@ -485,7 +507,7 @@ export default function MaskingPanel({ showConfirm }) {
             <span>{error}</span>
             <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
               <button onClick={loadPolicies} style={s.retryBtn}>Retry</button>
-              <button onClick={() => setError(null)} style={s.dismissErrorBtn}>&times;</button>
+              <button onClick={() => setError(null)} style={s.dismissErrorBtn} aria-label="Dismiss error">&times;</button>
             </div>
           </div>
         )}
@@ -604,7 +626,12 @@ const s = {
 
   // Table
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 13 },
-  th: { textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--havn-border-light)', color: 'var(--havn-text-secondary)', fontSize: 11, textTransform: 'uppercase' },
+  // Sticky inside `content`, which scrolls and has 20px padding: top -20 pins
+  // the header to the scroller's visible top edge rather than 20px below it.
+  th: { textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--havn-border-light)', color: 'var(--havn-text-secondary)', fontSize: 11, textTransform: 'uppercase', position: 'sticky', top: -20, zIndex: 1, background: 'var(--havn-bg)' },
+  // Header sort controls and the Condition toggle: buttons that look like the
+  // text around them.
+  sortBtn: { background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer', textAlign: 'left', textTransform: 'inherit', letterSpacing: 'inherit', userSelect: 'none' },
   td: { padding: '8px 12px', borderBottom: '1px solid var(--havn-border)', color: 'var(--havn-text)' },
   row: {},
   code: { background: 'color-mix(in srgb, var(--havn-accent) 8%, transparent)', padding: '1px 5px', borderRadius: 3, fontSize: 12, fontFamily: 'var(--havn-font-mono)', color: 'var(--havn-accent)' },

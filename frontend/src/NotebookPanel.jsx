@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import "./monacoSetup";
 import MonacoEditor from "@monaco-editor/react";
 import { api } from "./api";
 
@@ -134,6 +135,35 @@ const DEFAULT_INGEST = {
   options: {},
 };
 
+// Unsaved notebooks, by name. The panel unmounts on every tab switch and
+// whenever another file is opened, and the edits lived only in its state:
+// a trip to the Query tab and back lost them. A draft kept here outlives the
+// panel (not a page reload, which App warns about instead).
+const drafts = new Map();
+export function hasUnsavedNotebooks() {
+  return drafts.size > 0;
+}
+
+function newCellId() {
+  return "cell_" + Math.random().toString(36).slice(2, 8);
+}
+
+// Edits and run results are applied by cell id, so every cell needs a unique
+// one; a hand-written .dpnb may have none, or a repeated one.
+function withCellIds(nb) {
+  const seen = new Set();
+  const cells = (nb.cells || []).map((cell) => {
+    if (cell.id && !seen.has(cell.id)) {
+      seen.add(cell.id);
+      return cell;
+    }
+    const id = newCellId();
+    seen.add(id);
+    return { ...cell, id };
+  });
+  return { ...nb, cells };
+}
+
 function CellOutput({ outputs }) {
   if (!outputs || outputs.length === 0) return null;
   return (
@@ -223,10 +253,10 @@ function IngestCellEditor({ cell, notebookName, onUpdate, onDelete, externalRunn
       const next = { ...prev, ...updates };
       const json = JSON.stringify(next);
       setRawSource(JSON.stringify(next, null, 2));
-      onUpdate({ ...cell, source: json });
+      onUpdate({ source: json });
       return next;
     });
-  }, [cell, onUpdate]);
+  }, [onUpdate]);
 
   // Auto-populate table name from file path
   function handlePathChange(path) {
@@ -250,7 +280,8 @@ function IngestCellEditor({ cell, notebookName, onUpdate, onDelete, externalRunn
       const result = await api.runCell(notebookName, json, { cell_type: "ingest" });
       setOutputs(result.outputs);
       setDuration(result.duration_ms);
-      onUpdate({ ...cell, source: json, outputs: result.outputs, duration_ms: result.duration_ms });
+      // Only the result: edits made while it ran are already in the notebook.
+      onUpdate({ outputs: result.outputs, duration_ms: result.duration_ms });
     } catch (e) {
       setOutputs([{ type: "error", text: e.message }]);
     }
@@ -262,7 +293,7 @@ function IngestCellEditor({ cell, notebookName, onUpdate, onDelete, externalRunn
     try {
       const parsed = JSON.parse(val);
       setSpec({ ...DEFAULT_INGEST, ...parsed });
-      onUpdate({ ...cell, source: val });
+      onUpdate({ source: val });
     } catch {
       // Invalid JSON — just update raw, don't sync spec
     }
@@ -442,7 +473,7 @@ function SqlCell({ cell, notebookName, onUpdate, onDelete, externalRunning }) {
       const result = await api.runCell(notebookName, source, { cell_type: "sql" });
       setOutputs(result.outputs);
       setDuration(result.duration_ms);
-      onUpdate({ ...cell, source, outputs: result.outputs, duration_ms: result.duration_ms });
+      onUpdate({ outputs: result.outputs, duration_ms: result.duration_ms });
     } catch (e) {
       setOutputs([{ type: "error", text: e.message }]);
     }
@@ -465,7 +496,7 @@ function SqlCell({ cell, notebookName, onUpdate, onDelete, externalRunning }) {
         language="sql"
         onChange={(e) => {
           setSource(e.target.value);
-          onUpdate({ ...cell, source: e.target.value });
+          onUpdate({ source: e.target.value });
         }}
         onKeyDown={(e) => {
           if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runCell(); }
@@ -498,7 +529,7 @@ function CodeCell({ cell, notebookName, onUpdate, onDelete, externalRunning }) {
       const result = await api.runCell(notebookName, source, { cell_type: "code" });
       setOutputs(result.outputs);
       setDuration(result.duration_ms);
-      onUpdate({ ...cell, source, outputs: result.outputs, duration_ms: result.duration_ms });
+      onUpdate({ outputs: result.outputs, duration_ms: result.duration_ms });
     } catch (e) {
       setOutputs([{ type: "error", text: e.message }]);
     }
@@ -521,7 +552,7 @@ function CodeCell({ cell, notebookName, onUpdate, onDelete, externalRunning }) {
         language="python"
         onChange={(e) => {
           setSource(e.target.value);
-          onUpdate({ ...cell, source: e.target.value });
+          onUpdate({ source: e.target.value });
         }}
         onKeyDown={(e) => {
           if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runCell(); }
@@ -652,7 +683,7 @@ function MarkdownCell({ cell, onUpdate, onDelete }) {
         language="markdown"
         onChange={(e) => {
           setSource(e.target.value);
-          onUpdate({ ...cell, source: e.target.value });
+          onUpdate({ source: e.target.value });
         }}
         minLines={2}
       />
@@ -670,8 +701,20 @@ export default function NotebookPanel({ openPath }) {
   const resizingRef = useRef(false);
   const [runningCellId, setRunningCellId] = useState(null);
   const [nbError, setNbError] = useState(null);
+  // The notebook as last opened or saved. Every edit makes a new object, so
+  // anything else on screen has unsaved changes.
+  const [savedNotebook, setSavedNotebook] = useState(null);
+  const [saveState, setSaveState] = useState(null); // "saving" | "saved" | null
+  const dirty = !!notebook && notebook !== savedNotebook;
 
   useEffect(() => { loadList(); }, []);
+
+  // Keep the open notebook's draft while it has unsaved changes.
+  useEffect(() => {
+    if (!active) return;
+    if (dirty) drafts.set(active, { notebook, savedNotebook });
+    else drafts.delete(active);
+  }, [active, notebook, savedNotebook, dirty]);
 
   // Open a notebook when openPath changes (e.g. clicked from file tree)
   useEffect(() => {
@@ -689,10 +732,21 @@ export default function NotebookPanel({ openPath }) {
 
   async function openNotebook(name) {
     setNbError(null);
+    const draft = drafts.get(name);
+    if (draft) {
+      // Back to a notebook left with unsaved changes: show those, not disk.
+      setActive(name);
+      setNotebook(draft.notebook);
+      setSavedNotebook(draft.savedNotebook);
+      setSaveState(null);
+      return;
+    }
     try {
-      const nb = await api.getNotebook(name);
+      const nb = withCellIds(await api.getNotebook(name));
       setActive(name);
       setNotebook(nb);
+      setSavedNotebook(nb);
+      setSaveState(null);
     } catch (e) {
       setNbError(e.message || "Failed to open notebook");
     }
@@ -702,11 +756,13 @@ export default function NotebookPanel({ openPath }) {
     const name = newName.trim().replace(/\s+/g, "_") || "untitled";
     setNbError(null);
     try {
-      const nb = await api.createNotebook(name, name);
+      const nb = withCellIds(await api.createNotebook(name, name));
       setNewName("");
       await loadList();
       setActive(name);
       setNotebook(nb);
+      setSavedNotebook(nb);
+      setSaveState(null);
     } catch (e) {
       setNbError(e.message || "Failed to create notebook");
     }
@@ -714,9 +770,18 @@ export default function NotebookPanel({ openPath }) {
 
   async function saveNotebook() {
     if (!active || !notebook) return;
+    const snapshot = notebook;
+    const baseline = savedNotebook;
+    setSaveState("saving");
     try {
-      await api.saveNotebook(active, notebook);
+      await api.saveNotebook(active, snapshot);
+      // Edits made while the request was out stay unsaved (the notebook is no
+      // longer `snapshot`); a notebook opened meanwhile keeps its own baseline.
+      setSavedNotebook((cur) => (cur === baseline ? snapshot : cur));
+      setSaveState("saved");
+      setNbError(null);
     } catch (e) {
+      setSaveState(null);
       setNbError(e.message || "Failed to save notebook");
     }
   }
@@ -727,6 +792,7 @@ export default function NotebookPanel({ openPath }) {
     setNbError(null);
     try {
       await saveNotebook();
+      // Runs the cells as just saved; each result is merged back by id.
       const cells = [...notebook.cells];
       let firstCode = true;
       for (let i = 0; i < cells.length; i++) {
@@ -737,11 +803,9 @@ export default function NotebookPanel({ openPath }) {
         try {
           const result = await api.runCell(active, cell.source, { reset: firstCode, cell_type: cellType });
           firstCode = false;
-          cells[i] = { ...cell, outputs: result.outputs, duration_ms: result.duration_ms };
-          setNotebook((prev) => ({ ...prev, cells: [...cells] }));
+          updateCell(cell.id, { outputs: result.outputs, duration_ms: result.duration_ms });
         } catch (e) {
-          cells[i] = { ...cell, outputs: [{ type: "error", text: e.message }] };
-          setNotebook((prev) => ({ ...prev, cells: [...cells] }));
+          updateCell(cell.id, { outputs: [{ type: "error", text: e.message }] });
           break;
         }
       }
@@ -752,42 +816,47 @@ export default function NotebookPanel({ openPath }) {
     setRunningAll(false);
   }
 
+  // Every change below is a functional update. Run results land after an
+  // `await`, and writing back the notebook a closure captured when the run
+  // started would revert whatever was typed into other cells meanwhile.
   function addCell(type, afterIndex) {
     if (!notebook) return;
-    const id = "cell_" + Math.random().toString(36).slice(2, 8);
+    const id = newCellId();
     let source = "";
     if (type === "markdown") source = "## Heading";
     else if (type === "ingest") source = JSON.stringify(DEFAULT_INGEST, null, 2);
     else if (type === "sql") source = "SELECT 1";
     const cell = { id, type, source, outputs: [] };
-    if (afterIndex != null) {
-      const cells = [...notebook.cells];
-      cells.splice(afterIndex + 1, 0, cell);
-      setNotebook({ ...notebook, cells });
-    } else {
-      setNotebook({ ...notebook, cells: [...notebook.cells, cell] });
-    }
+    setNotebook((prev) => {
+      const cells = [...prev.cells];
+      cells.splice(afterIndex != null ? afterIndex + 1 : cells.length, 0, cell);
+      return { ...prev, cells };
+    });
   }
 
-  function updateCell(idx, updated) {
-    const cells = [...notebook.cells];
-    cells[idx] = updated;
-    setNotebook({ ...notebook, cells });
+  // Merge `patch` into the cell with this id. A result for a cell that is
+  // gone (deleted, or another notebook opened) changes nothing.
+  function updateCell(id, patch) {
+    setNotebook((prev) => {
+      if (!prev || !prev.cells.some((c) => c.id === id)) return prev;
+      return { ...prev, cells: prev.cells.map((c) => (c.id === id ? { ...c, ...patch } : c)) };
+    });
   }
 
-  function deleteCell(idx) {
-    const cells = notebook.cells.filter((_, i) => i !== idx);
-    setNotebook({ ...notebook, cells });
+  function deleteCell(id) {
+    setNotebook((prev) => ({ ...prev, cells: prev.cells.filter((c) => c.id !== id) }));
   }
 
   const [dragFrom, setDragFrom] = useState(null);
   const [dragOver, setDragOver] = useState(null);
   function moveCell(fromIdx, toIdx) {
     if (fromIdx === toIdx) return;
-    const cells = [...notebook.cells];
-    const [moved] = cells.splice(fromIdx, 1);
-    cells.splice(toIdx, 0, moved);
-    setNotebook({ ...notebook, cells });
+    setNotebook((prev) => {
+      const cells = [...prev.cells];
+      const [moved] = cells.splice(fromIdx, 1);
+      cells.splice(toIdx, 0, moved);
+      return { ...prev, cells };
+    });
   }
 
   if (!notebook) {
@@ -808,17 +877,26 @@ export default function NotebookPanel({ openPath }) {
     <div style={s.container}>
       <div style={s.nbHeader}>
         <span style={s.nbTitle}>{notebook.title || active}</span>
+        <span role="status" style={dirty && saveState !== "saving" ? s.unsaved : s.saveStatus}>
+          {saveState === "saving" ? "Saving..." : dirty ? "Unsaved changes" : saveState === "saved" ? "Saved" : ""}
+        </span>
         <div style={s.nbActions}>
           <button onClick={() => addCell("sql")} style={s.btn}>+ SQL</button>
           <button onClick={() => addCell("code")} style={s.btn}>+ Code</button>
           <button onClick={() => addCell("ingest")} style={s.btn}>+ Ingest</button>
           <button onClick={() => addCell("markdown")} style={s.btn}>+ Markdown</button>
-          <button onClick={saveNotebook} style={s.btn}>Save</button>
+          <button onClick={saveNotebook} disabled={saveState === "saving"} style={s.btn}>Save</button>
           <button onClick={runAll} disabled={runningAll} style={s.runAllBtn}>
             {runningAll ? "Running..." : "Run All"}
           </button>
         </div>
       </div>
+      {nbError && (
+        <div style={s.errorBanner} role="alert">
+          <span>{nbError}</span>
+          <button onClick={() => setNbError(null)} style={s.errorClose} aria-label="Dismiss error">&times;</button>
+        </div>
+      )}
       {/* Table of Contents from markdown headings */}
       {(() => {
         const headings = [];
@@ -902,8 +980,8 @@ export default function NotebookPanel({ openPath }) {
               <NotebookCell
                 cell={cell}
                 notebookName={active}
-                onUpdate={(updated) => updateCell(i, updated)}
-                onDelete={() => deleteCell(i)}
+                onUpdate={(patch) => updateCell(cell.id, patch)}
+                onDelete={() => deleteCell(cell.id)}
                 externalRunning={runningCellId === cell.id}
               />
             </div>
@@ -932,6 +1010,10 @@ const s = {
   nbHeader: { display: "flex", alignItems: "center", gap: "12px", padding: "8px 12px", borderBottom: "1px solid var(--havn-border)" },
   backBtn: { padding: "4px 12px", background: "var(--havn-btn-bg)", border: "1px solid var(--havn-btn-border)", borderRadius: "var(--havn-radius-lg)", color: "var(--havn-text)", cursor: "pointer", fontSize: "11px", fontWeight: 500 },
   nbTitle: { fontWeight: 600, fontSize: "14px", flex: 1 },
+  saveStatus: { fontSize: "11px", color: "var(--havn-text-secondary)", whiteSpace: "nowrap" },
+  unsaved: { fontSize: "11px", color: "var(--havn-accent)", fontWeight: 600, whiteSpace: "nowrap" },
+  errorBanner: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", padding: "6px 12px", background: "color-mix(in srgb, var(--havn-red) 12%, transparent)", color: "var(--havn-red)", fontSize: "12px", borderBottom: "1px solid var(--havn-border)" },
+  errorClose: { background: "none", border: "none", color: "var(--havn-red)", cursor: "pointer", fontSize: "14px", padding: "0 4px", flexShrink: 0 },
   nbActions: { display: "flex", gap: "6px" },
   runAllBtn: { padding: "4px 12px", background: "var(--havn-green)", border: "1px solid var(--havn-green-border)", borderRadius: "var(--havn-radius-lg)", color: "#fff", cursor: "pointer", fontSize: "11px", fontWeight: 500 },
   cells: { flex: 1, overflowY: "auto", overflowX: "hidden", padding: "12px 16px", margin: "0 auto", width: "100%", boxSizing: "border-box" },
@@ -952,10 +1034,15 @@ const cs = {
   duration: { color: "var(--havn-text-secondary)", fontSize: "11px" },
   codeInput: { width: "100%", padding: "8px 12px", background: "transparent", border: "none", color: "var(--havn-text)", fontFamily: "var(--havn-font-mono)", fontSize: "13px", resize: "vertical", outline: "none", boxSizing: "border-box", lineHeight: 1.5 },
   mdInput: { width: "100%", padding: "8px 12px", background: "transparent", border: "none", color: "var(--havn-text)", fontSize: "13px", resize: "vertical", outline: "none", boxSizing: "border-box", lineHeight: 1.5 },
+  // The ONE scroll container for a cell's output, both ways: a table header
+  // only sticks to its nearest scroller, so nothing in between may scroll (an
+  // overflow-x wrapper silently scrolls vertically too, and never does).
   outputArea: { borderTop: "1px solid var(--havn-border)", padding: "8px 12px", maxHeight: "300px", overflow: "auto", background: "color-mix(in srgb, var(--havn-bg) 50%, var(--havn-bg-tertiary))" },
-  tableWrap: { overflow: "auto" },
+  tableWrap: {},
   table: { width: "100%", borderCollapse: "collapse", fontSize: "12px", fontFamily: "var(--havn-font-mono)" },
-  th: { textAlign: "left", padding: "4px 8px", borderBottom: "1px solid var(--havn-border-light)", color: "var(--havn-text-secondary)", fontWeight: 600 },
+  // A shadow, not a border: with border-collapse a stuck header leaves its
+  // border behind with the first rows.
+  th: { textAlign: "left", padding: "4px 8px", boxShadow: "inset 0 -1px 0 var(--havn-border-light)", color: "var(--havn-text-secondary)", fontWeight: 600, position: "sticky", top: 0, zIndex: 1, background: "var(--havn-bg)" },
   td: { padding: "3px 8px", borderBottom: "1px solid var(--havn-border)", color: "var(--havn-text)" },
   null: { color: "var(--havn-text-dim)", fontStyle: "italic" },
   truncated: { padding: "4px", color: "var(--havn-yellow)", fontSize: "11px" },

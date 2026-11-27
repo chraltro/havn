@@ -1,22 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { api } from "./api";
 import { useHintTriggerFn } from "./HintSystem";
-
-// Make a div-based card behave like a button for keyboard/AT users:
-// spread {...clickable(handler)} onto the element (in addition to onClick).
-function clickable(onActivate, label) {
-  return {
-    role: "button",
-    tabIndex: 0,
-    "aria-label": label,
-    onKeyDown: (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        onActivate(e);
-      }
-    },
-  };
-}
+import { clickable } from "./a11y";
 
 function _timeAgo(dateStr) {
   if (!dateStr) return "";
@@ -32,7 +17,7 @@ function _timeAgo(dateStr) {
 const thStyle = { textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--havn-border)', color: 'var(--havn-text-secondary)', fontSize: 11, textTransform: 'uppercase' };
 const tdStyle = { padding: '8px 12px', borderBottom: '1px solid var(--havn-border)' };
 
-function CDCSection() {
+function CDCSection({ addOutput }) {
   const [cdcStatus, setCdcStatus] = useState([]);
   const [loading, setLoading] = useState(true);
   const [resetting, setResetting] = useState(null);
@@ -58,7 +43,7 @@ function CDCSection() {
       setConfirmReset(null);
       await loadCDC();
     } catch (e) {
-      console.error('Failed to reset watermark:', e);
+      addOutput?.('error', `Failed to reset watermark for "${name}": ${e.message}`);
     }
     setResetting(null);
   };
@@ -141,6 +126,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
   const [targetTable, setTargetTable] = useState("");
   const [preview, setPreview] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [uploadedFile, setUploadedFile] = useState(null);
 
   // Database connection state
@@ -222,6 +208,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
   async function handleUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
+    setUploading(true);
     try {
       const result = await api.uploadFile(file);
       setUploadedFile(result);
@@ -230,6 +217,8 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
       addOutput("info", `Uploaded ${result.name} (${(result.size / 1024).toFixed(1)}KB)`);
     } catch (e) {
       addOutput("error", `Upload failed: ${e.message}`);
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -401,6 +390,11 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
   }
 
   async function doRegenerate(name) {
+    // Regenerating rewrites the script from the connector config, so any hand
+    // edits to it are lost.
+    const msg = `Regenerate ingest/${name}.py from the connector config? Any edits you made to that script will be overwritten.`;
+    if (showConfirm && !(await showConfirm("Regenerate Script", msg, "Regenerate", true))) return;
+    if (!showConfirm && !confirm(msg)) return;
     try {
       const result = await api.regenerateConnector(name);
       if (result.status === "success") {
@@ -613,8 +607,10 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
           <div style={st.wizard}>
             <div style={st.formGroup}>
               <label style={st.label}>Upload a CSV, Parquet, or JSON file</label>
-              <input type="file" onChange={handleUpload} accept=".csv,.parquet,.pq,.json,.jsonl,.ndjson" style={st.fileInput} />
-              {uploadedFile && <div style={st.uploadInfo}>Uploaded: {uploadedFile.name}</div>}
+              <input type="file" onChange={handleUpload} accept=".csv,.parquet,.pq,.json,.jsonl,.ndjson" style={st.fileInput} disabled={uploading} />
+              {uploading ? (
+                <div style={st.uploadInfo} role="status">Uploading…</div>
+              ) : uploadedFile && <div style={st.uploadInfo}>Uploaded: {uploadedFile.name}</div>}
             </div>
             <div style={st.formGroup}>
               <label style={st.label}>Or enter file path</label>
@@ -631,9 +627,9 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
               </div>
             </div>
             <div style={st.actions}>
-              <button onClick={doPreview} disabled={!filePath} style={st.btn}>Preview</button>
-              <button onClick={doFileImport} disabled={!filePath || importing} style={st.btnPrimary}>
-                {importing ? "Importing..." : "Import"}
+              <button onClick={doPreview} disabled={!filePath || uploading} style={st.btn}>Preview</button>
+              <button onClick={doFileImport} disabled={!filePath || importing || uploading} style={st.btnPrimary}>
+                {uploading ? "Uploading…" : importing ? "Importing..." : "Import"}
               </button>
             </div>
           </div>
@@ -829,7 +825,7 @@ export default function DataSourcesPanel({ addOutput, showConfirm, onDataChanged
               })}
             </div>
           )}
-          <CDCSection />
+          <CDCSection addOutput={addOutput} />
         </div>
       </div>
     );

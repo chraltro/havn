@@ -5,6 +5,7 @@ import DashboardWidget from "./DashboardWidget";
 import DashboardFilterManager from "./DashboardFilterManager";
 import DashboardFilterBar from "./DashboardFilterBar";
 import ShareDialog from "./ShareDialog";
+import FocusTrap from "./FocusTrap";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -167,6 +168,10 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
       // the typing, not the last dashboard layout change.
       const t = e.target;
       if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable) return;
+      // An open modal (settings, filters, widget editor, a confirm) owns the
+      // keyboard wherever focus is: Escape there closes the dialog, and must
+      // not also leave edit mode behind it.
+      if (document.querySelector('[aria-modal="true"]')) return;
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
         e.preventDefault();
         undo();
@@ -218,15 +223,29 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
     }
   }
 
+  // App's confirm dialog sits on the modal tier (10000), above the
+  // fullscreen canvas (9999), so it works in both modes.
+  function confirmDanger(title, body) {
+    if (showConfirm) return showConfirm(title, body, "Delete", true);
+    return Promise.resolve(window.confirm(body));
+  }
+
   // Page management
-  function addPage() {
-    if (!newPageName.trim()) return;
+  async function addPage() {
+    const name = newPageName.trim();
+    if (!name) return;
     const newId = "page_" + Date.now();
-    const newPages = [...pages, { id: newId, name: newPageName.trim() }];
-    saveDashboard({ settings: { ...(dashboard.settings || {}), pages: newPages } });
-    setActivePageId(newId);
+    const newPages = [...pages, { id: newId, name }];
     setShowNewPage(false);
     setNewPageName("");
+    // Switch only once the page exists: a failed save would leave an empty
+    // canvas for a page that is not in the tab bar. Give the name back instead.
+    if (await saveDashboard({ settings: { ...(dashboard.settings || {}), pages: newPages } })) {
+      setActivePageId(newId);
+    } else {
+      setShowNewPage(true);
+      setNewPageName(name);
+    }
   }
 
   function renamePage(pageId) {
@@ -238,11 +257,21 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
     saveDashboard({ settings: { ...(dashboard.settings || {}), pages: newPages } });
   }
 
-  function deletePage(pageId) {
+  async function deletePage(pageId) {
     if (pages.length <= 1) return; // can't delete last page
+    const page = pages.find(p => p.id === pageId);
+    // The page's widgets are not deleted with it: they stay on the dashboard,
+    // but no page shows them any more. Say so before going ahead.
+    const hidden = allWidgets.filter(w => w.config?.page_id === pageId).length;
+    const ok = await confirmDanger(
+      "Delete Page",
+      `Delete the page "${page?.name || "Untitled"}"?` +
+        (hidden > 0 ? ` Its ${hidden} widget${hidden === 1 ? "" : "s"} will no longer be shown on any page (Undo brings the page back).` : ""),
+    );
+    if (!ok) return;
     const newPages = pages.filter(p => p.id !== pageId);
-    saveDashboard({ settings: { ...(dashboard.settings || {}), pages: newPages } });
-    if (activePageId === pageId) setActivePageId(newPages[0]?.id);
+    const saved = await saveDashboard({ settings: { ...(dashboard.settings || {}), pages: newPages } });
+    if (saved && currentPageId === pageId) setActivePageId(newPages[0]?.id);
   }
 
   // Name editing
@@ -312,15 +341,11 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
 
   // Delete widget with confirmation
   async function handleDelete(widget) {
-    if (showConfirm) {
-      const ok = await showConfirm(
-        "Delete Widget",
-        `Delete "${widget.title || "Untitled"}"? This cannot be undone.`,
-        "Delete",
-        true
-      );
-      if (!ok) return;
-    }
+    const ok = await confirmDanger(
+      "Delete Widget",
+      `Delete "${widget.title || "Untitled"}"? This cannot be undone.`,
+    );
+    if (!ok) return;
     await removeWidget(widget.id);
   }
 
@@ -446,7 +471,9 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
 
   return (
     <div
-      style={{ ...st.outer, ...(isFullscreen ? st.fullscreen : {}), ...(embedMode ? st.fullscreen : {}) }}
+      // Embed mode stays in the page flow: pinned over the whole window it
+      // covered the filter bar rendered above it.
+      style={{ ...st.outer, ...(isFullscreen ? st.fullscreen : {}) }}
       {...(dashboard?.settings?.darkMode ? { "data-havn-dark": "true" } : {})}
     >
       {/* Toolbar — hidden in embed mode */}
@@ -591,6 +618,14 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
         </div>
       </div>}
 
+      {/* Fullscreen covers the page's own filter bar, so show one here, in
+          the flow under the toolbar rather than pinned over it. */}
+      {isFullscreen && (
+        <div style={st.fullscreenFilterBar}>
+          <DashboardFilterBar />
+        </div>
+      )}
+
       {/* Page tab bar */}
       {pages.length > 0 && (
         <div style={st.pageTabBar}>
@@ -669,8 +704,11 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
               key={w.id}
               style={{
                 gridColumn: isNarrow ? "1 / -1" : `${pos.x} / span ${Math.min(pos.w, effectiveCols)}`,
-                gridRow: isNarrow ? undefined : `${pos.y} / span ${pos.h}`,
-                minHeight: isNarrow ? pos.h * ROW_HEIGHT : 0,
+                // Stacked, a widget still spans its height in grid rows: a
+                // min-height inside one fixed 64px row overflowed it and the
+                // next widget painted over the rest.
+                gridRow: isNarrow ? `span ${pos.h}` : `${pos.y} / span ${pos.h}`,
+                minHeight: 0,
                 minWidth: 0,
                 position: "relative",
                 userSelect: (dragState || resizeState) ? "none" : undefined,
@@ -743,13 +781,6 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
         )}
       </div>
 
-      {/* Fullscreen: show filter bar floating at top */}
-      {isFullscreen && (dashboard?.filters?.length > 0 || false) && (
-        <div style={st.fullscreenFilterBar}>
-          <DashboardFilterBar />
-        </div>
-      )}
-
       {/* Filter manager modal */}
       {showFilterManager && (
         <DashboardFilterManager onClose={() => setShowFilterManager(false)} />
@@ -757,11 +788,16 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
 
       {/* Settings panel */}
       {showSettings && (
-        <div style={st.settingsOverlay} onClick={(e) => e.target === e.currentTarget && setShowSettings(false)}>
+        <FocusTrap
+          labelledBy="havn-dashboard-settings-title"
+          style={st.settingsOverlay}
+          onClick={(e) => e.target === e.currentTarget && setShowSettings(false)}
+          onEscape={() => setShowSettings(false)}
+        >
           <div style={st.settingsPanel}>
             <div style={st.settingsHeader}>
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--havn-text)" }}>Dashboard Settings</h3>
-              <button style={{ background: "none", border: "none", color: "var(--havn-text-secondary)", fontSize: 20, cursor: "pointer" }} onClick={() => setShowSettings(false)}>×</button>
+              <h3 id="havn-dashboard-settings-title" style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--havn-text)" }}>Dashboard Settings</h3>
+              <button style={{ background: "none", border: "none", color: "var(--havn-text-secondary)", fontSize: 20, cursor: "pointer" }} onClick={() => setShowSettings(false)} aria-label="Close">×</button>
             </div>
             <div style={st.settingsBody}>
               <label style={st.settingsLabel}>Name</label>
@@ -825,7 +861,7 @@ export default function DashboardCanvas({ onBack, onEditWidget, showConfirm, emb
               </div>
             </div>
           </div>
-        </div>
+        </FocusTrap>
       )}
 
       {/* Share: published links, embed snippet, reports */}
@@ -917,10 +953,14 @@ function AddWidgetMenu({ onAdd }) {
 }
 
 const st = {
+  // A flex child of the column that holds the filter bar above it; the
+  // height:100% only applies where the parent is not a flex column.
   outer: {
     display: "flex",
     flexDirection: "column",
     height: "100%",
+    flex: 1,
+    minHeight: 0,
     overflow: "hidden",
   },
   fullscreen: {
@@ -1083,8 +1123,8 @@ const st = {
   },
   addMenuLabel: { fontWeight: 600, fontSize: 13, color: "var(--havn-text)" },
   addMenuDesc: { fontSize: 11, color: "var(--havn-text-secondary)", marginTop: 1 },
-  fullscreenFilterBar: { position: "fixed", top: 0, left: 0, right: 0, zIndex: 10000, background: "var(--havn-bg)", borderBottom: "1px solid var(--havn-border)" },
-  settingsOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000 },
+  fullscreenFilterBar: { flexShrink: 0 },
+  settingsOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000 },
   settingsPanel: { background: "var(--havn-bg)", border: "1px solid var(--havn-border)", borderRadius: 12, width: 420, maxWidth: "90vw" },
   settingsHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderBottom: "1px solid var(--havn-border)" },
   settingsBody: { padding: 20 },

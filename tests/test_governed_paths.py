@@ -88,3 +88,88 @@ def test_admin_is_exempt(conn):
 def test_writes_still_refused(conn):
     with pytest.raises(GovernedQueryError):
         run_governed_query(conn, "DELETE FROM silver.customers", QueryIdentity("root", "admin"))
+
+
+# ---------------------------------------------------------------------------
+# Row cap and the truncated flag
+
+
+@pytest.fixture
+def plain_conn(tmp_path):
+    c = duckdb.connect(str(tmp_path / "plain.duckdb"))
+    yield c
+    c.close()
+
+
+_ADMIN = QueryIdentity(username="root", role="admin")
+
+
+def test_exactly_limit_rows_is_not_reported_as_truncated(plain_conn):
+    # The query UI said "results capped" for a result that had exactly as
+    # many rows as the limit, when there was nothing more to show.
+    r = run_governed_query(plain_conn, "SELECT * FROM range(10)", _ADMIN, limit=10)
+    assert r["row_count"] == 10
+    assert r["truncated"] is False
+
+
+def test_one_row_past_the_limit_is_truncated_and_trimmed(plain_conn):
+    r = run_governed_query(plain_conn, "SELECT * FROM range(11)", _ADMIN, limit=10)
+    assert r["row_count"] == 10
+    assert r["truncated"] is True
+    assert r["limit"] == 10
+
+
+def test_paging_reports_whether_another_page_exists(plain_conn):
+    r = run_governed_query(plain_conn, "SELECT * FROM range(25) ORDER BY 1", _ADMIN, limit=10, offset=20)
+    assert [row[0] for row in r["rows"]] == [20, 21, 22, 23, 24]
+    assert r["truncated"] is False
+    r = run_governed_query(plain_conn, "SELECT * FROM range(25) ORDER BY 1", _ADMIN, limit=10, offset=10)
+    assert r["row_count"] == 10
+    assert r["truncated"] is True
+
+
+def test_limit_in_a_comment_or_string_does_not_skip_the_row_cap(plain_conn):
+    for sql in (
+        "SELECT * FROM range(100) -- TODO add a limit",
+        "SELECT range, 'no limit' AS note FROM range(100)",
+    ):
+        r = run_governed_query(plain_conn, sql, _ADMIN, row_cap=50)
+        assert r["row_count"] == 50, sql
+        assert r["truncated"] is True, sql
+
+
+def test_limit_in_a_subquery_still_caps_the_outer_result(plain_conn):
+    # The SQL is left unwrapped because it has a LIMIT, but that LIMIT bounds
+    # only the subquery: the fetch itself must still stop at the cap.
+    sql = "SELECT * FROM (SELECT * FROM range(5) LIMIT 5) UNION ALL SELECT * FROM range(100)"
+    r = run_governed_query(plain_conn, sql, _ADMIN, row_cap=50)
+    assert r["row_count"] == 50
+    assert r["truncated"] is True
+
+
+def test_own_limit_under_the_cap_is_not_truncated(plain_conn):
+    r = run_governed_query(plain_conn, "SELECT * FROM range(100) LIMIT 7", _ADMIN, row_cap=50)
+    assert r["row_count"] == 7
+    assert r["truncated"] is False
+
+
+def test_timestamptz_results_serialize(plain_conn):
+    # DuckDB needs pytz to hand TIMESTAMP WITH TIME ZONE values to Python.
+    # Without it every query touching now() or current_timestamp failed, in
+    # the UI and the CLI alike.
+    r = run_governed_query(plain_conn, "SELECT current_timestamp AS ts, now() AS n", _ADMIN)
+    assert r["columns"] == ["ts", "n"]
+    assert isinstance(r["rows"][0][0], str) and r["rows"][0][0]
+
+
+def test_error_context_shows_the_users_sql_not_the_paging_wrapper(plain_conn):
+    with pytest.raises(GovernedQueryError) as exc:
+        run_governed_query(plain_conn, "SELECT nope FROM range(3)", _ADMIN, limit=10)
+    msg = str(exc.value)
+    assert "LINE 1: SELECT nope FROM range(3)" in msg, msg
+    assert "SELECT * FROM (" not in msg
+    # The caret still points at the offending column.
+    lines = msg.split("\n")
+    i = next(n for n, line in enumerate(lines) if line.startswith("LINE 1: "))
+    caret = lines[i + 1].index("^")
+    assert lines[i][caret:].startswith("nope"), (lines[i], lines[i + 1])

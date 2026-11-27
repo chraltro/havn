@@ -432,6 +432,9 @@ export interface FileEntry {
 export interface FileContent {
   content: string;
   language: string;
+  path?: string;
+  /** Hash of the content on disk; send it back as saveFile's expectedHash. */
+  file_hash?: string;
 }
 
 export interface OutputEntry {
@@ -899,8 +902,33 @@ export const api = {
   // Files
   listFiles: () => request<FileEntry[]>("/files"),
   readFile: (path: string) => request<FileContent>(`/files/${path}`),
-  saveFile: (path: string, content: string) =>
-    request(`/files/${path}`, { method: "PUT", body: JSON.stringify({ content }) }),
+  /**
+   * `expectedHash`: the `file_hash` the edited content started from. The
+   * server answers 409 when the file on disk has changed since (another tab,
+   * an agent, git, a rename), and the thrown error has `conflict: true`.
+   * `createOnly`: 409 when the file already exists, for "new file" flows.
+   */
+  saveFile: async (
+    path: string,
+    content: string,
+    opts: { expectedHash?: string | null; createOnly?: boolean } = {},
+  ) => {
+    try {
+      return await request<{ path: string; status: string; file_hash: string }>(`/files/${path}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          content,
+          ...(opts.expectedHash ? { expected_hash: opts.expectedHash } : {}),
+          ...(opts.createOnly ? { create_only: true } : {}),
+        }),
+      });
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith("Error (409)")) {
+        (e as Error & { conflict?: boolean }).conflict = true;
+      }
+      throw e;
+    }
+  },
   deleteFile: (path: string, dropObject: boolean = false) =>
     request(`/files/${path}${dropObject ? "?drop_object=true" : ""}`, { method: "DELETE" }),
   moveFile: (source: string, destination: string) =>
@@ -1086,14 +1114,25 @@ export const api = {
       headers,
       body: JSON.stringify({ sql, ...(params && Object.keys(params).length ? { params } : {}) }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (res.status === 401) {
+      authToken = null;
+      localStorage.removeItem("havn_token");
+      window.dispatchEvent(new Event("havn_auth_required"));
+      throw new Error("Authentication required");
+    }
+    // The same readable message as every other call, not the raw JSON body.
+    if (!res.ok) throw new Error(await parseErrorResponse(res, "/query/export-csv"));
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = "export.csv";
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    // Revoking in the same tick can cancel the download before the browser
+    // has read the blob (Firefox does this), so give it a moment.
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
   },
   formatSql: (sql: string) =>
     request<{ formatted: string }>("/format-sql", { method: "POST", body: JSON.stringify({ sql }) }),

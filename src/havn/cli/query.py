@@ -23,8 +23,6 @@ def query(
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
     """Run an ad-hoc SQL query against the warehouse."""
-    import json as json_mod
-
     from havn.engine.database import open_warehouse
 
     project_dir = _resolve_project(project_dir)
@@ -64,39 +62,80 @@ def query(
             console.print("[yellow]Query executed successfully (no results returned).[/yellow]")
             return
         columns = [desc[0] for desc in result.description]
-        rows = result.fetchall()
-        if limit > 0:
-            rows = rows[:limit]
-
-        if csv:
-            import io as _io
-            import csv as _csv
-            buf = _io.StringIO()
-            writer = _csv.writer(buf)
-            writer.writerow(columns)
-            for row in rows:
-                writer.writerow(row)
-            console.print(buf.getvalue().rstrip())
-        elif json_output:
-            data = [dict(zip(columns, [_json_safe(v) for v in row])) for row in rows]
-            console.print(json_mod.dumps(data, indent=2, default=str))
-        else:
-            table = Table(show_lines=len(columns) > 8)
-            for col in columns:
-                table.add_column(col, no_wrap=False, max_width=60)
-            for row in rows:
-                table.add_row(*[str(v) for v in row])
-            console.print(table)
-            console.print(f"[dim]{len(rows)} rows[/dim]")
+        # -n stops the fetch, rather than fetching every row and dropping most.
+        rows = result.fetchmany(limit) if limit > 0 else result.fetchall()
+        _print_rows(columns, rows, csv, json_output, f"{len(rows)} rows")
     except Exception as e:
+        from rich.markup import escape
+
         err_msg = str(e)
         if "read-only mode" in err_msg:
-            console.print("[red]Query error:[/red] havn query is read-only. Use [bold]havn run[/bold] for write operations.")
+            _err_console().print("[red]Query error:[/red] havn query is read-only. Use [bold]havn run[/bold] for write operations.")
         else:
-            console.print(f"[red]Query error:[/red] {e}")
+            _err_console().print(f"[red]Query error:[/red] {escape(err_msg)}")
         raise typer.Exit(1)
     finally:
         conn.close()
+
+
+def _err_console():
+    """Errors and warnings go to stderr, so they never land in piped CSV/JSON."""
+    from rich.console import Console
+
+    return Console(stderr=True)
+
+
+def _print_rows(columns: list, rows: list, csv: bool, json_output: bool, footer: str) -> None:
+    """Write a query result as CSV, JSON or a table.
+
+    CSV and JSON are written to stdout verbatim. Through Rich they were
+    wrapped at the terminal width, so a long value split a CSV row across
+    two lines, and anything shaped like markup (``[bold]``) was swallowed.
+    Table cells are plain text for the same reason.
+    """
+    import json as json_mod
+
+    if csv:
+        import csv as _csv
+        import io as _io
+
+        buf = _io.StringIO()
+        writer = _csv.writer(buf, lineterminator="\n")
+        writer.writerow(columns)
+        for row in rows:
+            writer.writerow(row)
+        typer.echo(buf.getvalue().rstrip("\n"))
+        return
+    if json_output:
+        data = [dict(zip(columns, [_json_safe(v) for v in row])) for row in rows]
+        typer.echo(json_mod.dumps(data, indent=2, default=str))
+        return
+    from rich.markup import escape
+    from rich.text import Text
+
+    table = Table(show_lines=len(columns) > 8)
+    for col in columns:
+        table.add_column(escape(str(col)), no_wrap=False, max_width=60)
+    for row in rows:
+        table.add_row(*[Text(str(v)) for v in row])
+    console.print(table)
+    console.print(f"[dim]{escape(footer)}[/dim]")
+
+
+def _server_error_message(body: str) -> str:
+    """The message inside a server error body, not the raw JSON around it."""
+    import json as json_mod
+
+    try:
+        data = json_mod.loads(body)
+    except ValueError:
+        return body
+    if isinstance(data, dict):
+        for key in ("detail", "message", "error"):
+            value = data.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return body
 
 
 def _json_safe(v):
@@ -153,7 +192,7 @@ def _pid_alive(pid: int) -> bool:
             return False
 
 
-def _fetch_via_server(project_dir: Path, sql: str) -> tuple[list, list, str, bool] | None:
+def _fetch_via_server(project_dir: Path, sql: str, limit: int = 0) -> tuple[list, list, str, bool] | None:
     """Try to run ``sql`` against a running ``havn serve`` for this project.
 
     Returns ``(columns, rows, server_label, truncated)`` on success, ``None`` if
@@ -187,7 +226,12 @@ def _fetch_via_server(project_dir: Path, sql: str) -> tuple[list, list, str, boo
     try:
         import urllib.request
         import urllib.error
-        body = _json.dumps({"sql": sql}).encode("utf-8")
+        payload: dict = {"sql": sql}
+        if limit > 0:
+            # The server stops at the limit; without it, -n 10 still moved up
+            # to 50,000 rows over HTTP to print ten.
+            payload["limit"] = limit
+        body = _json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             f"http://{host}:{port}/api/query",
             data=body,
@@ -206,7 +250,9 @@ def _fetch_via_server(project_dir: Path, sql: str) -> tuple[list, list, str, boo
             err_body = e.read().decode("utf-8")
         except Exception:
             err_body = str(e)
-        console.print(f"[red]Query error:[/red] {err_body}")
+        from rich.markup import escape
+
+        _err_console().print(f"[red]Query error:[/red] {escape(_server_error_message(err_body))}")
         raise typer.Exit(1)
     except (urllib.error.URLError, ConnectionError, OSError):
         # Server genuinely unreachable -> the lockfile is stale, drop it.
@@ -226,40 +272,18 @@ def _fetch_via_server(project_dir: Path, sql: str) -> tuple[list, list, str, boo
 
 def _try_route_via_server(project_dir: Path, sql: str, csv: bool, json_output: bool, limit: int) -> bool:
     """Backwards-compat wrapper for the original `havn query` call site."""
-    fetched = _fetch_via_server(project_dir, sql)
+    fetched = _fetch_via_server(project_dir, sql, limit)
     if fetched is None:
         return False
     columns, rows, server_label, truncated = fetched
     server_returned = len(rows)
-    import json as _json
-    from rich.console import Console
-    err_console = Console(stderr=True)
     if limit > 0:
         rows = rows[:limit]
-
-    if csv:
-        import io as _io
-        import csv as _csv
-        buf = _io.StringIO()
-        writer = _csv.writer(buf)
-        writer.writerow(columns)
-        for row in rows:
-            writer.writerow(row)
-        console.print(buf.getvalue().rstrip())
-    elif json_output:
-        result = [dict(zip(columns, row)) for row in rows]
-        console.print(_json.dumps(result, indent=2, default=str))
-    else:
-        table = Table(show_lines=len(columns) > 8)
-        for col in columns:
-            table.add_column(col, no_wrap=False, max_width=60)
-        for row in rows:
-            table.add_row(*[str(v) for v in row])
-        console.print(table)
-        console.print(f"[dim]{len(rows)} rows (via server at {server_label})[/dim]")
-    if truncated:
+    _print_rows(columns, rows, csv, json_output, f"{len(rows)} rows (via server at {server_label})")
+    # Cut short by the server's own cap, not by the -n the user asked for.
+    if truncated and not (limit > 0 and server_returned >= limit):
         # Always to stderr — must not contaminate CSV/JSON output piped to a file.
-        err_console.print(
+        _err_console().print(
             f"[yellow]warning:[/yellow] result truncated by server at "
             f"{server_returned:,} rows. Re-run with the project's warehouse "
             f"file directly (stop [bold]havn serve[/bold]) for full results."

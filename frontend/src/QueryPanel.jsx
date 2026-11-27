@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { format as formatSQL } from "sql-formatter";
 import { api } from "./api";
 import SortableTable from "./SortableTable";
@@ -10,13 +10,45 @@ import useResizable from "./useResizable";
 import { isSystemSchema, schemaCompare } from "./schemaOrder";
 import { MOD_KEY } from "./platform";
 import { buildCompletions, applyCompletionText, caretCoordinates, completionFits } from "./queryAutocomplete";
+import { clickable, useDismiss } from "./a11y";
 
 const MAX_HISTORY = 50;
 const DEFAULT_LIMIT = 1000;
+const EDITOR_MIN_HEIGHT = 80;
+const RESULTS_MIN_HEIGHT = 160; // room kept below the editor for toolbar + results
 const AC_WIDTH = 360;
 const AC_MAX_HEIGHT = 220;
-const FMT_OPTS = { language: "sql", keywordCase: "upper", indentStyle: "standard" };
+// DuckDB dialect: the generic "sql" dialect tokenises DuckDB operators
+// character by character, so Format turned `->>` into `- > >`, a lambda's
+// `->` into `- >`, `//` into `/ /` and `**` into `* *`, all of which then fail
+// to parse. It also rejected `$name` parameters outright.
+const FMT_OPTS = {
+  language: "duckdb",
+  keywordCase: "upper",
+  indentStyle: "standard",
+  paramTypes: { positional: true, numbered: ["$"], named: ["$"] },
+};
 function fmt(sql) { try { return formatSQL(sql, FMT_OPTS); } catch { return sql; } }
+
+// The panel unmounts on every tab switch (App renders it conditionally), so
+// anything kept only in component state was lost: switch away mid-run and the
+// result vanished even though the query finished. This module-level session
+// outlives the component, so coming back restores the last result, the error,
+// the view and the LIMIT toggle, and reattaches to a run still in flight.
+const session = {
+  results: null,
+  error: null,
+  viewMode: "table",
+  limitEnabled: true,
+  runSeq: 0,          // bumps per result, so the table resets its sort/filters/column state
+  running: null,      // { promise, controller } while a run is in flight
+};
+
+// LIMIT inside a comment or string literal is not a LIMIT clause: a query like
+// `SELECT * FROM big -- TODO limit` must still get the automatic row limit.
+function hasLimitClause(sql) {
+  return /\bLIMIT\b/i.test(stripSqlLiterals(sql));
+}
 
 
 function getHistory() {
@@ -64,6 +96,13 @@ function coerceParamValue(raw) {
   if (/^-?(\d+\.\d*|\.\d+)$/.test(v)) return Number(v);
   if (/^(true|false)$/i.test(v)) return v.toLowerCase() === "true";
   return raw;
+}
+
+function formatElapsed(ms) {
+  if (ms < 1000) return `${ms} ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(ms < 10000 ? 2 : 1)} s`;
+  const m = Math.floor(ms / 60000);
+  return `${m}m ${Math.round((ms % 60000) / 1000)}s`;
 }
 
 function timeAgo(ts) {
@@ -144,10 +183,11 @@ function SchemaSidebar({ tables, onInsert, maskingPolicies, onOpenModel }) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Filter tables..."
+          aria-label="Filter tables"
           style={sbSt.searchInput}
         />
         {search && (
-          <button onClick={() => setSearch("")} style={sbSt.searchClear}>&times;</button>
+          <button onClick={() => setSearch("")} style={sbSt.searchClear} aria-label="Clear table filter" title="Clear filter">&times;</button>
         )}
       </div>
       <div style={sbSt.list}>
@@ -182,10 +222,15 @@ function SchemaSidebar({ tables, onInsert, maskingPolicies, onOpenModel }) {
               return (
                 <div key={key}>
                   <div style={sbSt.tableRow}>
-                    <button onClick={() => toggleExpand(key)} style={sbSt.expandBtn}>
+                    <button
+                      onClick={() => toggleExpand(key)}
+                      style={sbSt.expandBtn}
+                      aria-expanded={Boolean(cols)}
+                      aria-label={`${cols ? "Hide" : "Show"} columns of ${key}`}
+                    >
                       {cols ? "\u25BE" : "\u25B8"}
                     </button>
-                    <button onClick={(e) => { if ((e.ctrlKey || e.metaKey) && onOpenModel) { e.preventDefault(); onOpenModel(key); } else { onInsert(key); } }} style={sbSt.tableName} title={`Insert ${key} (Ctrl+click to open model)`}>
+                    <button onClick={(e) => { if ((e.ctrlKey || e.metaKey) && onOpenModel) { e.preventDefault(); onOpenModel(key); } else { onInsert(key); } }} style={sbSt.tableName} title={`Insert ${key} (${MOD_KEY}+click to open model)`}>
                       {t.name}
                     </button>
                   </div>
@@ -194,7 +239,13 @@ function SchemaSidebar({ tables, onInsert, maskingPolicies, onOpenModel }) {
                       {cols.map((c) => {
                         const maskMethod = maskingPolicies && maskingPolicies[`${key}.${c.name}`];
                         return (
-                          <div key={c.name} style={sbSt.colItem} onClick={() => onInsert(c.name)} title={maskMethod ? `Insert ${c.name} (masked: ${maskMethod})` : `Insert ${c.name}`}>
+                          <div
+                            key={c.name}
+                            style={sbSt.colItem}
+                            onClick={() => onInsert(c.name)}
+                            {...clickable(() => onInsert(c.name), `Insert column ${c.name}`)}
+                            title={maskMethod ? `Insert ${c.name} (masked: ${maskMethod})` : `Insert ${c.name}`}
+                          >
                             {maskMethod && <span style={sbSt.maskIcon} title={`Masked: ${maskMethod}`}>&#x1F6E1;</span>}
                             <span style={sbSt.colName}>{c.name}</span>
                             <span style={sbSt.colType}>{c.type}</span>
@@ -215,12 +266,14 @@ function SchemaSidebar({ tables, onInsert, maskingPolicies, onOpenModel }) {
 }
 
 const sbSt = {
-  container: { width: "100%", height: "100%", overflow: "auto", background: "var(--havn-bg-tertiary)", fontSize: "12px" },
-  header: { padding: "8px 10px 4px", fontWeight: 600, fontSize: "11px", color: "var(--havn-text-secondary)", textTransform: "uppercase", letterSpacing: "0.3px" },
-  searchRow: { display: "flex", alignItems: "center", gap: "6px", padding: "2px 8px 6px", borderBottom: "1px solid var(--havn-border)" },
+  // Only the list scrolls, so the header and the filter box stay in reach
+  // however far down a long table list the user is.
+  container: { width: "100%", height: "100%", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--havn-bg-tertiary)", fontSize: "12px" },
+  header: { padding: "8px 10px 4px", fontWeight: 600, fontSize: "11px", color: "var(--havn-text-secondary)", textTransform: "uppercase", letterSpacing: "0.3px", flexShrink: 0 },
+  searchRow: { display: "flex", alignItems: "center", gap: "6px", padding: "2px 8px 6px", borderBottom: "1px solid var(--havn-border)", flexShrink: 0 },
   searchInput: { flex: 1, padding: "3px 6px", background: "var(--havn-bg)", border: "1px solid var(--havn-border-light)", borderRadius: "var(--havn-radius)", color: "var(--havn-text)", fontSize: "11px", fontFamily: "var(--havn-font-mono)", outline: "none", minWidth: 0 },
   searchClear: { background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "14px", padding: "0 2px", lineHeight: 1, flexShrink: 0 },
-  list: { padding: "4px 0" },
+  list: { padding: "4px 0", flex: 1, minHeight: 0, overflow: "auto" },
   empty: { padding: "16px 10px", color: "var(--havn-text-dim)", fontSize: "12px", textAlign: "center" },
   schemaRow: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 10px 2px", marginTop: "4px" },
   schemaName: { fontWeight: 600, color: "var(--havn-accent)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.3px" },
@@ -254,15 +307,22 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
       textareaRef.current.value = v;
     }
   };
-  const [limitEnabled, setLimitEnabled] = useState(true);
-  const queryAbortRef = useRef(null);
-  const [results, setResults] = useState(null);
-  const [queryRunning, setQueryRunning] = useState(false);
-  const [error, setError] = useState(null);
+  const [limitEnabled, setLimitEnabled] = useState(session.limitEnabled);
+  const queryAbortRef = useRef(session.running?.controller ?? null);
+  const [results, setResults] = useState(session.results);
+  const [runSeq, setRunSeq] = useState(session.runSeq);
+  const [queryRunning, setQueryRunning] = useState(!!session.running);
+  // Explain and Export have their own busy flags: sharing queryRunning turned
+  // the Run button into a Cancel that could not cancel an Explain.
+  const [explaining, setExplaining] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [formatting, setFormatting] = useState(false);
+  const [error, setError] = useState(session.error);
   const [history, setHistory] = useState(getHistory);
   const [tables, setTables] = useState([]);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [viewMode, setViewMode] = useState("table");
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [viewMode, setViewMode] = useState(session.viewMode);
   const [explainResult, setExplainResult] = useState(null);
   const textareaRef = useRef(null);
   const historyRef = useRef(null);
@@ -270,7 +330,23 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
   const [paramValues, setParamValues] = useState(getSavedParams);
   const setHintTrigger = useHintTriggerFn();
   const [sidebarWidth, onSidebarResize, onSidebarResizeStart] = useResizable("havn_query_sidebar_width", 200, 120, 400);
-  const [editorHeight, onEditorResize, onEditorResizeStart] = useResizable("havn_query_editor_height", 300, 80, 600);
+  const [editorHeight, onEditorResize, onEditorResizeStart, resetEditorHeight] = useResizable("havn_query_editor_height", 300, EDITOR_MIN_HEIGHT, 600);
+  // The stored editor height is capped by the space actually available, so the
+  // results (and the resize handle under the editor) can never be pushed off
+  // a short window. A 600px editor in a 500px panel used to hide both, with no
+  // way to drag it back.
+  const queryAreaRef = useRef(null);
+  const [queryAreaHeight, setQueryAreaHeight] = useState(0);
+  useEffect(() => {
+    const el = queryAreaRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(([entry]) => setQueryAreaHeight(entry.contentRect.height));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const visibleEditorHeight = queryAreaHeight
+    ? Math.min(editorHeight, Math.max(EDITOR_MIN_HEIGHT, queryAreaHeight - RESULTS_MIN_HEIGHT))
+    : editorHeight;
 
   // Autocomplete state
   const [acItems, setAcItems] = useState([]);
@@ -309,6 +385,38 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
     }, 400);
     return () => clearTimeout(t);
   }, [sql]);
+  // Unmounting cancels the debounce above, which dropped the last 400ms of
+  // typing whenever the user switched tabs straight away. Save on the way out.
+  useEffect(() => () => {
+    try { localStorage.setItem("havn_query_draft", sqlRef.current); } catch { /* ignore */ }
+  }, []);
+
+  // Mirror the UI state that should survive a remount. Results and errors are
+  // written to the session where they are produced instead: a run can finish
+  // while this instance is gone, and an effect here could overwrite its
+  // result with this instance's stale copy.
+  useEffect(() => {
+    session.viewMode = viewMode;
+    session.limitEnabled = limitEnabled;
+  }, [viewMode, limitEnabled]);
+
+  // Back on the panel while a run started earlier is still going: show it as
+  // running, and pick up its result (and the history it added) when it lands.
+  useEffect(() => {
+    const running = session.running;
+    if (!running) return undefined;
+    let alive = true;
+    running.promise.finally(() => {
+      if (!alive) return;
+      setResults(session.results);
+      setError(session.error);
+      setRunSeq(session.runSeq);
+      setHistory(getHistory());
+      queryAbortRef.current = null;
+      setQueryRunning(false);
+    });
+    return () => { alive = false; };
+  }, []);
 
   // Pick up prefilled query — polls briefly to catch async prefills (e.g. onboarding sets it after 200ms)
   useEffect(() => {
@@ -319,7 +427,20 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
       delete window.__havn_prefill_query;
       const query = typeof pf === "string" ? pf : pf.sql;
       const autoRun = typeof pf === "object" && pf.run;
-      setSql(fmt(query));
+      const next = fmt(query);
+      // "Query this table" replaces the editor. Whatever the user had there
+      // (or, while the panel is mounting, the saved draft the prefill skips
+      // restoring) goes to History first, so an unrun draft is not just gone.
+      let previous = sqlRef.current.trim();
+      if (!previous) {
+        try { previous = (localStorage.getItem("havn_query_draft") || "").trim(); } catch { /* ignore */ }
+      }
+      if (previous && previous !== next.trim()) {
+        const kept = [{ sql: previous, ts: new Date().toISOString() }, ...getHistory().filter((h) => h.sql !== previous)];
+        setHistory(kept);
+        saveHistory(kept);
+      }
+      setSql(next);
       if (autoRun) setTimeout(() => runQuery(), 0);
       return true;
     }
@@ -332,15 +453,10 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Close history dropdown on outside click
-  useEffect(() => {
-    if (!historyOpen) return;
-    const handler = (e) => {
-      if (historyRef.current && !historyRef.current.contains(e.target)) setHistoryOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [historyOpen]);
+  // Close the history dropdown on Escape or an outside click; Escape puts
+  // focus back on the History button rather than dropping it on <body>.
+  const historyBtnRef = useRef(null);
+  useDismiss(historyOpen, () => { setHistoryOpen(false); setConfirmClear(false); }, [historyRef], historyBtnRef);
 
   // The query to execute: the textarea selection if one exists, else the full editor content
   function getEditorQuery() {
@@ -383,8 +499,10 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
     });
   }
 
-  async function runQuery() {
-    if (queryRunning) return;
+  // `opts.limit: false` runs without the automatic LIMIT whatever the toggle
+  // says (the toggle's new state is not visible to this call yet).
+  async function runQuery(opts = {}) {
+    if (queryRunning || session.running) return;
     const { query, isSelection } = getEditorQuery();
     if (!query) return;
     const { params, missing } = collectParams(query);
@@ -400,40 +518,87 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
     const controller = new AbortController();
     queryAbortRef.current = controller;
     // Default limit goes in the request body; the server wraps the query safely
-    const applyLimit = limitEnabled && !/\bLIMIT\b/i.test(query);
+    const applyLimit = (opts.limit ?? limitEnabled) && !hasLimitClause(query);
     addOutput("info", `Running query${isSelection ? " (selection)" : ""}${applyLimit ? ` (limit ${DEFAULT_LIMIT})` : ""}...`);
-    try {
-      const data = await api.runQuery(query, controller.signal, {
-        params,
-        limit: applyLimit ? DEFAULT_LIMIT : undefined,
-      });
-      setResults(data);
-      const entry = { sql: query, ts: new Date().toISOString() };
-      if (params && Object.keys(params).length > 0) entry.params = params;
-      const newHistory = [entry, ...getHistory().filter((h) => h.sql !== query)];
-      setHistory(newHistory);
-      saveHistory(newHistory);
-      addOutput("info", `Query: ${data.rows.length} row${data.rows.length !== 1 ? "s" : ""} (${data.columns.length} cols)${data.truncated ? " — results capped for display. Use Export CSV for full results." : ""}`);
-    } catch (e) {
-      if (e.name === "AbortError" || controller.signal.aborted) {
-        addOutput("info", "Query cancelled.");
-      } else {
-        // Suppress "Warehouse not found" in the OUTPUT panel (not actionable); inline error still shows
-        const msg = e.message || "";
-        const isEmptyWarehouse =
-          msg.includes("Warehouse not found") || msg.includes("warehouse not initialized");
-        setError(msg);
-        if (!isEmptyWarehouse) {
-          addOutput("error", `Query error: ${msg}`);
+    // The run writes its outcome to the module session, not only to this
+    // component: if the user switches tabs mid-run, this instance unmounts
+    // and the next one picks the result up from there.
+    const run = (async () => {
+      const started = performance.now();
+      try {
+        const data = await api.runQuery(query, controller.signal, {
+          params,
+          limit: applyLimit ? DEFAULT_LIMIT : undefined,
+        });
+        data.elapsedMs = Math.round(performance.now() - started);
+        data.autoLimited = applyLimit;
+        session.results = data;
+        session.error = null;
+        session.runSeq += 1;
+        const entry = { sql: query, ts: new Date().toISOString() };
+        if (params && Object.keys(params).length > 0) entry.params = params;
+        const newHistory = [entry, ...getHistory().filter((h) => h.sql !== query)];
+        setHistory(newHistory);
+        saveHistory(newHistory);
+        addOutput("info", `Query: ${data.rows.length} row${data.rows.length !== 1 ? "s" : ""} (${data.columns.length} cols)${data.truncated ? " — results capped for display. Use Export CSV for full results." : ""}`);
+      } catch (e) {
+        if (e.name === "AbortError" || controller.signal.aborted) {
+          addOutput("info", "Query cancelled.");
+        } else {
+          // Suppress "Warehouse not found" in the OUTPUT panel (not actionable); inline error still shows
+          const msg = e.message || "";
+          const isEmptyWarehouse =
+            msg.includes("Warehouse not found") || msg.includes("warehouse not initialized");
+          // The previous query's rows must not stay on screen under this
+          // query's error, where they read as this query's result.
+          session.results = null;
+          session.error = msg;
+          if (!isEmptyWarehouse) {
+            addOutput("error", `Query error: ${msg}`);
+          }
         }
+      } finally {
+        session.running = null;
       }
-    } finally {
-      queryAbortRef.current = null;
-      setQueryRunning(false);
+    })();
+    session.running = { promise: run, controller };
+    await run;
+    setResults(session.results);
+    setError(session.error);
+    setRunSeq(session.runSeq);
+    queryAbortRef.current = null;
+    setQueryRunning(false);
+  }
+
+  // Replace the whole buffer as an edit the browser can undo. setSql assigns
+  // textarea.value, which wipes the undo history, so a Format (or a History
+  // pick) the user did not want could not be taken back with Ctrl+Z.
+  function replaceAllUndoable(text) {
+    const ta = textareaRef.current;
+    if (ta && typeof document.execCommand === "function") {
+      acSuppressRef.current = true;
+      let ok = false;
+      try {
+        ta.focus();
+        ta.select();
+        ok = document.execCommand("insertText", false, text);
+      } catch {
+        ok = false;
+      } finally {
+        acSuppressRef.current = false;
+      }
+      // execCommand fires the textarea's input event, which already synced
+      // sqlRef and state through onInput.
+      if (ok && ta.value === text) {
+        hideCompletions();
+        return;
+      }
     }
+    setSql(text);
   }
 
   async function explainQuery() {
+    if (explaining) return;
     const { query } = getEditorQuery();
     if (!query) return;
     const { params, missing } = collectParams(query);
@@ -441,7 +606,7 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
       reportMissingParams(missing);
       return;
     }
-    setQueryRunning(true);
+    setExplaining(true);
     setError(null);
     setExplainResult(null);
     try {
@@ -450,28 +615,34 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
       setViewMode("plan");
       addOutput("info", "EXPLAIN plan generated");
     } catch (e) {
+      session.error = e.message;
       setError(e.message);
+      // The old plan was cleared above; staying on the Plan view would leave
+      // the results area blank under the error.
+      setViewMode((m) => (m === "plan" ? "table" : m));
       addOutput("error", `Explain error: ${e.message}`);
     } finally {
-      setQueryRunning(false);
+      setExplaining(false);
     }
   }
 
   async function formatQuery() {
-    if (!sql.trim()) return;
+    const before = sqlRef.current;
+    if (!before.trim() || formatting) return;
     // Step 1: sql-formatter for layout (line breaks, indentation)
-    const layoutFormatted = fmt(sql);
+    const layoutFormatted = fmt(before);
     // Step 2: SQLFluff for keyword casing and DuckDB-specific fixes
+    let next = layoutFormatted;
+    setFormatting(true);
     try {
       const result = await api.formatSql(layoutFormatted);
-      if (result.formatted && result.formatted.trim()) {
-        setSql(result.formatted);
-      } else {
-        setSql(layoutFormatted);
-      }
-    } catch {
-      setSql(layoutFormatted);
-    }
+      if (result.formatted && result.formatted.trim()) next = result.formatted;
+    } catch { /* keep the layout-only result */ }
+    finally { setFormatting(false); }
+    // The round trip to the server takes a moment. Anything typed meanwhile
+    // would be overwritten by a format of the older text, so drop it instead.
+    if (sqlRef.current !== before) return;
+    if (next !== before) replaceAllUndoable(next);
   }
 
   function handleKeyDown(e) {
@@ -617,10 +788,20 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
     }
     const start = ta.selectionStart;
     const end = ta.selectionEnd;
-    const before = sql.substring(0, start);
-    const after = sql.substring(end);
-    const newSql = before + text + after;
-    setSql(newSql);
+    const expected = sqlRef.current.substring(0, start) + text + sqlRef.current.substring(end);
+    // Through the browser's editing command, like a completion, so a table
+    // inserted from the sidebar is one Ctrl+Z away instead of wiping undo.
+    ta.focus();
+    ta.setSelectionRange(start, end);
+    acSuppressRef.current = true;
+    let inserted = false;
+    try { inserted = document.execCommand("insertText", false, text); } catch { /* unsupported */ }
+    acSuppressRef.current = false;
+    if (inserted && ta.value === expected) {
+      hideCompletions();
+      return;
+    }
+    setSql(expected);
     setTimeout(() => {
       ta.focus();
       ta.selectionStart = ta.selectionEnd = start + text.length;
@@ -653,20 +834,39 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
 
   const suggestions = getSuggestions();
   const detectedParams = detectParams(sql);
+  // Masking is per table.column; the result grid only knows column names.
+  const maskedColumns = useMemo(() => {
+    const acc = {};
+    for (const [key, method] of Object.entries(maskingPolicies || {})) {
+      const col = key.split(".").pop();
+      if (!acc[col]) acc[col] = method;
+    }
+    return acc;
+  }, [maskingPolicies]);
 
   return (
-    <div style={st.container}>
+    <div
+      style={st.container}
+      // Run from anywhere in the panel (a parameter box, the results), not
+      // only from the editor. The editor and inputs that handle the keys
+      // themselves mark the event, and are left alone.
+      onKeyDown={(e) => {
+        if (e.defaultPrevented || e.key !== "Enter" || !(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+        runQuery();
+      }}
+    >
       <div style={st.main}>
         {/* Schema sidebar */}
         <div data-havn-hint="query-sidebar" data-havn-guide="query-tables" style={{ display: "flex", flexDirection: "column", width: sidebarWidth, flexShrink: 0 }}>
           <SchemaSidebar tables={tables} onInsert={insertAtCursor} maskingPolicies={maskingPolicies} onOpenModel={onOpenModel} />
         </div>
-        <ResizeHandle direction="horizontal" onResize={onSidebarResize} onResizeStart={() => { hideCompletions(); onSidebarResizeStart(); }} />
+        <ResizeHandle direction="horizontal" label="Resize table list" onResize={onSidebarResize} onResizeStart={() => { hideCompletions(); onSidebarResizeStart(); }} />
 
         {/* Query area */}
-        <div style={st.queryArea}>
+        <div ref={queryAreaRef} style={st.queryArea}>
           {/* SQL textarea */}
-          <div style={{ ...st.editorWrapper, height: editorHeight }}>
+          <div style={{ ...st.editorWrapper, height: visibleEditorHeight }}>
             <textarea
               ref={textareaRef}
               defaultValue=""
@@ -722,7 +922,13 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
               </div>
             )}
           </div>
-          <ResizeHandle direction="vertical" onResize={onEditorResize} onResizeStart={() => { hideCompletions(); onEditorResizeStart(); }} />
+          <ResizeHandle
+            direction="vertical"
+            label="Resize editor"
+            onResize={onEditorResize}
+            onResizeStart={() => { hideCompletions(); onEditorResizeStart(visibleEditorHeight); }}
+            onDoubleClick={resetEditorHeight}
+          />
           <div style={st.shortcutHint}>
             <span style={st.shortcutKey}>{MOD_KEY}+Enter</span> run selection or all &nbsp;·&nbsp;
             <span style={st.shortcutKey}>{MOD_KEY}+Shift+F</span> format &nbsp;·&nbsp;
@@ -743,6 +949,11 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
                   <input
                     value={paramValues[name] ?? ""}
                     onChange={(e) => setParamValue(name, e.target.value)}
+                    // Fill in the value, press Enter, see rows: no trip back
+                    // to the editor or the mouse just to run.
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { e.preventDefault(); runQuery(); }
+                    }}
                     placeholder="value"
                     style={st.paramInput}
                     spellCheck={false}
@@ -759,14 +970,14 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
                 Cancel
               </button>
             ) : (
-              <button onClick={runQuery} disabled={!sql.trim()} style={!sql.trim() ? st.runBtnDisabled : st.runBtn} aria-label="Run query" title="Run the query, or only the selected text if you have a selection">
+              <button onClick={() => runQuery()} disabled={!sql.trim()} style={!sql.trim() ? st.runBtnDisabled : st.runBtn} aria-label="Run query" title="Run the query, or only the selected text if you have a selection">
                 Run <span style={st.shortcut}>{MOD_KEY}+Enter</span>
               </button>
             )}
-            <button onClick={explainQuery} disabled={queryRunning || !sql.trim()} style={st.fmtBtn} title="Show query execution plan">
-              Explain
+            <button onClick={explainQuery} disabled={explaining || !sql.trim()} style={st.fmtBtn} title="Show query execution plan">
+              {explaining ? "Explaining…" : "Explain"}
             </button>
-            <button onClick={formatQuery} disabled={!sql.trim()} style={st.fmtBtn} title={`Format SQL (${MOD_KEY}+Shift+F)`}>
+            <button onClick={formatQuery} disabled={formatting || !sql.trim()} style={st.fmtBtn} title={`Format SQL (${MOD_KEY}+Shift+F)`}>
               Format <span style={st.shortcut}>{MOD_KEY}+Shift+F</span>
             </button>
             <button
@@ -778,12 +989,14 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
                 color: limitEnabled ? "var(--havn-accent)" : undefined,
               }}
               title={limitEnabled ? `Auto-limit queries to ${DEFAULT_LIMIT} rows (click to disable)` : `Enable auto-limit to ${DEFAULT_LIMIT} rows`}
+              aria-pressed={limitEnabled}
             >
               LIMIT {DEFAULT_LIMIT}
             </button>
 
             <button
               onClick={async () => {
+                if (exporting) return;
                 const { query } = getEditorQuery();
                 if (!query) return;
                 const { params, missing } = collectParams(query);
@@ -791,24 +1004,31 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
                   reportMissingParams(missing);
                   return;
                 }
+                setExporting(true);
                 addOutput("info", "Exporting to CSV (no row limit)...");
                 try {
                   await api.exportCsv(query, params);
                   addOutput("success", "CSV export downloaded");
                 } catch (e) {
+                  // Shown here too: the output panel is often collapsed, and
+                  // a click that silently does nothing reads as a dead button.
+                  session.error = `Export failed: ${e.message}`;
+                  setError(session.error);
                   addOutput("error", `Export failed: ${e.message}`);
+                } finally {
+                  setExporting(false);
                 }
               }}
-              disabled={queryRunning || !sql.trim()}
+              disabled={exporting || !sql.trim()}
               style={st.fmtBtn}
               title="Export full query results as CSV (no row limit)"
             >
-              Export CSV
+              {exporting ? "Exporting…" : "Export CSV"}
             </button>
 
             {/* History dropdown */}
             <div ref={historyRef} style={st.historyWrapper}>
-              <button onClick={() => setHistoryOpen(!historyOpen)} style={st.historyBtn} title="Query history" aria-label="Query history" aria-expanded={historyOpen}>
+              <button ref={historyBtnRef} onClick={() => { setHistoryOpen(!historyOpen); setConfirmClear(false); }} style={st.historyBtn} title="Query history" aria-label="Query history" aria-expanded={historyOpen} aria-haspopup="true">
                 History {history.length > 0 && <span style={st.historyCount}>{history.length}</span>}
               </button>
               {historyOpen && (
@@ -816,28 +1036,37 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
                   <div style={st.historyHeader}>
                     <span>Recent Queries</span>
                     {history.length > 0 && (
+                      // Two clicks: one stray click used to wipe every saved query.
                       <button
-                        onClick={() => { setHistory([]); saveHistory([]); }}
-                        style={st.historyClear}
+                        onClick={() => {
+                          if (!confirmClear) { setConfirmClear(true); return; }
+                          setHistory([]); saveHistory([]); setConfirmClear(false);
+                        }}
+                        onBlur={() => setConfirmClear(false)}
+                        style={confirmClear ? { ...st.historyClear, color: "var(--havn-red)" } : st.historyClear}
                         title="Clear query history"
                       >
-                        Clear
+                        {confirmClear ? `Clear all ${history.length}?` : "Clear"}
                       </button>
                     )}
                   </div>
                   {history.length === 0 ? (
                     <div style={st.historyEmpty}>No history yet</div>
                   ) : (
-                    history.slice(0, 20).map((h, i) => (
+                    // All of it: the badge counts up to MAX_HISTORY entries, and
+                    // listing only 20 made the rest unreachable.
+                    history.map((h, i) => (
                       <button
-                        key={i}
+                        key={`${h.ts}:${i}`}
                         onClick={() => {
-                          setSql(h.sql);
+                          setHistoryOpen(false);
+                          // Undoable, so a misclick does not cost the current draft.
+                          replaceAllUndoable(h.sql);
                           if (h.params) {
                             for (const [k, v] of Object.entries(h.params)) setParamValue(k, String(v));
                           }
-                          setHistoryOpen(false);
                         }}
+                        title={h.sql}
                         style={st.historyItem}
                         onMouseEnter={(e) => e.currentTarget.style.background = "var(--havn-btn-bg)"}
                         onMouseLeave={(e) => e.currentTarget.style.background = "none"}
@@ -876,15 +1105,17 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
 
           {/* Error */}
           {error && (
-            <div style={st.error}>
+            <div style={st.error} role="alert">
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: "8px", minWidth: 0 }}>
                   <span style={st.errorLabel}>Error</span>
                   <span style={st.errorMessage}>{error}</span>
                 </div>
                 <button
-                  onClick={() => setError(null)}
+                  onClick={() => { session.error = null; setError(null); }}
                   style={st.errorDismiss}
+                  aria-label="Dismiss error"
+                  title="Dismiss"
                 >{"\u00D7"}</button>
               </div>
             </div>
@@ -918,22 +1149,56 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
             </div>
           )}
           {viewMode === "table" && results && (
-            <div style={st.results}>
+            // The previous result stays up while a new run is going, dimmed
+            // and marked, so it is not mistaken for the new query's rows.
+            <div style={queryRunning ? { ...st.results, ...st.resultsStale } : st.results} aria-busy={queryRunning}>
               <div style={st.resultsHeader}>
-                <span style={st.resultsCount}>{results.rows.length} row{results.rows.length !== 1 ? "s" : ""}</span>
+                <span style={st.resultsCount}>{results.rows.length.toLocaleString()} row{results.rows.length !== 1 ? "s" : ""}</span>
                 <span style={st.resultsSep}>&middot;</span>
                 <span>{results.columns.length} col{results.columns.length !== 1 ? "s" : ""}</span>
-                {results.truncated && <span style={st.resultsTruncated}>results capped</span>}
+                {typeof results.elapsedMs === "number" && (
+                  <>
+                    <span style={st.resultsSep}>&middot;</span>
+                    <span title="Time from Run to rows on screen, including the transfer">{formatElapsed(results.elapsedMs)}</span>
+                  </>
+                )}
+                {results.truncated && (
+                  results.autoLimited ? (
+                    <span style={st.resultsTruncated}>
+                      First {results.rows.length.toLocaleString()} rows (LIMIT {DEFAULT_LIMIT} is on)
+                      {!queryRunning && (
+                        <button
+                          type="button"
+                          style={st.resultsTruncatedBtn}
+                          onClick={() => { setLimitEnabled(false); runQuery({ limit: false }); }}
+                          title={`Turn off the automatic LIMIT ${DEFAULT_LIMIT} and run again`}
+                        >
+                          Run without limit
+                        </button>
+                      )}
+                    </span>
+                  ) : (
+                    <span
+                      style={st.resultsTruncated}
+                      title="The browser shows at most this many rows. Export CSV writes every row."
+                    >
+                      First {results.rows.length.toLocaleString()} rows shown, more not loaded (Export CSV has all of them)
+                    </span>
+                  )
+                )}
+                {queryRunning && <span style={st.resultsRunning}>Running query…</span>}
               </div>
               <div style={st.resultsBody}>
-                <SortableTable columns={results.columns} rows={results.rows} columnTypes={results.column_types} maskedColumns={maskingPolicies ? Object.entries(maskingPolicies).reduce((acc, [key, method]) => { const col = key.split(".").pop(); if (!acc[col]) acc[col] = method; return acc; }, {}) : undefined} />
+                {/* Keyed per result: sort, filters and pinned columns belong to
+                    the result they were set on, not to the next query's columns. */}
+                <SortableTable key={runSeq} fill columns={results.columns} rows={results.rows} columnTypes={results.column_types} maskedColumns={maskedColumns} />
               </div>
             </div>
           )}
           {viewMode === "chart" && results && (
-            <div style={st.results}>
+            <div style={queryRunning ? { ...st.results, ...st.resultsStale } : st.results} aria-busy={queryRunning}>
               <div style={st.resultsBody}>
-                <ChartPanel columns={results.columns} rows={results.rows} />
+                <ChartPanel key={runSeq} columns={results.columns} rows={results.rows} />
               </div>
             </div>
           )}
@@ -941,8 +1206,10 @@ export default function QueryPanel({ addOutput, onOpenModel }) {
           {/* Empty state — no results yet */}
           {!results && !explainResult && !error && (
             <div style={st.emptyState}>
-              <div style={st.emptyText}>
-                {sql.trim() ? `Press ${MOD_KEY}+Enter to run your query` : "Write a SQL query above to get started"}
+              <div style={st.emptyText} role="status">
+                {queryRunning
+                  ? "Running query…"
+                  : sql.trim() ? `Press ${MOD_KEY}+Enter to run your query` : "Write a SQL query above to get started"}
               </div>
             </div>
           )}
@@ -1042,17 +1309,24 @@ const st = {
   suggestLabel: { fontSize: "11px", color: "var(--havn-text-dim)", fontWeight: 500 },
   suggestBtn: { padding: "3px 10px", background: "var(--havn-bg-secondary)", border: "1px solid var(--havn-border)", borderRadius: "var(--havn-radius-lg)", color: "var(--havn-accent)", cursor: "pointer", fontSize: "11px", fontFamily: "var(--havn-font-mono)", fontWeight: 500 },
 
-  error: { padding: "10px 12px", background: "color-mix(in srgb, var(--havn-red) 8%, transparent)", borderLeft: "3px solid var(--havn-red)", margin: "0", color: "var(--havn-text)", fontSize: "12px", fontFamily: "var(--havn-font-mono)", whiteSpace: "pre-wrap", lineHeight: 1.5 },
+  // Capped and scrollable: a long DuckDB error (a binder error lists every
+  // candidate column) used to push the results off the bottom of the panel.
+  error: { padding: "10px 12px", background: "color-mix(in srgb, var(--havn-red) 8%, transparent)", borderLeft: "3px solid var(--havn-red)", margin: "0", color: "var(--havn-text)", fontSize: "12px", fontFamily: "var(--havn-font-mono)", whiteSpace: "pre-wrap", lineHeight: 1.5, maxHeight: "35%", overflow: "auto", flexShrink: 0 },
   errorLabel: { fontWeight: 600, color: "var(--havn-red)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.3px", flexShrink: 0 },
   errorMessage: { color: "var(--havn-red)", wordBreak: "break-word" },
   errorDismiss: { background: "none", border: "none", color: "var(--havn-text-dim)", cursor: "pointer", fontSize: "16px", lineHeight: 1, flexShrink: 0, padding: "0 2px" },
 
-  results: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" },
-  resultsHeader: { display: "flex", alignItems: "center", gap: "6px", padding: "6px 12px", fontSize: "11px", color: "var(--havn-text-dim)", borderBottom: "1px solid var(--havn-border)", flexShrink: 0, fontFamily: "var(--havn-font-mono)" },
+  results: { flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" },
+  resultsHeader: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px", padding: "6px 12px", fontSize: "11px", color: "var(--havn-text-dim)", borderBottom: "1px solid var(--havn-border)", flexShrink: 0, fontFamily: "var(--havn-font-mono)" },
   resultsCount: { color: "var(--havn-text-secondary)", fontWeight: 500 },
   resultsSep: { opacity: 0.4 },
-  resultsTruncated: { marginLeft: "4px", color: "var(--havn-yellow)", fontSize: "10px", fontWeight: 500 },
-  resultsBody: { flex: 1, overflow: "auto", display: "flex", flexDirection: "column" },
+  resultsTruncated: { marginLeft: "4px", color: "var(--havn-yellow)", fontSize: "11px", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" },
+  resultsTruncatedBtn: { background: "none", border: "1px solid currentColor", borderRadius: "var(--havn-radius)", color: "inherit", cursor: "pointer", font: "inherit", fontSize: "10px", padding: "1px 6px" },
+  resultsRunning: { marginLeft: "auto", color: "var(--havn-accent)", fontWeight: 500 },
+  resultsStale: { opacity: 0.55 },
+  // No scrolling here: the table (fill mode) is the one scroll container, so
+  // its header stays pinned. A second scroller around it defeated that.
+  resultsBody: { flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" },
 
   emptyState: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "32px" },
   emptyText: { fontSize: "13px", color: "var(--havn-text-dim)", fontFamily: "var(--havn-font-mono)" },

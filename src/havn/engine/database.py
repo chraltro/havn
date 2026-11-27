@@ -184,7 +184,28 @@ def ensure_schemas(conn: duckdb.DuckDBPyConnection, schemas: list[str]) -> None:
 
 
 def _is_ducklake_connection(conn: duckdb.DuckDBPyConnection) -> bool:
-    """True if this connection has a DuckLake catalog attached."""
+    """True if this connection has a DuckLake catalog attached.
+
+    Answered from the catalog first. Calling ``ducklake_snapshots()`` on a
+    plain DuckDB connection raises, and inside an open transaction DuckDB 1.5
+    aborts the caller's whole transaction on that error, so every statement
+    after the check failed ("Current transaction is aborted"). That broke
+    every live-model advance on a plain warehouse.
+    """
+    try:
+        row = conn.execute(
+            "SELECT type FROM duckdb_databases() WHERE database_name = 'warehouse'"
+        ).fetchone()
+    except Exception:
+        return False
+    if row is None:
+        return False
+    kind = str(row[0]).lower()
+    if kind == "ducklake":
+        return True
+    if kind == "duckdb":
+        return False
+    # Any other attach type: ask DuckLake itself, as before.
     try:
         conn.execute("SELECT 1 FROM ducklake_snapshots('warehouse') LIMIT 1").fetchone()
         return True

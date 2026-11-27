@@ -36,8 +36,10 @@ export default function Hint({ onNavigate }) {
     }
 
     const rect = target.getBoundingClientRect();
-    const cardW = 300;
-    const cardH = 120;
+    // The card's real size once it is on screen: a fixed 120px guess put a
+    // hint with longer text over the very control it points at.
+    const cardW = cardRef.current?.offsetWidth || 300;
+    const cardH = cardRef.current?.offsetHeight || 120;
     const gap = 10;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
@@ -68,6 +70,9 @@ export default function Hint({ onNavigate }) {
 
   useEffect(() => {
     computePosition();
+    // Once more after the card has rendered and can be measured.
+    const raf = requestAnimationFrame(() => computePosition());
+    return () => cancelAnimationFrame(raf);
   }, [computePosition]);
 
   useEffect(() => {
@@ -95,6 +100,7 @@ export default function Hint({ onNavigate }) {
   return (
     <div
       ref={cardRef}
+      role="status"
       style={{
         ...styles.card,
         ...pos,
@@ -178,7 +184,8 @@ const styles = {
     background: "none",
     border: "1px solid var(--havn-border-light)",
     borderRadius: "var(--havn-radius, 4px)",
-    color: "var(--havn-text-dim)",
+    // text-dim on the card background was too faint to read as a button.
+    color: "var(--havn-text-secondary)",
     cursor: "pointer",
     fontSize: "11px",
   },

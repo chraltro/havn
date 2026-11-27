@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { api } from "./api";
+import { clickable } from "./a11y";
 
 const SEVERITY_COLORS = {
   breaking: "var(--havn-red)",
@@ -270,6 +271,8 @@ export default function SentinelPanel() {
                 <div
                   key={i}
                   onClick={() => loadImpacts(d.diff_id)}
+                  {...clickable(() => loadImpacts(d.diff_id))}
+                  aria-current={selectedDiff === d.diff_id ? "true" : undefined}
                   style={{
                     ...st.diffListItem,
                     background: selectedDiff === d.diff_id ? "var(--havn-bg-tertiary)" : "transparent",
@@ -331,6 +334,8 @@ export default function SentinelPanel() {
                 <div
                   key={i}
                   onClick={() => loadHistory(s.name)}
+                  {...clickable(() => loadHistory(s.name))}
+                  aria-current={selectedSource === s.name ? "true" : undefined}
                   style={{
                     ...st.diffListItem,
                     background: selectedSource === s.name ? "var(--havn-bg-tertiary)" : "transparent",

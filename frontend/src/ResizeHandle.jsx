@@ -1,12 +1,28 @@
 import React, { useState, useCallback, useRef } from "react";
 
-export default function ResizeHandle({ direction, onResize, onResizeStart }) {
+// Keyboard step for the arrow keys; Shift moves further.
+const KEY_STEP = 20;
+const KEY_STEP_LARGE = 80;
+
+export default function ResizeHandle({ direction, onResize, onResizeStart, onDoubleClick, label }) {
   const [dragging, setDragging] = useState(false);
   const [hovered, setHovered] = useState(false);
   const startPos = useRef(0);
   const overlayRef = useRef(null);
 
   const isHorizontal = direction === "horizontal";
+
+  // Arrow keys resize, so splits are not mouse-only. Each press is a fresh
+  // resize from the current size: start, then one delta.
+  const handleKeyDown = useCallback((e) => {
+    const grow = isHorizontal ? "ArrowRight" : "ArrowDown";
+    const shrink = isHorizontal ? "ArrowLeft" : "ArrowUp";
+    if (e.key !== grow && e.key !== shrink) return;
+    e.preventDefault();
+    const step = e.shiftKey ? KEY_STEP_LARGE : KEY_STEP;
+    if (onResizeStart) onResizeStart();
+    onResize(e.key === grow ? step : -step);
+  }, [isHorizontal, onResize, onResizeStart]);
 
   const handleMouseDown = useCallback((e) => {
     e.preventDefault();
@@ -85,8 +101,16 @@ export default function ResizeHandle({ direction, onResize, onResizeStart }) {
   return (
     <div
       data-havn-resize-handle=""
+      role="separator"
+      // A handle that resizes horizontally is a vertical bar, and vice versa.
+      aria-orientation={isHorizontal ? "vertical" : "horizontal"}
+      aria-label={label || (isHorizontal ? "Resize panel width" : "Resize panel height")}
+      tabIndex={0}
+      title={onDoubleClick ? "Drag to resize, double-click to reset" : "Drag to resize"}
       style={containerStyle}
       onMouseDown={handleMouseDown}
+      onKeyDown={handleKeyDown}
+      onDoubleClick={onDoubleClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >

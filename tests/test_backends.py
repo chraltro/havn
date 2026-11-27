@@ -309,3 +309,24 @@ def test_open_warehouse_rejects_bad_type():
 
     with pytest.raises(TypeError):
         open_warehouse("not a config")  # type: ignore[arg-type]
+
+
+# --- DuckLake detection ------------------------------------------------------
+
+
+@pytest.mark.parametrize("filename", ["warehouse.duckdb", "w.duckdb"])
+def test_ducklake_check_leaves_an_open_transaction_usable(tmp_path, filename):
+    """Probing ducklake_snapshots() on a plain warehouse raised, and inside an
+    open transaction DuckDB 1.5 then aborted the whole transaction: every live
+    model advance failed with "Current transaction is aborted"."""
+    from havn.engine.database import _is_ducklake_connection
+
+    conn = duckdb.connect(str(tmp_path / filename))
+    try:
+        conn.execute("BEGIN")
+        assert _is_ducklake_connection(conn) is False
+        conn.execute("CREATE TABLE after_check (a INTEGER)")
+        conn.execute("COMMIT")
+        assert conn.execute("SELECT count(*) FROM after_check").fetchone() == (0,)
+    finally:
+        conn.close()

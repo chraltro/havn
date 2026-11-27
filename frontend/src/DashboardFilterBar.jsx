@@ -7,8 +7,11 @@ import { useDashboard } from "./DashboardContext";
  * Supports: dropdown, multi_select, date_range, text, number_range, schema.
  */
 
-// Shared cache for options_sql results, keyed by SQL string.
+// Shared cache for options_sql results, keyed by SQL string: { opts, at }.
+// Entries go stale after a minute, so values that reach the warehouse later
+// show up the next time the filter loads instead of only after a page reload.
 const _optionsSqlCache = new Map();
+const OPTIONS_TTL_MS = 60 * 1000;
 
 export default function DashboardFilterBar() {
   const { dashboard, globalFilters, setFilter, parameters, setParameter, clearCrossFilter, crossFilter, savedViews, saveView, loadView, deleteView, readOnly, loadFilterOptions } = useDashboard();
@@ -113,8 +116,14 @@ function SavedViewsDropdown({ savedViews, onSave, onLoad, onDelete }) {
               </button>
               <button
                 style={st.viewDeleteBtn}
-                onClick={(e) => { e.stopPropagation(); onDelete(v.id); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // No app confirm dialog reaches the filter bar (and it would
+                  // sit under a fullscreen canvas), so use the browser's.
+                  if (window.confirm(`Delete the saved view "${v.name}"?`)) onDelete(v.id);
+                }}
                 title="Delete view"
+                aria-label={`Delete view ${v.name}`}
               >
                 ×
               </button>
@@ -185,34 +194,48 @@ const DATE_PRESETS = [
 
 function FilterControl({ filter, value, onChange, loadOptions }) {
   const [options, setOptions] = useState([]);
+  const [optionsError, setOptionsError] = useState(null);
+  const [retry, setRetry] = useState(0);
   const cacheRef = useRef(_optionsSqlCache);
 
   // Load options from SQL (cached) or static list. A published view has no
   // SQL: it asks the server to run the filter's saved options query.
   useEffect(() => {
+    let cancelled = false;
+    // A failed load used to leave an empty list that looked like "no values".
+    const failed = (e) => {
+      console.error(`Failed to load options for filter "${filter.label}":`, e);
+      if (!cancelled) setOptionsError(e?.message || "Couldn't load the options");
+    };
+    setOptionsError(null);
     if (loadOptions) {
       if (!filter.has_options && !filter.options) return undefined;
-      let cancelled = false;
-      loadOptions(filter).then(opts => { if (!cancelled) setOptions(opts || []); }).catch(() => {});
+      loadOptions(filter).then(opts => { if (!cancelled) setOptions(opts || []); }).catch(failed);
       return () => { cancelled = true; };
     }
     if (filter.options_sql) {
       const cached = cacheRef.current.get(filter.options_sql);
-      if (cached) {
-        setOptions(cached);
-        return;
-      }
+      if (cached) setOptions(cached.opts);
+      if (cached && Date.now() - cached.at < OPTIONS_TTL_MS) return undefined;
+      // Missing or stale: (re)load, showing any stale values meanwhile.
       api.runQuery(filter.options_sql).then(result => {
-        if (result?.rows) {
-          const opts = result.rows.map(r => String(r[0] ?? ""));
-          cacheRef.current.set(filter.options_sql, opts);
-          setOptions(opts);
-        }
-      }).catch(() => {});
+        const opts = (result?.rows || []).map(r => String(r[0] ?? ""));
+        cacheRef.current.set(filter.options_sql, { opts, at: Date.now() });
+        if (!cancelled) setOptions(opts);
+      }).catch(failed);
+      return () => { cancelled = true; };
     } else if (filter.options) {
       setOptions(filter.options);
     }
-  }, [filter.options_sql, filter.options, filter.id, filter.has_options, loadOptions]); // eslint-disable-line react-hooks/exhaustive-deps
+    return undefined;
+  }, [filter.options_sql, filter.options, filter.id, filter.has_options, loadOptions, retry]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const optionsNote = optionsError && (
+    <span role="alert" style={st.optionsError} title={optionsError}>
+      Options didn't load.{" "}
+      <button style={st.optionsRetryBtn} onClick={() => setRetry(n => n + 1)}>Retry</button>
+    </span>
+  );
 
   switch (filter.type) {
     case "dropdown":
@@ -223,15 +246,17 @@ function FilterControl({ filter, value, onChange, loadOptions }) {
             style={st.filterSelect}
             value={value || ""}
             onChange={(e) => onChange(e.target.value || null)}
+            aria-label={filter.label}
           >
             <option value="">All</option>
             {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
           </select>
+          {optionsNote}
         </div>
       );
 
     case "multi_select":
-      return <MultiSelectFilter filter={filter} options={options} value={value} onChange={onChange} />;
+      return <MultiSelectFilter filter={filter} options={options} value={value} onChange={onChange} note={optionsNote} />;
 
     case "date_range":
       return <DateRangeFilter filter={filter} value={value} onChange={onChange} />;
@@ -334,6 +359,7 @@ function DateRangeFilter({ filter, value, onChange }) {
           value={from}
           onChange={handleFrom}
           placeholder="From"
+          aria-label={`${filter.label} from`}
         />
         <span style={{ fontSize: 11, color: "var(--havn-text-secondary)" }}>/</span>
         <input
@@ -342,6 +368,7 @@ function DateRangeFilter({ filter, value, onChange }) {
           value={to}
           onChange={handleTo}
           placeholder="To"
+          aria-label={`${filter.label} to`}
         />
       </div>
     </div>
@@ -357,7 +384,7 @@ function isPresetActive(preset, value) {
 
 // ---------- MultiSelectFilter ----------
 
-function MultiSelectFilter({ filter, options, value, onChange }) {
+function MultiSelectFilter({ filter, options, value, onChange, note }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const ref = useRef(null);
@@ -444,6 +471,7 @@ function MultiSelectFilter({ filter, options, value, onChange }) {
           </div>
         )}
       </div>
+      {note}
     </div>
   );
 }
@@ -501,11 +529,11 @@ function ParamControl({ param, value, onChange }) {
     <div style={st.filterGroup}>
       <label style={st.filterLabel}>{param.label || param.name}</label>
       {param.type === "date" ? (
-        <input type="date" style={st.filterInput} value={value || ""} onChange={(e) => onChange(e.target.value)} />
+        <input type="date" style={st.filterInput} value={value || ""} onChange={(e) => onChange(e.target.value)} aria-label={param.label || param.name} />
       ) : param.type === "number" ? (
-        <input type="number" style={{ ...st.filterInput, width: 80 }} value={value || ""} onChange={(e) => onChange(e.target.value)} />
+        <input type="number" style={{ ...st.filterInput, width: 80 }} value={value || ""} onChange={(e) => onChange(e.target.value)} aria-label={param.label || param.name} />
       ) : (
-        <input style={st.filterInput} value={value || ""} onChange={(e) => onChange(e.target.value)} placeholder={param.name} />
+        <input style={st.filterInput} value={value || ""} onChange={(e) => onChange(e.target.value)} placeholder={param.name} aria-label={param.label || param.name} />
       )}
     </div>
   );
@@ -575,6 +603,19 @@ const st = {
     padding: "0 2px",
     lineHeight: 1,
     opacity: 0.8,
+  },
+  optionsError: {
+    fontSize: 10,
+    color: "var(--havn-red)",
+  },
+  optionsRetryBtn: {
+    background: "none",
+    border: "none",
+    padding: 0,
+    fontSize: 10,
+    color: "var(--havn-accent)",
+    cursor: "pointer",
+    textDecoration: "underline",
   },
 
   // Date range

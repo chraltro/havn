@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { api } from "./api";
+import { clickable } from "./a11y";
 
 /*
  * One change set proposed by an agent: its files, the verification report
@@ -39,9 +40,15 @@ function detailText(d) {
 function Check({ check }) {
   const [open, setOpen] = useState(check.status === "fail");
   const details = check.details || [];
+  const toggle = () => setOpen((v) => !v);
   return (
     <div style={st.check}>
-      <div style={st.checkHead} onClick={() => details.length && setOpen(!open)}>
+      <div
+        style={st.checkHead}
+        onClick={() => details.length && toggle()}
+        // A check with details is an expander the keyboard can open too.
+        {...(details.length ? { ...clickable(toggle), "aria-expanded": open } : {})}
+      >
         <span style={{ ...st.badge, color: STATUS_COLOR[check.status], borderColor: STATUS_COLOR[check.status] }}>
           {check.status}
         </span>
@@ -57,7 +64,7 @@ function Check({ check }) {
   );
 }
 
-export default function ChangeSetCard({ changeset, onChanged, onOpenFile }) {
+export default function ChangeSetCard({ changeset, onChanged, onOpenFile, showConfirm }) {
   const [cs, setCs] = useState(changeset);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -67,8 +74,14 @@ export default function ChangeSetCard({ changeset, onChanged, onOpenFile }) {
   const closed = cs.status === "applied" || cs.status === "discarded";
   const stale = cs.stale_files || [];
 
-  const act = async (fn, confirmText) => {
-    if (confirmText && !window.confirm(confirmText)) return;
+  // `confirm` is [title, body, confirmLabel]. The app's dialog when the card
+  // is given showConfirm, the browser's otherwise.
+  const act = async (fn, confirm) => {
+    if (confirm) {
+      const [title, body, label] = confirm;
+      const ok = showConfirm ? await showConfirm(title, body, label, true) : window.confirm(body);
+      if (!ok) return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -143,12 +156,15 @@ export default function ChangeSetCard({ changeset, onChanged, onOpenFile }) {
           )}
           {cs.status === "failed" && !stale.length && (
             <button style={st.ghost} disabled={busy}
-              onClick={() => act(() => api.applyChangeSet(cs.id, true), "Verification failed. Apply these changes anyway?")}>
+              onClick={() => act(() => api.applyChangeSet(cs.id, true), ["Apply Change Set", "Verification failed. Apply these changes anyway?", "Apply anyway"])}>
               Apply anyway
             </button>
           )}
           <button style={st.ghost} disabled={busy} onClick={() => act(() => api.verifyChangeSet(cs.id))}>Re-verify</button>
-          <button style={st.ghost} disabled={busy} onClick={() => act(() => api.discardChangeSet(cs.id))}>Discard</button>
+          <button style={st.ghost} disabled={busy}
+            onClick={() => act(() => api.discardChangeSet(cs.id), ["Discard Change Set", "Discard this change set? Its proposed changes will not be applied, and a discarded change set cannot be reopened.", "Discard"])}>
+            Discard
+          </button>
         </div>
       )}
     </div>

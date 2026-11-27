@@ -157,14 +157,17 @@ export default function DashboardWidget({
   const rawData = widgetData[widget.id];
   const data = drillState && drillData ? drillData : rawData;
 
-  // Close widget fullscreen on Escape
+  // Close widget fullscreen on Escape. Capture phase and stopPropagation, so
+  // the canvas's own Escape shortcut (leave edit mode) never sees this one.
   useEffect(() => {
     if (!isWidgetFullscreen) return;
     const handler = (e) => {
-      if (e.key === "Escape") setIsWidgetFullscreen(false);
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setIsWidgetFullscreen(false);
     };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
   }, [isWidgetFullscreen]);
 
   // Close menu on outside click
@@ -418,6 +421,7 @@ export default function DashboardWidget({
               style={st.widgetFullscreenClose}
               onClick={() => setIsWidgetFullscreen(false)}
               title="Close (Escape)"
+              aria-label="Close fullscreen"
             >
               ×
             </button>
@@ -455,16 +459,17 @@ function PaginatedTable({ columns, rows, conditionalRules, showSummary }) {
   const totalPages = Math.ceil(rows.length / pageSize);
   const pagedRows = rows.slice(page * pageSize, (page + 1) * pageSize);
 
+  // The widget body is height-bounded, so the table fills it and scrolls
+  // inside with its header pinned. No scroll wrapper of our own around it:
+  // a second scroller takes the sticky header away with the rows.
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
-      <div style={{ flex: 1, overflow: "auto" }}>
-        <SortableTable columns={columns} rows={pagedRows} conditionalRules={conditionalRules} showSummary={showSummary} />
-      </div>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+      <SortableTable fill columns={columns} rows={pagedRows} conditionalRules={conditionalRules} showSummary={showSummary} />
       {totalPages > 1 && (
         <div style={st.pagination}>
-          <button style={st.pageBtn} disabled={page === 0} onClick={() => setPage(p => p - 1)}>‹</button>
+          <button style={st.pageBtn} disabled={page === 0} onClick={() => setPage(p => p - 1)} aria-label="Previous page">‹</button>
           <span style={st.pageInfo}>{page + 1} / {totalPages}</span>
-          <button style={st.pageBtn} disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>›</button>
+          <button style={st.pageBtn} disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)} aria-label="Next page">›</button>
           <span style={st.pageCount}>{rows.length} rows</span>
         </div>
       )}
@@ -601,12 +606,8 @@ function renderWidgetContent(widget, data, onChartClick) {
     return <hr style={{ border: "none", borderTop: "1px solid var(--havn-border)", margin: "auto 0", width: "100%" }} />;
   }
 
-  // Default: table
-  return (
-    <div style={{ overflow: "auto", flex: 1 }}>
-      <SortableTable columns={displayColumns} rows={processedRows} />
-    </div>
-  );
+  // Default: table, filling the (flex column, height-bounded) widget body
+  return <SortableTable fill columns={displayColumns} rows={processedRows} />;
 }
 
 function KPIDisplay({ columns, rows, config }) {
