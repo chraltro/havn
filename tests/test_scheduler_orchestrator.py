@@ -458,6 +458,54 @@ def test_restart_with_catchup_runs_the_newest_missed_fire_once(tmp_path):
     assert _count(project, "ticks_a") == 2
 
 
+@pytest.mark.parametrize("catchup", ["false", "true"])
+def test_restart_in_the_minute_of_a_fire_does_not_run_it_again(tmp_path, catchup):
+    """The previous process ran the 05:00 fire; this one starts at 05:00:40."""
+    project = _project(tmp_path, RESTART_PROJECT.format(catchup=catchup))
+    _run_first_process(project)
+    assert _count(project, "ticks_a") == 1
+
+    clock = Clock(utc(2026, 4, 6, 5, 0, 40))
+    second = _scheduler(project, clock)
+    second._startup(clock.t)
+    second._tick(now=utc(2026, 4, 6, 5, 0, 45))
+    assert second.wait_idle(120)
+    assert _count(project, "ticks_a") == 1
+    assert [(r[1].strftime("%H:%M"), r[2]) for r in _history(project, "hourly")] == [
+        ("05:00", "success"),
+    ]
+    # The next fire still runs.
+    second._tick(now=utc(2026, 4, 6, 6, 0, 5))
+    assert second.wait_idle(120)
+    assert _count(project, "ticks_a") == 2
+
+
+def test_restart_does_not_rerun_a_fire_recorded_under_another_expression(tmp_path):
+    """Two expressions of one job fire at 05:00; history holds it under one of them."""
+    project = _project(tmp_path, RESTART_PROJECT.format(catchup="false"))
+    (project / "orchestration" / "twice.yml").write_text(textwrap.dedent("""\
+        name: twice
+        target: ingest/a.py
+        schedules:
+          - "0 * * * *"
+          - "0 5 * * *"
+    """), encoding="utf-8")
+    clock = Clock(utc(2026, 4, 6, 4, 59, 0))
+    first = _scheduler(project, clock)
+    first._startup(clock.t)
+    first._tick(now=utc(2026, 4, 6, 4, 59, 5))
+    first._tick(now=utc(2026, 4, 6, 5, 0, 5))
+    assert first.wait_idle(120)
+    first.stop()
+    assert len(_history(project, "twice")) == 1
+
+    second = _scheduler(project, Clock(utc(2026, 4, 6, 5, 0, 40)))
+    second._startup(utc(2026, 4, 6, 5, 0, 40))
+    second._tick(now=utc(2026, 4, 6, 5, 0, 45))
+    assert second.wait_idle(120)
+    assert len(_history(project, "twice")) == 1
+
+
 def test_first_start_has_nothing_to_catch_up(tmp_path):
     project = _project(tmp_path, RESTART_PROJECT.format(catchup="true"))
     t = _scheduler(project, Clock(utc(2026, 4, 6, 9, 30, 0)))

@@ -712,6 +712,7 @@ class SchedulerThread(threading.Thread):
         origin = self._clock_origin(now)
         last_seen = info["last_seen"]
         for spec in specs:
+            self._seed_cron_clock(spec, info["last_fires"], origin)
             tz = spec.zone()
             missed: dict[datetime.datetime, str] = {}
             for expr in spec.cron_expressions:
@@ -746,6 +747,27 @@ class SchedulerThread(threading.Thread):
             if catch_up:
                 inst, expr = catch_up
                 self._dispatch(spec, expr, inst, now, trigger="catchup")
+
+    def _seed_cron_clock(self, spec: ScheduleSpec, last_fires: dict, origin: datetime.datetime) -> None:
+        """Start ``spec``'s cron clocks after its newest recorded fire.
+
+        The loop counts from the start of the minute the scheduler started
+        in, so a restart in the same minute as a fire the previous process
+        already recorded (and ran) would dispatch that fire again. Seeding
+        each clock at the newest fire history holds for the schedule (over
+        all of its expressions: two expressions firing in the same minute
+        are one fire) means a recorded fire is never dispatched twice.
+        """
+        recorded = [
+            inst for (kind, name, _expr), inst in last_fires.items()
+            if kind == spec.kind and name == spec.name and inst is not None
+        ]
+        if not recorded:
+            return
+        start = max(origin, max(recorded))
+        for expr in spec.cron_expressions:
+            key = f"{spec.key}|{expr}"
+            self._cron_clock[key] = max(self._cron_clock.get(key, start), start)
 
     # -- the loop --------------------------------------------------------
 
