@@ -4,6 +4,45 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **The scheduler keeps a history.** Every fire of a scheduled stream or job
+  is recorded in `_havn.schedule_history`: when it was due, when it started
+  and finished, how late it started, and whether it succeeded, failed, was
+  skipped or was missed. `havn schedule --history` shows it, and so does
+  `GET /api/scheduler/history`. Rows are kept for 30 days
+  (`scheduler.history_days`).
+- **Overlap rules.** There is now a defined rule for a stream or job that is
+  still running, or already waiting, at its next fire time. `overlap: skip`
+  (the default) records the fire as skipped; `overlap: queue` lets one run
+  wait and start when the current one finishes.
+  Set it under `scheduler:` in project.yml, on a stream, or in a job file.
+- **Missed fires after a restart.** When the scheduler starts, fires that
+  passed while it was down are recorded as missed. With `catchup: true` the
+  newest of them runs once; by default they are only recorded.
+- **Time zones for schedules.** `scheduler.timezone` (an IANA name such as
+  `Europe/Oslo`), or `timezone:` on a stream or job, sets the zone cron
+  expressions are evaluated in. Without it the server's local time is used,
+  as before. A fire time skipped by a daylight saving change runs at the end
+  of the gap, and one that occurs twice runs once. An unknown zone name stops
+  `havn validate` and the scheduler with an error instead of falling back to
+  local time. `havn schedule` shows each schedule's next run in its zone.
+  havn now depends on `tzdata`, so zone names also work on Windows.
+
+### Changed
+
+- **The scheduler no longer stops ticking during a run.** Due runs are
+  handed to worker threads while the scheduler goes on checking schedules,
+  so lateness, skips and missed fires are recorded on time. Runs still
+  execute one at a time by default (`scheduler.max_concurrent: 1`): two runs
+  writing the same warehouse at once can fail on DuckDB write-write
+  conflicts, so running several at a time is opt-in and only safe for
+  streams and jobs that write different tables.
+- **Stopping the scheduler is predictable.** Ctrl+C on `havn schedule` (or
+  stopping `havn serve --schedule`) cancels runs that have not started and
+  gives running ones 30 seconds to finish; a second Ctrl+C quits at once.
+  A run cut off this way is marked `interrupted` in the history.
+
 ### Fixed
 
 - **Result tables keep their column headers.** Scrolling a query result

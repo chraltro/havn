@@ -140,11 +140,13 @@ Starts the web UI and scheduler together. The scheduler runs in a background thr
 
 ### How It Works
 
-1. The scheduler thread starts and reads schedules from `project.yml`
-2. Every 30 seconds, it checks all cron expressions against the current time
-3. When a schedule matches the current minute, the corresponding stream is executed
-4. Each stream runs at most once per minute (deduplication)
-5. Config is re-read on each check, so schedule changes take effect without restart
+1. Every 30 seconds the dispatch loop re-reads `project.yml` and `orchestration/*.yml` and works out which schedules have fired since it last looked
+2. Due runs go to a worker pool (`scheduler.max_concurrent`, default 1 run at a time); the loop keeps ticking while they execute
+3. A stream or job still running (or already waiting) at its next fire is skipped (`overlap: skip`, the default) or allowed one waiting run (`overlap: queue`)
+4. Every fire is recorded in `_havn.schedule_history`; see it with `havn schedule --history`
+5. Cron is evaluated in `timezone` (an IANA name such as `Europe/Oslo`) or the server's local time
+
+Settings, missed fires after a restart (`catchup`), DST rules and shutdown are described in the scheduler reference (docs/scheduler.md).
 
 ## File Watcher
 
@@ -209,16 +211,13 @@ This gives you:
 
 ### SchedulerThread
 
-The scheduler runs as a daemon thread with a simple polling loop:
+The scheduler is a daemon thread running a dispatch loop, plus a pool of daemon worker threads:
 
-- Wakes every 30 seconds
-- Reloads `project.yml` and `orchestration/*.yml` on each iteration (picks up config changes)
-- Runs due streams, then due jobs, then due dashboard reports, one at a time in the same thread
-- Logs all activity to the console and Python logging
-
-A cron schedule runs when one of its fire times fell since the scheduler last looked at it. So when a long run holds the loop (a 06:00 job that takes 20 minutes), a stream scheduled for 06:05 still runs once that job ends instead of being skipped. Several missed fires of the same schedule collapse into one run. The clock starts when the scheduler starts: fires from before it was running are never caught up, so restarting the server at 10:00 does not replay a 06:00 schedule. Interval schedules on jobs (`every 2h`) count from the job's last run, which is read back from `_havn.job_runs` at startup.
-
-There is no queue and no task database: the loop is the whole scheduler, and it only runs while `havn schedule` or `havn serve --schedule` does.
+- The loop wakes every 30 seconds, reloads `project.yml` and `orchestration/*.yml`, and hands due streams, jobs and the dashboard report check to the pool
+- Workers run them; with the default `max_concurrent: 1` one at a time, because overlapping runs in one DuckDB warehouse can fail on write-write conflicts
+- Each fire is written to `_havn.schedule_history` (status, lateness, duration), and a heartbeat to `_havn.scheduler_state`
+- On start, fires that passed while no scheduler was running are recorded as `missed`; with `catchup: true` the newest runs once
+- Stopping cancels queued runs and waits up to 30 seconds for running ones
 
 A scheduled stream runs through the same code as `havn stream`: seeds, retries, Pipeline Rewind tracking, the stream's `webhook_url`, and the `alerts:` pipeline success/failure alert all apply. A stream counts as failed when a step fails, including a transform step where a model errored or an error-severity `@assert` rejected it; later steps do not run.
 

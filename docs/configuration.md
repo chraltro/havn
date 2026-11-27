@@ -86,8 +86,36 @@ Stream options:
 | `retries` | int | `0` | Retry attempts per failed step |
 | `retry_delay` | int | `5` | Seconds between retries |
 | `webhook_url` | string | `null` | URL for completion notifications |
+| `overlap` | string | `scheduler.overlap` | `skip` or `queue`: what a fire does while this stream is still running |
+| `catchup` | bool | `scheduler.catchup` | Run once after a restart if fires were missed |
+| `timezone` | string | `scheduler.timezone` | IANA zone the `schedule` is evaluated in, or `local` |
 
 Step actions: `ingest`, `seed`, `transform`, `export`. Each takes a list of targets or `[all]`.
+
+### Scheduler
+
+Settings for `havn schedule` and `havn serve --schedule`. All optional:
+
+```yaml
+scheduler:
+  max_concurrent: 1          # runs at a time (worker pool size)
+  overlap: skip              # skip | queue
+  catchup: false             # after a restart, run once for missed fires
+  timezone: Europe/Oslo      # IANA name; leave out for the server's local time
+  history_days: 30           # how long _havn.schedule_history keeps rows
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `max_concurrent` | int | `1` | How many scheduled runs may execute at the same time. Raise it only for streams and jobs that write different tables; see [Scheduler](scheduler#concurrency). |
+| `overlap` | string | `skip` | When a stream or job is still running (or already waiting) at its next fire: `skip` records the fire as skipped, `queue` lets one run wait. |
+| `catchup` | bool | `false` | On start, fires that passed while the scheduler was down are always recorded as `missed`; with `true` the newest one also runs, once. |
+| `timezone` | string | server local time | Zone that cron expressions are evaluated in. An unknown name is an error (`havn validate` and scheduler start fail); it never falls back to local time. |
+| `history_days` | int | `30` | Retention of the schedule history table. |
+
+`overlap`, `catchup` and `timezone` are defaults: a stream (above) or a job
+file in `orchestration/` can set its own. `timezone: local` on a stream or
+job means the server's local time even when the project default is a zone.
 
 ### Lint
 
