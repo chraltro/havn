@@ -43,7 +43,50 @@ All notable changes to havn are documented in this file.
   gives running ones 30 seconds to finish; a second Ctrl+C quits at once.
   A run cut off this way is marked `interrupted` in the history.
 
+- **havn runs on DuckDB 2.x as well as 1.5.** The dependency is now
+  `duckdb>=1.5.2,<3`. On Python 3.11 and newer pip installs DuckDB 2; Python
+  3.10 stays on 1.5, since DuckDB 2 needs Python 3.11. Two things to know
+  before upgrading an existing project:
+  - A warehouse file that DuckDB 2 has written cannot be opened by DuckDB 1.5
+    again. Take a `havn backup` first if you may need to go back.
+  - DuckDB 2 no longer accepts the arrow lambda syntax `x -> x + 1` by
+    default. Models that use it fail with "Deprecated lambda arrow"; write
+    `lambda x: x + 1` instead, which DuckDB 1.5 also understands.
+- **Other dependencies have upper bounds.** typer, fastapi, uvicorn, pyarrow,
+  numpy, rich, sqlfluff, watchdog, prometheus_client, pyyaml and
+  python-multipart are capped below their next major version, so a future
+  breaking release is not installed until havn has been tested on it. pytz
+  and tzdata are versioned by year and stay uncapped.
+- **`tzdata` is a dependency.** DuckDB 2 reads time zones through Python's
+  zoneinfo, which has no time zone database on Windows without it.
+
 ### Fixed
+
+- **Python models and macros on DuckDB 2.** DuckDB 2
+  keeps a query result open until it has been read to the end, and refuses
+  other work on that connection meanwhile. havn now finishes such results
+  before registering macros, before a Python model's function runs and
+  before its result is stored, so macros register, Python models build and
+  a model function that read one row with `fetchone()` no longer breaks the
+  build.
+- **Live models on DuckDB 2.** Advancing a live source failed with "Current
+  transaction is aborted": havn probed for its own tables with a query that
+  was allowed to fail, and DuckDB 2 aborts the whole transaction on any
+  failed statement. It now looks the tables up in the catalog.
+- **Query plans and performance capture on DuckDB 2.** EXPLAIN ANALYZE in the
+  web UI showed no timings, and `havn perf` recorded no plans, because
+  DuckDB 2 lays out its JSON profile differently. Both layouts are read now.
+- **PIVOT queries through the query interface on DuckDB 2**, which were
+  refused as non-SELECT statements. `CREATE TABLE ... AS PIVOT` and
+  `INSERT ... PIVOT` are still refused, as is `SHOW '<file path>'`.
+- **Web UI actions that overlap no longer fail on DuckDB 2.** Running a
+  script or contracts from the web UI, and the audit entries for queries,
+  file edits, Ask and change sets, used the server's shared connection
+  directly. DuckDB 1.5 made a second caller wait; DuckDB 2 refuses with
+  "connection is busy". They now use their own cursor, like the rest of the
+  server.
+- **Error messages point at your SQL on DuckDB 2**, which underlines the
+  offending token instead of marking one character.
 
 - **Result tables keep their column headers.** Scrolling a query result
   scrolled the header row away with the rows: the table sat in two nested
