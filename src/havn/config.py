@@ -57,6 +57,100 @@ class StreamConfig(BaseModel):
     retries: int = 0  # number of retry attempts for failed steps
     retry_delay: int = 5  # seconds between retries
     webhook_url: str | None = None  # POST notification on completion/failure
+    # Per-stream overrides of the `scheduler:` defaults; None = use the default.
+    # Kept as written; `havn validate` and scheduler start report bad values.
+    overlap: Any = None   # "skip" | "queue"
+    catchup: Any = None   # bool
+    timezone: Any = None  # IANA name, or "local"
+
+
+SCHEDULER_OVERLAP_POLICIES = ("skip", "queue")
+
+
+class SchedulerConfig(BaseModel):
+    """``scheduler:`` in project.yml: how ``havn schedule`` / ``serve --schedule`` run.
+
+    ``max_concurrent`` is the size of the worker pool. It defaults to 1: runs
+    in one warehouse that overlap can fail on DuckDB write-write conflicts
+    (metadata tables, landing tables two ingest scripts both replace), so
+    only raise it for streams and jobs that write disjoint tables.
+
+    ``overlap``, ``catchup`` and ``timezone`` are defaults that a stream (in
+    project.yml) or a job file can override. ``problems`` collects values
+    that could not be read; they are reported by ``havn validate`` and stop
+    the scheduler from starting, instead of being silently replaced.
+    """
+    model_config = ConfigDict(extra="ignore")
+
+    max_concurrent: int = 1
+    overlap: str = "skip"
+    catchup: bool = False
+    timezone: str | None = None   # IANA name; None = server local time
+    history_days: int = 30        # retention of _havn.schedule_history
+    problems: list[str] = Field(default_factory=list)
+
+
+def parse_bool_setting(value: Any) -> bool | None:
+    """A YAML boolean (or "true"/"false"/"yes"/"no"/"on"/"off"); None if not one."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("true", "yes", "on", "1"):
+            return True
+        if v in ("false", "no", "off", "0"):
+            return False
+    return None
+
+
+def _parse_scheduler(raw_section: Any) -> SchedulerConfig:
+    """Parse ``scheduler:``. Never raises; unreadable values go to ``problems``."""
+    if raw_section is None:
+        return SchedulerConfig()
+    if not isinstance(raw_section, dict):
+        return SchedulerConfig(problems=["scheduler: must be a mapping"])
+    problems: list[str] = []
+    cfg = SchedulerConfig()
+
+    if "max_concurrent" in raw_section:
+        raw = raw_section["max_concurrent"]
+        try:
+            value = int(raw)
+            if isinstance(raw, bool) or value < 1 or str(raw).strip() != str(value):
+                raise ValueError
+            cfg.max_concurrent = value
+        except (TypeError, ValueError):
+            problems.append(f"scheduler.max_concurrent must be a whole number of at least 1, not {raw!r}")
+
+    if raw_section.get("overlap") is not None:
+        raw = str(raw_section["overlap"]).strip().lower()
+        if raw in SCHEDULER_OVERLAP_POLICIES:
+            cfg.overlap = raw
+        else:
+            problems.append(f"scheduler.overlap must be skip or queue, not {raw_section['overlap']!r}")
+
+    if raw_section.get("catchup") is not None:
+        value = parse_bool_setting(raw_section["catchup"])
+        if value is None:
+            problems.append(f"scheduler.catchup must be true or false, not {raw_section['catchup']!r}")
+        else:
+            cfg.catchup = value
+
+    if raw_section.get("timezone") is not None:
+        cfg.timezone = str(raw_section["timezone"]).strip() or None
+
+    if raw_section.get("history_days") is not None:
+        raw = raw_section["history_days"]
+        try:
+            value = int(raw)
+            if isinstance(raw, bool) or value < 1:
+                raise ValueError
+            cfg.history_days = value
+        except (TypeError, ValueError):
+            problems.append(f"scheduler.history_days must be a whole number of at least 1, not {raw!r}")
+
+    cfg.problems = problems
+    return cfg
 
 
 class LintConfig(BaseModel):
@@ -519,6 +613,7 @@ class ProjectConfig(BaseModel):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     connections: dict[str, ConnectionConfig] = Field(default_factory=dict)
     streams: dict[str, StreamConfig] = Field(default_factory=dict)
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     lint: LintConfig = Field(default_factory=LintConfig)
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
     quality: QualityConfig = Field(default_factory=QualityConfig)
@@ -817,6 +912,9 @@ def load_project(
             retries=int(stream_raw.get("retries", 0)),
             retry_delay=int(stream_raw.get("retry_delay", 5)),
             webhook_url=stream_raw.get("webhook_url"),
+            overlap=stream_raw.get("overlap"),
+            catchup=stream_raw.get("catchup"),
+            timezone=stream_raw.get("timezone"),
         )
 
     # Lint
@@ -989,6 +1087,7 @@ def load_project(
         database=database,
         connections=connections,
         streams=streams,
+        scheduler=_parse_scheduler(raw.get("scheduler")),
         lint=lint,
         alerts=alerts,
         quality=quality,

@@ -47,6 +47,10 @@ dependencies = [
     # built from current_timestamp or now()) into Python objects. Without it
     # every query returning such a column fails, in the UI and the CLI.
     "pytz>=2023.3",
+    # zoneinfo reads the operating system's time zone database, which
+    # Windows and slim container images do not have; scheduler.timezone
+    # (Europe/Oslo, ...) needs it. zoneinfo falls back to this package.
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]

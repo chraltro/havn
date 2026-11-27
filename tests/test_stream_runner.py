@@ -55,10 +55,27 @@ def _ticks(project: Path) -> int:
         conn.close()
 
 
+_SCHEDULERS: list[SchedulerThread] = []
+
+
+@pytest.fixture(autouse=True)
+def _stop_schedulers():
+    yield
+    while _SCHEDULERS:
+        _SCHEDULERS.pop().stop()
+
+
 def _scheduler(project: Path, started_at: dt.datetime) -> SchedulerThread:
     t = SchedulerThread(project)
     t._started_at = started_at
+    _SCHEDULERS.append(t)
     return t
+
+
+def _tick(t: SchedulerThread, now: dt.datetime) -> None:
+    """One poll, then wait for the runs it handed to the worker pool."""
+    t._tick(now=now)
+    assert t.wait_idle(timeout=120)
 
 
 # ---------------------------------------------------------------------------
@@ -129,13 +146,13 @@ def test_tick_runs_a_stream_missed_during_a_long_run_exactly_once(tmp_path):
               - ingest: [tick]
     """)
     t = _scheduler(project, dt.datetime(2026, 4, 6, 6, 0, 0))
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 0, 1))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 0, 1))
     assert _ticks(project) == 0
     # The next poll comes 21 minutes later, after a long 06:00 run.
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 21, 0))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 21, 0))
     assert _ticks(project) == 1
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 21, 30))
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 22, 0))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 21, 30))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 22, 0))
     assert _ticks(project) == 1
 
 
@@ -153,8 +170,8 @@ def test_tick_does_not_catch_up_before_thread_start(tmp_path):
               - ingest: [tick]
     """)
     t = _scheduler(project, dt.datetime(2026, 4, 6, 9, 0, 0))
-    t._tick(now=dt.datetime(2026, 4, 6, 9, 0, 1))
-    t._tick(now=dt.datetime(2026, 4, 6, 9, 0, 31))
+    _tick(t, dt.datetime(2026, 4, 6, 9, 0, 1))
+    _tick(t, dt.datetime(2026, 4, 6, 9, 0, 31))
     assert _ticks(project) == 0
 
 
@@ -172,10 +189,10 @@ def test_job_with_two_schedules_due_in_one_window_fires_once(tmp_path):
         retry: 0
     """), encoding="utf-8")
     t = _scheduler(project, dt.datetime(2026, 4, 6, 6, 0, 0))
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 0, 1))
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 30, 0))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 0, 1))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 30, 0))
     assert _ticks(project) == 1
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 30, 30))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 30, 30))
     assert _ticks(project) == 1
 
 
@@ -242,7 +259,7 @@ def test_scheduler_loop_prints_failed_not_completed(tmp_path, capsys):
     original = sched.console.print
     sched.console.print = lambda *a, **k: printed.append(" ".join(str(x) for x in a))
     try:
-        t._tick(now=dt.datetime(2026, 4, 6, 6, 0, 5))
+        _tick(t, dt.datetime(2026, 4, 6, 6, 0, 5))
     finally:
         sched.console.print = original
     assert any("Stream 'nightly' failed" in line for line in printed), printed
@@ -312,7 +329,7 @@ def test_scheduled_stream_runs_seed_step(tmp_path):
     """)
     (project / "seeds" / "colours.csv").write_text("id,name\n1,red\n2,blue\n", encoding="utf-8")
     t = _scheduler(project, dt.datetime(2026, 4, 6, 6, 0, 0))
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 0, 5))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 0, 5))
     assert _query(project, "SELECT COUNT(*) FROM seeds.colours") == [(2,)]
 
 
