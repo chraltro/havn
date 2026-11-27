@@ -42,11 +42,15 @@ def serve(
     # Start optional background services
     threads = []
     if watch_files:
-        from havn.server.deps import reregister_macros_on_shared_conns
+        from havn.engine.write_queue import cursor_for
+        from havn.server.deps import _get_shared_conn, reregister_macros_on_shared_conns
 
         watcher = FileWatcher(
             project_dir,
             on_macro_change=reregister_macros_on_shared_conns,
+            # Rebuild on a cursor of the server's shared connection, never
+            # a second connection of its own in this process.
+            connect=lambda: cursor_for(_get_shared_conn()),
         )
         watcher.start()
         threads.append(watcher)

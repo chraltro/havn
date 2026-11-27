@@ -1094,26 +1094,143 @@ class FileWatcher(threading.Thread):
     a ``.py`` or ``.sql`` file inside ``macros/`` is saved.  The server layer
     wires this to ``reregister_macros_on_shared_conns`` so live connections
     pick up edits without a restart.
+
+    A transform change does not rebuild at once: it is recorded as pending
+    and the watcher's own loop runs the rebuild once no change has come in
+    for ``debounce`` seconds, so a burst of saves builds once. The rebuild
+    takes the project's run gate (``engine/run_gate.py``) exclusively and
+    without waiting, like a web UI run: while a UI or scheduled run holds
+    it, the rebuild stays pending (logged once) and runs when the gate is
+    free. Changes that arrive meanwhile join the pending rebuild.
+
+    ``connect()`` returns the connection to build on and is closed after the
+    rebuild. ``havn serve --watch`` passes a cursor of the server's shared
+    connection, so the watcher never opens a second connection in the
+    server process (one with other settings is refused by DuckDB, and a
+    second instance would fight the server over the file). Default: open
+    the warehouse of ``config_loader()`` (``load_project``).
     """
 
-    def __init__(self, project_dir: Path, on_change=None, on_macro_change=None, route_globs: list[str] | None = None):
+    DEBOUNCE_SECONDS = 2.0
+    POLL_SECONDS = 0.25
+
+    def __init__(self, project_dir: Path, on_change=None, on_macro_change=None,
+                 route_globs: list[str] | None = None, *, connect=None, config_loader=None,
+                 debounce: float | None = None, clock=None):
         super().__init__(daemon=True, name="havn-watcher")
-        self.project_dir = project_dir
+        self.project_dir = Path(project_dir)
         self.on_change = on_change
         self.on_macro_change = on_macro_change
         # When set, only transform-side changes whose relative path matches
         # one of these globs trigger a rebuild — and only the matching
         # model is rebuilt, not the whole DAG.
         self.route_globs = route_globs or []
+        self._connect = connect
+        self._config_loader = config_loader
+        self.debounce = self.DEBOUNCE_SECONDS if debounce is None else debounce
+        self._clock = clock or time.monotonic
         self._stop_event = threading.Event()
+        self._pending_lock = threading.Lock()
+        # None: nothing pending. A set: the targets to rebuild; ALL in it
+        # means the whole DAG.
+        self._pending: set[str] | None = None
+        self._last_change = 0.0
+        self._waiting_logged = False
+
+    _ALL = "\0all"
 
     def stop(self) -> None:
         self._stop_event.set()
+
+    # -- rebuilds ----------------------------------------------------------
+
+    def request_rebuild(self, targets: list[str] | None) -> None:
+        """Record a transform change; ``None`` rebuilds the whole DAG."""
+        with self._pending_lock:
+            if self._pending is None:
+                self._pending = set()
+            self._pending.update(targets if targets else [self._ALL])
+            self._last_change = self._clock()
+
+    @property
+    def pending(self) -> list[str] | None:
+        """The pending rebuild's targets (``[]`` = everything), or None."""
+        with self._pending_lock:
+            if self._pending is None:
+                return None
+            return [] if self._ALL in self._pending else sorted(self._pending)
+
+    def try_rebuild(self, now: float | None = None) -> str:
+        """Run the pending rebuild if it is due and the gate is free.
+
+        Returns ``"idle"`` (nothing pending), ``"waiting"`` (a change came in
+        less than ``debounce`` seconds ago), ``"busy"`` (another run holds
+        the run gate; still pending) or ``"ran"``.
+        """
+        from havn.engine.run_gate import GateBusy, gate_for
+
+        now = self._clock() if now is None else now
+        with self._pending_lock:
+            if self._pending is None:
+                return "idle"
+            if now - self._last_change < self.debounce:
+                return "waiting"
+            taken = gate_for(self.project_dir).try_exclusive("watcher rebuild")
+            if isinstance(taken, GateBusy):
+                if not self._waiting_logged:
+                    self._waiting_logged = True
+                    logger.info("Watcher: rebuild pending until the current run ends (%s)", taken.message)
+                    console.print(
+                        "[bold yellow]Watcher:[/bold yellow] Rebuild pending; "
+                        f"waiting for the current run ({', '.join(taken.labels) or 'a run'})"
+                    )
+                return "busy"
+            pending, self._pending = self._pending, None
+            self._waiting_logged = False
+        try:
+            targets = None if self._ALL in pending else sorted(pending)
+            self._rebuild(targets)
+        finally:
+            taken.release()
+        return "ran"
+
+    def _open(self):
+        if self._connect is not None:
+            return self._connect()
+        from havn.engine.database import open_warehouse
+
+        if self._config_loader is not None:
+            config = self._config_loader()
+        else:
+            from havn.config import load_project
+
+            config = load_project(self.project_dir)
+        return open_warehouse(config, self.project_dir)
+
+    def _rebuild(self, targets: list[str] | None) -> None:
+        from havn.engine.transform import run_transform
+
+        label = f"Running transform (target: {', '.join(targets)})..." if targets else "Running transform..."
+        console.print(f"[bold yellow]Watcher:[/bold yellow] {label}")
+        try:
+            conn = self._open()
+            try:
+                run_transform(conn, self.project_dir / "transform", targets=targets,
+                              project_dir=self.project_dir)
+            finally:
+                conn.close()
+            console.print("[bold green]Watcher:[/bold green] Transform completed")
+        except Exception as e:
+            logger.error("Watcher: transform failed: %s", e)
+            console.print(f"[bold red]Watcher:[/bold red] Transform failed: {e}")
+
+    # -- the thread --------------------------------------------------------
 
     def run(self) -> None:
         from watchdog.events import FileSystemEventHandler
         from watchdog.observers import Observer
 
+        watcher = self
         project_dir = self.project_dir
         on_macro_change = self.on_macro_change
         route_globs = list(self.route_globs)
@@ -1169,23 +1286,8 @@ class FileWatcher(threading.Thread):
                             targets = [f"{schema}.{name}"]
                         except (ValueError, IndexError):
                             targets = None
-
-                    label = f"Running transform (target: {targets[0]})..." if targets else "Running transform..."
-                    console.print(f"[bold yellow]Watcher:[/bold yellow] {label}")
-                    try:
-                        from havn.config import load_project
-                        from havn.engine.database import open_warehouse
-                        from havn.engine.transform import run_transform
-
-                        config = load_project(project_dir)
-                        conn = open_warehouse(config, project_dir)
-                        try:
-                            run_transform(conn, project_dir / "transform", targets=targets)
-                        finally:
-                            conn.close()
-                        console.print("[bold green]Watcher:[/bold green] Transform completed")
-                    except Exception as e:
-                        console.print(f"[bold red]Watcher:[/bold red] Transform failed: {e}")
+                    # Built by the watcher's loop, under the run gate.
+                    watcher.request_rebuild(targets)
 
                 elif rel_str.startswith("macros"):
                     macro_logger.info("Macro file changed: %s — reloading", rel)
@@ -1226,7 +1328,11 @@ class FileWatcher(threading.Thread):
 
         try:
             while not self._stop_event.is_set():
-                self._stop_event.wait(1)
+                try:
+                    self.try_rebuild()
+                except Exception as e:
+                    logger.error("Watcher: %s", e)
+                self._stop_event.wait(self.POLL_SECONDS)
         finally:
             observer.stop()
             observer.join()
