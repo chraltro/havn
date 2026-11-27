@@ -4,6 +4,8 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-27
+
 ### Fixed
 
 - **A fresh install on Python 3.11 or newer got DuckDB 2.0, which havn does
