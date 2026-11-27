@@ -145,18 +145,10 @@ def _dedupe(name: str, taken: dict) -> str:
 
 
 def ensure_lineage_table(conn: duckdb.DuckDBPyConnection) -> None:
-    from havn.engine.database import _is_ducklake_connection, _strip_pk
+    """Kept for compatibility; the table is defined in :mod:`havn.engine.migrations`."""
+    from havn.engine.database import ensure_meta_table
 
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute(_strip_pk("""
-        CREATE TABLE IF NOT EXISTS _havn.model_lineage (
-            model_path   VARCHAR PRIMARY KEY,
-            content_hash VARCHAR,
-            materialized VARCHAR,
-            lineage      JSON,
-            built_at     TIMESTAMP DEFAULT current_timestamp
-        )
-    """, _is_ducklake_connection(conn)))
+    ensure_meta_table(conn)
 
 
 def save_model_lineage(conn: duckdb.DuckDBPyConnection, model: Any) -> None:

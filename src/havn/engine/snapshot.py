@@ -18,20 +18,10 @@ logger = logging.getLogger("havn.snapshot")
 
 
 def _ensure_snapshot_table(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create the snapshots table if it doesn't exist."""
-    from havn.engine.database import _is_ducklake_connection, _strip_pk
+    """Kept for compatibility; the table is defined in :mod:`havn.engine.migrations`."""
+    from havn.engine.database import ensure_meta_table
 
-    is_lake = _is_ducklake_connection(conn)
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute(_strip_pk("""
-        CREATE TABLE IF NOT EXISTS _havn.snapshots (
-            name VARCHAR PRIMARY KEY,
-            created_at TIMESTAMP DEFAULT now(),
-            project_hash VARCHAR,
-            table_signatures VARCHAR,
-            file_manifest VARCHAR
-        )
-    """, is_lake))
+    ensure_meta_table(conn)
 
 
 def _hash_file(path: Path) -> str:

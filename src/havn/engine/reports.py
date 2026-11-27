@@ -63,49 +63,10 @@ class ReportError(Exception):
 
 
 def ensure_report_tables(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create the report tables if they do not exist (lazy bootstrap)."""
-    from havn.engine.database import _is_ducklake_connection, _strip_pk
+    """Kept for compatibility; the table is defined in :mod:`havn.engine.migrations`."""
+    from havn.engine.database import ensure_meta_table
 
-    is_lake = _is_ducklake_connection(conn)
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute(_strip_pk("""
-        CREATE TABLE IF NOT EXISTS _havn.reports (
-            id                VARCHAR PRIMARY KEY,
-            name              VARCHAR NOT NULL,
-            dashboard_id      VARCHAR NOT NULL,
-            widget_id         VARCHAR,
-            schedule          VARCHAR,
-            enabled           BOOLEAN DEFAULT TRUE,
-            owner             VARCHAR NOT NULL,
-            recipients        JSON DEFAULT '{}',
-            formats           JSON DEFAULT '[]',
-            filters           JSON DEFAULT '{}',
-            parameters        JSON DEFAULT '{}',
-            condition         JSON,
-            subject           VARCHAR DEFAULT '',
-            message           VARCHAR DEFAULT '',
-            created_at        TIMESTAMP,
-            updated_at        TIMESTAMP,
-            last_run_at       TIMESTAMP,
-            last_status       VARCHAR,
-            last_error        VARCHAR,
-            last_fired_minute TIMESTAMP
-        )
-    """, is_lake))
-    conn.execute(_strip_pk("""
-        CREATE TABLE IF NOT EXISTS _havn.report_deliveries (
-            id            VARCHAR PRIMARY KEY,
-            report_id     VARCHAR NOT NULL,
-            trigger       VARCHAR NOT NULL,
-            status        VARCHAR NOT NULL,
-            condition_met BOOLEAN,
-            channels      JSON,
-            summary       JSON,
-            error         VARCHAR,
-            started_at    TIMESTAMP,
-            finished_at   TIMESTAMP
-        )
-    """, is_lake))
+    ensure_meta_table(conn)
 
 
 _REPORT_COLUMNS = (

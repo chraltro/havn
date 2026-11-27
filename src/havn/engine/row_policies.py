@@ -48,29 +48,10 @@ _PLACEHOLDER_RE = re.compile(r"'?\{user\.([A-Za-z_][A-Za-z0-9_]*)\}'?")
 
 
 def ensure_row_policy_table(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create ``_havn.row_policies`` if it does not exist."""
-    from havn.engine.database import _is_ducklake_connection, _strip_pk
+    """Kept for compatibility; the table is defined in :mod:`havn.engine.migrations`."""
+    from havn.engine.database import ensure_meta_table
 
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute(_strip_pk("""
-        CREATE TABLE IF NOT EXISTS _havn.row_policies (
-            id               VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
-            name             VARCHAR,
-            schema_name      VARCHAR NOT NULL,
-            table_name       VARCHAR NOT NULL,
-            filter_sql       VARCHAR NOT NULL,
-            applies_to_roles JSON,
-            applies_to_users JSON,
-            exempted_roles   JSON DEFAULT '["admin"]',
-            exempted_users   JSON DEFAULT '[]',
-            follow_lineage   BOOLEAN DEFAULT TRUE,
-            enabled          BOOLEAN DEFAULT TRUE,
-            description      VARCHAR,
-            created_by       VARCHAR,
-            created_at       TIMESTAMP DEFAULT current_timestamp,
-            updated_at       TIMESTAMP
-        )
-    """, _is_ducklake_connection(conn)))
+    ensure_meta_table(conn)
 
 
 _COLUMNS = (

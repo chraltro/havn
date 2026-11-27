@@ -42,54 +42,6 @@ import duckdb
 
 logger = logging.getLogger("havn.live")
 
-_DDL = (
-    """
-    CREATE TABLE IF NOT EXISTS _havn.live_sources (
-        source      VARCHAR PRIMARY KEY,
-        kind        VARCHAR NOT NULL,
-        watermark   BIGINT NOT NULL,
-        rows_total  BIGINT DEFAULT 0,
-        advanced_at TIMESTAMP
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS _havn.live_advances (
-        source      VARCHAR NOT NULL,
-        wm_from     BIGINT NOT NULL,
-        wm_to       BIGINT NOT NULL,
-        "rows"      BIGINT DEFAULT 0,
-        advanced_at TIMESTAMP NOT NULL,
-        origin_at   TIMESTAMP NOT NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS _havn.live_consumed (
-        model       VARCHAR NOT NULL,
-        source      VARCHAR NOT NULL,
-        watermark   BIGINT NOT NULL,
-        consumed_at TIMESTAMP
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS _havn.live_state (
-        model                VARCHAR PRIMARY KEY,
-        status               VARCHAR NOT NULL,
-        paused               BOOLEAN DEFAULT false,
-        consecutive_failures INTEGER DEFAULT 0,
-        next_retry_at        TIMESTAMP,
-        last_error           VARCHAR,
-        last_refresh_at      TIMESTAMP,
-        last_duration_ms     BIGINT DEFAULT 0,
-        last_lag_ms          BIGINT,
-        refreshes            BIGINT DEFAULT 0,
-        rows_total           BIGINT DEFAULT 0,
-        last_assertions_at   TIMESTAMP,
-        last_profile_at      TIMESTAMP,
-        updated_at           TIMESTAMP
-    )
-    """,
-)
-
 
 def utcnow() -> datetime:
     """Naive UTC now, the form every live timestamp is stored in."""
@@ -97,22 +49,14 @@ def utcnow() -> datetime:
 
 
 def ensure_live_tables(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create the live tables if they are missing. Cheap when they exist.
+    """Kept for compatibility; the tables are defined in :mod:`havn.engine.migrations`.
 
-    Checks the catalog instead of probing with a SELECT and catching the
-    CatalogException: callers run this inside their own transaction, and on
-    DuckDB 2.0 any failed statement aborts the transaction it ran in.
+    The migrations run when a writable connection opens, so this is a cheap
+    set lookup and never a failing statement inside the caller's transaction.
     """
-    if _havn_tables_present(
-        conn, ("live_sources", "live_advances", "live_consumed", "live_state")
-    ):
-        return
-    from havn.engine.database import _is_ducklake_connection, _strip_pk
+    from havn.engine.database import ensure_meta_table
 
-    is_lake = _is_ducklake_connection(conn)
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    for ddl in _DDL:
-        conn.execute(_strip_pk(ddl, is_lake))
+    ensure_meta_table(conn)
 
 
 def _havn_tables_present(conn: duckdb.DuckDBPyConnection, names: tuple[str, ...]) -> bool:

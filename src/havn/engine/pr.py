@@ -203,32 +203,10 @@ def _load_pr(project_dir: Path, pr_id: str) -> PullRequest | None:
 
 
 def ensure_pr_builds_table(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create _havn.pr_builds if missing. Safe to call repeatedly."""
-    from havn.engine.database import _is_ducklake_connection, _strip_pk
+    """Kept for compatibility; the table is defined in :mod:`havn.engine.migrations`."""
+    from havn.engine.database import ensure_meta_table
 
-    is_lake = _is_ducklake_connection(conn)
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute(_strip_pk("""
-        CREATE TABLE IF NOT EXISTS _havn.pr_builds (
-            id              VARCHAR PRIMARY KEY,
-            pr_id           VARCHAR NOT NULL,
-            branch_head     VARCHAR,
-            status          VARCHAR NOT NULL DEFAULT 'running',
-            started_at      TIMESTAMP DEFAULT current_timestamp,
-            finished_at     TIMESTAMP,
-            duration_ms     BIGINT,
-            data_diff       JSON,
-            lineage_impact  JSON,
-            contract_results JSON,
-            error           VARCHAR
-        )
-    """, is_lake))
-    # Added after the table shipped. A read-only connection can't migrate;
-    # _fetch_build_record then reads without the column.
-    try:
-        conn.execute("ALTER TABLE _havn.pr_builds ADD COLUMN IF NOT EXISTS metric_diff JSON")
-    except Exception:
-        pass
+    ensure_meta_table(conn)
 
 
 def _save_build_record(conn: duckdb.DuckDBPyConnection, record: dict) -> None:

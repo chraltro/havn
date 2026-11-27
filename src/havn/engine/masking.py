@@ -23,23 +23,10 @@ import duckdb
 
 
 def ensure_masking_table(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create the masking_policies table if it doesn't exist."""
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS _havn.masking_policies (
-            id               VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
-            schema_name      VARCHAR NOT NULL,
-            table_name       VARCHAR NOT NULL,
-            column_name      VARCHAR NOT NULL,
-            method           VARCHAR NOT NULL,
-            method_config    JSON,
-            condition_column VARCHAR,
-            condition_value  VARCHAR,
-            exempted_roles   JSON DEFAULT '["admin"]',
-            created_at       TIMESTAMP DEFAULT current_timestamp
-        )
-    """)
+    """Kept for compatibility; the table is defined in :mod:`havn.engine.migrations`."""
+    from havn.engine.database import ensure_meta_table
 
+    ensure_meta_table(conn)
 
 # ---------------------------------------------------------------------------
 # Masking functions
