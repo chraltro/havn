@@ -159,8 +159,17 @@ def _emit(event_type: str, data: dict):
 def _finish_operation():
     """Mark the current operation as finished."""
     try:
+        from havn.engine.write_queue import cursor_for
         from havn.server.deps import _get_shared_conn
-        _get_shared_conn().execute("FORCE CHECKPOINT")
+
+        # A cursor, never the shared connection itself: on DuckDB 2.0 a
+        # connection another thread is using refuses the call instead of
+        # waiting for it.
+        cur = cursor_for(_get_shared_conn())
+        try:
+            cur.execute("FORCE CHECKPOINT")
+        finally:
+            cur.close()
     except Exception:
         pass
     with _pipeline_cond:
@@ -224,9 +233,14 @@ def _run_contracts_thread(project_dir):
     try:
         from havn.engine.contracts import run_contracts
 
-        conn = _get_shared_conn()
+        from havn.engine.write_queue import cursor_for
+
+        conn = cursor_for(_get_shared_conn())
         contracts_dir = project_dir / "contracts"
-        results = run_contracts(conn, contracts_dir)
+        try:
+            results = run_contracts(conn, contracts_dir)
+        finally:
+            conn.close()
 
         for r in results:
             _emit("contract_result", {
@@ -271,10 +285,17 @@ def _run_script_thread(script_path_str, project_dir, force=False, user=None):
     try:
         from havn.engine.runner import run_script
 
-        conn = _get_shared_conn()
+        from havn.engine.write_queue import cursor_for
+
+        conn = cursor_for(_get_shared_conn())
         script_path = project_dir / script_path_str
         script_type = "ingest" if "ingest" in script_path_str else "export"
         result = run_script(conn, script_path, script_type, force=force, run_as=user)
+        if not result.get("orphaned"):
+            # A script that timed out and is still running owns the cursor;
+            # closing it under a running query is not safe, so it is left
+            # for the garbage collector.
+            conn.close()
 
         from havn.engine.secrets import mask_output
         log_output = result.get("log_output", "")

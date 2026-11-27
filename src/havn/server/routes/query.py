@@ -174,13 +174,10 @@ def run_query(request: Request, req: QueryRequest, conn: DbConnReadOnly) -> dict
 
     # Audit log the query execution
     try:
-        from havn.engine.audit import log_audit
-        from havn.server.deps import _get_shared_conn
+        from havn.server.deps import log_audit_shared
 
-        _audit_conn = _get_shared_conn()
         client_ip = request.client.host if request.client else None
-        log_audit(
-            _audit_conn,
+        log_audit_shared(
             user=user.get("username", "anonymous"),
             action="query",
             resource=sql[:500],

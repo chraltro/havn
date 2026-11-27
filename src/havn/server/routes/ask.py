@@ -111,11 +111,9 @@ def ask_endpoint(request: Request, req: AskRequest, conn: DbConnReadOnlyOptional
 
     ctx = _context(request, conn, user)
     try:
-        from havn.engine.audit import log_audit
-        from havn.server.deps import _get_shared_conn
+        from havn.server.deps import log_audit_shared
 
-        log_audit(
-            _get_shared_conn(),
+        log_audit_shared(
             user=user.get("username", "anonymous"),
             action="ask",
             resource=req.question[:500],

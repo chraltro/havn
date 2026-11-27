@@ -650,7 +650,7 @@ def test_ref_applies_the_defer_rewriter(project, conn):
     m = _model(project, "silver.scores")
     rel = make_ref(conn, m, query_rewriter=rewriter)("bronze.orders")
     assert seen == ["SELECT * FROM bronze.orders"]
-    assert rel.aggregate("count(*)").fetchone()[0] == 3
+    assert rel.aggregate("count(*)").fetchall()[0][0] == 3
 
 
 def test_bind_uses_built_columns_for_python_model(project, conn):
@@ -714,7 +714,7 @@ def test_notebook_cell_runs(project, conn):
     cell = notebook_cell(_model(project, "silver.scores"))
     ns = {"db": conn}
     exec(cell["source"].rsplit("\nresult\n", 1)[0], ns)
-    assert ns["result"].aggregate("count(*)").fetchone()[0] == 2
+    assert ns["result"].aggregate("count(*)").fetchall()[0][0] == 2
 
 
 def test_rewind_snapshot_captures_python_model(project, conn):

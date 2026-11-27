@@ -134,7 +134,9 @@ def _execute_statement(state: StatementState) -> None:
                     import pyarrow as pa
 
                     if table is None:
-                        table = cur.to_arrow_table() if hasattr(cur, "to_arrow_table") else cur.fetch_arrow_table()
+                        from havn.engine.database import result_to_arrow
+
+                        table = result_to_arrow(cur)
                     state.columns = list(table.column_names)
                     state.row_count = table.num_rows
                     slice_ = table.slice(0, MAX_INLINE_ROWS) if MAX_INLINE_ROWS else table

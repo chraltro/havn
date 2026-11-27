@@ -20,6 +20,56 @@ from pathlib import Path
 import duckdb
 
 
+def finish_pending_result(conn) -> None:
+    """Run any open ``execute()`` result on ``conn`` to its end.
+
+    DuckDB 2.0 streams ``execute()`` results: ``conn.execute(q).fetchone()``
+    leaves the result open until a fetch returns no rows, and while it is
+    open ``create_function``, ``register``, ``sql()`` and friends raise
+    ``ResourceInUseException``. A following ``execute()`` silently replaces
+    the open result, which is why most code never notices. Call this before
+    any non-``execute`` call on a connection whose last ``execute()`` might
+    not have been read to the end.
+
+    DuckDB 1.x materialises every result, so the method does not exist and
+    this is a no-op. Safe to call on an idle connection, a cursor, or any
+    object that is not a DuckDB connection at all.
+    """
+    complete = getattr(conn, "complete", None)
+    if complete is None:
+        return
+    try:
+        complete()
+    except Exception:
+        # An error the open result would have raised on its next fetch
+        # (e.g. a cast failure in row 10,000 of a SELECT) belongs to the
+        # caller who abandoned it, not to the next unrelated call.
+        abort = getattr(conn, "abort", None)
+        if abort is not None:
+            try:
+                abort()
+            except Exception:
+                pass
+
+
+def result_to_arrow(cur):
+    """The rest of ``cur``'s ``execute()`` result as a pyarrow Table.
+
+    ``to_arrow_table()`` on both 1.5 (where ``fetch_arrow_table()`` is the
+    deprecated spelling) and 2.0. On 2.0 it copies the rows and warns that
+    ``con.sql(query)`` would not; the statement has already run (it may have
+    been a write), so the copy is the only way and the warning is silenced.
+    """
+    to_arrow = getattr(cur, "to_arrow_table", None)
+    if to_arrow is None:
+        return cur.fetch_arrow_table()
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Arrow output on a DB-API result")
+        return to_arrow()
+
+
 def open_warehouse(
     config,
     project_dir: str | Path | None = None,

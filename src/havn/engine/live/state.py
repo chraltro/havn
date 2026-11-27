@@ -97,13 +97,16 @@ def utcnow() -> datetime:
 
 
 def ensure_live_tables(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create the live tables if they are missing. Cheap when they exist."""
-    try:
-        conn.execute("SELECT 1 FROM _havn.live_state LIMIT 0")
-        conn.execute("SELECT 1 FROM _havn.live_advances LIMIT 0")
+    """Create the live tables if they are missing. Cheap when they exist.
+
+    Checks the catalog instead of probing with a SELECT and catching the
+    CatalogException: callers run this inside their own transaction, and on
+    DuckDB 2.0 any failed statement aborts the transaction it ran in.
+    """
+    if _havn_tables_present(
+        conn, ("live_sources", "live_advances", "live_consumed", "live_state")
+    ):
         return
-    except duckdb.CatalogException:
-        pass
     from havn.engine.database import _is_ducklake_connection, _strip_pk
 
     is_lake = _is_ducklake_connection(conn)
@@ -112,12 +115,23 @@ def ensure_live_tables(conn: duckdb.DuckDBPyConnection) -> None:
         conn.execute(_strip_pk(ddl, is_lake))
 
 
+def _havn_tables_present(conn: duckdb.DuckDBPyConnection, names: tuple[str, ...]) -> bool:
+    """True when every ``_havn.<name>`` table exists in the current database.
+
+    Runs on every source advance: duckdb_tables() costs about a third of
+    information_schema.tables here.
+    """
+    in_list = ", ".join(f"'{n}'" for n in names)  # internal constants only
+    row = conn.execute(
+        "SELECT COUNT(DISTINCT table_name) FROM duckdb_tables() "
+        "WHERE database_name = current_database() AND schema_name = '_havn' "
+        f"AND table_name IN ({in_list})"
+    ).fetchall()
+    return bool(row) and row[0][0] == len(names)
+
+
 def _tables_exist(conn: duckdb.DuckDBPyConnection) -> bool:
-    try:
-        conn.execute("SELECT 1 FROM _havn.live_sources LIMIT 0")
-        return True
-    except duckdb.CatalogException:
-        return False
+    return _havn_tables_present(conn, ("live_sources",))
 
 
 # ---------------------------------------------------------------------------

@@ -732,7 +732,7 @@ def register_macros(
     if force_reload:
         _force_reload_macro_modules(macros_dir)
 
-    from havn.engine.database import _is_ducklake_connection
+    from havn.engine.database import _is_ducklake_connection, finish_pending_result
     is_lake = _is_ducklake_connection(conn)
 
     # Read-only connections (ad-hoc ``havn query``, read pool members) can't
@@ -826,6 +826,7 @@ def register_macros(
                 # holds only a C pointer to it, so we have to keep the
                 # Python object alive ourselves.
                 _pinned_udfs.append(info.func)
+                finish_pending_result(conn)
                 conn.create_function(info.name, info.func, param_types, info.return_type)
                 count += 1
                 logger.debug("Registered DuckLake UDF: %s", info.name)
@@ -834,6 +835,7 @@ def register_macros(
             # DuckDB file backend: versioned internal + CREATE OR REPLACE MACRO alias.
             _pinned_udfs.append(info.func)
             internal_name = f"_udf_{info.name}_{gen}"
+            finish_pending_result(conn)
             conn.create_function(
                 internal_name,
                 info.func,
@@ -882,6 +884,7 @@ def register_macros(
             _pinned_udfs.append(json_udf)
             _pinned_udfs.append(info.func)
             internal_name = f"_udf_{info.name}_{gen}_json"
+            finish_pending_result(conn)
             conn.create_function(
                 internal_name,
                 json_udf,

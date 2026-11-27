@@ -26,13 +26,10 @@ logger = logging.getLogger("havn.server")
 def _audit_file_action(request: Request, user: dict, action: str, resource: str, detail: str | None = None) -> None:
     """Helper to log a file audit entry without failing the main operation."""
     try:
-        from havn.engine.audit import log_audit
-        from havn.server.deps import _get_shared_conn
+        from havn.server.deps import log_audit_shared
 
-        conn = _get_shared_conn()
         client_ip = request.client.host if request.client else None
-        log_audit(
-            conn,
+        log_audit_shared(
             user=user.get("username", "anonymous"),
             action=action,
             resource=resource,

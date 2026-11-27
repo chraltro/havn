@@ -110,11 +110,9 @@ def create_flight_server(
                     cur = cursor_for(conn)
                     try:
                         cur.execute(sql)
-                        table = (
-                            cur.to_arrow_table()
-                            if hasattr(cur, "to_arrow_table")
-                            else cur.fetch_arrow_table()
-                        )
+                        from havn.engine.database import result_to_arrow
+
+                        table = result_to_arrow(cur)
                     finally:
                         try:
                             cur.close()

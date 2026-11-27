@@ -278,7 +278,7 @@ def _get_db_resource_limits() -> tuple[str | None, int | None]:
 import threading
 
 from havn.engine.backends import WarehouseBackend, create_backend
-from havn.engine.write_queue import WriteQueue, create_read_pool, ReadPool, SharedConnPool
+from havn.engine.write_queue import WriteQueue, create_read_pool, ReadPool, SharedConnPool, cursor_for
 
 _backend: WarehouseBackend | None = None
 _write_queue: WriteQueue | None = None
@@ -320,6 +320,29 @@ def _get_shared_conn(*, require_exists: bool = False) -> duckdb.DuckDBPyConnecti
     Prefer using ``_get_write_queue()`` or ``_get_read_pool()`` directly.
     """
     return _get_write_queue().conn
+
+
+def log_audit_shared(
+    user: str,
+    action: str,
+    resource: str,
+    detail: str | None = None,
+    ip_address: str | None = None,
+) -> None:
+    """Write an audit entry through a cursor of the shared connection.
+
+    Never through the shared connection itself: request threads run at the
+    same time as the write-queue thread, and on DuckDB 2.0 a connection that
+    another thread is using refuses the call instead of waiting for it.
+    """
+    from havn.engine.audit import log_audit
+
+    cur = cursor_for(_get_shared_conn())
+    try:
+        log_audit(cur, user=user, action=action, resource=resource,
+                  detail=detail, ip_address=ip_address)
+    finally:
+        cur.close()
 
 
 def _get_write_queue() -> WriteQueue:
