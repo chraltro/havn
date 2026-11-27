@@ -115,17 +115,24 @@ def test_other_root_files_short_max_age(client):
 # --- compression -----------------------------------------------------------
 
 
+def _vary(response) -> set[str]:
+    """Tokens of the Vary header. Other middleware may add its own (newer
+    Starlette's CORS layer always adds Origin), so tests look for a token
+    instead of comparing the whole header."""
+    return {t.strip().lower() for t in response.headers.get("vary", "").split(",") if t.strip()}
+
+
 def test_gzip_only_when_accepted(client):
     r = client.get("/assets/app-abc123.js", headers={"Accept-Encoding": "gzip, deflate"})
     assert r.headers["content-encoding"] == "gzip"
-    assert r.headers["vary"] == "Accept-Encoding"
+    assert "accept-encoding" in _vary(r)
     assert int(r.headers["content-length"]) < len(APP_JS)
     # httpx decodes transparently; check the decoded body is the original.
     assert r.content == APP_JS
 
     plain = client.get("/assets/app-abc123.js", headers={"Accept-Encoding": "identity"})
     assert "content-encoding" not in plain.headers
-    assert plain.headers["vary"] == "Accept-Encoding"
+    assert "accept-encoding" in _vary(plain)
     assert plain.content == APP_JS
     # Each representation has its own ETag.
     assert plain.headers["etag"] != r.headers["etag"]
@@ -214,7 +221,7 @@ def test_already_compressed_formats_not_compressed(client):
         r = client.get(path, headers={"Accept-Encoding": "gzip"})
         assert r.status_code == 200
         assert "content-encoding" not in r.headers
-        assert "vary" not in r.headers
+        assert "accept-encoding" not in _vary(r)
 
 
 # --- content types ---------------------------------------------------------

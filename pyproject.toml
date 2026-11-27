@@ -24,7 +24,12 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "duckdb>=1.5.2",          # DuckLake 1.0 requires DuckDB 1.5.2+
+    # DuckLake 1.0 requires DuckDB 1.5.2+. Capped below 2: DuckDB 2.0 changed
+    # the Python API havn is built on (relations no longer hold a result, a
+    # busy connection refuses a second call instead of waiting), and under it
+    # macros fail to register and live models, Python models and performance
+    # capture break. pip picks 2.x on Python 3.11+ without this cap.
+    "duckdb>=1.5.2,<2",
     "numpy>=1.24",
     "typer>=0.15.0",
     "pyyaml>=6.0",

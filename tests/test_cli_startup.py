@@ -195,7 +195,8 @@ def _command_paths() -> set[str]:
         for name, sub in getattr(cmd, "commands", {}).items():
             path = f"{prefix} {name}".strip()
             out.add(path)
-            if isinstance(sub, click.Group):
+            # Duck-typed: newer Typer groups are not click.Group subclasses.
+            if getattr(sub, "commands", None):
                 out |= walk(sub, path)
         return out
 

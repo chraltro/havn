@@ -6,6 +6,10 @@ All notable changes to havn are documented in this file.
 
 ### Fixed
 
+- **A fresh install on Python 3.11 or newer got DuckDB 2.0, which havn does
+  not support yet.** The dependency had no upper bound. Under DuckDB 2,
+  macros failed to register and live models, Python models and performance
+  capture broke. DuckDB is now capped below 2.
 - **Anomaly detection could not fire.** Each build was compared with a
   baseline that already contained it, so with five or fewer recorded runs no
   spike of any size reached the threshold, and later ones were damped. The

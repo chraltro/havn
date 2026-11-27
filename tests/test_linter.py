@@ -13,16 +13,18 @@ import pytest
 
 from havn.lint.linter import LintRefused, lint, lint_file
 
-# Line 5 references a table that is not in the FROM clause (RF01). Lines 1-2
+# Line 5 defines a CTE that is never used (ST03). The rule is one SQLFluff has
+# reported the same way across versions; RF01 (unknown table reference), which
+# this used to rely on, stopped firing for DuckDB in SQLFluff 4.5. Lines 1-2
 # are a modern `@config` header, and the `@assert` below the SQL is a
 # directive in the middle of the file rather than in the header block.
 MODEL_SQL = textwrap.dedent("""\
     @config materialized=table, schema=gold
 
-    SELECT
-        t.id,
-        other.name
-    FROM bronze.t AS t
+    WITH
+    used AS (SELECT t.id FROM bronze.t AS t),
+    unused AS (SELECT t.id FROM bronze.t AS t)
+    SELECT used.id FROM used
     @assert row_count > 0
 """)
 
@@ -71,10 +73,10 @@ def test_lint_file_legacy_header_line_numbers(tmp_path):
         -- config: materialized=table, schema=gold
         -- depends_on: bronze.t
 
-        SELECT
-            t.id,
-            other.name
-        FROM bronze.t AS t
+        WITH
+        used AS (SELECT t.id FROM bronze.t AS t),
+        unused AS (SELECT t.id FROM bronze.t AS t)
+        SELECT used.id FROM used
     """))
     _, violations, _, _ = lint_file(sql_file, tmp_path)
     assert [v["line"] for v in violations] == [6] * len(violations)
