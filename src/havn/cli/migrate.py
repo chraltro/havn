@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
-import yaml
 from rich.table import Table
 
 from havn.cli import _resolve_project, app, console
@@ -165,6 +164,8 @@ def _rewrite_project_yml(project_dir: Path, dest_config) -> None:
     Writes to a temp file first and renames on top of the target so a
     killed process never leaves a truncated project.yml.
     """
+    import yaml
+
     yml_path = project_dir / "project.yml"
     raw = yaml.safe_load(read_project_text(yml_path)) or {}
     raw["database"] = dest_config.model_dump(exclude_none=True, exclude_defaults=False)

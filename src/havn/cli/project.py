@@ -4,11 +4,6 @@ from __future__ import annotations
 
 import re
 import shutil
-import tarfile
-import tempfile
-import urllib.error
-import urllib.request
-import zipfile
 from pathlib import Path
 from typing import Annotated, Optional
 from urllib.parse import urlparse
@@ -43,6 +38,9 @@ def _resolve_template_url(ref: str) -> str:
 
 def _download(url: str, dest: Path) -> None:
     """Download url to dest. Raises typer.Exit on network errors."""
+    import urllib.error
+    import urllib.request
+
     console.print(f"[dim]fetching {url}[/dim]")
     req = urllib.request.Request(url, headers={"User-Agent": "havn-init"})
     try:
@@ -62,6 +60,9 @@ def _extract_archive(archive_path: Path, staging: Path) -> Path:
     If the archive has a single top-level directory (as GitHub archives do),
     return that directory. Otherwise return staging itself.
     """
+    import tarfile
+    import zipfile
+
     name = archive_path.name.lower()
     if name.endswith(".zip"):
         with zipfile.ZipFile(archive_path) as zf:
@@ -90,6 +91,8 @@ def _extract_archive(archive_path: Path, staging: Path) -> Path:
 
 def _init_from_remote(name: str, directory: Optional[Path], url: str) -> None:
     """Create a project by extracting a remote archive into the target directory."""
+    import tempfile
+
     archive_url = _resolve_template_url(url)
     target = directory or Path.cwd() / name
 
