@@ -52,9 +52,16 @@ def serve(
         threads.append(watcher)
         console.print("[bold]File watcher enabled[/bold]")
 
+    scheduler = None
     if scheduler_on:
+        from havn.engine.scheduler import SchedulerConfigError
+
         scheduler = SchedulerThread(project_dir)
-        scheduler.start()
+        try:
+            scheduler.start()
+        except SchedulerConfigError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
         threads.append(scheduler)
         console.print("[bold]Scheduler enabled[/bold]")
 
@@ -123,6 +130,12 @@ def serve(
             serve_info.unlink()
         except Exception:
             pass
+        if scheduler is not None:
+            # No new runs; cancel queued ones and give running ones the
+            # scheduler's grace period. Its workers are daemon threads, so
+            # a run still going after that ends with the process.
+            scheduler.stop()
+            scheduler.join(timeout=scheduler.shutdown_grace + 5)
 
 
 # --- snapshot ---

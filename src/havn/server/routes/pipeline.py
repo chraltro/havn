@@ -1202,3 +1202,23 @@ def get_scheduler_status(request: Request) -> dict:
 
     streams = get_scheduled_streams(_get_project_dir())
     return {"scheduled_streams": streams}
+
+
+@router.get("/api/scheduler/history")
+def get_scheduler_history(
+    request: Request,
+    conn: DbConn,
+    limit: int = 50,
+    name: str | None = None,
+    status: str | None = None,
+) -> dict:
+    """Recorded schedule fires, newest first (``_havn.schedule_history``).
+
+    One row per fire: when it was due (UTC), when it started and finished,
+    how late it started, and its status (success, failed, skipped_overlap,
+    missed, interrupted, cancelled, queued, running).
+    """
+    _require_permission(request, "read")
+    from havn.engine.schedule_history import read_history
+
+    return {"history": read_history(conn, limit=limit, name=name, status=status)}

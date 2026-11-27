@@ -710,26 +710,46 @@ def watch(
 
 @app.command()
 def schedule(
+    history: Annotated[bool, typer.Option("--history", help="Show recorded schedule fires (runs, skips, missed fires) instead of starting the scheduler")] = False,
+    name: Annotated[Optional[str], typer.Option("--name", "-n", help="With --history: only this stream or job")] = None,
+    status: Annotated[Optional[str], typer.Option("--status", help="With --history: only this status (success, failed, skipped_overlap, missed, ...)")] = None,
+    limit: Annotated[int, typer.Option("--limit", help="With --history: number of rows")] = 30,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
-    """Show scheduled streams and start the scheduler."""
-    from havn.engine.scheduler import SchedulerThread, get_scheduled_streams
+    """Show scheduled streams and jobs and start the scheduler.
 
-    from havn.engine.orchestration import discover_jobs
+    With --history, list what the scheduler recorded instead: one row per
+    fire, with how late it started and how it ended.
+    """
+    from havn.config import load_project
+    from havn.engine.scheduler import (
+        SchedulerConfigError,
+        SchedulerThread,
+        collect_schedules,
+        format_in_zone,
+        next_run,
+    )
 
     project_dir = _resolve_project(project_dir)
-    scheduled = get_scheduled_streams(project_dir)
-    # The scheduler also runs orchestration/*.yml jobs. A project that
-    # schedules only jobs used to be told it had nothing scheduled, and the
-    # scheduler never started.
-    scheduled_jobs = [
-        (job, job.schedules or ([job.cron] if job.cron else []))
-        for job in discover_jobs(project_dir)
-        if job.enabled
-    ]
-    scheduled_jobs = [(job, schedules) for job, schedules in scheduled_jobs if schedules]
+    if history:
+        _print_schedule_history(project_dir, name=name, status=status, limit=limit)
+        return
 
-    if not scheduled and not scheduled_jobs:
+    config = load_project(project_dir)
+    # Streams in project.yml and orchestration/*.yml jobs. A project that
+    # schedules only jobs used to be told it had nothing scheduled.
+    specs, errors, warnings = collect_schedules(project_dir, config)
+    for w in warnings:
+        console.print(f"[yellow]Warning:[/yellow] {w}")
+    if errors:
+        console.print("[red]The scheduler cannot start:[/red]")
+        for e in errors:
+            console.print(f"  [red]-[/red] {e}")
+        raise typer.Exit(1)
+
+    streams = [s for s in specs if s.kind == "stream"]
+    jobs = [s for s in specs if s.kind == "job"]
+    if not streams and not jobs:
         console.print("[yellow]No scheduled streams or jobs found[/yellow]")
         console.print("Add a schedule to a stream in project.yml:")
         console.print('  schedule: "0 6 * * *"  # 6am daily')
@@ -737,34 +757,116 @@ def schedule(
         console.print('  schedules: ["0 6 * * *"]')
         return
 
-    if scheduled:
-        table = Table(title="Scheduled Streams")
-        table.add_column("Stream", style="bold")
+    for title, label, group in (("Scheduled Streams", "Stream", streams), ("Scheduled Jobs", "Job", jobs)):
+        if not group:
+            continue
+        table = Table(title=title)
+        table.add_column(label, style="bold")
         table.add_column("Schedule")
+        table.add_column("Next run")
+        table.add_column("Overlap")
         table.add_column("Description")
-        for s in scheduled:
-            table.add_row(s["name"], s["schedule"], s["description"])
+        for spec in group:
+            nxt = next_run(spec)
+            if nxt is None and spec.interval_expressions:
+                nxt_text = "interval, counted from the last run"
+            else:
+                nxt_text = format_in_zone(nxt, spec.timezone)
+            overlap = spec.overlap + (", catchup" if spec.catchup else "")
+            table.add_row(spec.name, ", ".join(spec.expressions), nxt_text, overlap, spec.description)
         console.print(table)
         console.print()
 
-    if scheduled_jobs:
-        table = Table(title="Scheduled Jobs")
-        table.add_column("Job", style="bold")
-        table.add_column("Schedule")
-        for job, schedules in scheduled_jobs:
-            table.add_row(job.name, ", ".join(schedules))
-        console.print(table)
-        console.print()
-
-    console.print("[bold]Starting scheduler...[/bold] (Ctrl+C to stop)")
+    workers = config.scheduler.max_concurrent
+    console.print(
+        f"[bold]Starting scheduler...[/bold] (at most {workers} run{'s' if workers != 1 else ''} "
+        "at a time; Ctrl+C to stop)"
+    )
     scheduler = SchedulerThread(project_dir)
-    scheduler.start()
+    try:
+        scheduler.start()
+    except SchedulerConfigError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
 
     try:
         scheduler.join()
     except KeyboardInterrupt:
         scheduler.stop()
-        console.print("\n[dim]Scheduler stopped.[/dim]")
+        grace = int(getattr(scheduler, "shutdown_grace", 0) or 0)
+        console.print(
+            f"\n[dim]Stopping: no new runs start; waiting up to {grace}s for running ones "
+            "(Ctrl+C again to quit now)...[/dim]"
+        )
+        try:
+            scheduler.join()
+        except KeyboardInterrupt:
+            pass
+        console.print("[dim]Scheduler stopped.[/dim]")
+
+
+def _print_schedule_history(project_dir: Path, *, name: str | None, status: str | None, limit: int) -> None:
+    """`havn schedule --history`: the newest rows of _havn.schedule_history."""
+    import datetime as _dt
+
+    from havn.config import load_project
+    from havn.engine.database import open_warehouse
+    from havn.engine.schedule_history import read_history
+    from havn.engine.scheduler import format_in_zone
+
+    config = load_project(project_dir)
+    if not _warehouse_exists(config, project_dir):
+        console.print("[yellow]No warehouse database found. Nothing has been scheduled yet.[/yellow]")
+        return
+    conn = open_warehouse(config, project_dir, read_only=True)
+    try:
+        rows = read_history(conn, limit=limit, name=name, status=status)
+    finally:
+        conn.close()
+    if not rows:
+        console.print("[yellow]No schedule history recorded yet.[/yellow]")
+        return
+
+    def _instant(text):
+        if not text:
+            return None
+        return _dt.datetime.fromisoformat(text.rstrip("Z")).replace(tzinfo=_dt.timezone.utc)
+
+    def _dur(ms):
+        if ms is None:
+            return "-"
+        secs = ms / 1000
+        if secs < 60:
+            return f"{secs:.1f}s"
+        if secs < 3600:
+            return f"{secs / 60:.1f}m"
+        return f"{secs / 3600:.1f}h"
+
+    colours = {"success": "green", "failed": "red", "missed": "yellow", "skipped_overlap": "yellow",
+               "interrupted": "red", "cancelled": "dim", "running": "blue", "queued": "blue"}
+    table = Table(title="Schedule history (newest first)")
+    table.add_column("Scheduled for")
+    table.add_column("Kind")
+    table.add_column("Name", style="bold")
+    table.add_column("Status")
+    table.add_column("Late", justify="right")
+    table.add_column("Duration", justify="right")
+    table.add_column("Note")
+    for r in rows:
+        colour = colours.get(r["status"], "white")
+        note = r["error"] or ""
+        if r["trigger"] == "catchup":
+            note = f"catch-up run. {note}".strip()
+        table.add_row(
+            format_in_zone(_instant(r["scheduled_for"]), r["timezone"]),
+            r["kind"],
+            r["name"],
+            f"[{colour}]{r['status']}[/{colour}]",
+            _dur(r["lateness_ms"]),
+            _dur(r["duration_ms"]),
+            note[:80],
+        )
+    console.print(table)
 
 
 # --- cdc ---

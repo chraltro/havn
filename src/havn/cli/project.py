@@ -431,6 +431,15 @@ def validate(
             if step.action not in ("ingest", "transform", "export", "seed"):
                 errors.append(f"Stream '{name}': unknown action '{step.action}'")
 
+    # 3b. Scheduler settings: scheduler:, per-stream and per-job overlap,
+    # catchup and timezone (an unknown time zone is an error, never a
+    # silent fallback to local time).
+    from havn.engine.scheduler import check_schedules
+
+    sched_errors, sched_warnings = check_schedules(project_dir, config)
+    errors.extend(sched_errors)
+    warnings.extend(sched_warnings)
+
     # 4. Discover and validate SQL models
     models = discover_all_models(project_dir, config)
     model_names = {m.full_name for m in models}
