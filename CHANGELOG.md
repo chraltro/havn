@@ -83,6 +83,29 @@ All notable changes to havn are documented in this file.
   a result cell threw when the page was opened over plain http on a LAN
   address (no clipboard API).
 
+### Changed
+
+- **The web UI opens faster.** Every page used to be downloaded before the
+  first one appeared: 1.6 MB of JavaScript (426 kB compressed), plus the
+  code editor's 1 MB, even for someone who only looked at the Home page.
+  Now the first download is the app's frame and the Home page, 405 kB of
+  JavaScript (122 kB compressed); in a measured load of Home the browser
+  fetched 128 kB instead of 1.5 MB. The other pages, the editor and the
+  agent sidebar are fetched when they are first opened, or before that:
+  when the pointer or keyboard focus reaches their entry in the navigation,
+  and in the background once the first page is on screen, so switching
+  pages does not wait on a normal connection. Opening havn directly on any
+  page (a bookmark, a reload, a shared link) fetches that page straight
+  away.
+- **A tab left open across an upgrade recovers by itself.** After havn is
+  updated, a page opened for the first time in an old tab asks for a file the
+  new version no longer has. havn now reloads once to pick up the new
+  version (the browser still asks first if there is unsaved work), and if
+  that does not help it says so and offers a Reload button, instead of an
+  error or a blank panel.
+- Published dashboard links download less: they no longer include the
+  dependency graph and the dashboard editor.
+
 ## [0.3.1] - 2026-11-27
 
 ### Fixed
