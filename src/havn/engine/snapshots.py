@@ -170,13 +170,23 @@ def _meta_conn_for(project_dir: Path) -> duckdb.DuckDBPyConnection:
 
 
 def _ensure_meta_db(project_dir: Path) -> duckdb.DuckDBPyConnection:
-    """Backwards-compatible wrapper that now reuses a cached connection."""
-    return _meta_conn_for(project_dir)
+    """A cursor on the cached metadata connection; close it with ``_close_meta_db``.
+
+    A cursor, not the connection itself: a DuckDB connection must not be
+    used from two threads at once, and Rewind is reached from the pipeline
+    engine's worker threads (snapshot capture), the run's own thread (start,
+    finish, GC) and the Rewind API's request threads at the same time. Each
+    cursor is its own connection to the one cached database instance.
+    """
+    return _meta_conn_for(project_dir).cursor()
 
 
 def _close_meta_db(conn: duckdb.DuckDBPyConnection) -> None:
-    """No-op: cached connections are kept alive for the process lifetime."""
-    return None
+    """Close a cursor from ``_ensure_meta_db``; the cached connection stays open."""
+    try:
+        conn.close()
+    except Exception:
+        pass
 
 
 def close_meta_db_cache() -> None:

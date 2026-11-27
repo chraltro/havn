@@ -47,10 +47,11 @@ from .quality import (
 console = Console()
 logger = logging.getLogger("havn.transform")
 
-# Pipeline Rewind keeps one cached connection to its metadata database per
-# project, and a DuckDB connection must not be used from two threads at once.
-# The CLI captures snapshots from one thread, but the web UI's runner calls
-# ``build_one_model`` from several worker threads, so captures take turns.
+# The pipeline engine calls ``build_one_model`` from several worker threads,
+# so snapshot captures take turns, and the engine takes the same lock around
+# starting, finishing and garbage-collecting a Rewind run (GC must not delete
+# what a capture is writing). Rewind's metadata connection itself is reached
+# through per-call cursors (``snapshots._ensure_meta_db``).
 _SNAPSHOT_CAPTURE_LOCK = threading.Lock()
 
 
