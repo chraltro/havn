@@ -295,7 +295,9 @@ def test_stale_error_source_is_not_built(tmp_path, run_events):
     # source is reported as a skip, with the reason in `error`.
     assert ends["bronze.orders"]["status"] == "skipped"
     assert "source stale: landing.orders" in ends["bronze.orders"]["error"]
-    assert ends["silver.orders"]["status"] == "skipped_upstream_blocked"
+    # Sent as "skipped" with the reason, not the raw skipped_upstream_blocked.
+    assert ends["silver.orders"]["status"] == "skipped"
+    assert ends["silver.orders"]["error"] == "upstream blocked: bronze.orders"
     assert _query(project, "SELECT count(*) FROM information_schema.tables "
                            "WHERE table_schema IN ('bronze', 'silver')") == [(0,)]
     assert events[-1]["data"]["status"] == "success"
@@ -499,3 +501,105 @@ def test_stream_with_an_unknown_step_fails(tmp_path, run_events):
     events = _run_stream(run_events, project)
     assert [e["event"] for e in events] == ["complete"]
     assert events[0]["data"]["status"] == "failed"
+
+
+# ---------------------------------------------------------------------------
+# A failure stops what depends on it
+# ---------------------------------------------------------------------------
+
+
+def _export_marker(tmp_path: Path) -> tuple[Path, str]:
+    marker = tmp_path / "exported"
+    return marker, f"from pathlib import Path\nPath(r'{marker.as_posix()}').write_text('ran')\n"
+
+
+def test_failed_ingest_stops_what_depends_on_it(tmp_path, run_events):
+    marker, export = _export_marker(tmp_path)
+    project = _project(tmp_path, files={
+        "ingest/orders.py": "raise RuntimeError('source is down')\n",
+        "ingest/customers.py": (
+            "db.execute('CREATE SCHEMA IF NOT EXISTS landing')\n"
+            "db.execute('CREATE OR REPLACE TABLE landing.customers AS SELECT 1 AS id')\n"
+        ),
+        "transform/bronze/customers.sql": (
+            "@config materialized=table, schema=bronze\n\nSELECT id FROM landing.customers\n"
+        ),
+        "export/report.py": export,
+    })
+    events = run_events(project, "_run_selective_pipeline_thread",
+                        ["ingest", "transform", "export"], False, project, USER)
+    ends = _ends(events)
+
+    assert ends["orders.py"]["status"] == "error"
+    assert ends["customers.py"]["status"] == "success"
+    # The independent branch still builds.
+    assert ends["bronze.customers"]["status"] == "built"
+    # The model reading the failed load, and the export, never run.
+    for name in ("bronze.orders", "report.py"):
+        assert ends[name]["status"] == "skipped"
+        assert ends[name]["error"] == "upstream failed: ingest/orders.py"
+    assert not marker.exists()
+    assert not any(e["event"] == "model_start" and e["data"]["name"] in ("bronze.orders", "report.py")
+                   for e in events)
+    assert events[-1]["data"]["status"] == "failed"
+
+    assert _query(project, "SELECT count(*) FROM information_schema.tables "
+                           "WHERE table_schema = 'bronze' AND table_name = 'orders'") == [(0,)]
+    assert _query(project, "SELECT count(*) FROM _havn.model_state "
+                           "WHERE model_path = 'bronze.orders'") == [(0,)]
+    run_id = events[0]["data"]["pipeline_run_id"]
+    assert _query(project, "SELECT status, error FROM _havn.run_log "
+                           "WHERE target = 'bronze.orders' AND pipeline_run_id = ?", [run_id]) == [
+        ("skipped", "upstream failed: ingest/orders.py"),
+    ]
+    assert _query(project, "SELECT status, steps_completed, steps_failed, steps_skipped "
+                           "FROM _havn.job_runs WHERE id = ?", [run_id]) == [("failure", 2, 1, 2)]
+
+
+def test_failed_seed_stops_what_depends_on_it(tmp_path, run_events):
+    project = _stream_project(
+        tmp_path,
+        "      - seed: [all]\n      - transform: [silver.countries]\n",
+        files={
+            "seeds/countries.csv": "code,name\nNO,Norway\n",
+            "transform/silver/countries.sql": (
+                "@config materialized=table, schema=silver\n\nSELECT code FROM seeds.countries\n"
+            ),
+        },
+    )
+    # A view where the seed's table goes makes loading it fail.
+    conn = duckdb.connect(str(project / "warehouse.duckdb"))
+    conn.execute("CREATE SCHEMA seeds")
+    conn.execute("CREATE VIEW seeds.countries AS SELECT 'XX' AS code")
+    conn.close()
+
+    events = _run_stream(run_events, project)
+    ends = _ends(events)
+    assert ends["seeds.countries"]["status"] == "error"
+    assert ends["silver.countries"]["status"] == "skipped"
+    assert ends["silver.countries"]["error"] == "upstream failed: seeds.countries"
+    # Nothing left to build, so no gate ran either.
+    assert not any(e["event"] == "validation" for e in events)
+    assert events[-1]["data"]["status"] == "failed"
+    assert _query(project, "SELECT count(*) FROM information_schema.tables "
+                           "WHERE table_schema = 'silver'") == [(0,)]
+
+
+def test_failed_model_stops_the_export(tmp_path, run_events):
+    marker, export = _export_marker(tmp_path)
+    project = _project(tmp_path, files={
+        # Binds, so the pre-build gate passes; fails when it runs.
+        "transform/bronze/boom.sql": (
+            "@config materialized=table, schema=bronze\n\nSELECT CAST('x' AS INTEGER) AS v\n"
+        ),
+        "export/report.py": export,
+    })
+    events = run_events(project, "_run_selective_pipeline_thread",
+                        ["ingest", "transform", "export"], False, project, USER)
+    ends = _ends(events)
+    assert ends["bronze.boom"]["status"] == "error"
+    assert ends["bronze.orders"]["status"] == "built"
+    assert ends["report.py"]["status"] == "skipped"
+    assert ends["report.py"]["error"] == "upstream failed: bronze.boom"
+    assert not marker.exists()
+    assert events[-1]["data"]["status"] == "failed"

@@ -42,11 +42,15 @@ Emit = Callable[[str, dict], None]
 # Statuses ``build_one_model`` returns, as the browser is told about them.
 # The frontend knows "built", "skipped", "inlined", "error" and
 # "assertion_failed", and shows anything else as a green "Built ...". So a
-# model held back by a stale error-severity source is reported "skipped"
-# (``run_log`` records it as skipped too), and a model a ``policies.deny``
+# model held back by a stale error-severity source, or by a blocked or
+# failed upstream, is reported "skipped" with the reason in ``error``
+# (``run_log`` records both as skipped too), and a model a ``policies.deny``
 # rule refused is reported "error" (``run_log`` records it as an error).
-# "skipped_upstream_blocked" has always been sent as is and still is.
-_EVENT_STATUS = {"source_stale": "skipped", "policy_denied": "error"}
+_EVENT_STATUS = {
+    "source_stale": "skipped",
+    "skipped_upstream_blocked": "skipped",
+    "policy_denied": "error",
+}
 
 # Node statuses (before the mapping above) that fail the run. A transform
 # fails on what ``havn transform`` exits 1 for, plus a policy denial, which
@@ -510,11 +514,79 @@ def _execute(
     active = 0
     pending: list[str] = []
 
+    # A node that failed in this run, or that is held back because something
+    # above it failed, maps to the failures it carries ("ingest/orders.py").
+    # Nothing that depends on it runs: ingest failures stop the pipeline,
+    # and `havn stream` never reaches its export step after a failed load or
+    # transform. Exports are leaves, so a failed export blocks nothing.
+    poisoned: dict[str, str] = {}
+    dependents: dict[str, set[str]] = {}
+    for nid, waits in plan.deps.items():
+        for dep in waits:
+            dependents.setdefault(dep, set()).add(nid)
+
+    def failure_label(node: _Node) -> str:
+        return f"{node.kind}/{node.name}" if node.kind in ("ingest", "export") else node.name
+
+    def hold_back(nid: str, reasons: list[str]) -> None:
+        """Report ``nid`` as not run because ``reasons`` failed above it."""
+        node = nodes[nid]
+        reason = ", ".join(sorted({r for rs in reasons for r in rs.split(", ")}))
+        error = f"upstream failed: {reason}"
+        poisoned[nid] = reason
+        if nid not in numbers:
+            numbers[nid] = next_num[0]
+            next_num[0] += 1
+        if node.kind == "transform":
+            # As build_one_model does for a blocked parent: a run_log skip
+            # and the blocked set, no model state.
+            results[node.name] = "skipped_upstream_blocked"
+            blocked.add(node.name)
+            tally.models_run.append(node.name)
+            try:
+                log_run(main, "transform", node.name, "skipped", 0, 0,
+                        error=error, pipeline_run_id=run_id)
+            except Exception:
+                pass
+        emit("model_end", _end_payload(
+            spec, node, {"status": "skipped_upstream_blocked", "error": error}, numbers[nid],
+        ))
+        tally.skipped += 1
+        sorter.done(nid)
+
+    def admit(ready) -> None:
+        """Queue the nodes that became ready, holding back the poisoned ones."""
+        todo = list(ready)
+        while todo:
+            nid = todo.pop(0)
+            reasons = [poisoned[d] for d in plan.deps.get(nid, ()) if d in poisoned]
+            if reasons:
+                hold_back(nid, reasons)
+                todo.extend(sorter.get_ready())
+            else:
+                pending.append(nid)
+
+    def doomed_models() -> set[str]:
+        """Models below a failure in this run, held back or about to be."""
+        doomed: set[str] = set()
+        stack = list(poisoned)
+        while stack:
+            for nxt in dependents.get(stack.pop(), ()):
+                if nxt not in doomed:
+                    doomed.add(nxt)
+                    stack.append(nxt)
+        return {nodes[n].name for n in doomed if nodes[n].kind == "transform"}
+
     def maybe_run_gate() -> bool:
         nonlocal gate_pending, gate_failed
         if gate_pending:
             gate_pending = False
-            gate_failed = not run_prebuild_gate(conn, models, emit, project_dir=project_dir)
+            # Only what can still be built: a model whose loader failed has
+            # nothing to validate against and will not run.
+            doomed = doomed_models()
+            live = [m for m in models if m.full_name not in doomed]
+            if live:
+                gate_failed = not run_prebuild_gate(conn, live, emit, project_dir=project_dir)
         return not gate_failed
 
     def submit_ready() -> None:
@@ -541,7 +613,7 @@ def _execute(
         main, project_dir=project_dir, pipeline_run_id=run_id,
         kind=spec.operation, name=spec.stream or None,
     ):
-        pending.extend(sorter.get_ready())
+        admit(sorter.get_ready())
         submit_ready()
         while sorter.is_active() or active > 0:
             if gate_failed and active == 0:
@@ -579,16 +651,15 @@ def _execute(
             if raw in _FAILED:
                 tally.has_error = True
                 tally.failed += 1
+                if node.kind != "export":
+                    poisoned[nid] = failure_label(node)
             elif raw in _SKIPPED:
                 tally.skipped += 1
             else:
                 tally.completed += 1
 
             sorter.done(nid)
-            try:
-                pending.extend(sorter.get_ready())
-            except Exception:
-                pass
+            admit(sorter.get_ready())
             submit_ready()
 
         try:
