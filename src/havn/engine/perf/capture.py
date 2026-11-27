@@ -27,6 +27,8 @@ from typing import Any, Iterator
 
 import duckdb
 
+from havn.engine.profile_json import normalize_profile
+
 logger = logging.getLogger("havn.perf")
 
 # Long values in a plan's extra_info (a projection list of 300 columns, a
@@ -157,7 +159,7 @@ def run_build_statement(
             result = conn.execute(sql)
             try:
                 raw = conn.get_profiling_information(format="json")
-                profile = json.loads(raw) if raw else None
+                profile = normalize_profile(json.loads(raw)) if raw else None
                 # Something outside the build may still use the connection
                 # between the two calls; a profile of another query is dropped.
                 if profile and _same_query(profile.get("query_name"), sql):

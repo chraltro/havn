@@ -301,7 +301,7 @@ def env_region(env):
         "SELECT p.id, region FROM landing.people p JOIN landing.region r USING (id)",
         "SELECT p.id, region.region FROM landing.people p JOIN landing.region USING (id)",
         "SELECT x FROM landing.people p, unnest([1, 2]) AS x(x)",
-        "SELECT list_transform([1], people -> people + 1) FROM landing.people",
+        "SELECT list_transform([1], lambda people: people + 1) FROM landing.people",
         "SELECT p.*, r.* FROM landing.people p JOIN landing.region r USING (id)",
         "SELECT * FROM (VALUES (1)) v(x), landing.people",
     ],

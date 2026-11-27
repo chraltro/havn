@@ -219,9 +219,11 @@ def _unwrap_error_context(message: str, wrapped: str, original: str) -> str:
         if m and m.group(2).startswith(_WRAP_PREFIX):
             out.append(m.group(1) + m.group(2)[len(_WRAP_PREFIX):])
             nxt = lines[i + 1] if i + 1 < len(lines) else None
-            if nxt is not None and nxt.strip() == "^":
+            # One caret (DuckDB 1.x) or one per character of the token (2.0).
+            marker = nxt.strip() if nxt is not None else ""
+            if marker and set(marker) == {"^"}:
                 indent = len(nxt) - len(nxt.lstrip(" "))
-                out.append(" " * max(len(m.group(1)), indent - len(_WRAP_PREFIX)) + "^")
+                out.append(" " * max(len(m.group(1)), indent - len(_WRAP_PREFIX)) + marker)
                 i += 2
                 continue
             i += 1

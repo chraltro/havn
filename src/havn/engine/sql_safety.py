@@ -410,6 +410,40 @@ def _parser_conn():
     return conn
 
 
+def _multi_statement_type():
+    import duckdb
+
+    return getattr(duckdb.StatementType, "MULTI", None)
+
+
+_MULTI = _multi_statement_type()
+
+# Words a read-only statement can open with. A MULTI statement (see
+# _check_with_duckdb_parser) is accepted only when its text starts with one.
+# DuckDB has no data-modifying CTEs, so WITH is a read.
+_READ_LEAD_KEYWORDS = frozenset({"select", "with", "from", "pivot", "unpivot", "values", "table", "("})
+
+
+def _first_keyword(query: str) -> str:
+    """The first token of ``query`` lowercased, comments skipped by DuckDB's lexer."""
+    import duckdb
+
+    try:
+        tokens = duckdb.tokenize(query)
+    except Exception:
+        return ""
+    for k, (offset, kind) in enumerate(tokens):
+        if kind == duckdb.token_type.comment:
+            continue
+        end = tokens[k + 1][0] if k + 1 < len(tokens) else len(query)
+        text = query[offset:end].strip()
+        if text.startswith("("):
+            return "("
+        m = _IDENT_RE.match(text)
+        return m.group(0).lower() if m else text[:1]
+    return ""
+
+
 def _explain_target(query: str) -> str | None:
     """Return the statement text an ``EXPLAIN [ANALYZE] [(opts)]`` wraps."""
     import duckdb
@@ -476,6 +510,18 @@ def _check_with_duckdb_parser(sql: str, *, _depth: int = 0) -> None:
                 raise ReadOnlyQueryError("Only SELECT queries can be explained.")
             _check_with_duckdb_parser(target, _depth=_depth + 1)
             continue
+        elif _MULTI is not None and stmt.type == _MULTI:
+            # DuckDB 2.0 reports a statement that expands into several (a
+            # dynamic PIVOT, wherever it sits) as one MULTI statement carrying
+            # the user's text; 1.x listed the expansion with empty text. The
+            # expansion is hidden, so judge the text: CREATE TABLE AS PIVOT
+            # and INSERT ... PIVOT are MULTI as well, and must not pass.
+            if _first_keyword(stmt.query or sql) not in _READ_LEAD_KEYWORDS:
+                raise ReadOnlyQueryError(
+                    "Only SELECT queries are allowed through the query interface."
+                )
+            reads += 1
+            _check_parse_tree(stmt.query or sql)
         elif stmt.type in (st.CREATE, st.SET) and not stmt.query.strip():
             # A dynamic PIVOT expands into CREATE TYPE ... AS ENUM statements
             # (wrapped in SETs once the connection has run a query) ahead of
@@ -513,7 +559,9 @@ def _check_parse_tree(query: str) -> None:
     import json
 
     try:
-        raw = _parser_conn().execute("SELECT json_serialize_sql(?)", [query]).fetchone()[0]
+        # fetchall, not fetchone: on DuckDB 2.0 a half-read result keeps the
+        # parser connection busy for extract_statements on the next call.
+        raw = _parser_conn().execute("SELECT json_serialize_sql(?)", [query]).fetchall()[0][0]
         tree = json.loads(raw)
     except Exception:
         tree = {"error": True}
@@ -532,7 +580,9 @@ def _check_parse_tree(query: str) -> None:
             continue
         if not isinstance(node, dict):
             continue
-        if node.get("type") == "BASE_TABLE":
+        # SHOW_REF: DuckDB 2.0 keeps the target of SHOW/DESCRIBE '<path>' as
+        # the ref's own table_name; 1.x nested a BASE_TABLE under it.
+        if node.get("type") in ("BASE_TABLE", "SHOW_REF"):
             name = str(node.get("table_name") or "")
             if any(ch in _PATH_CHARS for ch in name):
                 raise ReadOnlyQueryError(

@@ -84,6 +84,9 @@ def _parse_json_plan(raw_json: str, *, is_analyze: bool = False) -> PlanNode:
             return PlanNode(operator="EMPTY")
         return _parse_json_node(data[0], is_analyze=is_analyze)
     elif isinstance(data, dict):
+        from havn.engine.profile_json import normalize_profile
+
+        data = normalize_profile(data)
         # EXPLAIN ANALYZE with json profiling returns a dict with "children"
         # The root is a query-level wrapper; real plan is in children
         children = data.get("children", [])

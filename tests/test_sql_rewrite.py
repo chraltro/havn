@@ -150,7 +150,7 @@ def test_find_table_refs_excludes_ctes():
 DUCKDB_CONSTRUCTS = [
     ("exclude", "SELECT * EXCLUDE (b) FROM bronze.t"),
     ("replace", "SELECT * REPLACE (a * 2 AS a) FROM bronze.t"),
-    ("lambda", "SELECT list_transform([1, 2, 3], x -> x + 1) AS v FROM bronze.t"),
+    ("lambda", "SELECT list_transform([1, 2, 3], lambda x: x + 1) AS v FROM bronze.t"),
     ("struct_dot", "SELECT s.field FROM (SELECT {'field': 1} AS s, a FROM bronze.t)"),
     ("qualify", "SELECT a, row_number() OVER (ORDER BY a) AS rn FROM bronze.t QUALIFY rn = 1"),
     ("union_by_name", "SELECT a FROM bronze.t UNION ALL BY NAME SELECT a FROM bronze.t"),
