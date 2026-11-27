@@ -732,7 +732,7 @@ def test_schedule_listing_shows_next_run_with_timezone(tmp_path, monkeypatch):
     class _Fake:
         shutdown_grace = 0
 
-        def __init__(self, project_dir):
+        def __init__(self, project_dir, **kwargs):
             pass
 
         def start(self):
@@ -784,3 +784,127 @@ def test_schedule_history_cli_and_api(tmp_path, monkeypatch):
     assert [h["status"] for h in hist] == ["success"]
     assert hist[0]["scheduled_for"] == "2026-04-06T06:00:00Z"
     assert hist[0]["cron"] == "*/5 * * * *"
+
+
+# ---------------------------------------------------------------------------
+# The scheduler builds the warehouse its host builds
+# ---------------------------------------------------------------------------
+
+
+ENV_PROJECT = """\
+    name: t
+    database:
+      path: warehouse.duckdb
+    environments:
+      dev:
+        database:
+          path: dev.duckdb
+      prod:
+        database:
+          path: prod.duckdb
+    rewind:
+      enabled: false
+    scheduler:
+      timezone: UTC
+    streams:
+      hourly:
+        schedule: "0 * * * *"
+        steps:
+          - ingest: [a]
+"""
+
+
+def _ticks_in(db: Path) -> int:
+    if not db.exists():
+        return 0
+    conn = duckdb.connect(str(db))
+    try:
+        exists = conn.execute(
+            "SELECT count(*) FROM information_schema.tables WHERE table_name = 'ticks_a'"
+        ).fetchone()[0]
+        return conn.execute("SELECT count(*) FROM landing.ticks_a").fetchone()[0] if exists else 0
+    finally:
+        conn.close()
+
+
+class _Captured:
+    """Stands in for SchedulerThread in the CLI; keeps its config loader."""
+
+    instances: list = []
+    shutdown_grace = 0
+
+    def __init__(self, project_dir, **kwargs):
+        self.project_dir = project_dir
+        self.kwargs = kwargs
+        _Captured.instances.append(self)
+
+    def start(self):
+        pass
+
+    def join(self, timeout=None):
+        pass
+
+    def stop(self):
+        pass
+
+
+def test_scheduler_under_serve_builds_the_servers_environment(tmp_path, monkeypatch):
+    """`havn serve --env prod --schedule`: scheduled runs build what the UI builds."""
+    import uvicorn
+
+    import havn.engine.scheduler as scheduler_mod
+    import havn.server.app as server_app
+    from havn.cli import app
+    from havn.server import deps
+
+    project = _project(tmp_path, ENV_PROJECT)
+    _Captured.instances = []
+    monkeypatch.setattr(scheduler_mod, "SchedulerThread", _Captured)
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+    monkeypatch.setattr(server_app, "PROJECT_DIR", server_app.PROJECT_DIR)
+    monkeypatch.setattr(server_app, "ACTIVE_ENV", server_app.ACTIVE_ENV)
+    monkeypatch.setattr(server_app, "AUTH_ENABLED", server_app.AUTH_ENABLED)
+    deps.invalidate_config_cache()
+    try:
+        result = CliRunner().invoke(app, ["serve", "--schedule", "--env", "prod", "--port", "39871",
+                                          "--project", str(project)])
+        assert result.exit_code == 0, result.output
+        (captured,) = _Captured.instances
+        loader = captured.kwargs["config_loader"]
+        assert loader().database.path == "prod.duckdb"
+        assert project / loader().database.path == deps._get_db_path()
+
+        # And a real scheduler with that loader runs into prod, not dev.
+        clock = Clock(utc(2026, 4, 6, 5, 0, 30))
+        t = _scheduler(project, clock, config_loader=loader)
+        t._started_at = clock.t
+        t._tick(now=utc(2026, 4, 6, 6, 0, 5))
+        assert t.wait_idle(120)
+        t.stop()
+        assert _ticks_in(project / "prod.duckdb") == 1
+        assert _ticks_in(project / "dev.duckdb") == 0
+    finally:
+        deps.invalidate_config_cache()
+
+
+def test_schedule_env_option_resolves_like_havn_stream(tmp_path, monkeypatch):
+    import havn.engine.scheduler as scheduler_mod
+    from havn.cli import app
+
+    project = _project(tmp_path, ENV_PROJECT)
+    _Captured.instances = []
+    monkeypatch.setattr(scheduler_mod, "SchedulerThread", _Captured)
+    result = CliRunner().invoke(app, ["schedule", "--env", "prod", "--project", str(project)])
+    assert result.exit_code == 0, result.output
+    assert "env=prod" in result.output
+    (captured,) = _Captured.instances
+    assert captured.kwargs["config_loader"]().database.path == "prod.duckdb"
+
+    # Without --env: the active environment, as `havn stream` picks it.
+    _Captured.instances = []
+    result = CliRunner().invoke(app, ["schedule", "--project", str(project)])
+    assert result.exit_code == 0, result.output
+    assert _Captured.instances[0].kwargs["config_loader"]().database.path == "dev.duckdb"
+
+    result = CliRunner().invoke(app, ["schedule", "--env", "nope", "--project", str(project)])
+    assert result.exit_code == 1

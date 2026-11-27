@@ -735,14 +735,16 @@ def schedule(
     name: Annotated[Optional[str], typer.Option("--name", "-n", help="With --history: only this stream or job")] = None,
     status: Annotated[Optional[str], typer.Option("--status", help="With --history: only this status (success, failed, skipped_overlap, missed, ...)")] = None,
     limit: Annotated[int, typer.Option("--limit", help="With --history: number of rows")] = 30,
+    env: Annotated[Optional[str], typer.Option("--env", "-e", help="Environment to use (e.g. dev, prod)")] = None,
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
     """Show scheduled streams and jobs and start the scheduler.
 
+    Scheduled runs build the environment's warehouse, as `havn stream
+    --env` does (default: the active environment, see `havn env use`).
     With --history, list what the scheduler recorded instead: one row per
     fire, with how late it started and how it ended.
     """
-    from havn.config import load_project
     from havn.engine.scheduler import (
         SchedulerConfigError,
         SchedulerThread,
@@ -752,11 +754,11 @@ def schedule(
     )
 
     project_dir = _resolve_project(project_dir)
+    config = _load_config(project_dir, env)
     if history:
-        _print_schedule_history(project_dir, name=name, status=status, limit=limit)
+        _print_schedule_history(project_dir, config, name=name, status=status, limit=limit)
         return
 
-    config = load_project(project_dir)
     # Streams in project.yml and orchestration/*.yml jobs. A project that
     # schedules only jobs used to be told it had nothing scheduled.
     specs, errors, warnings = collect_schedules(project_dir, config)
@@ -799,11 +801,14 @@ def schedule(
         console.print()
 
     workers = config.scheduler.max_concurrent
+    env_label = f", env={config.active_environment}" if config.active_environment else ""
     console.print(
         f"[bold]Starting scheduler...[/bold] (at most {workers} run{'s' if workers != 1 else ''} "
-        "at a time; Ctrl+C to stop)"
+        f"at a time{env_label}; Ctrl+C to stop)"
     )
-    scheduler = SchedulerThread(project_dir)
+    # Re-read on every tick with the same environment, as `havn stream
+    # --env` resolves it.
+    scheduler = SchedulerThread(project_dir, config_loader=lambda: _load_config(project_dir, env))
     try:
         scheduler.start()
     except SchedulerConfigError as e:
@@ -826,16 +831,15 @@ def schedule(
         console.print("[dim]Scheduler stopped.[/dim]")
 
 
-def _print_schedule_history(project_dir: Path, *, name: str | None, status: str | None, limit: int) -> None:
+def _print_schedule_history(project_dir: Path, config, *, name: str | None, status: str | None,
+                            limit: int) -> None:
     """`havn schedule --history`: the newest rows of _havn.schedule_history."""
     import datetime as _dt
 
-    from havn.config import load_project
     from havn.engine.database import open_warehouse
     from havn.engine.schedule_history import read_history
     from havn.engine.scheduler import format_in_zone
 
-    config = load_project(project_dir)
     if not _warehouse_exists(config, project_dir):
         console.print("[yellow]No warehouse database found. Nothing has been scheduled yet.[/yellow]")
         return

@@ -447,7 +447,7 @@ def test_scheduler_thread_hook(project, dashboard, client, smtp, monkeypatch):
 
     called = threading.Event()
 
-    def fake(project_dir, now=None):
+    def fake(project_dir, now=None, config=None):
         called.set()
         return []
 

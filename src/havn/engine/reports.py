@@ -925,13 +925,18 @@ def render_file(conn: duckdb.DuckDBPyConnection, report: dict, config, fmt: str)
     return html.encode("utf-8"), "text/html; charset=utf-8", f"{base}.html"
 
 
-def run_due_reports_for_project(project_dir: Path, now: _dt.datetime | None = None) -> list[dict]:
-    """Scheduler entry point: open the warehouse, run due reports, close it."""
+def run_due_reports_for_project(project_dir: Path, now: _dt.datetime | None = None, config=None) -> list[dict]:
+    """Scheduler entry point: open the warehouse, run due reports, close it.
+
+    ``config``: the project config the scheduler resolved (its host's
+    environment); None loads project.yml as is.
+    """
     from havn.config import load_project
     from havn.engine.backends import create_backend
     from havn.engine.database import open_warehouse
 
-    config = load_project(project_dir)
+    if config is None:
+        config = load_project(project_dir)
     if not create_backend(config.database, project_dir=project_dir).exists():
         return []
     conn = open_warehouse(config, project_dir)

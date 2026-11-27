@@ -56,7 +56,12 @@ def serve(
     if scheduler_on:
         from havn.engine.scheduler import SchedulerConfigError
 
-        scheduler = SchedulerThread(project_dir)
+        from havn.server.deps import _get_config_cached
+
+        # The server's own resolution (--env, the environment switched to
+        # in the UI, the checked-out branch's warehouse), so scheduled runs
+        # build the warehouse the UI shows.
+        scheduler = SchedulerThread(project_dir, config_loader=_get_config_cached)
         try:
             scheduler.start()
         except SchedulerConfigError as e:

@@ -60,9 +60,12 @@ class SchedulerConfigError(ValueError):
     """The scheduler settings cannot be used; the message lists every problem."""
 
 
-def _run_stream_task(project_dir_str: str, stream_name: str, trigger: str = "scheduled") -> dict:
+def _run_stream_task(project_dir_str: str, stream_name: str, trigger: str = "scheduled",
+                     config=None) -> dict:
     """Run one stream through the shared stream runner; return its result dict.
 
+    ``config`` is the project config the scheduler resolved (its host's
+    environment and branch warehouse); None loads project.yml as is.
     Never raises for a failing stream: the result's ``status`` is
     ``"success"`` or ``"error"``.
     """
@@ -70,7 +73,8 @@ def _run_stream_task(project_dir_str: str, stream_name: str, trigger: str = "sch
     from havn.engine.stream_runner import StreamNotFound, run_stream
 
     project_dir = Path(project_dir_str)
-    config = load_project(project_dir)
+    if config is None:
+        config = load_project(project_dir)
     try:
         result = run_stream(config, project_dir, stream_name, trigger=trigger)
     except StreamNotFound:
@@ -78,11 +82,13 @@ def _run_stream_task(project_dir_str: str, stream_name: str, trigger: str = "sch
     return result.to_dict()
 
 
-def _run_job_task(project_dir_str: str, job_name: str, trigger: str = "scheduled") -> dict:
+def _run_job_task(project_dir_str: str, job_name: str, trigger: str = "scheduled",
+                  config=None) -> dict:
     """Run one orchestration job as a scheduled run; return ``{status, error}``.
 
     ``status`` is the job's own (``success``, ``failure``, ``timeout``,
     ``cancelled``) or ``error`` when the job could not be planned.
+    ``config`` as for :func:`_run_stream_task`.
     """
     from havn.config import load_project
     from havn.engine.database import ensure_meta_table, open_warehouse
@@ -98,7 +104,8 @@ def _run_job_task(project_dir_str: str, job_name: str, trigger: str = "scheduled
     job = _find_job(project_dir, job_name)
     if job is None:
         return {"job": job_name, "status": "error", "error": f"Job '{job_name}' not found"}
-    config = load_project(project_dir)
+    if config is None:
+        config = load_project(project_dir)
     conn = open_warehouse(config, project_dir)
     try:
         ensure_meta_table(conn)
@@ -430,6 +437,13 @@ class _WorkerPool:
 class SchedulerThread(threading.Thread):
     """Background thread that dispatches scheduled streams, jobs and reports.
 
+    ``config_loader()`` returns the project config the scheduler works with,
+    re-read on every tick: its host's resolution, so the scheduler builds the
+    warehouse its host does. ``havn serve`` passes the server's own resolver
+    (``--env``, the environment switched to in the UI, the branch warehouse
+    of the checked-out branch); ``havn schedule --env`` resolves like the
+    other run commands. Default: ``load_project(project_dir)``.
+
     Injectable for tests: ``clock`` returns the current time (an aware
     datetime), ``runner(task)`` runs one stream/job and returns ``(status,
     error)`` with status ``"success"`` or ``"failed"``, ``max_concurrent``
@@ -452,11 +466,13 @@ class SchedulerThread(threading.Thread):
         max_concurrent: int | None = None,
         shutdown_grace: float | None = None,
         poll_seconds: float | None = None,
+        config_loader=None,
     ):
         super().__init__(daemon=True, name="havn-scheduler")
         from havn.engine.schedule_history import HistoryStore, WarehouseLease, new_id
 
         self.project_dir = Path(project_dir)
+        self._config_loader = config_loader
         self._clock = clock or (lambda: datetime.datetime.now(UTC))
         self._runner = runner or self._default_runner
         self._max_concurrent_override = max_concurrent
@@ -497,9 +513,12 @@ class SchedulerThread(threading.Thread):
     # -- configuration -------------------------------------------------
 
     def _load_config(self):
-        from havn.config import load_project
+        if self._config_loader is not None:
+            self._config = self._config_loader()
+        else:
+            from havn.config import load_project
 
-        self._config = load_project(self.project_dir)
+            self._config = load_project(self.project_dir)
         return self._config
 
     def _connect(self):
@@ -1038,12 +1057,12 @@ class SchedulerThread(threading.Thread):
         title = label[0].upper() + label[1:]
         logger.info("Scheduler triggering %s", label)
         console.print(f"[bold blue]Scheduler:[/bold blue] Running {label}")
+        config = self._config or self._load_config()
         if spec.kind == "stream":
-            result = _run_stream_task(str(self.project_dir), spec.name)
-            ok = result.get("status") == "success"
+            result = _run_stream_task(str(self.project_dir), spec.name, config=config)
         else:
-            result = _run_job_task(str(self.project_dir), spec.name)
-            ok = result.get("status") == "success"
+            result = _run_job_task(str(self.project_dir), spec.name, config=config)
+        ok = result.get("status") == "success"
         error = result.get("error")
         if ok:
             console.print(f"[bold green]Scheduler:[/bold green] {title} completed")
@@ -1059,7 +1078,8 @@ class SchedulerThread(threading.Thread):
         """Scheduled dashboard reports (_havn.reports) that are due."""
         from havn.engine.reports import run_due_reports_for_project
 
-        for delivery in run_due_reports_for_project(self.project_dir):
+        config = self._config or self._load_config()
+        for delivery in run_due_reports_for_project(self.project_dir, config=config):
             colour = "green" if delivery["status"] in ("sent", "skipped") else "red"
             console.print(
                 f"[bold {colour}]Scheduler:[/bold {colour}] Report "
