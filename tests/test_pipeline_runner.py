@@ -379,7 +379,8 @@ def test_transform_run_event_contract(tmp_path, run_events):
     assert _shape(events) == [
         ("start", ("label", "operation", "pipeline_run_id")),
         _MODEL_START_T,
-        ("model_end", ("action", "duration_ms", "name", "num", "row_count", "status")),
+        # `error` added deliberately, so a skip can say why.
+        ("model_end", ("action", "duration_ms", "error", "name", "num", "row_count", "status")),
         ("complete", ("duration_seconds", "operation", "pipeline_run_id", "status")),
     ]
     assert events[0]["data"]["label"] == "Transform (bronze.orders) --force"
@@ -603,3 +604,232 @@ def test_failed_model_stops_the_export(tmp_path, run_events):
     assert ends["report.py"]["error"] == "upstream failed: bronze.boom"
     assert not marker.exists()
     assert events[-1]["data"]["status"] == "failed"
+
+
+_EVENTS_INGEST_FAILS = "raise RuntimeError('events source is down')\n"
+
+
+def test_failed_ingest_stops_a_model_reading_a_table_no_stem_names(tmp_path, run_events):
+    """bronze.events reads raw.events, which nothing ties to ingest/events.py by
+    name; it must still wait for the load, and the export with it."""
+    marker, export = _export_marker(tmp_path)
+    project = _project(tmp_path, files={
+        "ingest/events.py": _EVENTS_INGEST_FAILS,
+        "transform/bronze/events.sql": (
+            "@config materialized=table, schema=bronze\n\nSELECT * FROM raw.events\n"
+        ),
+        "transform/bronze/orders.sql": None,
+        "ingest/orders.py": None,
+        "export/report.py": export,
+    })
+    (project / "transform" / "bronze" / "orders.sql").unlink(missing_ok=True)
+    (project / "ingest" / "orders.py").unlink(missing_ok=True)
+    # raw.events exists from an earlier load, so the model would build from it.
+    conn = duckdb.connect(str(project / "warehouse.duckdb"))
+    conn.execute("CREATE SCHEMA raw")
+    conn.execute("CREATE TABLE raw.events AS SELECT 1 AS id")
+    conn.close()
+
+    events = run_events(project, "_run_selective_pipeline_thread",
+                        ["ingest", "transform", "export"], False, project, USER)
+    ends = _ends(events)
+    assert ends["events.py"]["status"] == "error"
+    for name in ("bronze.events", "report.py"):
+        assert ends[name]["status"] == "skipped", name
+        assert ends[name]["error"] == "upstream failed: ingest/events.py"
+    assert not marker.exists()
+    assert _query(project, "SELECT count(*) FROM information_schema.tables "
+                           "WHERE table_schema = 'bronze'") == [(0,)]
+    assert events[-1]["data"]["status"] == "failed"
+
+
+def test_failed_ingest_stops_the_export_when_no_model_reads_it(tmp_path, run_events):
+    marker, export = _export_marker(tmp_path)
+    project = _project(tmp_path, files={
+        "ingest/events.py": _EVENTS_INGEST_FAILS,
+        "export/report.py": export,
+    })
+    events = run_events(project, "_run_selective_pipeline_thread",
+                        ["ingest", "transform", "export"], False, project, USER)
+    ends = _ends(events)
+    assert ends["events.py"]["status"] == "error"
+    assert ends["bronze.orders"]["status"] == "built"  # reads landing.orders: its own script
+    assert ends["report.py"]["status"] == "skipped"
+    assert ends["report.py"]["error"] == "upstream failed: ingest/events.py"
+    assert not marker.exists()
+    assert events[-1]["data"]["status"] == "failed"
+
+
+def test_model_with_an_unattributable_dependency_waits_on_every_load(tmp_path, run_events):
+    project = _project(tmp_path, files={
+        "ingest/events.py": _EVENTS_INGEST_FAILS,
+        # landing.orders is ingest/orders.py's; ref.regions is nobody's.
+        "transform/bronze/mixed.sql": (
+            "@config materialized=table, schema=bronze\n\n"
+            "SELECT o.order_id FROM landing.orders o CROSS JOIN ref.regions r\n"
+        ),
+        "export/report.py": None,
+    })
+    conn = duckdb.connect(str(project / "warehouse.duckdb"))
+    conn.execute("CREATE SCHEMA ref")
+    conn.execute("CREATE TABLE ref.regions AS SELECT 'north' AS region")
+    conn.close()
+    events = run_events(project, "_run_selective_pipeline_thread",
+                        ["ingest", "transform"], False, project, USER)
+    ends = _ends(events)
+    assert ends["bronze.orders"]["status"] == "built"
+    assert ends["bronze.mixed"]["status"] == "skipped"
+    assert ends["bronze.mixed"]["error"] == "upstream failed: ingest/events.py"
+
+
+def test_transform_run_says_why_a_model_was_skipped(tmp_path, run_events):
+    project = _project(tmp_path, files={
+        "ingest/orders.py": (
+            "db.execute('CREATE SCHEMA IF NOT EXISTS landing')\n"
+            "db.execute(\"CREATE OR REPLACE TABLE landing.orders AS SELECT 1 AS order_id, "
+            "1.0 AS amount, CAST('2020-01-01' AS TIMESTAMP) AS ts\")\n"
+        ),
+        "transform/bronze/orders.sql": (
+            "@config materialized=table, schema=bronze\n"
+            "@source_freshness landing.orders, max_age=1s, on=ts\n\n"
+            "SELECT order_id, amount FROM landing.orders\n"
+        ),
+        "transform/silver/orders.sql": (
+            "@config materialized=table, schema=silver\n\nSELECT * FROM bronze.orders\n"
+        ),
+    })
+    run_events(project, "_run_selective_pipeline_thread", ["ingest"], False, project, USER)
+    events = run_events(project, "_run_transform_thread", None, False, project)
+    ends = _ends(events)
+    assert ends["bronze.orders"]["status"] == "skipped"
+    assert "source stale: landing.orders" in ends["bronze.orders"]["error"]
+    assert ends["silver.orders"]["error"] == "upstream blocked: bronze.orders"
+
+
+def test_ui_run_records_lineage_for_every_model(tmp_path, run_events):
+    files = {f"transform/bronze/m{i:02d}.sql": (
+        f"@config materialized=table, schema=bronze\n\nSELECT {i} AS id\n"
+    ) for i in range(16)}
+    project = _project(tmp_path, files={**files, "transform/bronze/orders.sql": None})
+    (project / "transform" / "bronze" / "orders.sql").unlink(missing_ok=True)
+    events = run_events(project, "_run_transform_thread", None, True, project)
+    assert {d["status"] for d in _ends(events).values()} == {"built"}
+    assert _query(project, "SELECT count(*) FROM _havn.model_lineage") == [(16,)]
+
+
+def test_held_back_parent_through_an_unselected_model_blocks_the_child(tmp_path, run_events):
+    """build_one_model sees direct parents only; silver.b sits between and is not selected."""
+    project = _stream_project(
+        tmp_path,
+        "      - transform: [bronze.a, gold.c]\n",
+        files={
+            "transform/bronze/a.sql": (
+                "@config materialized=table, schema=bronze\n"
+                "@source_freshness landing.orders, max_age=1s, on=ts\n\n"
+                "SELECT order_id FROM landing.orders\n"
+            ),
+            "transform/silver/b.sql": "@config materialized=view, schema=silver\n\nSELECT * FROM bronze.a\n",
+            "transform/gold/c.sql": "@config materialized=table, schema=gold\n\nSELECT * FROM silver.b\n",
+            "transform/bronze/orders.sql": None,
+        },
+    )
+    (project / "transform" / "bronze" / "orders.sql").unlink(missing_ok=True)
+    # Built once, so silver.b exists and gold.c would build from stale data.
+    conn = duckdb.connect(str(project / "warehouse.duckdb"))
+    conn.execute("CREATE SCHEMA landing")
+    conn.execute("CREATE TABLE landing.orders AS SELECT 1 AS order_id, "
+                 "CAST('2020-01-01' AS TIMESTAMP) AS ts")
+    conn.execute("CREATE SCHEMA bronze")
+    conn.execute("CREATE TABLE bronze.a AS SELECT 1 AS order_id")
+    conn.execute("CREATE SCHEMA silver")
+    conn.execute("CREATE VIEW silver.b AS SELECT * FROM bronze.a")
+    conn.close()
+
+    events = _run_stream(run_events, project)
+    ends = _ends(events)
+    assert ends["bronze.a"]["status"] == "skipped"
+    assert ends["gold.c"]["status"] == "skipped"
+    assert ends["gold.c"]["error"] == "upstream blocked: bronze.a"
+    assert _query(project, "SELECT count(*) FROM information_schema.tables "
+                           "WHERE table_schema = 'gold'") == [(0,)]
+    # A stale source does not fail the run.
+    assert events[-1]["data"]["status"] == "success"
+
+
+def test_stream_retries_a_model_that_fails_once(tmp_path, run_events):
+    marker = (tmp_path / "attempted").as_posix()
+    project = _stream_project(
+        tmp_path,
+        "      - transform: [gold.flaky]\n",
+        extra="    retries: 1\n    retry_delay: 0\n",
+        files={
+            "transform/gold/flaky.py": (
+                "from pathlib import Path\n"
+                "from havn import model\n\n"
+                "@model(materialized='table')\n"
+                "def flaky(db):\n"
+                f"    marker = Path(r'{marker}')\n"
+                "    if not marker.exists():\n"
+                "        marker.write_text('x')\n"
+                "        raise RuntimeError('first attempt fails')\n"
+                "    return db.sql('SELECT 1 AS x')\n"
+            ),
+        },
+    )
+    events = _run_stream(run_events, project)
+    assert _ends(events)["gold.flaky"]["status"] == "built"
+    assert events[-1]["data"]["status"] == "success"
+    assert _query(project, "SELECT count(*) FROM gold.flaky") == [(1,)]
+
+
+_LOG_ALERTS = "alerts:\n  channels: [log]\n"
+
+
+def _alerts(project: Path) -> list[tuple]:
+    return _query(project, "SELECT alert_type, target FROM _havn.alert_log ORDER BY sent_at")
+
+
+def test_transform_run_alerts_like_the_cli(tmp_path, run_events):
+    project = _project(tmp_path, _LOG_ALERTS, files={"export/report.py": None})
+    run_events(project, "_run_selective_pipeline_thread", ["ingest"], False, project, USER)
+    assert _alerts(project) == []  # nothing built: no success alert
+
+    run_events(project, "_run_transform_thread", None, False, project)
+    assert _alerts(project) == [("pipeline_success", "transform")]
+
+    # Nothing built this time: no alert.
+    run_events(project, "_run_transform_thread", None, False, project)
+    assert _alerts(project) == [("pipeline_success", "transform")]
+
+    _write(project / "transform" / "bronze" / "orders.sql",
+           "@config materialized=table, schema=bronze\n\nSELECT CAST('x' AS INTEGER) AS v\n")
+    run_events(project, "_run_transform_thread", None, False, project)
+    assert _alerts(project)[-1] == ("pipeline_failure", "transform")
+
+
+def test_selective_pipeline_run_alerts_like_the_cli(tmp_path, run_events):
+    project = _project(tmp_path, _LOG_ALERTS, files={"export/report.py": None})
+    run_events(project, "_run_selective_pipeline_thread", ["ingest", "transform"], False, project, USER)
+    assert _alerts(project) == [("pipeline_success", "pipeline")]
+    run_events(project, "_run_selective_pipeline_thread", ["transform"], False, project, USER)
+    assert _alerts(project) == [("pipeline_success", "pipeline")]
+    _write(project / "ingest" / "orders.py", "raise RuntimeError('down')\n")
+    run_events(project, "_run_selective_pipeline_thread", ["ingest", "transform"], False, project, USER)
+    assert _alerts(project)[-1] == ("pipeline_failure", "pipeline")
+
+
+def test_rewind_run_is_finished_when_the_run_breaks_off(tmp_path, run_events, monkeypatch):
+    from havn.engine.snapshots import get_runs
+    from havn.engine.transform import orchestration
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("anomaly detection broke")
+
+    monkeypatch.setattr(orchestration, "detect_run_anomalies", boom)
+    project = _project(tmp_path)
+    events = run_events(project, "_run_selective_pipeline_thread",
+                        ["ingest", "transform"], False, project, USER)
+    assert events[-1]["event"] == "complete"
+    assert events[-1]["data"]["status"] == "failed"
+    runs = get_runs(project, 10)
+    assert [r.status for r in runs] == ["failed"]

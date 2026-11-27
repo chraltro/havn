@@ -856,6 +856,14 @@ def _run_transform_parallel(
             conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
         except Exception as e:
             logger.debug("Pre-create schema %s failed: %s", schema, e)
+    # Same race on _havn.model_lineage, which _update_state creates lazily:
+    # save_model_lineage swallows the conflict, so a model lost its row.
+    try:
+        from havn.engine.governance.lineage import ensure_lineage_table
+
+        ensure_lineage_table(conn)
+    except Exception as e:
+        logger.debug("Pre-create _havn.model_lineage failed: %s", e)
 
     # DuckLake with a local file catalog cannot be attached twice within the
     # same process — parallel workers would all try to attach the same file

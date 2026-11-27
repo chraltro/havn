@@ -87,7 +87,11 @@ class RunSpec:
     audit_detail: str = ""
     rewind_trigger: str = "ui"
     webhook_url: str | None = None
-    alert: bool = False                 # send the project's pipeline alert
+    # The project's pipeline alert: None sends nothing; "always" alerts on
+    # every finished run (`havn stream`); "when_built" alerts on failure, and
+    # on success only when a model was built (`havn transform`).
+    alert: str | None = None
+    alert_target: str = ""
 
 
 @dataclass
@@ -129,6 +133,7 @@ def _end_payload(spec: RunSpec, node: _Node, result: dict, num: int) -> dict:
             "name": node.name, "action": node.kind, "status": status,
             "duration_ms": result.get("duration_ms", 0),
             "row_count": result.get("row_count", 0), "num": num,
+            "error": result.get("error"),
         }
     return {
         "name": node.name, "action": node.kind, "status": status,
@@ -234,22 +239,26 @@ def _plan(spec: RunSpec, project_dir: Path, config: Any, conn: Any) -> _Plan:
             if dep in selected:
                 wait.add(f"transform:{dep}")
             elif dep in model_map:
-                # An unselected model in between still orders two selected ones.
+                # An unselected model in between still orders two selected
+                # ones; a model reading only other models is covered by them.
                 wait.update(f"transform:{d}" for d in nearest(dep))
             elif f"seed:{dep}" in nodes:
                 wait.add(f"seed:{dep}")
-            elif dep.startswith("landing."):
-                mapped = landing_to_ingest.get(dep)
-                if mapped:
-                    wait.add(mapped)
-                else:
-                    wait.update(ingest_ids)
+            elif dep in landing_to_ingest:
+                wait.add(landing_to_ingest[dep])
+            else:
+                # A table no single loader in this run is known to write
+                # (raw.events, a landing table named after no script, a
+                # file): any of them may write it, so any failed load holds
+                # this model back.
+                wait.update(ingest_ids)
         deps[nid] = wait
 
-    # Exports read what the run built: every model, or with no transform in
-    # the run, whatever it loaded.
+    # Exports read what the run built and what it loaded, so they wait on
+    # every model and every loader: a failed load or model stops them, as
+    # `havn stream` stops before its export step.
     transform_ids = {f"transform:{m.full_name}" for m in models}
-    export_wait = transform_ids or (ingest_ids | seed_ids)
+    export_wait = transform_ids | ingest_ids | seed_ids
     for script in _scripts(project_dir / "export", spec.export):
         nid = f"export:{script.name}"
         nodes[nid] = _Node("export", script.name, path=script)
@@ -395,6 +404,14 @@ def _execute(
         schemas.add("seeds")
     for schema in sorted(schemas):
         main.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+    # The same race on the one _havn table a build creates lazily (every
+    # other one it writes comes from ensure_meta_table above, and the perf
+    # tables from instrument_run below, both before any worker starts):
+    # save_model_lineage swallows the conflict, so a model lost its row.
+    if models:
+        from havn.engine.governance.lineage import ensure_lineage_table
+
+        ensure_lineage_table(main)
 
     # State shared by the workers' build_one_model calls (see its docstring
     # for why no lock is needed). A rejected parent outside this selection
@@ -415,281 +432,309 @@ def _execute(
 
     rewind_id = _start_rewind(config, project_dir, spec) if models else None
 
-    _, threads_cfg = _get_db_resource_limits()
-    # DuckLake's catalog cannot tolerate concurrent in-process writes: several
-    # cursors creating tables against one attached catalog corrupt its
-    # metadata. One worker there; transforms still get full memory and
-    # threads through per-query SET memory_limit / SET threads.
-    max_workers = 1 if _get_backend().name == "ducklake" else (threads_cfg or 4)
+    # From here on the Rewind run must be finished and the workers shut down
+    # however the run ends; the normal path does both itself.
+    executor: ThreadPoolExecutor | None = None
+    try:
+        _, threads_cfg = _get_db_resource_limits()
+        # DuckLake's catalog cannot tolerate concurrent in-process writes: several
+        # cursors creating tables against one attached catalog corrupt its
+        # metadata. One worker there; transforms still get full memory and
+        # threads through per-query SET memory_limit / SET threads.
+        max_workers = 1 if _get_backend().name == "ducklake" else (threads_cfg or 4)
 
-    result_q: queue.Queue = queue.Queue()
-    numbers: dict[str, int] = {}
-    next_num = [1]
+        result_q: queue.Queue = queue.Queue()
+        numbers: dict[str, int] = {}
+        next_num = [1]
 
-    def run_once(nid: str, cur: Any) -> dict:
-        node = nodes[nid]
-        if node.kind in ("ingest", "export"):
-            from havn.engine.runner import run_script
-
-            res = run_script(cur, node.path, node.kind, pipeline_run_id=run_id,
-                             force=spec.force, run_as=spec.user)
-            out = {
-                "status": res["status"], "duration_ms": res.get("duration_ms", 0),
-                "error": res.get("error"), "orphaned": bool(res.get("orphaned")),
-            }
-            if node.kind == "ingest":
-                out["rows_affected"] = res.get("rows_affected", 0)
-            return out
-        if node.kind == "seed":
-            from havn.engine.seeds import load_seed
-
-            try:
-                res = load_seed(cur, node.path, "seeds", spec.force)
-            except Exception as e:
-                log_run(cur, "seed", node.name, "error", error=str(e), pipeline_run_id=run_id)
-                return {"status": "error", "error": str(e)}
-            return {"status": res["status"], "duration_ms": res["duration_ms"],
-                    "row_count": res["row_count"]}
-        # transform
-        from havn.engine.transform.orchestration import build_one_model
-
-        model = node.model
-        outcome = build_one_model(
-            cur, model, plan.model_map, results, blocked,
-            force=spec.force, project_dir=project_dir,
-            rewind_config=config.rewind if rewind_id else None, run_id=rewind_id,
-            pipeline_run_id=run_id, run_profiles=run_profiles, echo=False,
-        )
-        error = outcome.error
-        if outcome.status == "policy_denied":
-            error = f"policy_denied: {denied.get(model.full_name, '')}".rstrip(": ")
-        return {"status": outcome.status, "duration_ms": outcome.duration_ms,
-                "row_count": outcome.row_count, "error": error}
-
-    def retryable(nid: str, res: dict) -> bool:
-        # A script still running after its timeout owns its cursor; running it
-        # again would race it. Assertion failures, stale sources and denials
-        # come out the same on a second try.
-        return res.get("status") == "error" and not res.get("orphaned")
-
-    def exec_node(nid: str) -> None:
-        node = nodes[nid]
-        cur = cursor_for(conn)
-        start_data = {"name": node.name, "action": node.kind, "num": numbers.get(nid, 0)}
-        if node.kind == "transform":
-            start_data["materialized"] = node.model.materialized
-        result_q.put(("__start__", start_data))
-        try:
-            attempt = 0
-            while True:
-                try:
-                    res = run_once(nid, cur)
-                except Exception as e:
-                    logger.error("Node %s failed: %s", nid, e, exc_info=True)
-                    if node.kind == "transform":
-                        try:
-                            log_run(cur, "transform", node.name, "error",
-                                    error=str(e), pipeline_run_id=run_id)
-                        except Exception:
-                            pass
-                    res = {"status": "error", "error": str(e)}
-                if attempt >= spec.retries or not retryable(nid, res) or cancel.is_set():
-                    break
-                attempt += 1
-                logger.warning("Pipeline node %s failed; retry %d/%d after %ss",
-                               node.name, attempt, spec.retries, spec.retry_delay)
-                if cancel.wait(spec.retry_delay):
-                    break
-                if node.kind == "transform":
-                    # Let build_one_model take the model again.
-                    results.pop(node.name, None)
-                    blocked.discard(node.name)
-            result_q.put((nid, res))
-        finally:
-            cur.close()
-
-    sorter = TopologicalSorter(plan.deps)
-    sorter.prepare()
-    executor = ThreadPoolExecutor(max_workers=max_workers)
-    active = 0
-    pending: list[str] = []
-
-    # A node that failed in this run, or that is held back because something
-    # above it failed, maps to the failures it carries ("ingest/orders.py").
-    # Nothing that depends on it runs: ingest failures stop the pipeline,
-    # and `havn stream` never reaches its export step after a failed load or
-    # transform. Exports are leaves, so a failed export blocks nothing.
-    poisoned: dict[str, str] = {}
-    dependents: dict[str, set[str]] = {}
-    for nid, waits in plan.deps.items():
-        for dep in waits:
-            dependents.setdefault(dep, set()).add(nid)
-
-    def failure_label(node: _Node) -> str:
-        return f"{node.kind}/{node.name}" if node.kind in ("ingest", "export") else node.name
-
-    def hold_back(nid: str, reasons: list[str]) -> None:
-        """Report ``nid`` as not run because ``reasons`` failed above it."""
-        node = nodes[nid]
-        reason = ", ".join(sorted({r for rs in reasons for r in rs.split(", ")}))
-        error = f"upstream failed: {reason}"
-        poisoned[nid] = reason
-        if nid not in numbers:
-            numbers[nid] = next_num[0]
-            next_num[0] += 1
-        if node.kind == "transform":
-            # As build_one_model does for a blocked parent: a run_log skip
-            # and the blocked set, no model state.
-            results[node.name] = "skipped_upstream_blocked"
-            blocked.add(node.name)
-            tally.models_run.append(node.name)
-            try:
-                log_run(main, "transform", node.name, "skipped", 0, 0,
-                        error=error, pipeline_run_id=run_id)
-            except Exception:
-                pass
-        emit("model_end", _end_payload(
-            spec, node, {"status": "skipped_upstream_blocked", "error": error}, numbers[nid],
-        ))
-        tally.skipped += 1
-        sorter.done(nid)
-
-    def admit(ready) -> None:
-        """Queue the nodes that became ready, holding back the poisoned ones."""
-        todo = list(ready)
-        while todo:
-            nid = todo.pop(0)
-            reasons = [poisoned[d] for d in plan.deps.get(nid, ()) if d in poisoned]
-            if reasons:
-                hold_back(nid, reasons)
-                todo.extend(sorter.get_ready())
-            else:
-                pending.append(nid)
-
-    def doomed_models() -> set[str]:
-        """Models below a failure in this run, held back or about to be."""
-        doomed: set[str] = set()
-        stack = list(poisoned)
-        while stack:
-            for nxt in dependents.get(stack.pop(), ()):
-                if nxt not in doomed:
-                    doomed.add(nxt)
-                    stack.append(nxt)
-        return {nodes[n].name for n in doomed if nodes[n].kind == "transform"}
-
-    def maybe_run_gate() -> bool:
-        nonlocal gate_pending, gate_failed
-        if gate_pending:
-            gate_pending = False
-            # Only what can still be built: a model whose loader failed has
-            # nothing to validate against and will not run.
-            doomed = doomed_models()
-            live = [m for m in models if m.full_name not in doomed]
-            if live:
-                gate_failed = not run_prebuild_gate(conn, live, emit, project_dir=project_dir)
-        return not gate_failed
-
-    def submit_ready() -> None:
-        nonlocal active
-        i = 0
-        while i < len(pending) and active < max_workers:
-            if nodes[pending[i]].kind == "transform":
-                if gate_pending and loaders_left:
-                    i += 1  # held back until the loaders are done
-                    continue
-                if not maybe_run_gate():
-                    return  # the loop below sees gate_failed and stops
-            nid = pending.pop(i)
-            if nid not in numbers:
-                numbers[nid] = next_num[0]
-                next_num[0] += 1
-            try:
-                executor.submit(exec_node, nid)
-            except RuntimeError:
-                return  # interpreter shutting down
-            active += 1
-
-    with instrument_run(
-        main, project_dir=project_dir, pipeline_run_id=run_id,
-        kind=spec.operation, name=spec.stream or None,
-    ):
-        admit(sorter.get_ready())
-        submit_ready()
-        while sorter.is_active() or active > 0:
-            if gate_failed and active == 0:
-                tally.has_error = True
-                executor.shutdown(wait=False, cancel_futures=True)
-                break
-            if cancel.is_set():
-                tally.cancelled = True
-                executor.shutdown(wait=False, cancel_futures=True)
-                break
-            try:
-                nid, res = result_q.get(timeout=2)
-            except queue.Empty:
-                continue
-            if nid == "__start__":
-                emit("model_start", res)
-                continue
-
-            active -= 1
+        def run_once(nid: str, cur: Any) -> dict:
             node = nodes[nid]
+            if node.kind in ("ingest", "export"):
+                from havn.engine.runner import run_script
+
+                res = run_script(cur, node.path, node.kind, pipeline_run_id=run_id,
+                                 force=spec.force, run_as=spec.user)
+                out = {
+                    "status": res["status"], "duration_ms": res.get("duration_ms", 0),
+                    "error": res.get("error"), "orphaned": bool(res.get("orphaned")),
+                }
+                if node.kind == "ingest":
+                    out["rows_affected"] = res.get("rows_affected", 0)
+                return out
+            if node.kind == "seed":
+                from havn.engine.seeds import load_seed
+
+                try:
+                    res = load_seed(cur, node.path, "seeds", spec.force)
+                except Exception as e:
+                    log_run(cur, "seed", node.name, "error", error=str(e), pipeline_run_id=run_id)
+                    return {"status": "error", "error": str(e)}
+                return {"status": res["status"], "duration_ms": res["duration_ms"],
+                        "row_count": res["row_count"]}
+            # transform
+            from havn.engine.transform.orchestration import build_one_model
+
+            model = node.model
+            outcome = build_one_model(
+                cur, model, plan.model_map, results, blocked,
+                force=spec.force, project_dir=project_dir,
+                rewind_config=config.rewind if rewind_id else None, run_id=rewind_id,
+                pipeline_run_id=run_id, run_profiles=run_profiles, echo=False,
+            )
+            error = outcome.error
+            if outcome.status == "policy_denied":
+                error = f"policy_denied: {denied.get(model.full_name, '')}".rstrip(": ")
+            return {"status": outcome.status, "duration_ms": outcome.duration_ms,
+                    "row_count": outcome.row_count, "error": error}
+
+        def retryable(nid: str, res: dict) -> bool:
+            # A script still running after its timeout owns its cursor; running it
+            # again would race it. Assertion failures, stale sources and denials
+            # come out the same on a second try.
+            return res.get("status") == "error" and not res.get("orphaned")
+
+        def exec_node(nid: str) -> None:
+            node = nodes[nid]
+            cur = cursor_for(conn)
+            start_data = {"name": node.name, "action": node.kind, "num": numbers.get(nid, 0)}
+            if node.kind == "transform":
+                start_data["materialized"] = node.model.materialized
+            result_q.put(("__start__", start_data))
+            try:
+                attempt = 0
+                while True:
+                    try:
+                        res = run_once(nid, cur)
+                    except Exception as e:
+                        logger.error("Node %s failed: %s", nid, e, exc_info=True)
+                        if node.kind == "transform":
+                            try:
+                                log_run(cur, "transform", node.name, "error",
+                                        error=str(e), pipeline_run_id=run_id)
+                            except Exception:
+                                pass
+                        res = {"status": "error", "error": str(e)}
+                    if attempt >= spec.retries or not retryable(nid, res) or cancel.is_set():
+                        break
+                    attempt += 1
+                    logger.warning("Pipeline node %s failed; retry %d/%d after %ss",
+                                   node.name, attempt, spec.retries, spec.retry_delay)
+                    if cancel.wait(spec.retry_delay):
+                        break
+                    if node.kind == "transform":
+                        # Let build_one_model take the model again.
+                        results.pop(node.name, None)
+                        blocked.discard(node.name)
+                result_q.put((nid, res))
+            finally:
+                cur.close()
+
+        sorter = TopologicalSorter(plan.deps)
+        sorter.prepare()
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        active = 0
+        pending: list[str] = []
+
+        # A node that failed in this run, or that is held back because something
+        # above it failed, maps to the failures it carries ("ingest/orders.py").
+        # Nothing that depends on it runs: ingest failures stop the pipeline,
+        # and `havn stream` never reaches its export step after a failed load or
+        # transform. Exports are leaves, so a failed export blocks nothing.
+        poisoned: dict[str, str] = {}
+        # A model that was not built because something above it was held back
+        # without failing (a stale error-severity source, a parent rejected on an
+        # earlier run) maps to its own name. Models below it are held back too,
+        # also through models this run does not select, which build_one_model
+        # cannot see (it checks direct parents only). That does not fail the
+        # run, and exports are not held back by it: `havn stream` does not stop
+        # its export step for a stale source either.
+        held: dict[str, str] = {}
+        dependents: dict[str, set[str]] = {}
+        for nid, waits in plan.deps.items():
+            for dep in waits:
+                dependents.setdefault(dep, set()).add(nid)
+
+        def failure_label(node: _Node) -> str:
+            return f"{node.kind}/{node.name}" if node.kind in ("ingest", "export") else node.name
+
+        def hold_back(nid: str, reasons: list[str], *, failed: bool) -> None:
+            """Report ``nid`` as not run because of ``reasons`` above it."""
+            node = nodes[nid]
+            reason = ", ".join(sorted({r for rs in reasons for r in rs.split(", ")}))
+            error = f"upstream {'failed' if failed else 'blocked'}: {reason}"
+            if failed:
+                poisoned[nid] = reason
+            else:
+                held[nid] = node.name
             if nid not in numbers:
                 numbers[nid] = next_num[0]
                 next_num[0] += 1
-            emit("model_end", _end_payload(spec, node, res, numbers[nid]))
-
-            raw = res.get("status", "error")
-            if node.kind in ("ingest", "seed"):
-                loaders_left -= 1
             if node.kind == "transform":
+                # As build_one_model does for a blocked parent: a run_log skip
+                # and the blocked set, no model state.
+                results[node.name] = "skipped_upstream_blocked"
+                blocked.add(node.name)
                 tally.models_run.append(node.name)
-                if raw == "assertion_failed":
-                    tally.assertion_failed += 1
-                elif raw == "built":
-                    tally.built += 1
-            if raw in _FAILED:
-                tally.has_error = True
-                tally.failed += 1
-                if node.kind != "export":
-                    poisoned[nid] = failure_label(node)
-            elif raw in _SKIPPED:
-                tally.skipped += 1
-            else:
-                tally.completed += 1
-
+                try:
+                    log_run(main, "transform", node.name, "skipped", 0, 0,
+                            error=error, pipeline_run_id=run_id)
+                except Exception:
+                    pass
+            emit("model_end", _end_payload(
+                spec, node, {"status": "skipped_upstream_blocked", "error": error}, numbers[nid],
+            ))
+            tally.skipped += 1
             sorter.done(nid)
+
+        def admit(ready) -> None:
+            """Queue the nodes that became ready, holding back the poisoned ones."""
+            todo = list(ready)
+            while todo:
+                nid = todo.pop(0)
+                waits = plan.deps.get(nid, ())
+                reasons = [poisoned[d] for d in waits if d in poisoned]
+                soft = [held[d] for d in waits if d in held] if nodes[nid].kind == "transform" else []
+                if reasons or soft:
+                    hold_back(nid, reasons or soft, failed=bool(reasons))
+                    todo.extend(sorter.get_ready())
+                else:
+                    pending.append(nid)
+
+        def doomed_models() -> set[str]:
+            """Models below a failure in this run, held back or about to be."""
+            doomed: set[str] = set()
+            stack = list(poisoned)
+            while stack:
+                for nxt in dependents.get(stack.pop(), ()):
+                    if nxt not in doomed:
+                        doomed.add(nxt)
+                        stack.append(nxt)
+            return {nodes[n].name for n in doomed if nodes[n].kind == "transform"}
+
+        def maybe_run_gate() -> bool:
+            nonlocal gate_pending, gate_failed
+            if gate_pending:
+                gate_pending = False
+                # Only what can still be built: a model whose loader failed has
+                # nothing to validate against and will not run.
+                doomed = doomed_models()
+                live = [m for m in models if m.full_name not in doomed]
+                if live:
+                    gate_failed = not run_prebuild_gate(conn, live, emit, project_dir=project_dir)
+            return not gate_failed
+
+        def submit_ready() -> None:
+            nonlocal active
+            i = 0
+            while i < len(pending) and active < max_workers:
+                if nodes[pending[i]].kind == "transform":
+                    if gate_pending and loaders_left:
+                        i += 1  # held back until the loaders are done
+                        continue
+                    if not maybe_run_gate():
+                        return  # the loop below sees gate_failed and stops
+                nid = pending.pop(i)
+                if nid not in numbers:
+                    numbers[nid] = next_num[0]
+                    next_num[0] += 1
+                try:
+                    executor.submit(exec_node, nid)
+                except RuntimeError:
+                    return  # interpreter shutting down
+                active += 1
+
+        with instrument_run(
+            main, project_dir=project_dir, pipeline_run_id=run_id,
+            kind=spec.operation, name=spec.stream or None,
+        ):
             admit(sorter.get_ready())
             submit_ready()
+            while sorter.is_active() or active > 0:
+                if gate_failed and active == 0:
+                    tally.has_error = True
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
+                if cancel.is_set():
+                    tally.cancelled = True
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
+                try:
+                    nid, res = result_q.get(timeout=2)
+                except queue.Empty:
+                    continue
+                if nid == "__start__":
+                    emit("model_start", res)
+                    continue
 
-        try:
-            executor.shutdown(wait=False)
-        except Exception:
-            pass
+                active -= 1
+                node = nodes[nid]
+                if nid not in numbers:
+                    numbers[nid] = next_num[0]
+                    next_num[0] += 1
+                emit("model_end", _end_payload(spec, node, res, numbers[nid]))
 
-        if not tally.cancelled:
-            # Workers are done; nothing writes run_profiles any more.
-            detect_run_anomalies(main, run_profiles, project_dir)
+                raw = res.get("status", "error")
+                if node.kind in ("ingest", "seed"):
+                    loaders_left -= 1
+                if node.kind == "transform":
+                    tally.models_run.append(node.name)
+                    if raw == "assertion_failed":
+                        tally.assertion_failed += 1
+                    elif raw == "built":
+                        tally.built += 1
+                    elif raw in ("source_stale", "skipped_upstream_blocked"):
+                        held[nid] = node.name
+                if raw in _FAILED:
+                    tally.has_error = True
+                    tally.failed += 1
+                    if node.kind != "export":
+                        poisoned[nid] = failure_label(node)
+                elif raw in _SKIPPED:
+                    tally.skipped += 1
+                else:
+                    tally.completed += 1
 
-    duration_s = round(time.perf_counter() - started, 1)
-    status = "cancelled" if tally.cancelled else ("failed" if tally.has_error else "success")
+                sorter.done(nid)
+                admit(sorter.get_ready())
+                submit_ready()
 
-    if rewind_id:
-        _finish_rewind(config, project_dir, rewind_id, tally)
+            try:
+                executor.shutdown(wait=False)
+            except Exception:
+                pass
 
-    if spec.audit_resource:
-        try:
-            from havn.engine.audit import log_audit
+            if not tally.cancelled:
+                # Workers are done; nothing writes run_profiles any more.
+                detect_run_anomalies(main, run_profiles, project_dir)
 
-            log_audit(main, user=spec.user.get("username", "anonymous"),
-                      action="transform", resource=spec.audit_resource,
-                      detail=f"{spec.audit_detail}: {status} in {duration_s}s")
-        except Exception:
-            pass
+        duration_s = round(time.perf_counter() - started, 1)
+        status = "cancelled" if tally.cancelled else ("failed" if tally.has_error else "success")
 
-    emit("complete", _complete_payload(spec, run_id, status, duration_s))
-    _notify(spec, config, main, status, duration_s, tally)
-    return status
+        if rewind_id:
+            _finish_rewind(config, project_dir, rewind_id, tally)
+            rewind_id = None
+
+        if spec.audit_resource:
+            try:
+                from havn.engine.audit import log_audit
+
+                log_audit(main, user=spec.user.get("username", "anonymous"),
+                          action="transform", resource=spec.audit_resource,
+                          detail=f"{spec.audit_detail}: {status} in {duration_s}s")
+            except Exception:
+                pass
+
+        emit("complete", _complete_payload(spec, run_id, status, duration_s))
+        _notify(spec, config, main, status, duration_s, tally)
+        return status
+    finally:
+        if executor is not None:
+            try:
+                executor.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+        if rewind_id:
+            _finish_rewind(config, project_dir, rewind_id, tally, crashed=True)
 
 
 # --- bookkeeping --------------------------------------------------------------
@@ -741,6 +786,22 @@ def _finish_job_run(spec: RunSpec, run_id: str, tally: _Tally, started: float) -
         logger.debug("Failed to update job_run for %s", spec.label, exc_info=True)
 
 
+def _rewind_lock():
+    """The lock build_one_model takes around snapshot capture.
+
+    Rewind keeps one cached connection to its metadata database per project,
+    and a DuckDB connection must not be used from two threads at once. This
+    runner takes the lock around every Rewind call it makes (start, finish,
+    GC), so they cannot overlap a capture -- including captures by workers a
+    cancelled run left behind. Not covered, because the calls live outside
+    this module and snapshots.py cannot take the lock itself: Rewind calls by
+    job runs, the CLI in this process, and the Rewind API's reads.
+    """
+    from havn.engine.transform.orchestration import _SNAPSHOT_CAPTURE_LOCK
+
+    return _SNAPSHOT_CAPTURE_LOCK
+
+
 def _start_rewind(config: Any, project_dir: Path, spec: RunSpec) -> str | None:
     """A Pipeline Rewind run for this run's snapshots, as the CLI starts one."""
     if not config.rewind.enabled:
@@ -748,36 +809,41 @@ def _start_rewind(config: Any, project_dir: Path, spec: RunSpec) -> str | None:
     try:
         from havn.engine.snapshots import start_run
 
-        return start_run(project_dir, trigger=spec.rewind_trigger)
+        with _rewind_lock():
+            return start_run(project_dir, trigger=spec.rewind_trigger)
     except Exception as e:
         logger.warning("Could not start a Rewind run: %s", e)
         return None
 
 
-def _finish_rewind(config: Any, project_dir: Path, rewind_id: str, tally: _Tally) -> None:
+def _finish_rewind(
+    config: Any, project_dir: Path, rewind_id: str, tally: _Tally, *, crashed: bool = False,
+) -> None:
     try:
         from havn.engine.snapshots import RewindConfig, finish_run, run_gc
 
-        # As `havn transform`: failed on an error, partial when only
-        # assertions failed (or the run was cut short), else success.
+        # As `havn transform`: failed on an error (or when the run itself
+        # broke off), partial when only assertions failed or the run was
+        # cancelled, else success.
         hard = tally.failed - tally.assertion_failed
         status = (
-            "failed" if hard
+            "failed" if (hard or crashed)
             else "partial" if (tally.assertion_failed or tally.cancelled)
             else "success"
         )
-        finish_run(project_dir, rewind_id, status, tally.models_run)
         rw = config.rewind
-        run_gc(project_dir, RewindConfig(
-            enabled=rw.enabled, retention=rw.retention, max_storage=rw.max_storage,
-            dedup=rw.dedup, exclude=rw.exclude,
-        ))
+        with _rewind_lock():
+            finish_run(project_dir, rewind_id, status, tally.models_run)
+            run_gc(project_dir, RewindConfig(
+                enabled=rw.enabled, retention=rw.retention, max_storage=rw.max_storage,
+                dedup=rw.dedup, exclude=rw.exclude,
+            ))
     except Exception as e:
         logger.warning("Rewind bookkeeping failed: %s", e)
 
 
 def _notify(spec: RunSpec, config: Any, conn: Any, status: str, duration_s: float, tally: _Tally) -> None:
-    """The stream's webhook and the project's pipeline alert, as `havn stream` sends them."""
+    """The stream's webhook and the project's pipeline alert."""
     if status == "cancelled":
         return
     ok = status == "success"
@@ -787,14 +853,23 @@ def _notify(spec: RunSpec, config: Any, conn: Any, status: str, duration_s: floa
         err = send_stream_webhook(spec.webhook_url, spec.stream, "success" if ok else "failed", duration_s)
         if err:
             logger.warning("Webhook failed for stream %s: %s", spec.stream, err)
-    if spec.alert:
-        try:
-            from havn.engine.pipeline_alerts import send_pipeline_alert
+    if spec.alert is None:
+        return
+    if spec.alert == "when_built":
+        # `havn transform`: a failure alert when it failed, a success alert
+        # only when it built something.
+        if ok and not tally.built:
+            return
+        errors = tally.failed - tally.assertion_failed
+        error = f"{errors} errors, {tally.assertion_failed} assertion failures"
+    else:
+        error = f"{tally.failed} step(s) failed"
+    try:
+        from havn.engine.pipeline_alerts import send_pipeline_alert
 
-            send_pipeline_alert(
-                config.alerts, spec.stream, ok=ok, duration_s=duration_s, conn=conn,
-                error=None if ok else f"{tally.failed} step(s) failed",
-                models_built=tally.built,
-            )
-        except Exception as e:
-            logger.debug("Pipeline alert failed: %s", e)
+        send_pipeline_alert(
+            config.alerts, spec.alert_target or spec.stream, ok=ok, duration_s=duration_s,
+            conn=conn, error=None if ok else error, models_built=tally.built,
+        )
+    except Exception as e:
+        logger.debug("Pipeline alert failed: %s", e)

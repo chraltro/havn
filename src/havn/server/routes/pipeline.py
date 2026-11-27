@@ -335,6 +335,9 @@ def _run_transform_thread(targets, force, project_dir):
         # This endpoint never ran the pre-build gate; it builds what it is
         # asked to and reports each model's result.
         gate=False,
+        # Alerts as `havn transform` does, under the same target name.
+        alert="when_built",
+        alert_target="transform",
     )
     _run_spec_thread(spec, project_dir)
 
@@ -385,7 +388,8 @@ def _stream_spec(stream_name, stream_config, force, user):
         audit_detail="stream completed",
         rewind_trigger=f"stream:{stream_name}",
         webhook_url=stream_config.webhook_url,
-        alert=True,
+        alert="always",
+        alert_target=stream_name,
     )
 
 
@@ -426,6 +430,8 @@ def _run_selective_pipeline_thread(steps, force, project_dir, user):
         job=(f"pipeline ({step_label})", "pipeline", step_label),
         audit_resource=f"pipeline({step_label})",
         audit_detail="selective pipeline completed",
+        alert="when_built",
+        alert_target="pipeline",
     )
     _run_spec_thread(spec, project_dir)
 
