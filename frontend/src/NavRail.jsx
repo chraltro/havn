@@ -82,7 +82,10 @@ const CSS = `
 }
 `;
 
-export default function NavRail({ sections, activeSection, onNavigate, agentOpen, onToggleAgent, badges = {} }) {
+// `onPreload(id)` is called when the pointer or keyboard focus reaches a
+// destination ("agent" for the agent button), so App can fetch its page
+// before the click.
+export default function NavRail({ sections, activeSection, onNavigate, onPreload, agentOpen, onToggleAgent, badges = {} }) {
   const primary = sections.filter((s) => !s.secondary);
   const secondary = sections.filter((s) => s.secondary);
   return (
@@ -93,13 +96,15 @@ export default function NavRail({ sections, activeSection, onNavigate, agentOpen
       </button>
       {primary.map((s) => (
         <RailItem key={s.id} section={s} index={sections.indexOf(s)} active={activeSection === s.id}
-                  badge={badges[s.id]} onClick={() => onNavigate(s.id)} />
+                  badge={badges[s.id]} onClick={() => onNavigate(s.id)} onPreload={() => onPreload?.(s.id)} />
       ))}
       <div className="havn-rail-spacer" />
       <button
         className="havn-rail-item"
         data-secondary="true"
         onClick={onToggleAgent}
+        onMouseEnter={() => onPreload?.("agent")}
+        onFocus={() => onPreload?.("agent")}
         aria-pressed={!!agentOpen}
         title="Toggle agent sidebar"
       >
@@ -108,13 +113,13 @@ export default function NavRail({ sections, activeSection, onNavigate, agentOpen
       </button>
       {secondary.map((s) => (
         <RailItem key={s.id} section={s} index={sections.indexOf(s)} active={activeSection === s.id}
-                  secondary onClick={() => onNavigate(s.id)} />
+                  secondary onClick={() => onNavigate(s.id)} onPreload={() => onPreload?.(s.id)} />
       ))}
     </nav>
   );
 }
 
-function RailItem({ section, index, active, badge, secondary, onClick }) {
+function RailItem({ section, index, active, badge, secondary, onClick, onPreload }) {
   return (
     <button
       className="havn-rail-item"
@@ -124,6 +129,8 @@ function RailItem({ section, index, active, badge, secondary, onClick }) {
       aria-current={active ? "page" : undefined}
       title={`${section.label} (Alt+${index + 1})`}
       onClick={onClick}
+      onMouseEnter={onPreload}
+      onFocus={onPreload}
     >
       <Icon name={section.icon} />
       {section.label}

@@ -1,65 +1,121 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { createPortal } from "react-dom";
 import { api } from "./api";
 import FileTree from "./FileTree";
-import Editor, { bindStatusLabel, stripModelDirectives } from "./Editor";
+import { bindStatusLabel, stripModelDirectives } from "./editorStatus";
+import { hasUnsavedNotebooks } from "./notebookDrafts";
 import OutputPanel from "./OutputPanel";
-import QueryPanel from "./QueryPanel";
-import TablesPanel from "./TablesPanel";
-import HistoryPanel from "./HistoryPanel";
-import DAGPanel from "./DAGPanel";
-import SentinelPanel from "./SentinelPanel";
-import DiffPanel from "./DiffPanel";
-import DocsPanel from "./DocsPanel";
-import NotebookPanel, { hasUnsavedNotebooks } from "./NotebookPanel";
-import DataSourcesPanel from "./DataSourcesPanel";
 import OverviewPanel from "./OverviewPanel";
 import HomePanel from "./HomePanel";
-import ShipPanel from "./ShipPanel";
 import NavRail from "./NavRail";
 import { SECTIONS, TAB_TO_SECTION, SECTION_DEFAULT, tabToPath, pathToTab } from "./navigation";
 import RunSummary from "./RunSummary";
-import SettingsPanel from "./SettingsPanel";
-import MaskingPanel from "./MaskingPanel";
-import GovernancePanel from "./GovernancePanel";
-import QualityPanel from "./QualityPanel";
-import UnitTestsPanel from "./UnitTestsPanel";
-import PerformancePanel from "./PerformancePanel";
-import LivePanel from "./LivePanel";
-import AskPanel from "./AskPanel";
-import WikiPanel from "./WikiPanel";
 import LoginPage from "./LoginPage";
 import ResizeHandle from "./ResizeHandle";
 import useResizable from "./useResizable";
 import { useFilesChanged } from "./filesChanged";
-import SortableTable from "./SortableTable";
 import { clickable } from "./a11y";
 import Onboarding from "./Onboarding";
 import ErrorBoundary from "./ErrorBoundary";
 import Hint from "./Hint";
 import { useHintTriggerFn } from "./HintSystem";
 import EnvironmentSwitcher from "./EnvironmentSwitcher";
-import ModelNotebookView from "./ModelNotebookView";
-import ModelWorkbench from "./ModelWorkbench";
-import NewModelDialog from "./NewModelDialog";
-import GitReviewsPanel from "./GitReviewsPanel";
-import OrchestrationPanel from "./OrchestrationPanel";
-import ResourcePanel from "./ResourcePanel";
-import AgentSidebar from "./AgentSidebar";
 import CommandPalette from "./CommandPalette";
 import FocusTrap from "./FocusTrap";
-import DashboardListPanel from "./DashboardListPanel";
-import DashboardCanvas from "./DashboardCanvas";
-import ReportsPanel from "./ReportsPanel";
-import WidgetEditor from "./WidgetEditor";
-import DashboardFilterBar from "./DashboardFilterBar";
-import { DashboardProvider, useDashboard } from "./DashboardContext";
 import { useAuth } from "./AuthContext";
 import { WarehouseProvider, useWarehouse } from "./WarehouseContext";
 import { isSystemSchema, schemaCompare } from "./schemaOrder";
 import { PipelineProvider, usePipeline } from "./PipelineContext";
 import { isModelFile, isPythonModelPath, modelNameFromPath, pythonModelTemplate } from "./modelFiles";
+import { lazyWithPreload, preloadAll, whenIdle, PanelFallback } from "./lazyLoad";
 
+/* ------------------------------------------------------------------ */
+/* Code-split pages                                                    */
+/* ------------------------------------------------------------------ */
+
+// The shell (header, nav rail, sidebar, output panel, command palette) and
+// the Home page are in the first download. Every other page, the editor and
+// the agent sidebar are fetched the first time they are needed; see
+// lazyLoad.jsx for how they are preloaded before that.
+const Editor = lazyWithPreload(() => import("./Editor"));
+const ModelWorkbench = lazyWithPreload(() => import("./ModelWorkbench"));
+const NotebookPanel = lazyWithPreload(() => import("./NotebookPanel"));
+const ModelNotebookView = lazyWithPreload(() => import("./ModelNotebookView"));
+const NewModelDialog = lazyWithPreload(() => import("./NewModelDialog"));
+const SortableTable = lazyWithPreload(() => import("./SortableTable"));
+const QueryPanel = lazyWithPreload(() => import("./QueryPanel"));
+const TablesPanel = lazyWithPreload(() => import("./TablesPanel"));
+const HistoryPanel = lazyWithPreload(() => import("./HistoryPanel"));
+const DAGPanel = lazyWithPreload(() => import("./DAGPanel"));
+const SentinelPanel = lazyWithPreload(() => import("./SentinelPanel"));
+const DiffPanel = lazyWithPreload(() => import("./DiffPanel"));
+const DocsPanel = lazyWithPreload(() => import("./DocsPanel"));
+const DataSourcesPanel = lazyWithPreload(() => import("./DataSourcesPanel"));
+const ShipPanel = lazyWithPreload(() => import("./ShipPanel"));
+const SettingsPanel = lazyWithPreload(() => import("./SettingsPanel"));
+const MaskingPanel = lazyWithPreload(() => import("./MaskingPanel"));
+const GovernancePanel = lazyWithPreload(() => import("./GovernancePanel"));
+const QualityPanel = lazyWithPreload(() => import("./QualityPanel"));
+const UnitTestsPanel = lazyWithPreload(() => import("./UnitTestsPanel"));
+const PerformancePanel = lazyWithPreload(() => import("./PerformancePanel"));
+const LivePanel = lazyWithPreload(() => import("./LivePanel"));
+const AskPanel = lazyWithPreload(() => import("./AskPanel"));
+const WikiPanel = lazyWithPreload(() => import("./WikiPanel"));
+const GitReviewsPanel = lazyWithPreload(() => import("./GitReviewsPanel"));
+const OrchestrationPanel = lazyWithPreload(() => import("./OrchestrationPanel"));
+const ResourcePanel = lazyWithPreload(() => import("./ResourcePanel"));
+const ReportsPanel = lazyWithPreload(() => import("./ReportsPanel"));
+const DashboardsPage = lazyWithPreload(() => import("./DashboardsSection"));
+const AgentSidebar = lazyWithPreload(() => import("./AgentSidebar"));
+
+// What each tab renders, so its chunks can be fetched before it is shown.
+// The Editor tab lists everything it can show at once: fetched together, the
+// workbench and the editor inside it arrive in parallel, not one after the
+// other.
+const TAB_CHUNKS = {
+  Editor: [Editor, ModelWorkbench, NotebookPanel, SortableTable],
+  Query: [QueryPanel],
+  Tables: [TablesPanel],
+  Runs: [HistoryPanel],
+  DAG: [DAGPanel],
+  Sentinel: [SentinelPanel],
+  Diff: [DiffPanel],
+  Docs: [DocsPanel],
+  "Data Sources": [DataSourcesPanel],
+  Ship: [ShipPanel],
+  Settings: [SettingsPanel],
+  Masking: [MaskingPanel],
+  Governance: [GovernancePanel],
+  Quality: [QualityPanel],
+  "Unit Tests": [UnitTestsPanel],
+  Performance: [PerformancePanel],
+  Live: [LivePanel],
+  Ask: [AskPanel],
+  Wiki: [WikiPanel],
+  Git: [GitReviewsPanel],
+  Orchestration: [OrchestrationPanel],
+  Resources: [ResourcePanel],
+  Reports: [ReportsPanel],
+  Dashboards: [DashboardsPage],
+};
+
+/** Start fetching what `tab` shows ("Quality:Contracts" counts as Quality). */
+function preloadTab(tab) {
+  return preloadAll(TAB_CHUNKS[String(tab || "").split(":")[0]]);
+}
+
+/** Start fetching the page a nav-rail destination opens on. */
+function preloadSection(id) {
+  if (id === "agent") preloadAll([AgentSidebar]);
+  else preloadTab(SECTION_DEFAULT[id]);
+}
+
+// Opened straight on a page (/observe/quality, a bookmark, a reload): start
+// fetching it now, while the auth check runs, instead of after it.
+if (typeof window !== "undefined") {
+  if (new URLSearchParams(window.location.hash.replace(/^#/, "")).get("embed") === "true") preloadAll([DashboardsPage]);
+  else preloadTab(pathToTab(window.location.pathname));
+}
 
 /** Row cap for the editor preview pane (whole model and single CTE alike). */
 const PREVIEW_LIMIT = 100;
@@ -393,49 +449,6 @@ const stStyles = {
 /* Main app content                                                    */
 /* ------------------------------------------------------------------ */
 
-function DashboardsSection({ showConfirm, embedMode }) {
-  const { dashboard, loadDashboard, closeDashboard, setEditMode } = useDashboard();
-  const [editingWidget, setEditingWidget] = useState(null);
-
-  // In embed mode, auto-load the dashboard from the hash and force view mode
-  useEffect(() => {
-    if (!embedMode) return;
-    const hash = window.location.hash.replace(/^#/, "");
-    const params = new URLSearchParams(hash);
-    const dashId = params.get("dashboard");
-    if (dashId && !dashboard) {
-      loadDashboard(dashId).then(() => setEditMode(false));
-    }
-  }, [embedMode]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (!dashboard) {
-    if (embedMode) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", color: "var(--havn-text-secondary)", fontFamily: "var(--havn-font)" }}>Loading dashboard...</div>;
-    return <DashboardListPanel onOpenDashboard={(id) => loadDashboard(id)} showConfirm={showConfirm} />;
-  }
-
-  return (
-    // A column, so the canvas gets the height left under the filter bar. As
-    // siblings in a plain box the canvas took the full height *below* the
-    // bar, and its last filter-bar's-worth of widgets was clipped off.
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <DashboardFilterBar />
-      <DashboardCanvas
-        onBack={closeDashboard}
-        onEditWidget={embedMode ? undefined : setEditingWidget}
-        showConfirm={showConfirm}
-        embedMode={embedMode}
-      />
-      {editingWidget && !embedMode && (
-        <WidgetEditor
-          widget={editingWidget}
-          onClose={() => setEditingWidget(null)}
-          onSave={() => setEditingWidget(null)}
-        />
-      )}
-    </div>
-  );
-}
-
 function AppContent() {
   const { currentUser, handleLogout } = useAuth();
   const { tables, files, streams, loadErrors, loadFiles, refreshAll } = useWarehouse();
@@ -587,6 +600,14 @@ function AppContent() {
     return () => window.removeEventListener("havn-agent-send", handler);
   }, [agentSidebarOpen]);
 
+  // Once the first page has painted and the browser is idle, fetch the page
+  // each nav-rail destination opens on, so a click on one does not wait for
+  // a download. Sub-tabs are fetched on hover or focus instead.
+  useEffect(() => whenIdle(() => {
+    for (const s of SECTIONS) preloadSection(s.id);
+    preloadAll([NewModelDialog]);
+  }), []);
+
   // Run status indicator (header)
   const [recentStatus, setRecentStatus] = useState(null); // "success" | "failed" | null
   // Error-level items in Home's attention queue, shown as the Observe badge.
@@ -723,11 +744,12 @@ function AppContent() {
       const filter = parts[2] || null;
       pendingSubTabRef.current = { tab: mainTab, subTab, filter };
       setActiveTab(mainTab);
-      // Dispatch after React render so the target panel is mounted
-      setTimeout(() => {
+      // Dispatch after React render so the target panel is mounted. The
+      // panel's chunk may still be downloading, so wait for it first.
+      preloadTab(mainTab).then(() => setTimeout(() => {
         window.dispatchEvent(new CustomEvent("havn-subtab", { detail: { tab: mainTab, subTab, filter } }));
         pendingSubTabRef.current = null;
-      }, 100);
+      }, 100));
     } else {
       setActiveTab(tab);
     }
@@ -1322,6 +1344,7 @@ function AppContent() {
       sections={SECTIONS}
       activeSection={activeSection}
       onNavigate={(id) => navigateToTab(SECTION_DEFAULT[id])}
+      onPreload={preloadSection}
       agentOpen={agentSidebarOpen}
       onToggleAgent={() => setAgentSidebarOpen((v) => !v)}
       badges={{ Observe: attentionCount }}
@@ -1425,7 +1448,7 @@ function AppContent() {
           <div style={styles.sidebarPane} data-havn-guide="files-pane">
             <div style={styles.sidebarSectionHeader}>
               <span>FILES</span>
-              <button onClick={() => setShowNewDialog(true)} style={styles.sidebarNewBtn} title="Create new file" aria-label="Create new file">+</button>
+              <button onClick={() => setShowNewDialog(true)} onMouseEnter={() => preloadAll([NewModelDialog])} onFocus={() => preloadAll([NewModelDialog])} style={styles.sidebarNewBtn} title="Create new file" aria-label="Create new file">+</button>
             </div>
             <div style={styles.sidebarPaneContent}>
               {loadErrors.files && <SidebarLoadError message={loadErrors.files} what="files" onRetry={refreshAll} />}
@@ -1476,6 +1499,8 @@ function AppContent() {
                   data-havn-tab=""
                   data-havn-active={activeTab === tab ? "true" : "false"}
                   onClick={() => navigateToTab(tab)}
+                  onMouseEnter={() => preloadTab(tab)}
+                  onFocus={() => preloadTab(tab)}
                   style={activeTab === tab ? styles.subTabActive : styles.subTab}
                 >
                   {tab === "Editor" && dirty ? tab + " *" : tab}
@@ -1538,6 +1563,11 @@ function AppContent() {
 
           {/* Panel */}
           <div style={styles.panel} data-havn-guide="main-panel">
+            {/* One boundary for every page: a page still downloading shows
+                the loading state in its place, and the shell around it stays
+                put. A chunk that fails to download reaches the page's own
+                ErrorBoundary, which offers a reload. */}
+            <Suspense fallback={<PanelFallback />}>
             {activeTab === "Overview" && (
               <ErrorBoundary name="Overview">
                 <HomePanel
@@ -1589,9 +1619,7 @@ function AppContent() {
             )}
             {activeTab === "Dashboards" && (
               <ErrorBoundary name="Dashboards">
-                <DashboardProvider>
-                  <DashboardsSection showConfirm={showConfirm} />
-                </DashboardProvider>
+                <DashboardsPage showConfirm={showConfirm} />
               </ErrorBoundary>
             )}
             {activeTab === "Editor" && (
@@ -1651,7 +1679,7 @@ function AppContent() {
                         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: previewError ? "auto" : "hidden" }}>
                           {previewError
                             ? <div style={{ padding: "8px 12px", color: "var(--havn-red)", fontFamily: "var(--havn-font-mono)", fontSize: "12px", whiteSpace: "pre-wrap" }}>{previewError}</div>
-                            : preview && <SortableTable fill columns={preview.columns} rows={preview.rows} />
+                            : preview && <Suspense fallback={null}><SortableTable fill columns={preview.columns} rows={preview.rows} /></Suspense>
                           }
                         </div>
                       </div>
@@ -1684,6 +1712,7 @@ function AppContent() {
             {activeTab === "Runs" && <ErrorBoundary name="Runs"><HistoryPanel onOpenFile={openFile} /></ErrorBoundary>}
             {activeTab === "Resources" && <ErrorBoundary name="Resources"><ResourcePanel /></ErrorBoundary>}
             {activeTab === "Settings" && <ErrorBoundary name="Settings"><SettingsPanel onShowGuide={showGuide} showConfirm={showConfirm} /></ErrorBoundary>}
+            </Suspense>
           </div>
 
           {/* Run summary */}
@@ -1723,6 +1752,7 @@ function AppContent() {
             />
             <div style={{ ...styles.agentPanel, width: agentWidth }} aria-label="Agent">
               <ErrorBoundary name="Agent Sidebar">
+                <Suspense fallback={<PanelFallback />}>
                 <AgentSidebar
                   showConfirm={showConfirm}
                   isOpen={agentSidebarOpen}
@@ -1733,6 +1763,7 @@ function AppContent() {
                   pendingPrompt={pendingAgentPromptRef.current}
                   onPromptConsumed={() => { pendingAgentPromptRef.current = null; }}
                 />
+                </Suspense>
               </ErrorBoundary>
             </div>
           </>
@@ -1799,26 +1830,34 @@ function AppContent() {
       {/* Model notebook view overlay */}
       {modelNotebookName && (
         <div style={{ position: "fixed", inset: 0, background: "var(--havn-bg)", zIndex: 900, overflow: "auto", padding: "16px" }}>
-          <ModelNotebookView
-            modelName={modelNotebookName}
-            onClose={() => setModelNotebookName(null)}
-            onSaved={() => { loadFiles(); }}
-            showConfirm={showConfirm}
-          />
+          <ErrorBoundary name="Model notebook">
+            <Suspense fallback={<PanelFallback />}>
+              <ModelNotebookView
+                modelName={modelNotebookName}
+                onClose={() => setModelNotebookName(null)}
+                onSaved={() => { loadFiles(); }}
+                showConfirm={showConfirm}
+              />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       )}
 
       {/* New model/notebook/ingest dialog */}
       {showNewDialog && (
-        <NewModelDialog
-          onClose={() => setShowNewDialog(false)}
-          onCreated={(result) => {
-            loadFiles();
-            if (result.path) {
-              addOutput("info", `Created ${result.path}`);
-            }
-          }}
-        />
+        <ErrorBoundary name="New file dialog">
+          <Suspense fallback={null}>
+            <NewModelDialog
+              onClose={() => setShowNewDialog(false)}
+              onCreated={(result) => {
+                loadFiles();
+                if (result.path) {
+                  addOutput("info", `Created ${result.path}`);
+                }
+              }}
+            />
+          </Suspense>
+        </ErrorBoundary>
       )}
 
       {/* Command palette (Ctrl+K / Cmd+K) */}
@@ -1882,9 +1921,11 @@ export default function App() {
     return (
       <WarehouseProvider enabled={isAuthenticated}>
         <div style={{ height: "100vh", background: "var(--havn-bg)", color: "var(--havn-text)", fontFamily: "var(--havn-font)" }}>
-          <DashboardProvider>
-            <DashboardsSection embedMode={true} />
-          </DashboardProvider>
+          <ErrorBoundary name="Dashboard">
+            <Suspense fallback={<PanelFallback fullScreen />}>
+              <DashboardsPage embedMode={true} />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       </WarehouseProvider>
     );

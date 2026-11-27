@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import "./monacoSetup";
 import MonacoEditor from "@monaco-editor/react";
 import { api } from "./api";
+import { drafts, hasUnsavedNotebooks } from "./notebookDrafts";
 
 const LINE_HEIGHT = 19;
 const MIN_CELL_LINES = 3;
@@ -135,14 +136,8 @@ const DEFAULT_INGEST = {
   options: {},
 };
 
-// Unsaved notebooks, by name. The panel unmounts on every tab switch and
-// whenever another file is opened, and the edits lived only in its state:
-// a trip to the Query tab and back lost them. A draft kept here outlives the
-// panel (not a page reload, which App warns about instead).
-const drafts = new Map();
-export function hasUnsavedNotebooks() {
-  return drafts.size > 0;
-}
+// Unsaved notebooks, by name: see notebookDrafts.js.
+export { hasUnsavedNotebooks };
 
 function newCellId() {
   return "cell_" + Math.random().toString(36).slice(2, 8);
