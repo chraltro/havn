@@ -155,7 +155,7 @@ curl -X POST http://localhost:3000/api/users \
   }'
 ```
 
-Username constraints: alphanumeric, underscores, dots, and hyphens. Password minimum: 4 characters.
+Username constraints: alphanumeric, underscores, dots, and hyphens. Password minimum: 8 characters when a password is set (creating a user, changing a password, first-run setup, `havn users create`). Sign-in accepts any length, so accounts created under the older 4-character rule still work; give them a longer password when convenient.
 
 ### Update User
 
@@ -168,6 +168,8 @@ curl -X PUT http://localhost:3000/api/users/analyst \
 
 You can update `role`, `password`, and `display_name` independently.
 
+Changing a password signs the user out everywhere: every token issued before the change is revoked. When admins change their own password, the session that sent the request stays signed in and their other sessions end.
+
 ### Delete User
 
 ```bash
@@ -179,15 +181,23 @@ Deleting a user also revokes all their active tokens.
 
 ## Password Security
 
-Passwords are stored using PBKDF2 with SHA-256 and 100,000 iterations:
+Passwords are stored using PBKDF2 with SHA-256 and 600,000 iterations (current OWASP guidance):
 
 - A 32-byte random salt is generated per user
-- The password is hashed with `PBKDF2(SHA256, password, salt, 100000)`
-- Only the hash and salt are stored -- passwords are never stored in plaintext
+- The password is hashed with `PBKDF2(SHA256, password, salt, 600000)`
+- The hash, the salt and the iteration count are stored -- passwords are never stored in plaintext
+- Accounts created before havn stored the count were hashed with 100,000 iterations. Their next successful sign-in re-hashes the password at 600,000; nothing else changes for the user. A hash at a higher count than the default is left as it is.
 
 ## Rate Limiting
 
-The login endpoint is rate-limited to prevent brute-force attacks. Each client IP is limited in its login attempt frequency.
+The login endpoint is rate-limited to prevent brute-force attacks, with two limits:
+
+- **Per client address:** 5 attempts per 60 seconds.
+- **Per username:** 10 failed attempts per 15 minutes, counted across all addresses. The username is compared case-insensitively. A successful sign-in does not count. This limit holds when attempts are spread over many addresses, or when havn runs behind a reverse proxy and every client appears to come from the same address.
+
+Either limit returns `429 Too many login attempts. Try again later.` The per-username limit applies the same way whether the username exists or not, so it does not reveal which accounts exist. Someone who knows a username can still use up its limit and keep that user from signing in for up to 15 minutes; the audit log records each failed attempt with its address.
+
+First-run setup (`POST /api/auth/setup`) is limited to 5 attempts per 60 seconds per address, and creates the first admin only once even if two requests arrive together.
 
 ## Secrets Management
 

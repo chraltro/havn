@@ -683,13 +683,10 @@ def _authenticate_websocket(websocket) -> dict | None:
     if not token:
         return None
 
-    from havn.engine.write_queue import cursor_for
-    cur = cursor_for(_get_shared_conn())
-    try:
-        from havn.engine.auth import validate_token
-        return validate_token(cur, token)
-    finally:
-        cur.close()
+    # Same cached lookup as HTTP requests, so a revoked token is refused on
+    # both paths once the cache is invalidated, and a reconnect storm does not
+    # queue a token query per socket.
+    return _cached_validate_token(token)
 
 
 def _require_permission(request: Request, permission: str) -> dict:
@@ -775,9 +772,41 @@ _RATE_LIMIT_WINDOW = 60.0
 _RATE_LIMIT_MAX = 5
 _RATE_LIMIT_MAX_KEYS = 10_000
 
+# Second login limit, keyed on the username being tried rather than the client
+# address: it holds when attempts are spread across many addresses, or when a
+# reverse proxy makes every client look like one address. Only failed attempts
+# use it up (a success hands its slot back), so a user who signs in often is
+# never limited, and one colleague's typos do not lock out another account.
+_LOGIN_USER_WINDOW = 900.0
+_LOGIN_USER_MAX = 10
 
-def _check_rate_limit(key: str) -> None:
-    """Enforce rate limiting. Raises 429 if too many attempts."""
+# Longest window of any limit above: keys idle for longer are evicted.
+_RATE_LIMIT_SWEEP_WINDOW = max(_RATE_LIMIT_WINDOW, _LOGIN_USER_WINDOW)
+
+
+def _login_user_key(username: str) -> str:
+    """Rate-limit key for a username: case variants share one bucket.
+
+    Applied to whatever is typed, before the user is looked up, so the limit
+    behaves the same for usernames that exist and ones that do not.
+    """
+    import unicodedata
+
+    return "login-user:" + unicodedata.normalize("NFKC", username).strip().casefold()
+
+
+def _check_rate_limit(
+    key: str,
+    *,
+    max_attempts: int | None = None,
+    window: float | None = None,
+) -> None:
+    """Enforce rate limiting. Raises 429 if too many attempts.
+
+    Defaults to the per-address login limit (5 per 60 seconds).
+    """
+    limit = _RATE_LIMIT_MAX if max_attempts is None else max_attempts
+    span = _RATE_LIMIT_WINDOW if window is None else window
     now = time.time()
     # FastAPI runs sync handlers on a threadpool, so concurrent logins hit this
     # from several threads at once. Without the lock the read-modify-write below
@@ -785,8 +814,8 @@ def _check_rate_limit(key: str) -> None:
     # raise "dictionary changed size during iteration" out of the login handler.
     with _login_attempts_lock:
         attempts = _login_attempts.get(key, [])
-        attempts = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
-        over_limit = len(attempts) >= _RATE_LIMIT_MAX
+        attempts = [t for t in attempts if now - t < span]
+        over_limit = len(attempts) >= limit
         if not over_limit:
             attempts.append(now)
         _login_attempts[key] = attempts
@@ -794,13 +823,35 @@ def _check_rate_limit(key: str) -> None:
             stale = [
                 k
                 for k, v in list(_login_attempts.items())
-                if not v or now - v[-1] > _RATE_LIMIT_WINDOW
+                if not v or now - v[-1] > _RATE_LIMIT_SWEEP_WINDOW
             ]
             for k in stale:
                 del _login_attempts[k]
     if over_limit:
         logger.warning("Rate limit exceeded for %s", key)
         raise HTTPException(429, "Too many login attempts. Try again later.")
+
+
+def _check_login_user_limit(username: str) -> str:
+    """Apply the per-username login limit; returns the key to release on success."""
+    key = _login_user_key(username)
+    _check_rate_limit(key, max_attempts=_LOGIN_USER_MAX, window=_LOGIN_USER_WINDOW)
+    return key
+
+
+def _release_rate_limit(key: str) -> None:
+    """Hand back one attempt recorded by ``_check_rate_limit``.
+
+    The slot is taken before the password is checked, so concurrent guesses
+    cannot all slip past the limit while the hash runs; a successful login
+    then returns it.
+    """
+    with _login_attempts_lock:
+        attempts = _login_attempts.get(key)
+        if attempts:
+            attempts.pop()
+            if not attempts:
+                del _login_attempts[key]
 
 
 # ---------------------------------------------------------------------------

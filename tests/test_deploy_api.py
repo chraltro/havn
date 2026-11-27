@@ -114,10 +114,10 @@ def test_auth_editors_deploy_only_merged_code_to_production(project):
     server_app.AUTH_ENABLED = True
     try:
         tc = TestClient(server_app.app)
-        admin = tc.post("/api/auth/setup", json={"username": "ada", "password": "adapass", "role": "admin"}).json()["token"]
-        tc.post("/api/users", json={"username": "ed", "password": "edpass", "role": "editor"},
+        admin = tc.post("/api/auth/setup", json={"username": "ada", "password": "adapass12", "role": "admin"}).json()["token"]
+        tc.post("/api/users", json={"username": "ed", "password": "edpass12", "role": "editor"},
                 headers={"Authorization": f"Bearer {admin}"})
-        ed = {"Authorization": f"Bearer {tc.post('/api/auth/login', json={'username': 'ed', 'password': 'edpass'}).json()['token']}"}
+        ed = {"Authorization": f"Bearer {tc.post('/api/auth/login', json={'username': 'ed', 'password': 'edpass12'}).json()['token']}"}
         ada = {"Authorization": f"Bearer {admin}"}
 
         resp = tc.post("/api/deploys", json={"env": "prod", "ref": "feature/y"}, headers=ed)

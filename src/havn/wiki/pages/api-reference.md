@@ -26,10 +26,10 @@ Returns: `{"auth_enabled": true, "needs_setup": false}`
 
 ### POST /api/auth/setup
 
-Create the first admin user. Only works when no users exist.
+Create the first admin user. Only works when no users exist. Passwords set through the API must be at least 8 characters.
 
 ```json
-{"username": "admin", "password": "password", "role": "admin"}
+{"username": "admin", "password": "a-long-passphrase", "role": "admin"}
 ```
 
 ## User Management
@@ -45,12 +45,12 @@ List all users (no passwords returned).
 Create a new user.
 
 ```json
-{"username": "analyst", "password": "pass", "role": "viewer", "display_name": "Data Analyst"}
+{"username": "analyst", "password": "analyst-passphrase", "role": "viewer", "display_name": "Data Analyst"}
 ```
 
 ### PUT /api/users/{username}
 
-Update user role, password, or display name.
+Update user role, password, or display name. Changing the password revokes all of the user's tokens (an admin changing their own password keeps the session that sent the request).
 
 ```json
 {"role": "editor", "display_name": "Senior Analyst"}

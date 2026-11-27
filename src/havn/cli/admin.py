@@ -387,15 +387,18 @@ def users_list(
 @users_app.command("create")
 def users_create(
     username: Annotated[str, typer.Argument(help="Username")],
-    password: Annotated[str, typer.Argument(help="Password")],
+    password: Annotated[str, typer.Argument(help="Password (at least 8 characters)")],
     role: Annotated[str, typer.Option("--role", "-r", help="Role: admin, editor, viewer")] = "viewer",
     project_dir: Annotated[Optional[Path], typer.Option("--project", "-p", help="Project directory (default: current dir)")] = None,
 ) -> None:
     """Create a new user."""
     from havn.config import load_project
-    from havn.engine.auth import create_user
+    from havn.engine.auth import MIN_PASSWORD_LENGTH, create_user
     from havn.engine.database import open_warehouse
 
+    if len(password) < MIN_PASSWORD_LENGTH:
+        console.print(f"[red]Password must be at least {MIN_PASSWORD_LENGTH} characters.[/red]")
+        raise typer.Exit(1)
     project_dir = _resolve_project(project_dir)
     config = load_project(project_dir)
     conn = open_warehouse(config, project_dir)

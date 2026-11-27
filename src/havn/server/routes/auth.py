@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import logging
+import threading
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("havn.server")
 
+from havn.engine.auth import MIN_PASSWORD_LENGTH
 from havn.server.deps import (
     DbConn,
+    _check_login_user_limit,
     _check_rate_limit,
     _get_config,
     _get_project_dir,
+    _release_rate_limit,
     _require_permission,
     _require_user,
     _get_auth_enabled,
@@ -27,6 +31,8 @@ router = APIRouter()
 
 class LoginRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=100)
+    # No MIN_PASSWORD_LENGTH here: users created under the older 4-character
+    # rule must still be able to sign in.
     password: str = Field(..., min_length=1, max_length=500)
 
 
@@ -34,14 +40,14 @@ class CreateUserRequest(BaseModel):
     username: str = Field(
         ..., min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_.-]+$"
     )
-    password: str = Field(..., min_length=4, max_length=500)
+    password: str = Field(..., min_length=MIN_PASSWORD_LENGTH, max_length=500)
     role: str = Field(default="viewer", pattern=r"^(admin|editor|viewer)$")
     display_name: str | None = Field(default=None, max_length=200)
 
 
 class UpdateUserRequest(BaseModel):
     role: str | None = Field(default=None, pattern=r"^(admin|editor|viewer)$")
-    password: str | None = Field(default=None, min_length=4, max_length=500)
+    password: str | None = Field(default=None, min_length=MIN_PASSWORD_LENGTH, max_length=500)
     display_name: str | None = Field(default=None, max_length=200)
 
 
@@ -60,9 +66,14 @@ def login(request: Request, req: LoginRequest, conn: DbConn) -> dict:
     """Authenticate and get a token (rate-limited)."""
     client_ip = request.client.host if request.client else "unknown"
     _check_rate_limit(f"login:{client_ip}")
+    # Keyed on the typed username before any lookup, and answered with the
+    # same 429, so it says nothing about whether the username exists.
+    user_key = _check_login_user_limit(req.username)
     from havn.engine.auth import authenticate
 
     token = authenticate(conn, req.username, req.password)
+    if token:
+        _release_rate_limit(user_key)
     # Audit login attempt
     try:
         from havn.engine.audit import log_audit
@@ -108,14 +119,23 @@ def get_auth_status(conn: DbConn) -> dict:
     return {"auth_enabled": True, "needs_setup": not has_any_users(conn)}
 
 
+# Serialises first-run setup: without it two concurrent calls could both see an
+# empty users table and both create an admin. The server is the only process
+# writing the warehouse (DuckDB holds a file lock), so a process lock suffices.
+_setup_lock = threading.Lock()
+
+
 @router.post("/api/auth/setup")
-def initial_setup(req: CreateUserRequest, conn: DbConn) -> dict:
+def initial_setup(request: Request, req: CreateUserRequest, conn: DbConn) -> dict:
     """Create the first admin user (only works when no users exist)."""
+    client_ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(f"setup:{client_ip}")
     from havn.engine.auth import authenticate, create_user, has_any_users
 
-    if has_any_users(conn):
-        raise HTTPException(400, "Setup already completed")
-    create_user(conn, req.username, req.password, "admin", req.display_name)
+    with _setup_lock:
+        if has_any_users(conn):
+            raise HTTPException(400, "Setup already completed")
+        create_user(conn, req.username, req.password, "admin", req.display_name)
     token = authenticate(conn, req.username, req.password)
     return {"token": token, "username": req.username, "role": "admin"}
 
@@ -170,11 +190,22 @@ def update_user_endpoint(
     from havn.engine.auth import update_user
     from havn.server.deps import invalidate_token_cache
 
+    # A password change ends every session of that user (update_user does
+    # it). An admin changing their own password keeps the session making this
+    # request, so they are not signed out mid-action; their other sessions end.
+    keep_token = None
+    if req.password and username == admin["username"]:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            keep_token = auth_header[7:]
     try:
-        found = update_user(conn, username, req.role, req.password, req.display_name)
+        found = update_user(
+            conn, username, req.role, req.password, req.display_name, keep_token=keep_token
+        )
         if not found:
             raise HTTPException(404, f"User '{username}' not found")
-        # Clear token cache so a role/password change is not masked by the 30s TTL.
+        # Clear the token cache so a role change, or the sessions a password
+        # change revoked, take effect now rather than after the 30 s TTL.
         invalidate_token_cache()
         try:
             from havn.engine.audit import log_audit

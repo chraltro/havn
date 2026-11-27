@@ -410,10 +410,10 @@ def auth_client(project):
     server_app.PROJECT_DIR = project
     server_app.AUTH_ENABLED = True
     tc = TestClient(server_app.app)
-    admin = tc.post("/api/auth/setup", json={"username": "ada", "password": "adapass", "role": "admin"}).json()["token"]
-    tc.post("/api/users", json={"username": "ed", "password": "edpass", "role": "editor"},
+    admin = tc.post("/api/auth/setup", json={"username": "ada", "password": "adapass12", "role": "admin"}).json()["token"]
+    tc.post("/api/users", json={"username": "ed", "password": "edpass12", "role": "editor"},
             headers={"Authorization": f"Bearer {admin}"})
-    ed = tc.post("/api/auth/login", json={"username": "ed", "password": "edpass"}).json()["token"]
+    ed = tc.post("/api/auth/login", json={"username": "ed", "password": "edpass12"}).json()["token"]
     tc.tokens = {"ada": {"Authorization": f"Bearer {admin}"}, "ed": {"Authorization": f"Bearer {ed}"}}
     yield tc
     server_app.AUTH_ENABLED = False

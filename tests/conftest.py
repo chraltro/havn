@@ -69,6 +69,24 @@ def _reset_server_singletons():
         deps.reset_shared_conn()
 
 
+@pytest.fixture(autouse=True)
+def _fast_password_hashing(request, monkeypatch):
+    """Hash passwords with a small PBKDF2 count during tests.
+
+    Production hashes at ``PBKDF2_ITERATIONS`` (600,000, about a third of a
+    second per hash); the suite creates users and signs in hundreds of times.
+    Only this process's module constant is lowered: the source value is
+    untouched, and a test marked ``real_pbkdf2`` keeps it.
+    """
+    if "real_pbkdf2" in request.keywords:
+        yield
+        return
+    import havn.engine.auth as auth
+
+    monkeypatch.setattr(auth, "PBKDF2_ITERATIONS", 1_000)
+    yield
+
+
 @pytest.fixture
 def shared_client(shared_project):
     """TestClient against the shared minimal project."""
@@ -96,6 +114,11 @@ def pytest_configure(config):
         "markers",
         "slow: long-running test (stress / soak / cron). Skipped by default; "
         "pass --runslow or run the nightly workflow to include them.",
+    )
+    config.addinivalue_line(
+        "markers",
+        "real_pbkdf2: hash passwords at the production PBKDF2 count instead of "
+        "the fast count tests/conftest.py sets.",
     )
 
 
