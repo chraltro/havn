@@ -22,6 +22,10 @@ vi.mock("./ThemeProvider", () => ({
   useTheme: () => ({ colorThemeId: "havn-dark", fontThemeId: "outfit-jetbrains", setColorThemeId: () => {}, setFontThemeId: () => {} }),
 }));
 
+// The panel is large and each test renders it whole (about 1 s alone), which
+// ran into the default 5 s limit when the full suite loads the machine.
+vi.setConfig({ testTimeout: 20000 });
+
 const { default: SettingsPanel } = await import("./SettingsPanel");
 
 beforeEach(() => {
