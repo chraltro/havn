@@ -233,6 +233,41 @@ def test_max_concurrent_two_runs_disjoint_streams_side_by_side(tmp_path):
     assert _statuses(project, "fast") == ["success"]
 
 
+def test_max_concurrent_change_in_project_yml_resizes_the_pool(tmp_path):
+    """project.yml is re-read every tick, max_concurrent included."""
+    project = _project(tmp_path, TWO_STREAMS)
+    both = threading.Barrier(2, timeout=30)
+
+    def runner(task):
+        if task.spec.name == "slow" and task.scheduled_for.minute == 0:
+            return "success", None
+        both.wait()          # only passes when both runs are in progress at once
+        return "success", None
+
+    clock = Clock(utc(2026, 4, 6, 6, 0, 0))
+    t = _scheduler(project, clock, runner=runner)
+    t._started_at = clock.t
+    t._tick(now=utc(2026, 4, 6, 6, 0, 2))            # slow at 06:00, on the one worker
+    assert t.wait_idle(60)
+    assert len(t.worker_threads) == 1
+
+    (project / "project.yml").write_text(textwrap.dedent(
+        TWO_STREAMS.replace("timezone: UTC", "timezone: UTC\n      max_concurrent: 2")
+    ), encoding="utf-8")
+    t._tick(now=utc(2026, 4, 6, 6, 5, 2))            # both due at 06:05: side by side now
+    assert t.wait_idle(60)
+    assert _statuses(project, "fast") == ["success"]
+    assert _statuses(project, "slow")[-1] == "success"
+    assert len(t.worker_threads) == 2
+
+    (project / "project.yml").write_text(textwrap.dedent(TWO_STREAMS), encoding="utf-8")
+    t._tick(now=utc(2026, 4, 6, 6, 6, 2))            # nothing due; the pool shrinks
+    deadline = time.monotonic() + 10
+    while len(t.worker_threads) > 1:
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+
+
 # ---------------------------------------------------------------------------
 # Overlap policy
 # ---------------------------------------------------------------------------

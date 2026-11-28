@@ -362,8 +362,11 @@ class _InternalTask:
     leased: bool = False
 
 
+_RETIRE = object()  # tells one worker to exit (the pool shrank)
+
+
 class _WorkerPool:
-    """A fixed number of daemon worker threads reading one FIFO queue.
+    """Daemon worker threads reading one FIFO queue; ``resize`` changes how many.
 
     Daemon threads never keep the process alive; ``ThreadPoolExecutor``
     workers would (they are joined at interpreter exit), so a stuck run
@@ -376,21 +379,45 @@ class _WorkerPool:
         self._queue: queue.Queue = queue.Queue()
         self._threads: list[threading.Thread] = []
         self._closed = False
+        self._started = False
+        self._mutex = threading.Lock()
+        self._next_index = 1
+
+    def _spawn(self, n: int) -> None:
+        for _ in range(n):
+            t = threading.Thread(target=self._work, name=f"havn-scheduler-worker-{self._next_index}",
+                                 daemon=True)
+            self._next_index += 1
+            t.start()
+            self._threads.append(t)
 
     def submit(self, task) -> None:
-        if self._closed:
-            raise RuntimeError("worker pool is closed")
-        if not self._threads:
-            for i in range(self.size):
-                t = threading.Thread(target=self._work, name=f"havn-scheduler-worker-{i + 1}", daemon=True)
-                t.start()
-                self._threads.append(t)
+        with self._mutex:
+            if self._closed:
+                raise RuntimeError("worker pool is closed")
+            if not self._started:
+                self._started = True
+                self._spawn(self.size)
         self._queue.put(task)
+
+    def resize(self, size: int) -> None:
+        """Grow at once; shrink as workers finish what is queued ahead of the change."""
+        size = max(1, int(size))
+        with self._mutex:
+            if self._closed or size == self.size:
+                return
+            if self._started:
+                if size > self.size:
+                    self._spawn(size - self.size)
+                else:
+                    for _ in range(self.size - size):
+                        self._queue.put(_RETIRE)
+            self.size = size
 
     def _work(self) -> None:
         while True:
             task = self._queue.get()
-            if task is None:
+            if task is None or task is _RETIRE:
                 return
             try:
                 self._handler(task)
@@ -405,16 +432,17 @@ class _WorkerPool:
                 task = self._queue.get_nowait()
             except queue.Empty:
                 return out
-            if task is not None:
+            if task is not None and task is not _RETIRE:
                 out.append(task)
 
     def close(self) -> None:
         """Stop the workers once they finish what they are running."""
-        if self._closed:
-            return
-        self._closed = True
-        for _ in self._threads:
-            self._queue.put(None)
+        with self._mutex:
+            if self._closed:
+                return
+            self._closed = True
+            for _ in self._threads:
+                self._queue.put(None)
 
     def join(self, timeout: float | None) -> list[threading.Thread]:
         """Wait up to ``timeout`` seconds in total; return workers still alive."""
@@ -426,7 +454,8 @@ class _WorkerPool:
 
     @property
     def threads(self) -> list[threading.Thread]:
-        return list(self._threads)
+        """The workers still running (a retired one has exited)."""
+        return [t for t in self._threads if t.is_alive()]
 
 
 # ---------------------------------------------------------------------------
@@ -842,6 +871,9 @@ class SchedulerThread(threading.Thread):
             self._started_at = now
         try:
             config = self._load_config()
+            if self._pool is not None:
+                # project.yml is re-read every tick; so is max_concurrent.
+                self._pool.resize(self.max_concurrent)
             specs, errors, _ = collect_schedules(self.project_dir, config)
             self._log_problems(errors)
             for spec in specs:
