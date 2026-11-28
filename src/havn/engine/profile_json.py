@@ -33,6 +33,7 @@ _ROOT_FIELDS: dict[str, dict[str, str]] = {
         "peak_buffer_memory": "system_peak_buffer_memory",
         "peak_temp_dir_size": "system_peak_temp_dir_size",
         "total_memory_allocated": "total_memory_allocated",
+        "total_bytes_spilled": "total_bytes_spilled",
         "blocked_thread_time": "blocked_thread_time",
     },
     "io": {
@@ -40,6 +41,10 @@ _ROOT_FIELDS: dict[str, dict[str, str]] = {
         "total_bytes_written": "total_bytes_written",
     },
 }
+
+# Set on a normalised profile whose peak memory / temp-dir figures describe
+# that one query (DuckDB 2.0), rather than the connection's high-water mark.
+PER_QUERY_PEAKS = "per_query_peaks"
 
 _NODE_FIELDS = {
     "name": "operator_name",
@@ -67,6 +72,11 @@ def normalize_profile(profile: dict) -> dict:
         for new_key, old_key in mapping.items():
             if new_key in values:
                 out[old_key] = values[new_key]
+    # 1.x's system_peak_* were high-water marks for the connection that never
+    # went down; 2.0's peaks are this query's own, and it reports what the
+    # query spilled as total_bytes_spilled. Readers that compensated for the
+    # 1.x marks (perf capture) check this flag.
+    out[PER_QUERY_PEAKS] = True
     out["extra_info"] = {}
     out["children"] = [_normalize_node(n) for n in _unwrap(profile["operator"])]
     return out

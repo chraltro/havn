@@ -110,3 +110,69 @@ def test_real_profile_normalizes_to_the_flat_layout(sql):
         nodes.append(node)
         stack.extend(node.get("children") or [])
     assert all("operator_name" in n and "operator_timing" in n for n in nodes)
+
+
+def _sectioned(peak: int, spilled: int, temp_dir: int, allocated: int = 0) -> dict:
+    p = json.loads(json.dumps(_SECTIONED))
+    p["system"] = {
+        "peak_buffer_memory": peak, "peak_temp_dir_size": temp_dir,
+        "total_memory_allocated": allocated, "total_bytes_spilled": spilled,
+    }
+    return normalize_profile(p)
+
+
+def test_sectioned_profile_is_marked_per_query():
+    from havn.engine.profile_json import PER_QUERY_PEAKS
+
+    flat = normalize_profile(json.loads(json.dumps(_SECTIONED)))
+    assert flat[PER_QUERY_PEAKS] is True
+
+
+def test_capture_uses_per_query_peak_and_spill_on_duckdb2_profiles():
+    # DuckDB 2.0's peaks are per query: a build after a bigger one used to be
+    # read as "did not raise the connection's high-water mark" and record 0.
+    from havn.engine.perf.capture import BuildCapture
+
+    big = BuildCapture(model="a")
+    big.absorb(_sectioned(peak=200_000_000, spilled=75_000_000, temp_dir=77_000_000, allocated=1_200_000_000))
+    small = BuildCapture(model="b")
+    small.absorb(
+        _sectioned(peak=85_000_000, spilled=0, temp_dir=69_000_000),
+        previous_marks=(200_000_000, 77_000_000),
+    )
+    assert big.peak_memory_bytes == 200_000_000  # not the 1.2 GB of allocations
+    assert big.spill_bytes == 75_000_000
+    assert small.peak_memory_bytes == 85_000_000
+    assert small.spill_bytes == 0  # leftover temp files are not this query's spill
+
+
+def test_capture_keeps_high_water_logic_for_duckdb1_profiles():
+    from havn.engine.perf.capture import BuildCapture
+
+    flat = {"latency": 0.1, "system_peak_buffer_memory": 100, "system_peak_temp_dir_size": 10,
+            "total_memory_allocated": 40, "children": []}
+    cap = BuildCapture(model="m")
+    cap.absorb(flat, previous_marks=(100, 10))  # did not raise the marks
+    assert cap.peak_memory_bytes == 40 and cap.spill_bytes == 0
+    cap2 = BuildCapture(model="m")
+    cap2.absorb(flat, previous_marks=(50, 4))
+    assert cap2.peak_memory_bytes == 100 and cap2.spill_bytes == 6
+
+
+def test_build_after_a_bigger_build_records_its_own_peak():
+    from havn.engine.perf.capture import BuildCapture, activate, run_build_statement
+
+    conn = duckdb.connect()
+    conn.execute("CREATE TABLE t AS SELECT i, i % 50000 AS g FROM range(1000000) r(i)")
+    caps = []
+    for sql in (
+        "CREATE TABLE a AS SELECT g, list(i) AS l FROM t GROUP BY g",
+        "CREATE TABLE b AS SELECT g % 7 AS g2, sum(i) AS s FROM t GROUP BY 1",
+    ):
+        cap = BuildCapture(model=sql[13:14])
+        with activate(cap):
+            run_build_statement(conn, sql)
+        caps.append(cap)
+    assert caps[0].statements == caps[1].statements == 1
+    if int(duckdb.__version__.split(".")[0]) >= 2:
+        assert caps[1].peak_memory_bytes > 0

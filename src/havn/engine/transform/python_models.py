@@ -802,6 +802,12 @@ def make_ref(
                 "has to be a string literal; for a name built at run time, "
                 "list it in @model(depends_on=[...])."
             )
+        # ref() shares the connection the function got as ``db``. After the
+        # natural watermark pattern, db.execute(...).fetchone(), DuckDB 2.0
+        # still holds that result open and refuses conn.sql().
+        from havn.engine.database import finish_pending_result
+
+        finish_pending_result(conn)
         if ref_map is not None:
             target = ref_map.get(key)
             if target is None:

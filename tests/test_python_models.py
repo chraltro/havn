@@ -460,6 +460,29 @@ def test_incremental_strategies(project, conn, strategy):
     assert outputs == ["full", "incremental"]
 
 
+WATERMARK = '''
+from havn import model
+
+
+@model(materialized="table", depends_on=["bronze.orders"])
+def events(db, ref):
+    # The natural watermark pattern: a half-read execute() result on the same
+    # connection ref() uses. On DuckDB 2.0 running the ref() relation then
+    # raised ResourceInUseException ("unfinished result from execute()").
+    low = db.execute("SELECT min(id) FROM bronze.orders").fetchone()[0]
+    n = ref("bronze.orders").aggregate("count(*)").fetchall()[0][0]
+    print(f"{n} upstream rows")
+    return ref("bronze.orders").filter(f"id > {low}").project("id, customer, amount")
+'''
+
+
+def test_ref_after_a_half_read_execute_on_db(project, conn):
+    _write(project / "transform/silver/events.py", WATERMARK)
+    result = _run(conn, project)
+    assert result["silver.events"] == "built", result
+    assert conn.execute("SELECT count(*), max(id) FROM silver.events").fetchone() == (2, 3)
+
+
 def test_incremental_on_schema_change_fail(project, conn):
     path = _write(
         project / "transform/silver/events.py",
