@@ -173,7 +173,7 @@ A run is never started twice at the same time, whatever `max_concurrent` is.
 
 Raising it is possible, but runs that overlap in one warehouse can fail. DuckDB allows one writer process per file and resolves concurrent transactions within that process optimistically, so two runs that write the same catalog object conflict. Measured on this codebase (two streams started together in one process, as the scheduler would):
 
-- On a fresh warehouse, both runs create the `_havn` metadata tables and the `landing`, `bronze`, `silver` and `gold` schemas, and the second one used to fail with `Catalog write-write conflict on create`. havn now creates those (and its other tables) under one lock per process and retries a conflict with a writer outside it, so this no longer fails.
+- On a fresh warehouse, both runs create the `landing`, `bronze`, `silver` and `gold` schemas (and register the project's macros), and the second one used to fail with `Catalog write-write conflict on create`. havn now does that under one lock per process and retries a conflict with a writer outside it, so this no longer fails. The `_havn` metadata tables are created by havn's migrations, which take their own lock.
 - Two ingest scripts replacing the same landing table failed in 4 of 10 rounds.
 - Two scripts of your own that each run `CREATE SCHEMA IF NOT EXISTS my_schema` on a warehouse without that schema can still conflict: havn does not see inside scripts.
 - Model builds are safe from each other (havn builds one model at a time per process), and streams that write disjoint tables ran side by side without errors.

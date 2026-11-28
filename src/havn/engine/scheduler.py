@@ -14,9 +14,9 @@ late or skipped) while a long run executes. What it schedules:
 Pool size is ``scheduler.max_concurrent`` (default 1, re-read every tick).
 One worker means runs still execute one at a time, as before: concurrent
 runs against one DuckDB warehouse can fail on write-write conflicts (two
-ingest scripts replacing the same landing table; havn's own schema and
-table bootstrap is serialised by ``engine.catalog_ddl``), so concurrency is
-opt-in. See docs/scheduler.md.
+ingest scripts replacing the same landing table; the schemas and macros
+every run creates are serialised by ``engine.catalog_ddl``, the ``_havn``
+tables by the migrations), so concurrency is opt-in. See docs/scheduler.md.
 
 One scheduler per warehouse: ``start()`` / ``_startup()`` take an OS-level
 lock (``engine.scheduler_lock``) held until the scheduler stops. A
