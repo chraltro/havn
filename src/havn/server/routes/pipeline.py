@@ -185,21 +185,33 @@ def _emit(event_type: str, data: dict):
 
 
 def _finish_operation():
-    """Mark the current operation as finished."""
-    try:
-        from havn.engine.write_queue import cursor_for
-        from havn.server.deps import _get_shared_conn
+    """Mark the current operation as finished.
 
-        # A cursor, never the shared connection itself: on DuckDB 2.0 a
-        # connection another thread is using refuses the call instead of
-        # waiting for it.
-        cur = cursor_for(_get_shared_conn())
+    An operation that held the run gate wrote to the warehouse: it is
+    checkpointed while the gate is still held, so no scheduled run can be
+    mid-transaction. One that did not (lint) is not: FORCE CHECKPOINT does
+    not abort an open transaction, but with uncommitted catalog changes in
+    one (a scheduled run creating tables) it waits for that transaction to
+    end, and the finished lint would show as running until then (measured
+    on DuckDB 1.5 and 2.0).
+    """
+    with _pipeline_cond:
+        held = _pipeline_state.get("gate_ticket") is not None
+    if held:
         try:
-            cur.execute("FORCE CHECKPOINT")
-        finally:
-            cur.close()
-    except Exception:
-        pass
+            from havn.engine.write_queue import cursor_for
+            from havn.server.deps import _get_shared_conn
+
+            # A cursor, never the shared connection itself: on DuckDB 2.0 a
+            # connection another thread is using refuses the call instead of
+            # waiting for it.
+            cur = cursor_for(_get_shared_conn())
+            try:
+                cur.execute("FORCE CHECKPOINT")
+            finally:
+                cur.close()
+        except Exception:
+            pass
     with _pipeline_cond:
         ticket = _pipeline_state.get("gate_ticket")
         _pipeline_state["gate_ticket"] = None

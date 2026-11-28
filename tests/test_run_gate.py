@@ -412,6 +412,34 @@ def test_legacy_sse_endpoint_refuses_while_busy_and_keeps_a_pending_cancel(tmp_p
         ticket.release()
 
 
+def test_ungated_operation_finishes_without_waiting_for_an_open_transaction(tmp_path, client_for):
+    """Lint's end does not checkpoint: a FORCE CHECKPOINT would wait for a
+    scheduled run's open transaction with catalog changes."""
+    from havn.engine.write_queue import cursor_for
+    from havn.server import deps
+    from havn.server.routes import pipeline
+
+    project = _project(tmp_path)
+    client_for(project)
+    deps.reset_shared_conn()
+    cur = cursor_for(deps._get_shared_conn())
+    cur.execute("BEGIN")
+    cur.execute("CREATE SCHEMA mid_run")
+    cur.execute("CREATE TABLE mid_run.x AS SELECT range AS i FROM range(200000)")
+    try:
+        r = pipeline._start_operation("lint", "Lint", pipeline._finish_operation, (), gated=False)
+        assert r["status"] == "started"
+        deadline = time.monotonic() + 5
+        while pipeline._pipeline_state["running"]:
+            assert time.monotonic() < deadline, "lint's end waited for the open transaction"
+            time.sleep(0.02)
+    finally:
+        cur.execute("ROLLBACK")
+        cur.close()
+        _wait_ui_idle()
+        deps.reset_shared_conn()
+
+
 def test_stopping_scheduler_cancels_a_run_waiting_for_the_gate(tmp_path):
     project = _project(tmp_path)
     clock = Clock(dt.datetime(2026, 4, 6, 6, 0, 0, tzinfo=UTC))
