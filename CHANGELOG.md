@@ -49,7 +49,22 @@ All notable changes to havn are documented in this file.
   database paths and the layout of havn's `_havn` tables through
   `pragma_show` / `pragma_table_info` is now admin-only, and DuckDB secrets
   and logs cannot be read through queries at all. `EXPLAIN ANALYZE` from the
-  query panel now runs in the same read-only transaction as a query.
+  query panel, the CSV export and collaboration sessions now run in the same
+  read-only transaction as a query.
+- **A query could make the server download and load DuckDB extensions.**
+  DuckDB installs a known extension the first time a query names one of its
+  functions or types, so `SELECT '127.0.0.1'::INET`, `stem(...)` or
+  `excel_text(...)` from any signed-in user with read permission downloaded
+  the inet, fts or excel extension from the internet, wrote it to the
+  server's disk and loaded it into the server process. This affects every
+  havn release up to and including 0.3.1, on DuckDB 1.5 and 2.x. On DuckDB
+  2.x, `SHOW <setting>` also returned DuckDB settings to such a user,
+  including S3 credentials set with `SET s3_secret_access_key`. Upgrading
+  fixes both: read-only queries can only use functions and types that are
+  already loaded, and `SHOW <setting>` is admin-only. If your server should
+  never fetch extensions, also set DuckDB's `autoinstall_known_extensions`
+  to false for it; havn leaves that setting alone, because its connectors
+  rely on extensions loading on first use.
 
 ### Added
 
