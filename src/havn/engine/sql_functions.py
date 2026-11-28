@@ -129,38 +129,65 @@ REVIEWED_SAFE_SCALAR_FUNCTIONS = frozenset({
 })
 
 
+
 # ---------------------------------------------------------------------------
 # Project macros
 # ---------------------------------------------------------------------------
 
+# A macro is keyed by (schema, name), both lowercased: two schemas may each
+# define ``m``, and only one of them may read a file.
+MacroKey = tuple[str, str]
+
 _lock = threading.Lock()
 # Project / package / stdlib table macros whose body passed the read-only
 # check: callable like an allowed table function.
-_safe_user_table_macros: frozenset[str] = frozenset()
-# Project macros (scalar or table) whose body calls something refused.
-_refused_user_macros: frozenset[str] = frozenset()
+_safe_user_table_macros: frozenset[MacroKey] = frozenset()
+# Project macros (scalar or table) whose body calls something refused, or
+# whose body could not be decided.
+_refused_user_macros: frozenset[MacroKey] = frozenset()
 
 
-def safe_user_table_macros() -> frozenset[str]:
-    return _safe_user_table_macros
+def _names(keys: frozenset[MacroKey], name: str) -> bool:
+    return any(n == name for _s, n in keys)
 
 
-def refused_user_macros() -> frozenset[str]:
-    return _refused_user_macros
+def table_function_allowed(name: str, *, admin: bool = False, schema: str = "") -> bool:
+    """Whether a table function call ``[schema.]name(...)`` may run.
 
-
-def table_function_allowed(name: str, *, admin: bool = False) -> bool:
+    A bare name that is a project macro in several schemas is allowed only
+    when none of them is refused: which one DuckDB resolves depends on the
+    search path, so the refused body wins.
+    """
     key = name.lower()
-    if key in ALLOWED_TABLE_FUNCTIONS or key in _safe_user_table_macros:
+    sch = (schema or "").lower()
+    if sch:
+        if (sch, key) in _refused_user_macros:
+            return False
+        if (sch, key) in _safe_user_table_macros:
+            return True
+    elif _names(_refused_user_macros, key):
+        return False
+    elif _names(_safe_user_table_macros, key):
+        return True
+    if key in ALLOWED_TABLE_FUNCTIONS:
         return True
     return admin and key in ADMIN_TABLE_FUNCTIONS
 
 
-def scalar_function_refused(name: str, *, admin: bool = False) -> bool:
+def scalar_function_refused(name: str, *, admin: bool = False, schema: str = "") -> bool:
+    """Whether a scalar (or aggregate) call ``[schema.]name(...)`` is refused.
+
+    Only scalar lists apply here: ``histogram(x)`` the aggregate is fine,
+    ``histogram`` the table macro is a table function and is judged by
+    :func:`table_function_allowed` where it is called as one.
+    """
     key = name.lower()
-    if key in REFUSED_SCALAR_FUNCTIONS or key in REFUSED_TABLE_FUNCTIONS or key in _refused_user_macros:
+    sch = (schema or "").lower()
+    if key in REFUSED_SCALAR_FUNCTIONS:
         return True
-    return not admin and (key in ADMIN_SCALAR_FUNCTIONS or key in ADMIN_TABLE_FUNCTIONS)
+    if (sch, key) in _refused_user_macros if sch else _names(_refused_user_macros, key):
+        return True
+    return not admin and key in ADMIN_SCALAR_FUNCTIONS
 
 
 def refresh_user_macros(conn) -> None:
@@ -182,16 +209,25 @@ def refresh_user_macros(conn) -> None:
 
     try:
         rows = conn.execute(
-            "SELECT DISTINCT lower(function_name), function_type, macro_definition "
+            "SELECT DISTINCT lower(schema_name), lower(function_name), function_type, macro_definition "
             "FROM duckdb_functions() WHERE NOT internal "
             "AND function_type IN ('macro', 'table_macro')"
         ).fetchall()
     except Exception:
         return
-    tables = {n: d for n, t, d in rows if t == "table_macro" and d}
-    scalars = {n: d for n, t, d in rows if t == "macro" and d}
-    safe: set[str] = set()
-    refused: set[str] = set()
+    tables: dict[MacroKey, str] = {}
+    scalars: dict[MacroKey, str] = {}
+    undecidable: set[MacroKey] = set()
+    for schema, name, kind, body in rows:
+        key = (schema or "", name)
+        if not body:
+            undecidable.add(key)
+        elif kind == "table_macro":
+            tables[key] = body
+        else:
+            scalars[key] = body
+    safe: set[MacroKey] = set()
+    refused: set[MacroKey] = set()
     with _lock:
         old_safe, old_refused = _safe_user_table_macros, _refused_user_macros
         try:
@@ -201,36 +237,55 @@ def refresh_user_macros(conn) -> None:
             while changed:
                 changed = False
                 _safe_user_table_macros, _refused_user_macros = frozenset(safe), frozenset(refused)
-                for name, body in list(tables.items()) + list(scalars.items()):
-                    if name in safe or name in refused:
+                for key, body in list(tables.items()) + list(scalars.items()):
+                    if key in safe or key in refused:
                         continue
-                    sql = body if name in tables else f"SELECT ({body})"
+                    is_table = key in tables
+                    sql = body if is_table else f"SELECT ({body})"
                     try:
                         validate_read_only_query(sql)
                     except ReadOnlyQueryError as e:
                         if "parse" in str(e).lower():
                             continue
-                        if name in tables and _only_waits_on_tables(body, tables, safe, refused):
+                        if _only_waits_on_tables(body, tables, safe, refused):
                             continue
-                        refused.add(name)
+                        refused.add(key)
                         changed = True
                     else:
-                        if name in tables:
-                            safe.add(name)
+                        if re.search(r"_havn\b", body, re.IGNORECASE):
+                            # A macro over havn's own metadata would hand it
+                            # to anyone who calls the macro.
+                            refused.add(key)
                             changed = True
-            # Table macros still undecided (cycles, unparseable bodies) stay
-            # unlisted, i.e. refused.
+                        elif is_table:
+                            safe.add(key)
+                            changed = True
+            # Macros still undecided (cycles, unparseable or empty bodies)
+            # are refused.
+            undecided = (set(tables) - safe - refused) | {
+                k for k in scalars if k not in refused and _calls_undecided(scalars[k], tables, safe)
+            }
             _safe_user_table_macros = frozenset(safe)
-            _refused_user_macros = frozenset(refused | (set(tables) - safe))
+            _refused_user_macros = frozenset(refused | undecided | undecidable)
         except Exception:
             _safe_user_table_macros, _refused_user_macros = old_safe, old_refused
             raise
+    invalidate_catalog_cache()
+
+
+def _called(body: str) -> set[str]:
+    return {m.lower() for m in re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(", body)}
 
 
 def _only_waits_on_tables(body: str, tables: dict, safe: set, refused: set) -> bool:
     """Whether ``body`` calls an undecided project table macro (decide it later)."""
-    called = {m.lower() for m in re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(", body)}
-    return any(n in tables and n not in safe and n not in refused for n in called)
+    called = _called(body)
+    return any(n in called and k not in safe and k not in refused for k in tables for _s, n in [k])
+
+
+def _calls_undecided(body: str, tables: dict, safe: set) -> bool:
+    called = _called(body)
+    return any(n in called and k not in safe for k in tables for _s, n in [k])
 
 
 def reset_user_macros() -> None:
@@ -239,3 +294,83 @@ def reset_user_macros() -> None:
     with _lock:
         _safe_user_table_macros = frozenset()
         _refused_user_macros = frozenset()
+    invalidate_catalog_cache()
+
+
+# ---------------------------------------------------------------------------
+# Names the live catalog already has
+# ---------------------------------------------------------------------------
+#
+# DuckDB installs and loads a "known" extension the first time a query names
+# one of its functions or types (``'1.2.3.4'::INET`` -> inet, ``stem()`` ->
+# fts, ``excel_text()`` -> excel): it downloads it, writes it to disk and
+# loads native code into the server. ``autoinstall_known_extensions`` /
+# ``autoload_known_extensions`` are instance-wide, and havn's own connectors
+# rely on them, so for governed reads the gate refuses any function or type
+# name the connection's catalog does not already have instead.
+
+_catalog_lock = threading.Lock()
+_known_functions: set[str] = set()
+_known_types: set[str] = set()
+
+# Names DuckDB's parser produces or accepts that are not catalog functions or
+# types of their own (syntax sugar, rewrites, type constructors).
+PARSER_FUNCTIONS = frozenset({
+    "row", "list_value", "struct_pack", "array_value", "map", "union_value",
+    "try", "coalesce", "nullif", "ifnull", "greatest", "least", "exists",
+    "grouping", "grouping_id", "unpack", "columns", "unnest",
+})
+PARSER_TYPES = frozenset({
+    "list", "struct", "map", "union", "array", "decimal", "numeric", "enum",
+    "varchar", "char", "bpchar", "text", "string", "integer", "int", "bigint",
+    "smallint", "tinyint", "hugeint", "uhugeint", "double", "float", "real",
+    "boolean", "bool", "date", "time", "timestamp", "interval", "blob", "uuid",
+    "bit", "bitstring", "varint", "bignum", "timestamptz", "timetz", "null",
+    "variant", "geometry",
+})
+
+
+def invalidate_catalog_cache() -> None:
+    with _catalog_lock:
+        _known_functions.clear()
+        _known_types.clear()
+
+
+def unknown_catalog_names(conn, functions: set[str], types: set[str]) -> tuple[set[str], set[str]]:
+    """The function and type names (lowercase) ``conn``'s catalog does not have.
+
+    Names already seen on this process's catalog are cached; anything else is
+    looked up on ``conn`` itself, so a macro or extension added since is found.
+    """
+    fns = {f for f in functions if f not in PARSER_FUNCTIONS}
+    tys = {t for t in types if t not in PARSER_TYPES}
+    with _catalog_lock:
+        miss_f = fns - _known_functions
+        miss_t = tys - _known_types
+    if not miss_f and not miss_t:
+        return set(), set()
+    found_f: set[str] = set()
+    found_t: set[str] = set()
+    try:
+        if miss_f:
+            marks = ", ".join("?" for _ in miss_f)
+            found_f = {r[0] for r in conn.execute(
+                f"SELECT DISTINCT lower(function_name) FROM duckdb_functions() "
+                f"WHERE lower(function_name) IN ({marks})",
+                sorted(miss_f),
+            ).fetchall()}
+        if miss_t:
+            marks = ", ".join("?" for _ in miss_t)
+            rows = conn.execute(
+                f"SELECT lower(type_name), lower(logical_type) FROM duckdb_types() "
+                f"WHERE lower(type_name) IN ({marks}) OR lower(logical_type) IN ({marks})",
+                sorted(miss_t) * 2,
+            ).fetchall()
+            found_t = {r[0] for r in rows} | {r[1] for r in rows}
+    except Exception:
+        # Cannot tell: treat as unknown (fail closed).
+        return miss_f, miss_t
+    with _catalog_lock:
+        _known_functions.update(found_f)
+        _known_types.update(found_t)
+    return miss_f - found_f, miss_t - found_t

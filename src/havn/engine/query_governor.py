@@ -49,8 +49,16 @@ def execute_governed(
     QueryTimeoutError
         If the query exceeds the timeout.
     """
+    from havn.engine.governed_query import read_only_execution
+
     result_holder: list = []
     error_holder: list = []
+    # Every governed read runs locked down (READ ONLY transaction, no Python
+    # replacement scans), here rather than in each route, so no caller can
+    # skip it. The guard stays open while the caller reads the result and
+    # closes when the result is exhausted or closed.
+    guard = read_only_execution(conn)
+    guard.__enter__()
 
     def _run():
         try:
@@ -70,15 +78,79 @@ def execute_governed(
             conn.interrupt()
         except Exception:
             pass
+        thread.join(timeout=5)
+        guard.__exit__(None, None, None)
         raise QueryTimeoutError(
             f"Query exceeded {timeout_s}s timeout and was cancelled. "
             f"Try adding filters or a LIMIT clause."
         )
 
     if error_holder:
+        guard.__exit__(None, None, None)
         raise error_holder[0]
 
-    return result_holder[0], duration_ms
+    return GovernedResult(result_holder[0], lambda: guard.__exit__(None, None, None)), duration_ms
+
+
+class GovernedResult:
+    """A query result whose read-only guard is released once it has been read.
+
+    Proxies ``description``, ``fetchall``, ``fetchmany`` and ``fetchone``. The
+    guard (the READ ONLY transaction) ends when a fetch comes back short or
+    empty, on ``close()``, or when the object is collected.
+    """
+
+    def __init__(self, result, release) -> None:
+        self._result = result
+        self._release = release
+        self._closed = False
+
+    @property
+    def description(self):
+        return self._result.description
+
+    def close(self) -> None:
+        if not self._closed:
+            self._closed = True
+            try:
+                self._release()
+            except Exception:
+                logger.debug("Could not release a governed read", exc_info=True)
+
+    def fetchall(self):
+        try:
+            return self._result.fetchall()
+        finally:
+            self.close()
+
+    def fetchmany(self, size: int = 1):
+        try:
+            rows = self._result.fetchmany(size)
+        except BaseException:
+            self.close()
+            raise
+        if len(rows) < size:
+            self.close()
+        return rows
+
+    def fetchone(self):
+        try:
+            row = self._result.fetchone()
+        except BaseException:
+            self.close()
+            raise
+        if row is None:
+            self.close()
+        return row
+
+    def __getattr__(self, name):
+        return getattr(self._result, name)
+
+    def __del__(self):  # pragma: no cover - best effort
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------

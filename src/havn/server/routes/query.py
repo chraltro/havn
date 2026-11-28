@@ -45,13 +45,18 @@ from havn.engine.sql_safety import (  # noqa: E402
 )
 
 
-def _validate_query_sql(sql: str) -> None:
+def _validate_query_sql(sql: str, conn=None, user: dict | None = None) -> None:
     """Reject SQL that is not a safe read-only query (HTTP flavour).
 
     See :func:`havn.engine.sql_safety.validate_read_only_query` for the rules.
+    Pass the connection the query will run on (unknown functions and types
+    are then refused instead of auto-loading an extension) and the user (an
+    admin may read settings).
     """
     try:
-        validate_read_only_query(sql)
+        validate_read_only_query(
+            sql, admin=bool(user) and user.get("role") == "admin", conn=conn,
+        )
     except ReadOnlyQueryError as e:
         raise HTTPException(e.status_code, str(e))
 
@@ -88,7 +93,7 @@ _QUERY_TIMEOUT_SECONDS = 30  # fallback; overridden per-role below
 def explain_endpoint(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
     """Run EXPLAIN on a SQL query and return structured plan + raw text."""
     user = _require_permission(request, "read")
-    _validate_query_sql(req.sql)
+    _validate_query_sql(req.sql, conn, user)
     # A plan carries row estimates (and, analysed, actual counts) of what it
     # reads, so it is planned for the governed query, not the raw one.
     sql = _govern(req.sql, user, conn, params=req.params).sql
@@ -106,7 +111,7 @@ def explain_endpoint(request: Request, req: ExplainRequest, conn: DbConnReadOnly
 def explain_analyze_endpoint(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
     """Run EXPLAIN ANALYZE on a SQL query and return structured plan + raw text."""
     user = _require_permission(request, "read")
-    _validate_query_sql(req.sql)
+    _validate_query_sql(req.sql, conn, user)
     sql = _govern(req.sql, user, conn, params=req.params).sql
     try:
         from havn.engine.explain import explain_analyze_query as _explain_analyze, plan_to_dict
@@ -124,7 +129,7 @@ def explain_analyze_endpoint(request: Request, req: ExplainRequest, conn: DbConn
 def profile_query(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -> dict:
     """Run EXPLAIN ANALYZE on a SQL query and return the profiled plan."""
     user = _require_permission(request, "read")
-    _validate_query_sql(req.sql)
+    _validate_query_sql(req.sql, conn, user)
     sql = _govern(req.sql, user, conn, params=req.params).sql
     try:
         from havn.engine.explain import explain_analyze_query as _explain_analyze, plan_to_dict
@@ -675,7 +680,11 @@ def export_csv(request: Request, req: ExportRequest):
         try:
             from havn.engine.query_governor import execute_governed
             result, _ = execute_governed(conn, csv_sql, timeout_s=csv_timeout, params=req.params)
-            columns = [desc[0] for desc in result.description]
+            try:
+                columns = [desc[0] for desc in result.description]
+            except BaseException:
+                result.close()
+                raise
         except QueryTimeoutError as e:
             raise HTTPException(408, str(e))
         except Exception as e:
@@ -708,6 +717,7 @@ def export_csv(request: Request, req: ExportRequest):
                 buf.seek(0)
                 buf.truncate(0)
         finally:
+            result.close()  # ends the read-only transaction execute_governed opened
             _release()
 
     return StreamingResponse(

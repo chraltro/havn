@@ -293,12 +293,12 @@ def test_legit_reads_pass_and_run_as_a_viewer(sql, warehouse):
 
 
 def test_read_only_execution_turns_python_replacement_scans_off(warehouse):
-    import pandas as pd
+    import pyarrow as pa  # a dependency; pandas is not installed everywhere
 
     from havn.engine.governed_query import read_only_execution
 
     conn, _root = warehouse
-    secret_df = pd.DataFrame({"k": ["API_KEY"]})  # noqa: F841 - found by name
+    secret_df = pa.table({"k": ["API_KEY"]})  # noqa: F841 - found by name
     assert conn.execute("SELECT count(*) FROM secret_df").fetchall() == [(1,)]
     with read_only_execution(conn):
         with pytest.raises(duckdb.Error):

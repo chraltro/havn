@@ -165,7 +165,7 @@ def prepare_governed_sql(
     from havn.engine.sql_safety import ReadOnlyQueryError, validate_read_only_query
 
     try:
-        validate_read_only_query(sql, admin=identity.role == "admin")
+        validate_read_only_query(sql, admin=identity.role == "admin", conn=conn)
     except ReadOnlyQueryError as e:
         raise GovernedQueryError(e.status_code, str(e)) from e
 
@@ -182,7 +182,7 @@ def prepare_governed_sql(
     if final_sql != sql:
         # Validate what actually runs, not only what was sent.
         try:
-            validate_read_only_query(final_sql, admin=identity.role == "admin")
+            validate_read_only_query(final_sql, admin=identity.role == "admin", conn=conn)
         except ReadOnlyQueryError as e:
             raise GovernedQueryError(e.status_code, str(e)) from e
     return PreparedQuery(original_sql=sql, sql=final_sql, governed=governed)
@@ -356,7 +356,7 @@ def run_governed_query(
     fetch_cap = effective_limit if effective_limit is not None else row_cap
     if wrapped != prepared.sql:
         try:
-            validate_read_only_query(wrapped, admin=identity.role == "admin")
+            validate_read_only_query(wrapped, admin=identity.role == "admin", conn=conn)
         except ReadOnlyQueryError as e:
             raise GovernedQueryError(e.status_code, str(e)) from e
 

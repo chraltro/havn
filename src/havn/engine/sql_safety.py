@@ -13,6 +13,7 @@ FastAPI don't need HTTP machinery; the server routes convert it to an
 
 from __future__ import annotations
 
+import json
 import re
 import threading
 
@@ -497,14 +498,14 @@ def refuse_nested_writes(sql: str) -> None:
     except Exception:
         tree = {"error": True}
     if tree.get("error"):
-        if _bare_write_word(target) is not None:
+        if _write_shape_anywhere(strip_sql_comments_and_strings(target)) is not None:
             raise ReadOnlyQueryError(_NESTED_WRITE_MESSAGE)
         return
     if _tree_has_write(tree):
         raise ReadOnlyQueryError(_NESTED_WRITE_MESSAGE)
 
 
-def validate_read_only_query(sql: str, *, admin: bool = False) -> None:
+def validate_read_only_query(sql: str, *, admin: bool = False, conn=None) -> None:
     """Reject SQL that is not a safe read-only query.
 
     Strips strings and comments, splits top-level statements, then rejects:
@@ -515,8 +516,13 @@ def validate_read_only_query(sql: str, *, admin: bool = False) -> None:
         (see ``havn.engine.sql_functions``)
 
     ``admin`` additionally allows the functions that read instance settings
-    and internals (``duckdb_settings()``, ``current_setting()``, ...) and
-    catalog listings of the ``_havn`` schema.
+    and internals (``duckdb_settings()``, ``current_setting()``, ``SHOW
+    <setting>``, ...) and catalog listings of the ``_havn`` schema.
+
+    ``conn`` is the connection the query will run on. With it, a function or
+    type name its catalog does not already have is refused: DuckDB would
+    otherwise download and load the extension that provides it
+    (``'1.2.3.4'::INET`` installs inet). Governed reads always pass it.
 
     Unknown leading keywords are passed through to DuckDB, which will return
     a parse error so the caller gets a 400 (not a misleading 403).
@@ -527,15 +533,28 @@ def validate_read_only_query(sql: str, *, admin: bool = False) -> None:
     # here but a valid, different query once wrapped. Balanced SQL can't
     # escape the wrapper's parentheses; unbalanced SQL is never valid anyway.
     depth = 0
+    deepest = 0
     for ch in cleaned:
         if ch == "(":
             depth += 1
+            deepest = max(deepest, depth)
         elif ch == ")":
             depth -= 1
             if depth < 0:
                 break
     if depth != 0:
         raise ReadOnlyQueryError("Unbalanced parentheses in query.", status_code=400)
+    # DuckDB's parser and the tree walk below recurse per nesting level;
+    # thousands of parentheses ended in a RecursionError (a 500).
+    if deepest > MAX_NESTING:
+        raise ReadOnlyQueryError(
+            f"Query is nested too deeply (more than {MAX_NESTING} levels of parentheses).",
+            status_code=400,
+        )
+    if len(sql) > MAX_QUERY_LENGTH:
+        raise ReadOnlyQueryError(
+            f"Query is too long (more than {MAX_QUERY_LENGTH:,} characters).", status_code=400,
+        )
     statements = split_statements(cleaned)
     if not statements:
         raise ReadOnlyQueryError("Empty query.", status_code=400)
@@ -564,29 +583,65 @@ def validate_read_only_query(sql: str, *, admin: bool = False) -> None:
     # can scan the cleaned statement directly. We also have to catch quoted
     # identifiers: DuckDB happily accepts `"read_csv"(...)` and treats the
     # quoted identifier as the same builtin.
-    for fname in _FUNCTION_CALL_RE.findall(stmt) + _QUOTED_FUNCTION_CALL_RE.findall(stmt):
-        if _function_refused(fname, admin=admin):
+    for schema, fname in _called_functions(stmt):
+        if _function_refused(fname, admin=admin, schema=schema):
             raise ReadOnlyQueryError(_refused_function_message(fname))
     if re.search(r'\bhttpfs_', stmt, re.IGNORECASE):
         raise ReadOnlyQueryError("HTTPFS access is not allowed through the query interface.")
-    # DuckDB reads local/remote files via a "replacement scan" on a bare string
-    # path — ``SELECT * FROM '/etc/passwd'`` or ``FROM 'https://…/x.csv'`` — with
-    # no function call to catch above. String literals are already stripped to
-    # ``''`` here, and a string literal in table position (directly after FROM or
-    # JOIN) is only ever a replacement scan, never valid otherwise. Reject it so
-    # the read-only surfaces can't be used to exfiltrate server files or SSRF.
-    if _REPLACEMENT_SCAN_RE.search(stmt) or _DQUOTE_PATH_SCAN_RE.search(stmt):
-        raise ReadOnlyQueryError(
-            "Reading files by path (FROM '<path>') is not allowed through the query interface.",
-        )
-    _check_with_duckdb_parser(sql, admin=admin)
+    # File reads by path (``FROM '/etc/passwd'``, a replacement scan). DuckDB's
+    # parse tree is exact about table position (_check_parse_tree); the text
+    # check here also covers forms the parser rejects, and skips FROM inside
+    # expressions (IS DISTINCT FROM 'x', extract(... FROM ...), trim, substring).
+    _check_from_strings(stmt)
+    _check_with_duckdb_parser(sql, admin=admin, conn=conn)
 
 
-def _function_refused(name: str, *, admin: bool = False) -> bool:
-    """Whether calling ``name`` (in any position) is refused."""
+MAX_NESTING = 200
+MAX_QUERY_LENGTH = 200_000
+
+# ``name(`` that is a CTE or alias with a column list, not a call:
+# ``WITH checkpoint(a) AS (...)``, ``FROM t AS glob(a, b)``.
+_COLUMN_LIST_AFTER_RE = re.compile(
+    r"\s*\([^()]*\)\s*(?:as\s*(?:not\s+)?(?:materialized\s*)?\(|using\s+key\b)", re.IGNORECASE
+)
+_NAME_CALL_RE = re.compile(
+    r'(?:(?:"([A-Za-z_][A-Za-z0-9_]*)"|\b([A-Za-z_][A-Za-z0-9_]*))\s*\.\s*)?'
+    r'(?:"([A-Za-z_][A-Za-z0-9_]*)"|\b([A-Za-z_][A-Za-z0-9_]*))\s*\('
+)
+
+
+def _called_functions(cleaned: str) -> list[tuple[str, str]]:
+    """``(schema, name)`` of everything called as a function in ``cleaned``.
+
+    Quoted names count. A name followed by a column list and ``AS (`` is a
+    CTE (``WITH x(a) AS (...)``) and one right after ``AS`` is an alias with
+    column names; neither calls anything.
+    """
+    out: list[tuple[str, str]] = []
+    for m in _NAME_CALL_RE.finditer(cleaned):
+        schema = m.group(1) or m.group(2) or ""
+        name = m.group(3) or m.group(4)
+        paren = m.end() - 1
+        if _COLUMN_LIST_AFTER_RE.match(cleaned, paren):
+            continue
+        before = cleaned[:m.start()].rstrip()
+        if re.search(r"\bas$", before, re.IGNORECASE):
+            continue
+        out.append((schema, name))
+    return out
+
+
+def _called_function_names(cleaned: str) -> list[str]:
+    return [name for _schema, name in _called_functions(cleaned)]
+
+
+def _function_refused(name: str, *, admin: bool = False, schema: str = "") -> bool:
+    """Whether calling ``[schema.]name`` (in any position) is refused."""
     from havn.engine.sql_functions import scalar_function_refused
 
-    return name.lower() in _DANGEROUS_FUNCTION_NAMES or scalar_function_refused(name, admin=admin)
+    return name.lower() in _DANGEROUS_FUNCTION_NAMES or scalar_function_refused(
+        name, admin=admin, schema=schema
+    )
 
 
 def _refused_function_message(name: str) -> str:
@@ -697,7 +752,7 @@ def _explain_target(query: str) -> str | None:
     return query[tokens[k][0]:]
 
 
-def _check_with_duckdb_parser(sql: str, *, admin: bool = False, _depth: int = 0) -> None:
+def _check_with_duckdb_parser(sql: str, *, admin: bool = False, conn=None, _depth: int = 0) -> None:
     """Second opinion from DuckDB's own parser on statement count and type.
 
     The lexer above has to track DuckDB's lexer by hand, and every divergence
@@ -728,13 +783,13 @@ def _check_with_duckdb_parser(sql: str, *, admin: bool = False, _depth: int = 0)
             reads += 1
             # A dynamic PIVOT's SELECT carries no text of its own; judge the
             # whole input instead.
-            _check_parse_tree(stmt.query if stmt.query.strip() else sql, admin=admin)
+            _check_parse_tree(stmt.query if stmt.query.strip() else sql, admin=admin, conn=conn)
         elif stmt.type == st.EXPLAIN:
             reads += 1
             target = _explain_target(stmt.query)
             if target is None or _depth > 2:
                 raise ReadOnlyQueryError("Only SELECT queries can be explained.")
-            _check_with_duckdb_parser(target, admin=admin, _depth=_depth + 1)
+            _check_with_duckdb_parser(target, admin=admin, conn=conn, _depth=_depth + 1)
             continue
         elif _MULTI is not None and stmt.type == _MULTI:
             # DuckDB 2.0 reports a statement that expands into several (a
@@ -747,7 +802,7 @@ def _check_with_duckdb_parser(sql: str, *, admin: bool = False, _depth: int = 0)
                     "Only SELECT queries are allowed through the query interface."
                 )
             reads += 1
-            _check_parse_tree(stmt.query or sql, admin=admin)
+            _check_parse_tree(stmt.query or sql, admin=admin, conn=conn)
         elif stmt.type in (st.CREATE, st.SET) and not stmt.query.strip():
             # A dynamic PIVOT expands into CREATE TYPE ... AS ENUM statements
             # (wrapped in SETs once the connection has run a query) ahead of
@@ -787,15 +842,14 @@ _TABLE_POSITION_CALL_RE = re.compile(
 _INTERNAL_SCHEMA_RE = re.compile(r"_havn\b", re.IGNORECASE)
 
 
-def _check_parse_tree(query: str, *, admin: bool = False) -> None:
+def _check_parse_tree(query: str, *, admin: bool = False, conn=None) -> None:
     """Refuse file scans and dangerous calls found in DuckDB's own parse tree.
 
     The regex scans above look at the text; this looks at what DuckDB actually
     parsed, so table position is known exactly (comma joins, aliases, nested
     FROMs, DESCRIBE/SUMMARIZE/TABLE targets) and quoting tricks around a
     function name (U&"read_csv") do not matter. Only SELECT-shaped statements
-    serialise; for the rest (a dynamic PIVOT) any path-shaped literal or
-    identifier is refused instead.
+    serialise; for the rest (a dynamic PIVOT) see :func:`_check_without_tree`.
     """
     import json
 
@@ -804,26 +858,12 @@ def _check_parse_tree(query: str, *, admin: bool = False) -> None:
         # parser connection busy for extract_statements on the next call.
         raw = _parser_conn().execute("SELECT json_serialize_sql(?)", [query]).fetchall()[0][0]
         tree = json.loads(raw)
+    except RecursionError:
+        raise ReadOnlyQueryError("Query is nested too deeply.", status_code=400)
     except Exception:
         tree = {"error": True}
     if tree.get("error"):
-        if _has_path_like_token(query):
-            raise ReadOnlyQueryError(
-                "Reading files by path is not allowed through the query interface.",
-            )
-        # No tree to inspect, so fail closed: any write verb anywhere in the
-        # text is refused, even one that is only a column name.
-        verb = _bare_write_word(query)
-        if verb is not None:
-            raise ReadOnlyQueryError(
-                f"This query could not be verified as read-only (it mentions {verb.upper()}). "
-                "Quote the identifier, or list the PIVOT values with IN (...).",
-            )
-        # Likewise for table functions: a call in table position must be on
-        # the allowlist (refused names anywhere were caught by the text scan).
-        for tname in _TABLE_POSITION_CALL_RE.findall(strip_sql_comments_and_strings(query)):
-            if not table_function_allowed(tname.strip('"'), admin=admin):
-                raise ReadOnlyQueryError(_refused_table_function_message(tname.strip('"')))
+        _check_without_tree(query, admin=admin)
         return
 
     # DuckDB 2.0 parses a CTE body that writes into INSERT/UPDATE/DELETE/COPY
@@ -831,6 +871,8 @@ def _check_parse_tree(query: str, *, admin: bool = False) -> None:
     if _tree_has_write(tree):
         raise ReadOnlyQueryError(_NESTED_WRITE_MESSAGE)
 
+    functions: set[str] = set()
+    types: set[str] = set()
     stack: list = [tree]
     while stack:
         node = stack.pop()
@@ -839,40 +881,270 @@ def _check_parse_tree(query: str, *, admin: bool = False) -> None:
             continue
         if not isinstance(node, dict):
             continue
-        # SHOW_REF: DuckDB 2.0 keeps the target of SHOW/DESCRIBE '<path>' as
-        # the ref's own table_name; 1.x nested a BASE_TABLE under it.
-        if node.get("type") in ("BASE_TABLE", "SHOW_REF"):
-            name = str(node.get("table_name") or "")
-            if any(ch in _PATH_CHARS for ch in name):
-                raise ReadOnlyQueryError(
-                    "Reading files by path (FROM '<path>') is not allowed through "
-                    "the query interface.",
-                )
+        ntype = node.get("type")
+        if ntype == "BASE_TABLE":
+            _check_base_table(node, admin=admin)
+        elif ntype == "SHOW_REF":
+            _check_show_ref(node, admin=admin, conn=conn)
         # Table functions are allowlisted (havn.engine.sql_functions): DuckDB
         # keeps its file readers, loggers, profilers and checkpoints there,
         # and new releases keep adding to them.
-        if node.get("type") == "TABLE_FUNCTION":
+        elif ntype == "TABLE_FUNCTION":
             fn = node.get("function") if isinstance(node.get("function"), dict) else {}
             tname = str(fn.get("function_name") or "")
-            if not table_function_allowed(tname, admin=admin):
+            schema = str(fn.get("schema") or "")
+            if not table_function_allowed(tname, admin=admin, schema=schema):
                 raise ReadOnlyQueryError(_refused_table_function_message(tname))
-            if not admin and _INTERNAL_SCHEMA_RE.search(json.dumps(fn)):
-                raise ReadOnlyQueryError(
-                    "The _havn schema holds havn's own metadata and is admin-only.",
-                )
+            if not admin and tname.lower() in _INTROSPECTION_FUNCTIONS:
+                _check_introspection_args(fn)
+            if tname:
+                functions.add(tname.lower())
+        cls = node.get("class")
         fname = node.get("function_name")
-        if isinstance(fname, str) and _function_refused(fname, admin=admin):
-            raise ReadOnlyQueryError(_refused_function_message(fname))
+        if isinstance(fname, str) and cls != "WINDOW":
+            schema = str(node.get("schema") or "")
+            if ntype != "TABLE_FUNCTION" and _function_refused_in_tree(fname, schema, admin=admin):
+                raise ReadOnlyQueryError(_refused_function_message(fname))
+            if not node.get("is_operator") and cls in ("FUNCTION", "AGGREGATE", None):
+                functions.add(fname.lower())
+        # Type names: DuckDB 2.0 has TYPE nodes, 1.x UNBOUND type infos.
+        if cls == "TYPE" and isinstance(node.get("type_name"), str):
+            types.add(node["type_name"].lower())
+        if node.get("type") == "UNBOUND_TYPE_INFO" and isinstance(node.get("name"), str):
+            types.add(node["name"].lower())
         stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
 
+    if conn is not None:
+        from havn.engine.sql_functions import unknown_catalog_names
 
-def _bare_write_word(query: str) -> str | None:
-    """The first unquoted INSERT/UPDATE/DELETE/MERGE/COPY word in ``query``, if any."""
-    for tok in _TOKEN_RE.findall(strip_sql_comments_and_strings(query)):
-        low = tok.lower()
-        if low in _NESTED_WRITE_VERBS:
-            return low
+        unknown_fns, unknown_types = unknown_catalog_names(conn, functions, types)
+        if unknown_fns or unknown_types:
+            names = sorted(unknown_fns | unknown_types)
+            raise ReadOnlyQueryError(
+                f"Unknown function or type: {', '.join(names)}. Read-only queries can use "
+                "what is already loaded; an extension that provides it has to be installed "
+                "and loaded by an admin first.",
+                status_code=400,
+            )
+
+
+def _function_refused_in_tree(name: str, schema: str, *, admin: bool) -> bool:
+    from havn.engine.sql_functions import scalar_function_refused
+
+    return name.lower() in _DANGEROUS_FUNCTION_NAMES or scalar_function_refused(
+        name, admin=admin, schema=schema
+    )
+
+
+# Catalog listings whose argument names one object: for non-admins it must be
+# a literal, so the _havn check below cannot be dodged with chr(95)||'havn'.
+_INTROSPECTION_FUNCTIONS = frozenset({
+    "pragma_table_info", "pragma_show", "pragma_storage_info", "pragma_metadata_info",
+})
+_INTERNAL_SCHEMA = "_havn"
+
+
+def _function_args(fn: dict) -> list:
+    """A function node's argument expressions (1.x ``children``, 2.0 ``arguments``)."""
+    out = []
+    for arg in (fn.get("children") or []) + (fn.get("arguments") or []):
+        if isinstance(arg, dict) and isinstance(arg.get("expression"), dict) and "class" not in arg:
+            arg = arg["expression"]
+        out.append(arg)
+    return out
+
+
+def _check_introspection_args(fn: dict) -> None:
+    args = _function_args(fn)
+    for arg in args:
+        if not isinstance(arg, dict) or arg.get("class") not in ("CONSTANT", "COLUMN_REF"):
+            raise ReadOnlyQueryError(
+                f"{fn.get('function_name')}() takes a table name written out as a string.",
+            )
+    if _INTERNAL_SCHEMA_RE.search(str(args)):
+        raise ReadOnlyQueryError("The _havn schema holds havn's own metadata and is admin-only.")
+
+
+def _check_base_table(node: dict, *, admin: bool) -> None:
+    name = str(node.get("table_name") or "")
+    qualified = bool(node.get("schema_name") or node.get("catalog_name"))
+    # DuckDB resolves an unknown unqualified name like 'x.csv' or
+    # "C:/data/x" as a replacement scan, i.e. it reads the file. A qualified
+    # name (landing."orders.csv") is always a catalog table.
+    if not qualified and any(ch in _PATH_CHARS for ch in name):
+        raise ReadOnlyQueryError(
+            "Reading files by path (FROM '<path>') is not allowed through the query interface.",
+        )
+
+
+# SHOW variants that list the catalog rather than name one object.
+_SHOW_SPECIAL_TABLES = frozenset({'"tables"', '"databases"', "__show_tables_expanded", "tables", "databases"})
+
+
+def _check_show_ref(node: dict, *, admin: bool, conn=None) -> None:
+    """SHOW / DESCRIBE / SUMMARIZE targets.
+
+    On DuckDB 2.0 ``SHOW <name>`` parses as a SHOW_REF without a query, and
+    the binder resolves the name as a *setting* when no table has it:
+    ``SHOW s3_secret_access_key`` returned the secret. For non-admins a bare
+    ``SHOW <name>`` is accepted only when ``conn``'s catalog has a table or
+    view of that name (without a connection, only a qualified name).
+    """
+    name = str(node.get("table_name") or "")
+    schema = str(node.get("schema_name") or "")
+    catalog = str(node.get("catalog_name") or "")
+    if not schema and not catalog and any(ch in _PATH_CHARS for ch in name):
+        raise ReadOnlyQueryError(
+            "Reading files by path (FROM '<path>') is not allowed through the query interface.",
+        )
+    if admin:
+        return
+    if schema.lower() == _INTERNAL_SCHEMA:
+        raise ReadOnlyQueryError("The _havn schema holds havn's own metadata and is admin-only.")
+    if node.get("query") is not None:
+        # DESCRIBE / SUMMARIZE / SHOW of a table or query: the layout of a
+        # _havn table is admin-only (SELECT on one is refused by governance).
+        if re.search(r'"schema_name":\s*"_havn"', json.dumps(node["query"]), re.IGNORECASE):
+            raise ReadOnlyQueryError("The _havn schema holds havn's own metadata and is admin-only.")
+        return
+    if not name:
+        return
+    if name.lower() in _SHOW_SPECIAL_TABLES:
+        return  # SHOW TABLES, SHOW ALL TABLES, SHOW DATABASES
+    if schema or catalog:
+        return
+    if conn is not None and _is_catalog_relation(conn, name):
+        return
+    raise ReadOnlyQueryError(
+        f"SHOW {name} is not available: it does not name a table or view, and showing "
+        "settings is admin-only. Use DESCRIBE <table>.",
+    )
+
+
+def _is_catalog_relation(conn, name: str) -> bool:
+    try:
+        rows = conn.execute(
+            "SELECT 1 FROM duckdb_tables() WHERE lower(table_name) = lower(?) "
+            "UNION ALL SELECT 1 FROM duckdb_views() WHERE lower(view_name) = lower(?) LIMIT 1",
+            [name, name],
+        ).fetchall()
+    except Exception:
+        return False
+    return bool(rows)
+
+
+# --- Fallback when there is no parse tree (a dynamic PIVOT) -----------------
+
+# Keywords that put FROM inside an expression rather than in table position.
+_FROM_SYNTAX_FUNCTIONS = frozenset({"extract", "trim", "substring", "overlay", "position", "date_part"})
+
+
+def _from_is_expression_syntax(cleaned: str, at: int) -> bool:
+    """Whether the FROM keyword at ``at`` belongs to an expression.
+
+    ``IS [NOT] DISTINCT FROM``, and FROM inside ``extract(... FROM ...)``,
+    ``trim(... FROM ...)``, ``substring(... FROM ...)``, ``overlay(...)``.
+    """
+    before = cleaned[:at].rstrip()
+    if re.search(r"\bdistinct$", before, re.IGNORECASE):
+        return True
+    depth = 0
+    for k in range(at - 1, -1, -1):
+        ch = cleaned[k]
+        if ch == ")":
+            depth += 1
+        elif ch == "(":
+            if depth == 0:
+                m = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*$", cleaned[:k])
+                return bool(m and m.group(1).lower() in _FROM_SYNTAX_FUNCTIONS)
+            depth -= 1
+    return False
+
+
+_NOT_A_FUNCTION_KEYWORDS = frozenset({
+    "pivot", "unpivot", "select", "values", "with", "lateral", "table", "from",
+    "describe", "summarize", "show",
+})
+
+_FROM_STRING_RE = re.compile(r"\b(from|join)\s*\(?\s*(''|\"[^\"]*\")", re.IGNORECASE)
+
+
+def _check_from_strings(cleaned: str) -> None:
+    """Refuse a string, or a file-shaped quoted name, in table position."""
+    for m in _FROM_STRING_RE.finditer(cleaned):
+        if _from_is_expression_syntax(cleaned, m.start()):
+            continue
+        if m.group(2) == "''" or _DQUOTE_PATH_SCAN_RE.search(m.group(0)):
+            raise ReadOnlyQueryError(
+                "Reading files by path (FROM '<path>') is not allowed through the query interface.",
+            )
+
+
+def _check_without_tree(query: str, *, admin: bool) -> None:
+    """Judge a statement DuckDB's parser cannot serialise (a dynamic PIVOT).
+
+    Fails closed where the text cannot tell: a path-shaped literal anywhere, a
+    string or file-shaped quoted name in table position, a write verb with
+    its statement shape anywhere, a table function call in table position
+    that is not allowed, and any refused table function named anywhere.
+    """
+    from havn.engine.sql_functions import REFUSED_TABLE_FUNCTIONS
+
+    if _has_path_like_token(query):
+        raise ReadOnlyQueryError("Reading files by path is not allowed through the query interface.")
+    cleaned = strip_sql_comments_and_strings(query)
+    _check_from_strings(cleaned)
+    verb = _write_shape_anywhere(cleaned)
+    if verb is not None:
+        raise ReadOnlyQueryError(
+            f"This query could not be verified as read-only (it contains {verb.upper()}).",
+        )
+    for m in _TABLE_POSITION_CALL_RE.finditer(cleaned):
+        if _from_is_expression_syntax(cleaned, m.start()):
+            continue
+        tname = m.group(1).strip('"')
+        if tname.lower() in _NOT_A_FUNCTION_KEYWORDS:
+            continue  # FROM (PIVOT (...)), FROM (SELECT ...), JOIN LATERAL (...)
+        if not table_function_allowed(tname, admin=admin):
+            raise ReadOnlyQueryError(_refused_table_function_message(tname))
+    for name in _called_function_names(cleaned):
+        if name.lower() in REFUSED_TABLE_FUNCTIONS and name.lower() not in _scalar_names():
+            raise ReadOnlyQueryError(_refused_table_function_message(name))
+
+
+def _write_shape_anywhere(cleaned: str) -> str | None:
+    """A write verb with its statement shape anywhere in ``cleaned``.
+
+    Without a tree a column called ``copy`` or ``merge`` (``PIVOT t ON copy``)
+    must still pass, so only ``DELETE FROM``, ``UPDATE t SET``, ``INSERT
+    INTO``, ``MERGE INTO`` and ``COPY x TO|FROM`` count.
+    """
+    nested = _nested_write_in_cleaned(cleaned)
+    if nested is not None:
+        return nested
+    low = [t.lower() for t in _TOKEN_RE.findall(cleaned)]
+    for i, tok in enumerate(low):
+        if tok in _NESTED_WRITE_VERBS and _write_shape(low, i):
+            return tok
     return None
+
+
+_scalar_names_cache: frozenset[str] | None = None
+
+
+def _scalar_names() -> frozenset[str]:
+    """Names DuckDB has as scalar, aggregate or window functions (histogram is both)."""
+    global _scalar_names_cache
+    if _scalar_names_cache is None:
+        try:
+            rows = _parser_conn().execute(
+                "SELECT DISTINCT lower(function_name) FROM duckdb_functions() "
+                "WHERE function_type IN ('scalar', 'aggregate', 'macro', 'window')"
+            ).fetchall()
+            _scalar_names_cache = frozenset(r[0] for r in rows)
+        except Exception:
+            return frozenset()
+    return _scalar_names_cache
 
 
 def _has_path_like_token(query: str) -> bool:
