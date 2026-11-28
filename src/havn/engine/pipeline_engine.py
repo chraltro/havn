@@ -586,11 +586,13 @@ class _Run:
         return self.result
 
     def _execute(self, phases: list[_Phase], main: Any) -> None:
+        from havn.engine.catalog_ddl import catalog_ddl
         from havn.engine.database import ensure_meta_table
         from havn.engine.instrumentation import instrument_run
 
         spec = self.spec
         tally = self.tally
+        # _havn tables come from the migrations, under their own lock.
         ensure_meta_table(main)
 
         # Every schema a worker writes to exists before the first worker
@@ -602,8 +604,14 @@ class _Run:
         schemas |= {m.schema for m in models if m.schema}
         if "seed" in kinds:
             schemas.add("seeds")
-        for schema in sorted(schemas):
-            main.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+
+        def create_schemas() -> None:
+            for schema in sorted(schemas):
+                main.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+
+        # Through catalog_ddl: two runs of this process (scheduler
+        # max_concurrent > 1) start together and create the same schemas.
+        catalog_ddl(create_schemas)
         # The same race on the one _havn table a build creates lazily (every
         # other one it writes comes from ensure_meta_table above, and the perf
         # tables from instrument_run below, both before any worker starts):

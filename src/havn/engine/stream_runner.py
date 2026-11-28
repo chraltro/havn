@@ -155,7 +155,10 @@ def run_stream(
             try:
                 from havn.engine.macros import register_macros
 
-                n_macros = register_macros(conn, project_dir)
+                from havn.engine.catalog_ddl import catalog_ddl
+
+                # CREATE MACRO statements: catalog writes two runs may race.
+                n_macros = catalog_ddl(register_macros, conn, project_dir)
                 if n_macros:
                     emit("macros", {"count": n_macros})
             except Exception as exc:

@@ -172,8 +172,12 @@ def connect(
     conn.execute(f"SET threads = {max_threads}")
 
     if project_dir is not None:
+        from havn.engine.catalog_ddl import catalog_ddl
         from havn.engine.macros import register_macros
-        register_macros(conn, Path(project_dir))
+
+        # CREATE OR REPLACE MACRO writes the catalog; two runs connecting at
+        # once (scheduler.max_concurrent > 1) would race it.
+        catalog_ddl(register_macros, conn, Path(project_dir))
 
     return conn
 
