@@ -61,9 +61,14 @@ The MCP server has the same trust level as your local CLI:
 
 - Every `query` / `query_metric` / introspection call goes through the same
   read-only SQL validation as the web API: single statement, no mutation
-  verbs, no `read_csv` / `read_parquet` / HTTP functions.
-- Reads use a read-only DuckDB connection — even a validator bypass could
-  not write.
+  verbs (also not inside a CTE), table functions only from a fixed list
+  (`range`, `unnest`, `json_each`, the catalog listings, your project's table
+  macros), and no functions that read files, call out over HTTP or change
+  DuckDB's settings.
+- Reads use a read-only DuckDB connection, so a validator bypass could not
+  write to the warehouse. DuckDB's read-only mode does not stop functions
+  that write files elsewhere (log or profiling output), which is why the
+  validator refuses those.
 - `run_transform` is the only mutating tool. It builds your own transform
   models (with Pipeline Rewind snapshots when enabled, so agent-triggered
   builds can be rolled back like any other run). Start with `--read-only`

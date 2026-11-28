@@ -289,7 +289,7 @@ def test_governed_reads_run_in_a_read_only_transaction(tmp_path, monkeypatch):
         governed_query, "prepare_governed_sql",
         lambda conn, sql, identity, **k: governed_query.PreparedQuery(original_sql=sql, sql=sql),
     )
-    monkeypatch.setattr("havn.engine.sql_safety.validate_read_only_query", lambda sql: None)
+    monkeypatch.setattr("havn.engine.sql_safety.validate_read_only_query", lambda sql, **k: None)
     with pytest.raises(GovernedQueryError) as exc:
         run_governed_query(conn, "INSERT INTO t VALUES (2)", QueryIdentity("v", "viewer"), row_cap=None)
     assert "read-only" in str(exc.value).lower()

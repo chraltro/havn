@@ -32,9 +32,10 @@ import re
 import threading
 import sys
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import duckdb
 
@@ -164,7 +165,7 @@ def prepare_governed_sql(
     from havn.engine.sql_safety import ReadOnlyQueryError, validate_read_only_query
 
     try:
-        validate_read_only_query(sql)
+        validate_read_only_query(sql, admin=identity.role == "admin")
     except ReadOnlyQueryError as e:
         raise GovernedQueryError(e.status_code, str(e)) from e
 
@@ -181,7 +182,7 @@ def prepare_governed_sql(
     if final_sql != sql:
         # Validate what actually runs, not only what was sent.
         try:
-            validate_read_only_query(final_sql)
+            validate_read_only_query(final_sql, admin=identity.role == "admin")
         except ReadOnlyQueryError as e:
             raise GovernedQueryError(e.status_code, str(e)) from e
     return PreparedQuery(original_sql=sql, sql=final_sql, governed=governed)
@@ -269,6 +270,58 @@ def _wrap_for_paging(sql: str, limit: int | None, offset: int, row_cap: int | No
     return sql, None
 
 
+@contextmanager
+def read_only_execution(conn: duckdb.DuckDBPyConnection) -> Iterator[None]:
+    """Run what is executed inside on ``conn`` as locked down as DuckDB allows per connection.
+
+    The last line of defence behind ``validate_read_only_query``:
+
+    * a ``READ ONLY`` transaction, so a write that slipped past the validator
+      (DuckDB 2.0 runs INSERT/UPDATE/DELETE inside a CTE of a "SELECT") fails
+      instead of changing the database. A caller's own open transaction is
+      left alone: BEGIN inside it would abort it.
+    * ``python_enable_replacements = false``, so a table name cannot resolve
+      to a Python object in the server process.
+
+    It does not stop ``COPY ... TO`` a file, temp tables, ``SET``, or table
+    functions that write files or change instance settings
+    (``enable_logging``, ``checkpoint()``): DuckDB applies its file-access
+    switches (``enable_external_access``, ``allowed_directories``,
+    ``lock_configuration``) to the whole database instance, irreversibly, and
+    the server's read cursors share that instance with pipeline runs that
+    must read and write files. Those are the validator's job.
+    """
+    from havn.engine.utils import in_transaction
+
+    previous_replacements = None
+    try:
+        previous_replacements = conn.execute(
+            "SELECT current_setting('python_enable_replacements')"
+        ).fetchall()[0][0]
+        conn.execute("SET python_enable_replacements = false")
+    except duckdb.Error:
+        previous_replacements = None
+    owns = False
+    try:
+        if not in_transaction(conn):
+            conn.execute("BEGIN TRANSACTION READ ONLY")
+            owns = True
+        yield
+    finally:
+        if owns:
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
+        if previous_replacements is not None:
+            try:
+                conn.execute(
+                    f"SET python_enable_replacements = {'true' if previous_replacements else 'false'}"
+                )
+            except Exception:
+                pass
+
+
 def run_governed_query(
     conn: duckdb.DuckDBPyConnection,
     sql: str,
@@ -303,7 +356,7 @@ def run_governed_query(
     fetch_cap = effective_limit if effective_limit is not None else row_cap
     if wrapped != prepared.sql:
         try:
-            validate_read_only_query(wrapped)
+            validate_read_only_query(wrapped, admin=identity.role == "admin")
         except ReadOnlyQueryError as e:
             raise GovernedQueryError(e.status_code, str(e)) from e
 
@@ -312,42 +365,21 @@ def run_governed_query(
     errors: list[BaseException] = []
 
     def _exec() -> None:
-        # Last line of defence behind the validator: run the read in a READ
-        # ONLY transaction, so a write that slipped past it (DuckDB 2.0 runs
-        # INSERT/UPDATE/DELETE inside a CTE of a "SELECT") fails instead of
-        # changing the database. It does not stop COPY ... TO a file, temp
-        # tables or SET; those are the validator's job. A caller's own open
-        # transaction is left alone: BEGIN inside it would abort it.
-        from havn.engine.utils import in_transaction
-
-        read_only_txn = False
         try:
-            if not in_transaction(conn):
-                conn.execute("BEGIN TRANSACTION READ ONLY")
-                read_only_txn = True
+            with read_only_execution(conn):
+                result = conn.execute(wrapped, params)
+                description = result.description or []
+                columns = [d[0] for d in description]
+                column_types = [str(d[1]) for d in description]
+                if fetch_cap is not None:
+                    rows = result.fetchmany(fetch_cap + 1)
+                else:
+                    rows = result.fetchall()
+                holder["columns"] = columns
+                holder["column_types"] = column_types
+                holder["rows"] = rows
         except BaseException as e:  # noqa: BLE001 - re-raised on the caller's thread
             errors.append(e)
-            return
-        try:
-            result = conn.execute(wrapped, params)
-            description = result.description or []
-            columns = [d[0] for d in description]
-            column_types = [str(d[1]) for d in description]
-            if fetch_cap is not None:
-                rows = result.fetchmany(fetch_cap + 1)
-            else:
-                rows = result.fetchall()
-            holder["columns"] = columns
-            holder["column_types"] = column_types
-            holder["rows"] = rows
-        except BaseException as e:  # noqa: BLE001 - re-raised on the caller's thread
-            errors.append(e)
-        finally:
-            if read_only_txn:
-                try:
-                    conn.execute("ROLLBACK")
-                except Exception:
-                    pass
 
     label = task_label or f"sql:{sql[:60]}"
     manager = get_resource_manager()

@@ -110,8 +110,10 @@ def explain_analyze_endpoint(request: Request, req: ExplainRequest, conn: DbConn
     sql = _govern(req.sql, user, conn, params=req.params).sql
     try:
         from havn.engine.explain import explain_analyze_query as _explain_analyze, plan_to_dict
+        from havn.engine.governed_query import read_only_execution
 
-        plan_node, raw = _explain_analyze(conn, sql, params=req.params)
+        # EXPLAIN ANALYZE runs the query: same read-only transaction as /api/query.
+        plan_node, raw = _explain_analyze(conn, sql, params=req.params, guard=read_only_execution)
         return {"plan": plan_to_dict(plan_node), "raw": raw}
     except Exception as e:
         logger.warning("EXPLAIN ANALYZE failed: %s", e)
@@ -126,8 +128,10 @@ def profile_query(request: Request, req: ExplainRequest, conn: DbConnReadOnly) -
     sql = _govern(req.sql, user, conn, params=req.params).sql
     try:
         from havn.engine.explain import explain_analyze_query as _explain_analyze, plan_to_dict
+        from havn.engine.governed_query import read_only_execution
 
-        plan_node, raw = _explain_analyze(conn, sql, params=req.params)
+        # EXPLAIN ANALYZE runs the query: same read-only transaction as /api/query.
+        plan_node, raw = _explain_analyze(conn, sql, params=req.params, guard=read_only_execution)
         return {"plan": plan_to_dict(plan_node), "raw": raw}
     except Exception as e:
         logger.warning("EXPLAIN ANALYZE failed: %s", e)

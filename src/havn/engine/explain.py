@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 
 logger = logging.getLogger("havn.engine.explain")
@@ -309,26 +310,32 @@ def explain_query(conn, sql: str, params: dict | None = None) -> tuple[PlanNode,
     return plan, raw_text
 
 
-def explain_analyze_query(conn, sql: str, params: dict | None = None) -> tuple[PlanNode, str]:
+def explain_analyze_query(conn, sql: str, params: dict | None = None, *, guard=None) -> tuple[PlanNode, str]:
     """Run EXPLAIN ANALYZE on a query and return (structured plan, raw text).
 
     Enables JSON profiling, runs the query, then parses the result.
-    ``params`` binds named ``$name`` placeholders in the query.
+    ``params`` binds named ``$name`` placeholders in the query. ``guard``, a
+    context-manager factory taking the connection (the server passes
+    ``governed_query.read_only_execution``), wraps each run of the query on
+    its own, so a failed first attempt cannot poison the fallback.
     """
     raw_text = ""
+    run = guard or (lambda _conn: nullcontext())
     try:
-        conn.execute("PRAGMA enable_profiling='json'")
-        result = conn.execute(f"EXPLAIN ANALYZE {sql}", params)
-        rows = result.fetchall()
+        with run(conn):
+            conn.execute("PRAGMA enable_profiling='json'")
+            result = conn.execute(f"EXPLAIN ANALYZE {sql}", params)
+            rows = result.fetchall()
         raw_json = rows[0][1] if rows and len(rows[0]) > 1 else rows[0][0]
 
         plan = _parse_json_plan(raw_json, is_analyze=True)
 
         # Get text format for raw display
         try:
-            conn.execute("PRAGMA enable_profiling='query_tree'")
-            result2 = conn.execute(f"EXPLAIN ANALYZE {sql}", params)
-            rows2 = result2.fetchall()
+            with run(conn):
+                conn.execute("PRAGMA enable_profiling='query_tree'")
+                result2 = conn.execute(f"EXPLAIN ANALYZE {sql}", params)
+                rows2 = result2.fetchall()
             raw_text = "\n".join(
                 str(r[1]) if len(r) > 1 else str(r[0]) for r in rows2
             )
@@ -346,7 +353,8 @@ def explain_analyze_query(conn, sql: str, params: dict | None = None) -> tuple[P
         conn.execute("PRAGMA enable_profiling='query_tree'")
     except Exception:
         pass
-    result = conn.execute(f"EXPLAIN ANALYZE {sql}", params)
+    with run(conn):
+        result = conn.execute(f"EXPLAIN ANALYZE {sql}", params)
     rows = result.fetchall()
     raw_text = "\n".join(
         str(r[1]) if len(r) > 1 else str(r[0]) for r in rows

@@ -943,6 +943,15 @@ def register_macros(
     # callers (deps.py post-init, ReadPool slots) skip out instead of
     # fighting the catalog.
     _conn_macros_registered.add(conn)
+    # Read-only queries may call a project table macro only once its body
+    # has passed the same check as the query (see havn.engine.sql_functions).
+    try:
+        from havn.engine.sql_functions import refresh_user_macros
+
+        finish_pending_result(conn)
+        refresh_user_macros(conn)
+    except Exception as exc:
+        logger.warning("Could not classify macros for read-only queries: %s", exc)
     return count
 
 

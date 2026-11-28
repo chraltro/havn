@@ -16,6 +16,8 @@ from __future__ import annotations
 import re
 import threading
 
+from havn.engine.sql_functions import table_function_allowed
+
 _FORBIDDEN_STATEMENT_KEYWORDS = frozenset({
     "insert", "update", "delete", "drop", "create", "alter", "truncate", "merge",
     "copy", "attach", "detach", "install", "load", "export", "import",
@@ -33,6 +35,11 @@ _FORBIDDEN_STATEMENT_KEYWORDS = frozenset({
     "use", "comment", "analyze",
 })
 
+# Names refused wherever they are called, by the text scan as well as in the
+# parse tree. Extension functions that may not be loaded when the classified
+# lists in havn.engine.sql_functions were taken. Table functions are
+# allowlisted on top of this (see _check_parse_tree), so this list is only
+# the first of two layers for them.
 _DANGEROUS_FUNCTION_NAMES = frozenset({
     "read_csv_auto", "read_csv", "read_parquet", "read_json_auto", "read_json",
     "read_json_objects", "read_json_objects_auto", "read_ndjson",
@@ -497,13 +504,19 @@ def refuse_nested_writes(sql: str) -> None:
         raise ReadOnlyQueryError(_NESTED_WRITE_MESSAGE)
 
 
-def validate_read_only_query(sql: str) -> None:
+def validate_read_only_query(sql: str, *, admin: bool = False) -> None:
     """Reject SQL that is not a safe read-only query.
 
     Strips strings and comments, splits top-level statements, then rejects:
       - multi-statement queries
       - any statement whose leading keyword (after a CTE) is a mutation verb
-      - calls to file-access functions (read_csv, read_parquet, http_*)
+      - a write nested anywhere in the statement (DuckDB 2.0 writing CTEs)
+      - table functions not on the allowlist, and refused scalar functions
+        (see ``havn.engine.sql_functions``)
+
+    ``admin`` additionally allows the functions that read instance settings
+    and internals (``duckdb_settings()``, ``current_setting()``, ...) and
+    catalog listings of the ``_havn`` schema.
 
     Unknown leading keywords are passed through to DuckDB, which will return
     a parse error so the caller gets a 400 (not a misleading 403).
@@ -551,16 +564,9 @@ def validate_read_only_query(sql: str) -> None:
     # can scan the cleaned statement directly. We also have to catch quoted
     # identifiers: DuckDB happily accepts `"read_csv"(...)` and treats the
     # quoted identifier as the same builtin.
-    for fname in _FUNCTION_CALL_RE.findall(stmt):
-        if fname.lower() in _DANGEROUS_FUNCTION_NAMES:
-            raise ReadOnlyQueryError(
-                "File-access functions (read_csv, read_parquet, etc.) are not allowed.",
-            )
-    for fname in _QUOTED_FUNCTION_CALL_RE.findall(stmt):
-        if fname.lower() in _DANGEROUS_FUNCTION_NAMES:
-            raise ReadOnlyQueryError(
-                "File-access functions (read_csv, read_parquet, etc.) are not allowed.",
-            )
+    for fname in _FUNCTION_CALL_RE.findall(stmt) + _QUOTED_FUNCTION_CALL_RE.findall(stmt):
+        if _function_refused(fname, admin=admin):
+            raise ReadOnlyQueryError(_refused_function_message(fname))
     if re.search(r'\bhttpfs_', stmt, re.IGNORECASE):
         raise ReadOnlyQueryError("HTTPFS access is not allowed through the query interface.")
     # DuckDB reads local/remote files via a "replacement scan" on a bare string
@@ -573,7 +579,30 @@ def validate_read_only_query(sql: str) -> None:
         raise ReadOnlyQueryError(
             "Reading files by path (FROM '<path>') is not allowed through the query interface.",
         )
-    _check_with_duckdb_parser(sql)
+    _check_with_duckdb_parser(sql, admin=admin)
+
+
+def _function_refused(name: str, *, admin: bool = False) -> bool:
+    """Whether calling ``name`` (in any position) is refused."""
+    from havn.engine.sql_functions import scalar_function_refused
+
+    return name.lower() in _DANGEROUS_FUNCTION_NAMES or scalar_function_refused(name, admin=admin)
+
+
+def _refused_function_message(name: str) -> str:
+    return (
+        f"File-access functions and functions with side effects are not allowed: {name}() "
+        "reads files or other state, or changes the database or its settings."
+    )
+
+
+def _refused_table_function_message(name: str) -> str:
+    return (
+        f"The table function {name}() is not available through the query interface. "
+        "Read-only queries can use tables, views, project table macros and a fixed set "
+        "of built-in table functions (range, generate_series, unnest, json_each, the "
+        "catalog listings)."
+    )
 
 
 _EXPLAIN_PREFIX_RE = re.compile(
@@ -668,7 +697,7 @@ def _explain_target(query: str) -> str | None:
     return query[tokens[k][0]:]
 
 
-def _check_with_duckdb_parser(sql: str, *, _depth: int = 0) -> None:
+def _check_with_duckdb_parser(sql: str, *, admin: bool = False, _depth: int = 0) -> None:
     """Second opinion from DuckDB's own parser on statement count and type.
 
     The lexer above has to track DuckDB's lexer by hand, and every divergence
@@ -699,13 +728,13 @@ def _check_with_duckdb_parser(sql: str, *, _depth: int = 0) -> None:
             reads += 1
             # A dynamic PIVOT's SELECT carries no text of its own; judge the
             # whole input instead.
-            _check_parse_tree(stmt.query if stmt.query.strip() else sql)
+            _check_parse_tree(stmt.query if stmt.query.strip() else sql, admin=admin)
         elif stmt.type == st.EXPLAIN:
             reads += 1
             target = _explain_target(stmt.query)
             if target is None or _depth > 2:
                 raise ReadOnlyQueryError("Only SELECT queries can be explained.")
-            _check_with_duckdb_parser(target, _depth=_depth + 1)
+            _check_with_duckdb_parser(target, admin=admin, _depth=_depth + 1)
             continue
         elif _MULTI is not None and stmt.type == _MULTI:
             # DuckDB 2.0 reports a statement that expands into several (a
@@ -718,7 +747,7 @@ def _check_with_duckdb_parser(sql: str, *, _depth: int = 0) -> None:
                     "Only SELECT queries are allowed through the query interface."
                 )
             reads += 1
-            _check_parse_tree(stmt.query or sql)
+            _check_parse_tree(stmt.query or sql, admin=admin)
         elif stmt.type in (st.CREATE, st.SET) and not stmt.query.strip():
             # A dynamic PIVOT expands into CREATE TYPE ... AS ENUM statements
             # (wrapped in SETs once the connection has run a query) ahead of
@@ -743,7 +772,22 @@ _PATH_LIKE_RE = re.compile(
 )
 
 
-def _check_parse_tree(query: str) -> None:
+# A function call in table position: after FROM / JOIN (optionally LATERAL
+# or a schema qualifier), or as the source of PIVOT / UNPIVOT / DESCRIBE /
+# SUMMARIZE. Used only where no parse tree is available (a dynamic PIVOT).
+# A table function after a FROM-list comma is not seen here; refused names
+# are still caught anywhere by the text scan.
+_TABLE_POSITION_CALL_RE = re.compile(
+    r"(?:\bfrom|\bjoin|\bpivot|\bunpivot|\bdescribe|\bsummarize)\s*\(?\s*(?:lateral\s+)?"
+    r"(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)*"
+    r'("?[A-Za-z_][A-Za-z0-9_]*"?)\s*\(',
+    re.IGNORECASE,
+)
+# The internal schema named in a catalog function's arguments.
+_INTERNAL_SCHEMA_RE = re.compile(r"_havn\b", re.IGNORECASE)
+
+
+def _check_parse_tree(query: str, *, admin: bool = False) -> None:
     """Refuse file scans and dangerous calls found in DuckDB's own parse tree.
 
     The regex scans above look at the text; this looks at what DuckDB actually
@@ -775,6 +819,11 @@ def _check_parse_tree(query: str) -> None:
                 f"This query could not be verified as read-only (it mentions {verb.upper()}). "
                 "Quote the identifier, or list the PIVOT values with IN (...).",
             )
+        # Likewise for table functions: a call in table position must be on
+        # the allowlist (refused names anywhere were caught by the text scan).
+        for tname in _TABLE_POSITION_CALL_RE.findall(strip_sql_comments_and_strings(query)):
+            if not table_function_allowed(tname.strip('"'), admin=admin):
+                raise ReadOnlyQueryError(_refused_table_function_message(tname.strip('"')))
         return
 
     # DuckDB 2.0 parses a CTE body that writes into INSERT/UPDATE/DELETE/COPY
@@ -799,11 +848,21 @@ def _check_parse_tree(query: str) -> None:
                     "Reading files by path (FROM '<path>') is not allowed through "
                     "the query interface.",
                 )
+        # Table functions are allowlisted (havn.engine.sql_functions): DuckDB
+        # keeps its file readers, loggers, profilers and checkpoints there,
+        # and new releases keep adding to them.
+        if node.get("type") == "TABLE_FUNCTION":
+            fn = node.get("function") if isinstance(node.get("function"), dict) else {}
+            tname = str(fn.get("function_name") or "")
+            if not table_function_allowed(tname, admin=admin):
+                raise ReadOnlyQueryError(_refused_table_function_message(tname))
+            if not admin and _INTERNAL_SCHEMA_RE.search(json.dumps(fn)):
+                raise ReadOnlyQueryError(
+                    "The _havn schema holds havn's own metadata and is admin-only.",
+                )
         fname = node.get("function_name")
-        if isinstance(fname, str) and fname.lower() in _DANGEROUS_FUNCTION_NAMES:
-            raise ReadOnlyQueryError(
-                "File-access functions (read_csv, read_parquet, etc.) are not allowed.",
-            )
+        if isinstance(fname, str) and _function_refused(fname, admin=admin):
+            raise ReadOnlyQueryError(_refused_function_message(fname))
         stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
 
 
