@@ -792,6 +792,10 @@ class _Run:
             try:
                 attempt = 0
                 while True:
+                    if self.cancel.is_set() and attempt == 0:
+                        # Submitted, but the run was cancelled before it started.
+                        res = {"status": "cancelled", "error": "Cancelled before it started"}
+                        break
                     try:
                         res = run_once(node, cur)
                     except Exception as e:
@@ -957,8 +961,9 @@ class _Run:
             return tally.cancelled
 
         try:
-            admit(sorter.get_ready())
-            submit_ready()
+            if not stopping():
+                admit(sorter.get_ready())
+                submit_ready()
             while sorter.is_active() or active > 0:
                 if tally.gate_failed and active == 0:
                     tally.has_error = True
