@@ -343,8 +343,10 @@ def ensure_meta_table(conn: duckdb.DuckDBPyConnection) -> None:
     """Make sure the ``_havn`` metadata schema is at the current version.
 
     Kept for the many callers that predate the migration system: the tables
-    themselves are defined once, in :mod:`havn.engine.migrations`. Cheap after
-    the first call in a process (a single catalog lookup), and a no-op on a
+    themselves are defined once, in :mod:`havn.engine.migrations`. Cheap once
+    the process has seen the file at the current version (one
+    ``duckdb_databases()`` query; an in-memory database is checked in full
+    on every call), and a no-op on a
     read-only connection, which cannot run DDL; readers there handle an
     absent table themselves.
     """

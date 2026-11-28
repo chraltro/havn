@@ -111,7 +111,9 @@ Open an issue on GitHub with:
 
 Every `_havn` table is defined in `src/havn/engine/migrations/`, nowhere
 else. `tests/test_migrations.py` fails on `CREATE TABLE _havn.x`,
-`ALTER TABLE _havn.x` and similar DDL anywhere outside that package.
+`ALTER TABLE _havn.x` and similar DDL anywhere outside that package
+(quoted names and `"_havn"` constants included); a justified exception goes
+in its allowlist with the reason.
 
 To add a table or a column:
 
@@ -133,8 +135,10 @@ To add a table or a column:
    shape by hand, put rows in it, migrate, check rows and columns.
 
 Code that needs a table calls `ensure_meta_table(conn)` (or the module's own
-`ensure_*` helper, which now does the same). That is a set lookup once the
-process has seen the database at the current version, and a no-op on a
+`ensure_*` helper, which now does the same). Once the process has seen a
+database file at the current version that costs one `duckdb_databases()`
+query (roughly 0.3 to 1 ms); an in-memory database is never remembered, so
+there it reads the applied versions on every call. It is a no-op on a
 read-only connection, so readers must still handle a missing table.
 
 ## License

@@ -17,8 +17,11 @@ the migration. Migrations that succeeded before it stay applied.
 Commands that only read (`havn query`, `havn status`, `havn tables`) never
 change the schema.
 
-Migrations only add tables and columns. Your own schemas (`landing`, `bronze`,
-`silver`, `gold`, ...) are never touched, and existing rows in `_havn` are kept.
+Migrations add tables and columns and never drop, rename or retype a column.
+Some also rewrite rows in `_havn`: migration 2 lowercases model names in every
+table that records them, and where a model has rows under
+both spellings it keeps the lowercase one and deletes the other. Your own
+schemas (`landing`, `bronze`, `silver`, `gold`, ...) are never touched.
 
 Warehouses created by any 0.2.x or 0.3.x release upgrade the same way,
 whichever havn features they used.
@@ -49,12 +52,20 @@ and restore it with `havn backup-restore <path>` if you need to go back.
 
 ## Going back to an older release
 
-A warehouse that a newer havn has opened records a schema version the older
-release does not know. The older release does not try to change it: it logs a
-warning ("newer than this havn knows"), `havn status` says the same, and it
-keeps working with the tables and columns it knows, because migrations only
-ever add. Data written by the older release while downgraded is readable after
-you upgrade again.
+A warehouse that a newer havn has opened records its schema version in
+`_havn.schema_migrations`. Releases up to and including 0.3.1 predate that
+table and ignore it: they log nothing about it and keep working with the
+tables and columns they know, because migrations never remove or retype a
+column. Later releases that find a version newer than they know log a warning
+("newer than this havn knows"), `havn status` says the same, and they apply
+nothing.
+
+Data written by the older release while downgraded is readable after you
+upgrade again, with one exception: 0.2.30 and earlier record a model whose
+file name has capital letters (`silver/Customers.sql`) under that spelling.
+Migration 2 has already run on the warehouse, so those rows are not
+lowercased again. Each such model rebuilds once as if new, and a microbatch
+model reprocesses its windows from `begin`. Lowercase file names avoid this.
 
 If the newer release did something you want undone, restore the backup you
 took before upgrading rather than relying on the older release.

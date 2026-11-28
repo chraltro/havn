@@ -88,8 +88,9 @@ def ensure_auth_tables(conn: duckdb.DuckDBPyConnection) -> None:
     """Make sure ``_havn.users`` and ``_havn.tokens`` exist with every column.
 
     The tables are defined in :mod:`havn.engine.migrations` (baseline). This
-    runs on every token validation, so it must stay cheap: after the first
-    call in a process it is a single catalog lookup.
+    runs on every token validation, so it must stay cheap: once the process
+    has seen the warehouse file at the current version it is one
+    ``duckdb_databases()`` query (well under a millisecond to about one).
     """
     from havn.engine.database import ensure_meta_table
 

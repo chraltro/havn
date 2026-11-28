@@ -47,7 +47,10 @@ ADDED_AFTER_FIRST_RELEASE = {
     "contract_results": ("consecutive_failures",),           # before 0.2.4
     "assertion_results": ("severity", "owner"),              # 0.2.17
     "pr_builds": ("metric_diff",),                           # 0.2.28
-    "users": ("attributes", "password_iterations"),          # 0.3.0, after 0.3.1
+    # job_runs shipped with steps_skipped in 0.2.6, but that release also
+    # ALTERed it in for warehouses made by pre-release builds.
+    "job_runs": ("steps_skipped",),                          # 0.2.6
+    "users": ("attributes", "password_iterations"),          # 0.3.0, 0.3.1
 }
 
 
