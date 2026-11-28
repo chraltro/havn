@@ -26,7 +26,9 @@ def migrate(
 
     Copies every table in landing, bronze, silver, gold, seeds, _havn to
     the destination backend; verifies row counts; rewrites project.yml;
-    renames the source to <source>.backup.
+    renames the source to <source>.backup. The source's metadata schema is
+    brought up to date first, and _havn rows go into the destination's own
+    migrated tables.
     """
     from havn.config import DatabaseConfig, load_project
     from havn.engine.backends import create_backend
@@ -87,8 +89,41 @@ def migrate(
 
     console.print(f"[bold]Migrating:[/bold] {src_config.backend} -> {to}")
 
+    from havn.engine.migrations import MigrationError, migration_status
+
+    # Bring the source's metadata schema up to date before copying it. The
+    # destination is created at the current version, and its _havn tables
+    # are filled by column name; a source at an older version would leave
+    # the destination with rows that lack the newer columns' values while
+    # being recorded as up to date. Opening the source for writing is what
+    # every other havn command does, so this changes nothing a normal run
+    # would not; it is refused instead when the source is newer than this
+    # havn, because those tables have columns the destination cannot hold.
+    try:
+        src_conn = src_backend.connect(read_only=False)
+    except MigrationError as e:
+        console.print(f"[red]Cannot migrate: {e}[/red]")
+        raise typer.Exit(code=1)
+    try:
+        src_status = migration_status(src_conn)
+    finally:
+        src_conn.close()
+    if not src_status.up_to_date:
+        console.print(
+            f"[red]Cannot migrate: the source's metadata schema is at version "
+            f"{src_status.version}, and this havn knows version {src_status.latest}. "
+            f"Upgrade havn and run the migration again.[/red]"
+        )
+        raise typer.Exit(code=1)
+
     src_conn = src_backend.connect(read_only=True)
-    dest_conn = dest_backend.connect(read_only=False)
+    try:
+        dest_conn = dest_backend.connect(read_only=False)
+    except MigrationError as e:
+        src_conn.close()
+        console.print(f"[red]Cannot migrate: {e}[/red]")
+        raise typer.Exit(code=1)
+    dest_is_duckdb = to == "duckdb"
 
     # Stage via Parquet to avoid materializing whole tables into Python memory.
     import tempfile
@@ -112,7 +147,12 @@ def migrate(
                 console.print(f"[red]Failed creating schema {schema}: {e}[/red]")
                 raise
 
+            managed = _metadata_tables(dest_conn) if schema == "_havn" else set()
             for (table_name,) in rows:
+                if schema == "_havn" and table_name == "schema_migrations":
+                    # The destination records its own migrations; copying
+                    # the source's rows would only ever make it lie.
+                    continue
                 fq = f'"{schema}"."{table_name}"'
                 pq_path = stage_dir / f"{schema}__{table_name}.parquet"
                 try:
@@ -121,10 +161,13 @@ def migrate(
                     src_conn.execute(
                         f"COPY (SELECT * FROM {fq}) TO '{pq_path.as_posix()}' (FORMAT PARQUET)"
                     )
-                    dest_conn.execute(
-                        f"CREATE OR REPLACE TABLE {fq} AS "
-                        f"SELECT * FROM read_parquet('{pq_path.as_posix()}')"
-                    )
+                    if table_name in managed:
+                        _fill_metadata_table(dest_conn, table_name, pq_path, dest_is_duckdb)
+                    else:
+                        dest_conn.execute(
+                            f"CREATE OR REPLACE TABLE {fq} AS "
+                            f"SELECT * FROM read_parquet('{pq_path.as_posix()}')"
+                        )
                     pq_path.unlink(missing_ok=True)
                     dest_count = dest_conn.execute(f"SELECT count(*) FROM {fq}").fetchone()[0]
                     status = "ok" if src_count == dest_count else "MISMATCH"
@@ -163,6 +206,63 @@ def migrate(
 
     _print_report(report)
     console.print(f"[green]Migration complete.[/green] Project now uses {to} backend.")
+
+
+def _metadata_tables(conn) -> set[str]:
+    """The ``_havn`` tables the destination's migrations created."""
+    rows = conn.execute(
+        "SELECT table_name FROM duckdb_tables() WHERE database_name = current_database() "
+        "AND schema_name = '_havn'"
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
+def _fill_metadata_table(conn, table: str, pq_path: Path, dest_is_duckdb: bool) -> None:
+    """Replace the rows of a migrated ``_havn`` table with the staged ones.
+
+    The table is filled in place rather than recreated, so the keys, NOT NULL
+    constraints and defaults the migrations gave it are kept (CREATE TABLE AS
+    keeps none of them). Columns are matched by name.
+    """
+    fq = f'"_havn"."{table}"'
+    src = f"read_parquet('{pq_path.as_posix()}')"
+    conn.execute(f"DELETE FROM {fq}")
+    if table == "audit_log" and dest_is_duckdb:
+        # DuckLake audit ids are uuids and DuckDB's are integers from
+        # _havn.audit_log_seq. Integer ids (a warehouse that came from
+        # DuckDB) are kept; otherwise the rows are numbered afresh by time.
+        uncastable = conn.execute(
+            f"SELECT count(*) FROM {src} WHERE id IS NOT NULL "
+            f"AND TRY_CAST(id AS INTEGER) IS NULL"
+        ).fetchall()[0][0]
+        if uncastable:
+            # The sequence hands out the ids, so it is already past them.
+            conn.execute(
+                f"INSERT INTO {fq} BY NAME SELECT * EXCLUDE (id) FROM {src} "
+                f'ORDER BY "timestamp", id'
+            )
+        else:
+            conn.execute(f"INSERT INTO {fq} BY NAME SELECT * FROM {src}")
+            _advance_audit_sequence(conn)
+        return
+    conn.execute(f"INSERT INTO {fq} BY NAME SELECT * FROM {src}")
+
+
+def _advance_audit_sequence(conn) -> None:
+    """Move ``_havn.audit_log_seq`` past the highest copied id.
+
+    DuckDB 1.x has neither ``setval`` nor ``ALTER SEQUENCE ... RESTART``, and a
+    sequence a column default uses cannot be replaced, so values are drawn
+    until it is past the maximum (about 30 ms per million).
+    """
+    top = conn.execute('SELECT max(id) FROM "_havn"."audit_log"').fetchall()[0][0]
+    if top is None:
+        return
+    current = conn.execute("SELECT nextval('_havn.audit_log_seq')").fetchall()[0][0]
+    if current < top:
+        conn.execute(
+            f"SELECT max(nextval('_havn.audit_log_seq')) FROM range({int(top) - int(current)})"
+        ).fetchall()
 
 
 def _cleanup_stage(stage_dir: Path) -> None:

@@ -230,6 +230,16 @@ All notable changes to havn are documented in this file.
 
 ### Fixed
 
+- **`havn migrate` keeps havn's own tables intact.** Moving a warehouse
+  between DuckDB and DuckLake recreated every `_havn` table from a copy,
+  which dropped its primary keys, NOT NULL rules and defaults. After a
+  round trip, audit entries were written without an id and new masking
+  policies came back without one; this also happened in 0.3.1. A warehouse
+  from an older release could also arrive without the newer columns while
+  being marked up to date, so signing in and creating users failed. The
+  source's metadata is now brought up to date first (a source written by a
+  newer havn is refused), and the rows are copied into the destination's
+  own tables, so keys, defaults and the audit id sequence are kept.
 - **Python models and macros on DuckDB 2.** DuckDB 2
   keeps a query result open until it has been read to the end, and refuses
   other work on that connection meanwhile. havn now finishes such results
