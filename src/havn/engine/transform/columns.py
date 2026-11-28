@@ -64,8 +64,12 @@ def save_model_columns(
 
         if _is_ducklake_connection(conn):
             # DuckLake drops the primary key at table creation, so
-            # INSERT OR REPLACE has nothing to match on.
-            conn.execute("BEGIN TRANSACTION")
+            # INSERT OR REPLACE has nothing to match on. A live refresh builds
+            # inside an outer transaction: join it, since a nested BEGIN would
+            # fail and abort it.
+            from havn.engine.utils import begin_transaction
+
+            owns_tx = begin_transaction(conn)
             try:
                 conn.execute(
                     "DELETE FROM _havn.model_columns WHERE model_path = ?",
@@ -77,9 +81,11 @@ def save_model_columns(
                     "VALUES (?, ?, ?, current_timestamp)",
                     params,
                 )
-                conn.execute("COMMIT")
+                if owns_tx:
+                    conn.execute("COMMIT")
             except Exception:
-                conn.execute("ROLLBACK")
+                if owns_tx:
+                    conn.execute("ROLLBACK")
                 raise
         else:
             conn.execute(
