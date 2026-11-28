@@ -26,6 +26,30 @@ All notable changes to havn are documented in this file.
   read-only transaction as well. If you ran an affected version with sign-in
   enabled, check user roles (`havn users list`) and the audit log for queries
   that put a write inside `WITH`.
+- **The read-only query check allowed DuckDB functions that read files or
+  change the database's settings.** It refused a fixed list of dangerous
+  functions and let everything else through, and DuckDB has more of them
+  than the list named. In every havn release up to and including 0.3.1, on
+  DuckDB 1.5 as well as 2.x, a signed-in user with read permission could,
+  through `/api/query`, dashboards, the MCP server and the other read-only
+  surfaces: read the Parquet metadata (schema, row groups, statistics) of any
+  Parquet file the server can read, also outside the project
+  (`parquet_full_metadata`); make DuckDB write log files into a directory of
+  their choosing and change its logging settings for everyone
+  (`enable_logging`, `disable_logging`, `truncate_duckdb_logs`); and force a
+  checkpoint (`checkpoint()`). On DuckDB 2.x they could also read the
+  contents of any CSV, JSON or Parquet file the server can read
+  (`read_single_csv_file` and friends) and write a profiling file to any path
+  (`enable_profiling`). Upgrading fixes it: table functions are now allowed
+  from a fixed list (generators such as `range` and `unnest`, `json_each`,
+  the catalog listings, and your project's table macros whose body passes the
+  same check), every function DuckDB ships is classified, and functions with
+  side effects (`nextval`, `setseed`, `write_log`, ...) are refused. Reading
+  DuckDB's settings (`duckdb_settings()`, `current_setting()`), attached
+  database paths and the layout of havn's `_havn` tables through
+  `pragma_show` / `pragma_table_info` is now admin-only, and DuckDB secrets
+  and logs cannot be read through queries at all. `EXPLAIN ANALYZE` from the
+  query panel now runs in the same read-only transaction as a query.
 
 ### Added
 
