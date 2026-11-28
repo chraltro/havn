@@ -114,12 +114,27 @@ _meta_lock = threading.Lock()
 
 
 def _conn_is_alive(conn: duckdb.DuckDBPyConnection) -> bool:
-    """Probe a cached connection; return False if the underlying handle was closed."""
+    """Probe a cached connection; return False if the underlying handle was closed.
+
+    Through a cursor of its own, read to the end and closed: on DuckDB 2 a
+    call on the connection itself is refused ("connection is busy") while
+    another thread uses it, which read as "closed" and replaced a
+    connection still in use. A closed connection refuses ``cursor()``.
+    """
     try:
-        conn.execute("SELECT 1").fetchone()
+        cur = conn.cursor()
+    except Exception:
+        return False
+    try:
+        cur.execute("SELECT 1").fetchall()
         return True
     except Exception:
         return False
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
 
 
 def _meta_conn_for(project_dir: Path) -> duckdb.DuckDBPyConnection:
