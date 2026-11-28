@@ -645,34 +645,116 @@ def test_status_shows_metadata_schema_version(tmp_path):
 # Keep the DDL in one place
 # ---------------------------------------------------------------------------
 
-# DDL on _havn that is allowed outside engine/migrations, with the reason.
-# Keep this empty: add a migration instead. (Per-model tables built from
-# f-strings, such as cdc_apply's _havn.cdc_tombstones__<schema>__<model>,
-# are model data rather than metadata schema and are not matched here.)
-_DDL_ALLOWED_OUTSIDE_MIGRATIONS: dict[str, str] = {}
+# DDL on _havn allowed outside engine/migrations: {(file, object): reason}.
+# Keep it short; add a migration instead. Per-model tables named from
+# f-strings, such as cdc_apply's _havn.cdc_tombstones__<schema>__<model>, are
+# model data rather than metadata schema and are not matched (the name must
+# be followed by a word boundary that is not an interpolation).
+_DDL_ALLOWED_OUTSIDE_MIGRATIONS: dict[tuple[str, str], str] = {}
 
-_DDL_RE = re.compile(
-    r"(CREATE\s+(?:OR\s+REPLACE\s+)?(?:TABLE|SEQUENCE|VIEW|INDEX)(?:\s+IF\s+NOT\s+EXISTS)?"
-    r"|ALTER\s+TABLE|DROP\s+TABLE(?:\s+IF\s+EXISTS)?)\s+_havn\.(\w+)",
-    re.IGNORECASE,
+_DDL_KEYWORD = (
+    r"(?:CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:TEMP|TEMPORARY)\s+)?(?:UNIQUE\s+)?"
+    r"(?:TABLE|SEQUENCE|VIEW|INDEX|MACRO|TYPE)(?:\s+IF\s+NOT\s+EXISTS)?"
+    r"|ALTER\s+(?:TABLE|SEQUENCE|VIEW)(?:\s+IF\s+EXISTS)?"
+    r"|DROP\s+(?:TABLE|SEQUENCE|VIEW|INDEX|MACRO|TYPE)(?:\s+IF\s+EXISTS)?)"
+    # An index is named before its table: CREATE INDEX i ON _havn.t
+    r"(?:\s+\"?\w+\"?\s+ON)?"
 )
+# _havn.x, "_havn"."x", "_havn".x, _havn."x"
+_LITERAL_TARGET = r'"?_havn"?\s*\.\s*"?(\w+)'
+
+
+def _havn_constants(source: str) -> set[str]:
+    """Module-level names bound to "_havn" or to a "_havn.<table>" string."""
+    import ast
+
+    names: set[str] = set()
+    try:
+        body = ast.parse(source).body
+    except SyntaxError:  # a bare SQL sample in the guard's own tests
+        return names
+    for node in body:
+        targets, value = [], None
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+            continue
+        if value.value == "_havn" or value.value.startswith("_havn."):
+            names.update(t.id for t in targets if isinstance(t, ast.Name))
+    return names
+
+
+def _ddl_on_havn(source: str) -> list[tuple[int, str, str]]:
+    """``(line, object, statement text)`` for each DDL statement on _havn."""
+    targets = [_LITERAL_TARGET]
+    constants = sorted(_havn_constants(source))
+    if constants:
+        alt = "|".join(re.escape(c) for c in constants)
+        # f"... {NAME}.x", f'... "{NAME}"', "... " + NAME
+        targets.append(r'\"?\{(' + alt + r')\}')
+        targets.append(r"[\"']\s*\+\s*(" + alt + r")(?!\w)")
+    pattern = re.compile(
+        _DDL_KEYWORD + r"\s+(?:" + "|".join(targets) + r")(?![\w{])", re.IGNORECASE
+    )
+    hits = []
+    for m in pattern.finditer(source):
+        obj = next(g for g in m.groups() if g)
+        hits.append((source.count("\n", 0, m.start()) + 1, obj, m.group(0)))
+    return hits
+
+
+@pytest.mark.parametrize("snippet", [
+    "CREATE TABLE _havn.x (a INT)",
+    "CREATE TABLE IF NOT EXISTS _havn.x (a INT)",
+    'CREATE TABLE "_havn"."x" (a INT)',
+    'create or replace table "_havn".x as select 1',
+    "CREATE TEMP TABLE _havn.x (a INT)",
+    "CREATE UNIQUE INDEX ix ON _havn.x (a)",
+    "CREATE INDEX IF NOT EXISTS ix ON _havn.x (a)",
+    "DROP SEQUENCE IF EXISTS _havn.s",
+    "DROP VIEW _havn.v",
+    "DROP INDEX _havn.ix",
+    "ALTER SEQUENCE _havn.s RESTART WITH 3",
+    "ALTER TABLE _havn.x ADD COLUMN b INT",
+    'SCHEMA = "_havn"\nq = f"CREATE TABLE {SCHEMA}.x (a INT)"',
+    'T: str = "_havn.x"\nq = f"DROP TABLE IF EXISTS {T}"',
+    'T = "_havn.x"\nq = "ALTER TABLE " + T + " ADD COLUMN b INT"',
+])
+def test_ddl_guard_catches(snippet):
+    assert _ddl_on_havn(snippet), snippet
+
+
+@pytest.mark.parametrize("snippet", [
+    "SELECT * FROM _havn.x",
+    "INSERT INTO _havn.x VALUES (1)",
+    "CREATE TABLE gold._havn_x (a INT)",
+    'f"CREATE TABLE IF NOT EXISTS _havn.cdc_tombstones__{schema}__{name} (k VARCHAR)"',
+    'OTHER = "gold"\nq = f"CREATE TABLE {OTHER}.x (a INT)"',
+])
+def test_ddl_guard_ignores(snippet):
+    assert not _ddl_on_havn(snippet), snippet
 
 
 def test_havn_metadata_ddl_lives_only_in_migrations():
-    offenders = []
+    offenders, allowed_seen = [], set()
     for py in SRC.rglob("*.py"):
         rel = py.relative_to(SRC).as_posix()
-        if rel.startswith("engine/migrations/") or rel in _DDL_ALLOWED_OUTSIDE_MIGRATIONS:
+        if rel.startswith("engine/migrations/"):
             continue
-        text = py.read_text(encoding="utf-8")
-        for m in _DDL_RE.finditer(text):
-            line = text.count("\n", 0, m.start()) + 1
-            offenders.append(f"{rel}:{line}: {m.group(0)}")
+        for line, obj, text in _ddl_on_havn(py.read_text(encoding="utf-8")):
+            if (rel, obj) in _DDL_ALLOWED_OUTSIDE_MIGRATIONS:
+                allowed_seen.add((rel, obj))
+                continue
+            offenders.append(f"{rel}:{line}: {' '.join(text.split())}")
     assert not offenders, (
         "DDL on _havn outside src/havn/engine/migrations/. Add a migration "
         "instead (see 'Changing havn's Metadata Tables' in CONTRIBUTING.md):\n"
         + "\n".join(offenders)
     )
+    stale = set(_DDL_ALLOWED_OUTSIDE_MIGRATIONS) - allowed_seen
+    assert not stale, f"allowlist entries that no longer match anything: {sorted(stale)}"
 
 
 def test_every_baseline_table_is_unique_and_column_names_are_unique():
