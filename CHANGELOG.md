@@ -4,6 +4,29 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
+### Security
+
+- **On DuckDB 2, the read-only query check let writes through.** DuckDB 2
+  accepts `INSERT`, `UPDATE`, `DELETE` and `COPY` inside a `WITH` clause
+  (`WITH d AS (UPDATE ... RETURNING *) SELECT * FROM d`), and havn judged such
+  a statement by its final `SELECT`. Any signed-in user who could run a query,
+  viewers included, could change or delete warehouse data through
+  `/api/query`, dashboards, the MCP server and the other read-only surfaces,
+  including havn's own `_havn.users` table, so a viewer could make itself an
+  admin. `COPY` in a `WITH` clause wrote warehouse data to a file on the
+  server, also from connections opened read-only. Governed Python and
+  `/v1/sql` let a non-admin write to `_havn` the same way. This affects every
+  havn release up to and including 0.3.1 running on DuckDB 2.x: releases
+  before 0.3.1 set no upper bound on DuckDB, so a fresh install on Python
+  3.11 or newer, and the Docker image (Python 3.12), got DuckDB 2. DuckDB 1.x
+  rejects these statements, so installs on DuckDB 1.x were not affected.
+  Upgrading fixes it: a write anywhere inside a statement (a CTE, a subquery,
+  a nested `WITH`, `EXPLAIN ANALYZE`) is refused, judged both from the text
+  and from DuckDB's own parse tree, and read-only queries now run in a
+  read-only transaction as well. If you ran an affected version with sign-in
+  enabled, check user roles (`havn users list`) and the audit log for queries
+  that put a write inside `WITH`.
+
 ### Added
 
 - **The scheduler keeps a history.** Every fire of a scheduled stream or job
@@ -113,19 +136,25 @@ All notable changes to havn are documented in this file.
   keeps a query result open until it has been read to the end, and refuses
   other work on that connection meanwhile. havn now finishes such results
   before registering macros, before a Python model's function runs and
-  before its result is stored, so macros register, Python models build and
-  a model function that read one row with `fetchone()` no longer breaks the
-  build.
+  before its result is stored and whenever the function calls `ref()`, so
+  macros register, Python models build and a model function that read one
+  row with `fetchone()` no longer breaks the build or its next `ref()`.
 - **Live models on DuckDB 2.** Advancing a live source failed with "Current
   transaction is aborted": havn probed for its own tables with a query that
   was allowed to fail, and DuckDB 2 aborts the whole transaction on any
-  failed statement. It now looks the tables up in the catalog.
+  failed statement. It now looks the tables up in the catalog. The same
+  applied to a live model with an aggregate assertion (`@assert sum(x) > 0`),
+  which havn first tried as a row-level check, and to metadata a warehouse
+  from an older release lacks: havn now decides before running anything.
 - **Query plans and performance capture on DuckDB 2.** EXPLAIN ANALYZE in the
   web UI showed no timings, and `havn perf` recorded no plans, because
-  DuckDB 2 lays out its JSON profile differently. Both layouts are read now.
+  DuckDB 2 lays out its JSON profile differently. Both layouts are read now,
+  and on DuckDB 2 a build's peak memory and spill are its own (DuckDB 1.x
+  only reports connection-wide high-water marks).
 - **PIVOT queries through the query interface on DuckDB 2**, which were
-  refused as non-SELECT statements. `CREATE TABLE ... AS PIVOT` and
-  `INSERT ... PIVOT` are still refused, as is `SHOW '<file path>'`.
+  refused as non-SELECT statements, `DESCRIBE` and `SUMMARIZE` of a PIVOT
+  included. `CREATE TABLE ... AS PIVOT` and `INSERT ... PIVOT` are still
+  refused, as is `SHOW '<file path>'`.
 - **Web UI actions that overlap no longer fail on DuckDB 2.** Running a
   script or contracts from the web UI, and the audit entries for queries,
   file edits, Ask and change sets, used the server's shared connection
@@ -225,13 +254,19 @@ All notable changes to havn are documented in this file.
   and in the background once the first page is on screen, so switching
   pages does not wait on a normal connection. Opening havn directly on any
   page (a bookmark, a reload, a shared link) fetches that page straight
-  away.
+  away. A model notebook or notebook opened before the editor was fetched
+  fetches it then, for SQL completion and hover, and an AI Review sent while
+  the agent sidebar is still downloading reaches it once it is there.
 - **A tab left open across an upgrade recovers by itself.** After havn is
   updated, a page opened for the first time in an old tab asks for a file the
-  new version no longer has. havn now reloads once to pick up the new
-  version (the browser still asks first if there is unsaved work), and if
-  that does not help it says so and offers a Reload button, instead of an
-  error or a blank panel.
+  new version no longer has. havn tries the download again, then checks
+  whether the server now serves a newer version; if so it reloads once to
+  pick it up (the browser still asks first if there is unsaved work), and if
+  that does not help it says so and offers a Reload button. When the server
+  is only restarting or the network dropped out, havn does not reload: it
+  says the part could not be loaded and offers Retry, keeping everything on
+  screen. Where the browser blocks storage (some embeds and private windows)
+  havn never reloads by itself, since it could not remember having done so.
 - Published dashboard links download less: they no longer include the
   dependency graph and the dashboard editor.
 
