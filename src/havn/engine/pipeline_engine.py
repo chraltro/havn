@@ -504,6 +504,7 @@ class _Run:
         self.run_profiles: dict[str, object] = {}
         self.rewind_id: str | None = None
         self.ended = False
+        self.notified = False
 
     # -- events --------------------------------------------------------------
 
@@ -557,6 +558,7 @@ class _Run:
                     logger.error("%s", e)
                 self.tally.has_error = True
                 self._end("failed", str(e), crashed=True)
+                self._notify_once(main)
                 return self.result
             if self.spec.ordered:
                 self.result.steps = [StepResult(p.index, p.action, p.targets) for p in phases]
@@ -571,6 +573,9 @@ class _Run:
             logger.error("Pipeline run failed: %s", e, exc_info=True)
             self.tally.has_error = True
             self._end("failed", str(e), crashed=True)
+            # A run that broke off still tells the webhook and the alert
+            # channels (once: it may have broken off after notifying).
+            self._notify_once(main)
         finally:
             if job_recorded:
                 self._finish_job_run()
@@ -658,7 +663,7 @@ class _Run:
                     pass
 
             self._end(status, error)
-            self._notify(main)
+            self._notify_once(main)
         finally:
             if self.rewind_id:
                 self._finish_rewind(crashed=crashed)
@@ -1134,6 +1139,16 @@ class _Run:
         except Exception as e:
             logger.warning("Rewind bookkeeping failed: %s", e)
 
+    def _notify_once(self, main: Any) -> None:
+        """:meth:`_notify`, at most once per run, never raising."""
+        if self.notified:
+            return
+        self.notified = True
+        try:
+            self._notify(main)
+        except Exception as e:
+            logger.warning("Pipeline notifications failed: %s", e)
+
     def _notify(self, main: Any) -> None:
         """The stream's webhook and the project's pipeline alert."""
         spec = self.spec
@@ -1156,7 +1171,8 @@ class _Run:
             if ok and not tally.built:
                 return
             errors = tally.failed - tally.assertion_failed
-            error = f"{errors} errors, {tally.assertion_failed} assertion failures"
+            error = (r.error if r.crashed and r.error
+                     else f"{errors} errors, {tally.assertion_failed} assertion failures")
         else:
             error = r.error or f"{tally.failed} step(s) failed"
         try:
