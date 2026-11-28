@@ -1157,31 +1157,10 @@ def get_contract_model_history(
 
 
 def _ensure_contracts_table(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create the contract results metadata table (no-op on read-only connections)."""
-    try:
-        conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS _havn.contract_results (
-                id                    VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
-                contract_name         VARCHAR NOT NULL,
-                model                 VARCHAR NOT NULL,
-                passed                BOOLEAN NOT NULL,
-                severity              VARCHAR NOT NULL DEFAULT 'error',
-                detail                JSON,
-                checked_at            TIMESTAMP DEFAULT current_timestamp,
-                consecutive_failures  INTEGER DEFAULT 0
-            )
-        """)
-        # Migrate: add consecutive_failures column if table exists but column doesn't
-        try:
-            conn.execute("""
-                ALTER TABLE _havn.contract_results
-                ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER DEFAULT 0
-            """)
-        except Exception:
-            pass
-    except Exception:
-        pass  # Read-only connection — table may already exist
+    """Kept for compatibility; the table is defined in :mod:`havn.engine.migrations`."""
+    from havn.engine.database import ensure_meta_table
+
+    ensure_meta_table(conn)
 
 
 def _save_contract_result(

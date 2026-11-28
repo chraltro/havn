@@ -33,21 +33,29 @@ streams:
     assert result[0]["schedule"] == "0 6 * * *"
 
 
-def test_cron_matching():
-    """Test that the scheduler's cron matching works correctly."""
+def test_invalid_cron_is_left_out_and_never_fires(tmp_path):
+    """An invalid expression is reported by collect_schedules and never run."""
     import datetime
 
-    scheduler = SchedulerThread(Path("/tmp"))
+    from havn.engine.schedule_time import as_instant
+    from havn.engine.scheduler import ScheduleSpec, collect_schedules
 
-    # Mock a known time
-    # _should_run checks current time, so we test the basic contract
-    # that it doesn't crash and returns a bool
-    result = scheduler._should_run("test", "0 6 * * *")
-    assert isinstance(result, bool)
+    (tmp_path / "project.yml").write_text(
+        "name: t\nstreams:\n  bad:\n    schedule: 'bad'\n    steps:\n      - ingest: [all]\n"
+    )
+    specs, errors, warnings = collect_schedules(tmp_path)
+    assert specs == [] and errors == []
+    assert any("not a valid cron expression" in w for w in warnings)
 
-    # Invalid cron should not match
-    result = scheduler._should_run("test", "bad")
-    assert result is False
+    # Even handed to the loop directly, it dispatches nothing and does not raise.
+    scheduler = SchedulerThread(tmp_path)
+    dispatched = []
+    scheduler._dispatch = lambda *a, **k: dispatched.append(a)
+    now = as_instant(datetime.datetime(2026, 4, 6, 6, 0, 5))
+    scheduler._started_at = now
+    for expr in ("bad", "*/0 * * * *", "99 9 * * *"):
+        scheduler._evaluate(ScheduleSpec("stream", expr, (expr,), "skip", False, None), now)
+    assert dispatched == []
 
 
 # --- Shared cron parser (engine/cron.py) ---
@@ -125,14 +133,24 @@ def test_next_cron_fire_weekly_monthly_yearly():
     assert next_cron_fire("0 0 30 2 *", base) is None
 
 
-def test_should_run_uses_shared_parser(tmp_path):
+def test_evaluate_uses_shared_parser(tmp_path):
+    from havn.engine.schedule_time import as_instant
+    from havn.engine.scheduler import ScheduleSpec
+
     scheduler = SchedulerThread(tmp_path)
-    monday_9 = _dt.datetime(2026, 4, 6, 9, 0)
-    assert scheduler._should_run("a", "0 9 * * MON", now=monday_9)
-    assert scheduler._should_run("b", "0 9 * * 1-5", now=monday_9)
-    assert not scheduler._should_run("c", "0 9 */2 * *", now=monday_9)  # 6th is even
-    assert scheduler._should_run("d", "0 9 */5 * *", now=monday_9)      # 1,6,11,...
-    assert not scheduler._should_run("e", "99 9 * * *", now=monday_9)
+    dispatched: list[str] = []
+    scheduler._dispatch = lambda spec, *a, **k: dispatched.append(spec.name)
+    monday_9 = as_instant(_dt.datetime(2026, 4, 6, 9, 0))
+    scheduler._started_at = monday_9
+    exprs = {
+        "a": "0 9 * * MON",
+        "b": "0 9 * * 1-5",
+        "c": "0 9 */2 * *",   # the 6th is even: no
+        "d": "0 9 */5 * *",   # 1, 6, 11, ...: yes
+    }
+    for name, expr in exprs.items():
+        scheduler._evaluate(ScheduleSpec("stream", name, (expr,), "skip", False, None), monday_9)
+    assert dispatched == ["a", "b", "d"]
 
 
 def test_cron_rejects_non_ascii_digits():

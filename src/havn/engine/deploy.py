@@ -70,23 +70,10 @@ def _now() -> str:
 
 
 def ensure_deploys_table(conn: duckdb.DuckDBPyConnection) -> None:
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS _havn.deploys (
-            id           VARCHAR,
-            env          VARCHAR,
-            ref          VARCHAR,
-            commit_sha   VARCHAR,
-            pr_id        VARCHAR,
-            deployed_by  VARCHAR,
-            status       VARCHAR,
-            started_at   VARCHAR,
-            finished_at  VARCHAR,
-            duration_ms  BIGINT,
-            detail       JSON,
-            error        VARCHAR
-        )
-    """)
+    """Kept for compatibility; the table is defined in :mod:`havn.engine.migrations`."""
+    from havn.engine.database import ensure_meta_table
+
+    ensure_meta_table(conn)
 
 
 def mark_interrupted_deploys(conn: duckdb.DuckDBPyConnection) -> int:

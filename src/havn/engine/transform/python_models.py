@@ -802,6 +802,12 @@ def make_ref(
                 "has to be a string literal; for a name built at run time, "
                 "list it in @model(depends_on=[...])."
             )
+        # ref() shares the connection the function got as ``db``. After the
+        # natural watermark pattern, db.execute(...).fetchone(), DuckDB 2.0
+        # still holds that result open and refuses conn.sql().
+        from havn.engine.database import finish_pending_result
+
+        finish_pending_result(conn)
         if ref_map is not None:
             target = ref_map.get(key)
             if target is None:
@@ -868,10 +874,18 @@ def _stage_result(conn: duckdb.DuckDBPyConnection, model: SQLModel, result: Any,
         )
 
     source = f"{staged}_src"
+    # The model function may have left a half-read execute() result behind
+    # (db.execute(...).fetchone()); on DuckDB 2.0 that blocks register().
+    from havn.engine.database import finish_pending_result
+
+    finish_pending_result(conn)
     try:
         conn.register(source, obj)
-    except duckdb.InvalidInputException as e:
-        if isinstance(obj, duckdb.DuckDBPyRelation) and "another Connection" in str(e):
+    except duckdb.InvalidInputException:
+        # A relation from another connection: DuckDB 1.x says "another
+        # Connection", 2.0 "not suitable for replacement scan". Either way
+        # it can only come across as data.
+        if isinstance(obj, duckdb.DuckDBPyRelation):
             obj = obj.to_arrow_table()
             conn.register(source, obj)
         else:
@@ -937,10 +951,10 @@ def _target_exists(conn: duckdb.DuckDBPyConnection, model: SQLModel) -> bool:
             "WHERE table_catalog = current_database() "
             "AND table_schema = ? AND table_name = ? AND table_type = 'BASE TABLE'",
             [model.schema, model.name],
-        ).fetchone()
+        ).fetchall()
     except Exception:
         return False
-    return bool(row and row[0])
+    return bool(row and row[0][0])
 
 
 def run_python_model(
@@ -1080,6 +1094,11 @@ def _invoke(
 
     if is_incremental is None:
         is_incremental = model.materialized == "incremental" and _target_exists(conn, model)
+    # Hand the function an idle connection: on DuckDB 2.0 a half-read result
+    # left by havn (or the caller) makes its first db.sql() / ref() raise.
+    from havn.engine.database import finish_pending_result
+
+    finish_pending_result(conn)
     provided = {
         "db": conn,
         "ref": make_ref(

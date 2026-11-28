@@ -668,6 +668,8 @@ timeout_minutes: 60
 # schedules:
 #   - "0 6 * * *"          # every day at 6:00 AM
 #   - "every 1 day"        # or an interval, whichever you prefer
+# timezone: Europe/Oslo    # evaluate the cron in this zone (default: server local time)
+# overlap: skip            # still running at the next fire: skip it, or queue one run
 """
 
 SAMPLE_INCREMENTAL_JOB = """\

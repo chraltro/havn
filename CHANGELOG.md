@@ -4,7 +4,273 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
+### Security
+
+- **On DuckDB 2, the read-only query check let writes through.** DuckDB 2
+  accepts `INSERT`, `UPDATE`, `DELETE` and `COPY` inside a `WITH` clause
+  (`WITH d AS (UPDATE ... RETURNING *) SELECT * FROM d`), and havn judged such
+  a statement by its final `SELECT`. Any signed-in user who could run a query,
+  viewers included, could change or delete warehouse data through
+  `/api/query`, dashboards, the MCP server and the other read-only surfaces,
+  including havn's own `_havn.users` table, so a viewer could make itself an
+  admin. `COPY` in a `WITH` clause wrote warehouse data to a file on the
+  server, also from connections opened read-only. Governed Python and
+  `/v1/sql` let a non-admin write to `_havn` the same way. This affects every
+  havn release up to and including 0.3.1 running on DuckDB 2.x: releases
+  before 0.3.1 set no upper bound on DuckDB, so a fresh install on Python
+  3.11 or newer, and the Docker image (Python 3.12), got DuckDB 2. DuckDB 1.x
+  rejects these statements, so installs on DuckDB 1.x were not affected.
+  Upgrading fixes it: a write anywhere inside a statement (a CTE, a subquery,
+  a nested `WITH`, `EXPLAIN ANALYZE`) is refused, judged both from the text
+  and from DuckDB's own parse tree, and read-only queries now run in a
+  read-only transaction as well. If you ran an affected version with sign-in
+  enabled, check user roles (`havn users list`) and the audit log for queries
+  that put a write inside `WITH`.
+- **The read-only query check allowed DuckDB functions that read files or
+  change the database's settings.** It refused a fixed list of dangerous
+  functions and let everything else through, and DuckDB has more of them
+  than the list named. In every havn release up to and including 0.3.1, on
+  DuckDB 1.5 as well as 2.x, a signed-in user with read permission could,
+  through `/api/query`, dashboards, the MCP server and the other read-only
+  surfaces: read the Parquet metadata (schema, row groups, statistics) of any
+  Parquet file the server can read, also outside the project
+  (`parquet_full_metadata`); make DuckDB write log files into a directory of
+  their choosing and change its logging settings for everyone
+  (`enable_logging`, `disable_logging`, `truncate_duckdb_logs`); and force a
+  checkpoint (`checkpoint()`). On DuckDB 2.x they could also read the
+  contents of any CSV, JSON or Parquet file the server can read
+  (`read_single_csv_file` and friends) and write a profiling file to any path
+  (`enable_profiling`). Upgrading fixes it: table functions are now allowed
+  from a fixed list (generators such as `range` and `unnest`, `json_each`,
+  the catalog listings, and your project's table macros whose body passes the
+  same check), every function DuckDB ships is classified, and functions with
+  side effects (`nextval`, `setseed`, `write_log`, ...) are refused. Reading
+  DuckDB's settings (`duckdb_settings()`, `current_setting()`), attached
+  database paths and the layout of havn's `_havn` tables through
+  `pragma_show` / `pragma_table_info` is now admin-only, and DuckDB secrets
+  and logs cannot be read through queries at all. `EXPLAIN ANALYZE` from the
+  query panel, the CSV export and collaboration sessions now run in the same
+  read-only transaction as a query.
+- **A query could make the server download and load DuckDB extensions.**
+  DuckDB installs a known extension the first time a query names one of its
+  functions or types, so `SELECT '127.0.0.1'::INET`, `stem(...)` or
+  `excel_text(...)` from any signed-in user with read permission downloaded
+  the inet, fts or excel extension from the internet, wrote it to the
+  server's disk and loaded it into the server process. This affects every
+  havn release up to and including 0.3.1, on DuckDB 1.5 and 2.x. On DuckDB
+  2.x, `SHOW <setting>` also returned DuckDB settings to such a user,
+  including S3 credentials set with `SET s3_secret_access_key`. Upgrading
+  fixes both: read-only queries can only use functions and types that are
+  already loaded, and `SHOW <setting>` is admin-only. If your server should
+  never fetch extensions, also set DuckDB's `autoinstall_known_extensions`
+  to false for it; havn leaves that setting alone, because its connectors
+  rely on extensions loading on first use.
+
+### Added
+
+- **The scheduler keeps a history.** Every fire of a scheduled stream or job
+  is recorded in `_havn.schedule_history`: when it was due, when it started
+  and finished, how late it started, and whether it succeeded, failed, was
+  skipped or was missed. `havn schedule --history` shows it, and so does
+  `GET /api/scheduler/history`. Rows are kept for 30 days
+  (`scheduler.history_days`). A fire that comes due while another process
+  holds the warehouse is still recorded, with its outcome, once the
+  warehouse can be opened again.
+- **Overlap rules.** There is now a defined rule for a stream or job that is
+  still running, or already waiting, at its next fire time. `overlap: skip`
+  (the default) records the fire as skipped; `overlap: queue` lets one run
+  wait and start when the current one finishes.
+  Set it under `scheduler:` in project.yml, on a stream, or in a job file.
+- **Missed fires after a restart.** When the scheduler starts, fires that
+  passed while it was down are recorded as missed. With `catchup: true` the
+  newest of them runs once; by default they are only recorded. A fire the
+  history already holds is never run again, also when the scheduler restarts
+  in the same minute.
+- **Time zones for schedules.** `scheduler.timezone` (an IANA name such as
+  `Europe/Oslo`), or `timezone:` on a stream or job, sets the zone cron
+  expressions are evaluated in. Without it the server's local time is used,
+  as before. A fire time skipped by a daylight saving change runs at the end
+  of the gap, and one that occurs twice runs once. An unknown zone name stops
+  `havn validate` and the scheduler with an error instead of falling back to
+  local time. `havn schedule` shows each schedule's next run in its zone.
+  havn now depends on `tzdata`, so zone names also work on Windows.
+- **`havn schedule --env`.** The scheduler builds the environment's
+  warehouse, chosen the way `havn stream --env` chooses it (default: the
+  active environment). Under `havn serve --schedule` scheduled runs build the
+  warehouse the web UI shows: the server's `--env`, the environment switched
+  to in the UI, and the checked-out branch's warehouse.
+- **One scheduler per warehouse.** A second scheduler on the same warehouse
+  (`havn schedule` while `havn serve --schedule` runs, or two `havn
+  schedule`s) refuses to start and names the process that holds it. The lock
+  is the operating system's, so it goes away with its process, also after a
+  crash. Two environments of one project can each have their own scheduler.
+
+### Changed
+
+- **havn upgrades its own metadata tables in a controlled way.** The `_havn`
+  schema now has a version, recorded in `_havn.schema_migrations`. The first
+  time a new release opens your warehouse for writing, it applies the pending
+  migrations, each in its own transaction. A failed upgrade is rolled back and
+  stops with an error that names the step, instead of being skipped silently
+  and breaking something later. Warehouses created by any 0.2.x or 0.3.x
+  release are brought to the same schema, with their rows kept. Read-only
+  commands never change the schema. `havn status` shows the version and any
+  pending migrations, and an older havn opening a warehouse that a newer one
+  has upgraded warns instead of guessing. Taking a backup (`havn backup`)
+  before upgrading is still wise. See docs/upgrading.md.
+- **The scheduler no longer stops ticking during a run.** Due runs are
+  handed to worker threads while the scheduler goes on checking schedules,
+  so lateness, skips and missed fires are recorded on time. Runs still
+  execute one at a time by default (`scheduler.max_concurrent: 1`): two runs
+  writing the same warehouse at once can fail on DuckDB write-write
+  conflicts, so running several at a time is opt-in and only safe for
+  streams and jobs that write different tables (creating the same schemas
+  and havn's own tables at the same moment is safe). A change to
+  `max_concurrent` in project.yml takes effect without a restart.
+- **Stopping the scheduler is predictable.** Ctrl+C on `havn schedule` (or
+  stopping `havn serve --schedule`) cancels runs that have not started and
+  gives running ones 30 seconds to finish; a second Ctrl+C quits at once.
+  A run cut off this way is marked `interrupted` in the history.
+- **A stream runs the same way from the terminal, the scheduler and the web
+  UI.** All three now go through one pipeline engine, so a stream behaves
+  identically wherever it is started:
+  - Steps run in the order they are listed in project.yml. Streams started
+    from the web UI used to merge all steps into one graph, so a step could
+    start before the one listed above it had finished.
+  - The scripts and seeds of one step run one at a time, in name order, and a
+    failed ingest script stops the rest of its step. The web UI used to run
+    them side by side.
+  - Models inside a transform step build in parallel as soon as their own
+    upstream models are done, also for `havn stream` and scheduled streams,
+    which used to build them one at a time.
+  - `havn stream` and scheduled streams now validate the models before
+    building them, as the web UI already did, and stop the stream on an
+    error-severity finding.
+  - Retries apply to the failed script or model, not to the whole step, so a
+    retried ingest step no longer runs its successful scripts a second time.
+  - A model refused by a `policies.deny` rule fails the stream everywhere.
+  - Every run of a stream logs its scripts and models in `_havn.run_log` under
+    one pipeline run id and appears in Job Results (`_havn.job_runs`), also
+    when it was started with `havn stream` or by the scheduler.
+  - A stream with an unknown step action fails before anything runs.
+  - A run that breaks off with an error of its own (it cannot be planned, or
+    something fails outside a script or model) still sends the stream's
+    webhook and the pipeline alert.
+  - The blocking `POST /api/stream/{name}` endpoint runs through the same
+    engine. It no longer forces a full rebuild of every model after an
+    ingest; models whose inputs got new data are rebuilt by change detection,
+    as in every other run.
+- **The web UI and the scheduler no longer run at the same time.** Under
+  `havn serve --schedule`, a scheduled run that comes due while a run started
+  from the UI is in progress waits for it to finish (the wait shows as
+  lateness in the schedule history), and starting a UI run while a scheduled
+  run is in progress is refused with a message naming the scheduled run.
+  Blocking endpoints that write to the warehouse (`POST /api/stream/{name}`,
+  `/api/transform`, `/api/run`, `/api/seeds`) answer 409 while another run
+  holds it, and starting a job from the UI while another run is in progress
+  now answers 409 instead of running it alongside. Scheduled runs can still
+  overlap each other when `scheduler.max_concurrent` is above 1.
+- **Cancelling a run waits until nothing is writing.** Cancel in the web UI
+  starts no new step; a running script is stopped (as a timeout stops it)
+  and a model being built finishes. The run reports those and ends only
+  then, so the next run cannot start while the cancelled one is still
+  writing. A script that cannot be interrupted (blocked in a long call) keeps
+  the run "cancelling" until it returns. A stopped script shows as cancelled,
+  not failed.
+- **The file watcher waits for running work.** With `havn serve --watch` or
+  `havn watch`, an edit that comes in while a web UI or scheduled run is in
+  progress is no longer built alongside it: the rebuild waits until the run
+  ends (the watcher says so once) and then runs once for all the edits made
+  meanwhile. A burst of saves builds once, two seconds after the last one.
+  Under `havn serve` the rebuild uses the server's own connection.
+
+- **havn runs on DuckDB 2.x as well as 1.5.** The dependency is now
+  `duckdb>=1.5.2,<3`. On Python 3.11 and newer pip installs DuckDB 2; Python
+  3.10 stays on 1.5, since DuckDB 2 needs Python 3.11. Two things to know
+  before upgrading an existing project:
+  - A warehouse file that DuckDB 2 has written cannot be opened by DuckDB 1.5
+    again. Take a `havn backup` first if you may need to go back.
+  - DuckDB 2 no longer accepts the arrow lambda syntax `x -> x + 1` by
+    default. Models that use it fail with "Deprecated lambda arrow"; write
+    `lambda x: x + 1` instead, which DuckDB 1.5 also understands.
+- **Other dependencies have upper bounds.** typer, fastapi, uvicorn, pyarrow,
+  numpy, rich, sqlfluff, watchdog, prometheus_client, pyyaml and
+  python-multipart are capped below their next major version, so a future
+  breaking release is not installed until havn has been tested on it. pytz
+  and tzdata are versioned by year and stay uncapped.
+- **`tzdata` is a dependency.** DuckDB 2 reads time zones through Python's
+  zoneinfo, which has no time zone database on Windows without it.
+
+- **The web UI opens faster.** Every page used to be downloaded before the
+  first one appeared: 1.6 MB of JavaScript (426 kB compressed), plus the
+  code editor's 1 MB, even for someone who only looked at the Home page.
+  Now the first download is the app's frame and the Home page, 405 kB of
+  JavaScript (122 kB compressed); in a measured load of Home the browser
+  fetched 128 kB instead of 1.5 MB. The other pages, the editor and the
+  agent sidebar are fetched when they are first opened, or before that:
+  when the pointer or keyboard focus reaches their entry in the navigation,
+  and in the background once the first page is on screen, so switching
+  pages does not wait on a normal connection. Opening havn directly on any
+  page (a bookmark, a reload, a shared link) fetches that page straight
+  away. A model notebook or notebook opened before the editor was fetched
+  fetches it then, for SQL completion and hover, and an AI Review sent while
+  the agent sidebar is still downloading reaches it once it is there.
+- **A tab left open across an upgrade recovers by itself.** After havn is
+  updated, a page opened for the first time in an old tab asks for a file the
+  new version no longer has. havn tries the download again, then checks
+  whether the server now serves a newer version; if so it reloads once to
+  pick it up (the browser still asks first if there is unsaved work), and if
+  that does not help it says so and offers a Reload button. When the server
+  is only restarting or the network dropped out, havn does not reload: it
+  says the part could not be loaded and offers Retry, keeping everything on
+  screen. Where the browser blocks storage (some embeds and private windows)
+  havn never reloads by itself, since it could not remember having done so.
+- Published dashboard links download less: they no longer include the
+  dependency graph and the dashboard editor.
+
 ### Fixed
+
+- **`havn migrate` keeps havn's own tables intact.** Moving a warehouse
+  between DuckDB and DuckLake recreated every `_havn` table from a copy,
+  which dropped its primary keys, NOT NULL rules and defaults. After a
+  round trip, audit entries were written without an id and new masking
+  policies came back without one; this also happened in 0.3.1. A warehouse
+  from an older release could also arrive without the newer columns while
+  being marked up to date, so signing in and creating users failed. The
+  source's metadata is now brought up to date first (a source written by a
+  newer havn is refused), and the rows are copied into the destination's
+  own tables, so keys, defaults and the audit id sequence are kept.
+- **Python models and macros on DuckDB 2.** DuckDB 2
+  keeps a query result open until it has been read to the end, and refuses
+  other work on that connection meanwhile. havn now finishes such results
+  before registering macros, before a Python model's function runs and
+  before its result is stored and whenever the function calls `ref()`, so
+  macros register, Python models build and a model function that read one
+  row with `fetchone()` no longer breaks the build or its next `ref()`.
+- **Live models on DuckDB 2.** Advancing a live source failed with "Current
+  transaction is aborted": havn probed for its own tables with a query that
+  was allowed to fail, and DuckDB 2 aborts the whole transaction on any
+  failed statement. It now looks the tables up in the catalog. The same
+  applied to a live model with an aggregate assertion (`@assert sum(x) > 0`),
+  which havn first tried as a row-level check, and to metadata a warehouse
+  from an older release lacks: havn now decides before running anything.
+- **Query plans and performance capture on DuckDB 2.** EXPLAIN ANALYZE in the
+  web UI showed no timings, and `havn perf` recorded no plans, because
+  DuckDB 2 lays out its JSON profile differently. Both layouts are read now,
+  and on DuckDB 2 a build's peak memory and spill are its own (DuckDB 1.x
+  only reports connection-wide high-water marks).
+- **PIVOT queries through the query interface on DuckDB 2**, which were
+  refused as non-SELECT statements, `DESCRIBE` and `SUMMARIZE` of a PIVOT
+  included. `CREATE TABLE ... AS PIVOT` and `INSERT ... PIVOT` are still
+  refused, as is `SHOW '<file path>'`.
+- **Web UI actions that overlap no longer fail on DuckDB 2.** Running a
+  script or contracts from the web UI, and the audit entries for queries,
+  file edits, Ask and change sets, used the server's shared connection
+  directly. DuckDB 1.5 made a second caller wait; DuckDB 2 refuses with
+  "connection is busy". They now use their own cursor, like the rest of the
+  server.
+- **Error messages point at your SQL on DuckDB 2**, which underlines the
+  offending token instead of marking one character.
 
 - **Result tables keep their column headers.** Scrolling a query result
   scrolled the header row away with the rows: the table sat in two nested

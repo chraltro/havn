@@ -107,6 +107,40 @@ Open an issue on GitHub with:
 3. Register it in `src/havn/connectors/__init__.py`
 4. Add tests
 
+## Changing havn's Metadata Tables (`_havn`)
+
+Every `_havn` table is defined in `src/havn/engine/migrations/`, nowhere
+else. `tests/test_migrations.py` fails on `CREATE TABLE _havn.x`,
+`ALTER TABLE _havn.x` and similar DDL anywhere outside that package
+(quoted names and `"_havn"` constants included); a justified exception goes
+in its allowlist with the reason.
+
+To add a table or a column:
+
+1. Add a module `src/havn/engine/migrations/_NNNN_<what>.py` with
+   `up(conn, ctx)`, and append `Migration(NNNN, "<what>", module.up)` to
+   `MIGRATIONS` in `__init__.py`. Versions are consecutive integers.
+2. Keep it additive: new tables, new nullable columns or columns with a
+   DEFAULT. Never drop, rename or retype a column; an older havn opening
+   the warehouse afterwards still reads the columns it knows.
+3. Make it tolerant of what may already be there (`IF NOT EXISTS`, or look
+   the column up in `duckdb_columns()`), and let real errors raise. The
+   runner wraps each migration in a transaction, records it only on commit,
+   and turns a failure into a `MigrationError` naming the migration.
+4. Branch on `ctx.is_lake` where DuckLake differs: it rejects PRIMARY KEY,
+   UNIQUE, CHECK and sequences.
+5. Never edit a migration that has shipped in a release, including the
+   baseline (`_0001_baseline.py`): warehouses already past it never rerun it.
+6. Add an upgrade test to `tests/test_migrations.py`: build the previous
+   shape by hand, put rows in it, migrate, check rows and columns.
+
+Code that needs a table calls `ensure_meta_table(conn)` (or the module's own
+`ensure_*` helper, which now does the same). Once the process has seen a
+database file at the current version that costs one `duckdb_databases()`
+query (roughly 0.3 to 1 ms); an in-memory database is never remembered, so
+there it reads the applied versions on every call. It is a no-op on a
+read-only connection, so readers must still handle a missing table.
+
 ## License
 
 havn is licensed under the [Business Source License 1.1](LICENSE), which auto-converts to Apache 2.0 four years after each release.

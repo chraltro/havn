@@ -146,7 +146,12 @@ class LiveRunner:
         settings: LiveSettings | None = None,
         alerts: object | None = None,
         models_loader: Callable[[], list[SQLModel]] | None = None,
+        clock: Callable[[], float] | None = None,
     ) -> None:
+        # The monotonic clock the debounce, latency, rate-limit and poll
+        # decisions read (injectable, so tests do not depend on how fast the
+        # machine is); real waits still take real time.
+        self._clock = clock or time.monotonic
         self.project_dir = Path(project_dir)
         self.executor = executor
         self.settings = settings or LiveSettings()
@@ -173,7 +178,7 @@ class LiveRunner:
         self._last_cycle_wall: datetime | None = None
         self._next_poll = 0.0
         self._next_prune = 0.0
-        self._last_log_flush = time.monotonic()
+        self._last_log_flush = self._clock()
         self._accum: dict[str, _Accum] = {}
         self._force: set[str] = set()
 
@@ -206,7 +211,7 @@ class LiveRunner:
         self._unsubscribe = events.subscribe(self._on_advance)
         # Catch up on anything that landed while no runner was up.
         with self._lock:
-            self._pending_since = time.monotonic()
+            self._pending_since = self._clock()
             self._last_event_at = 0.0
         self._thread = threading.Thread(target=self._run, name="havn-live", daemon=True)
         self._thread.start()
@@ -232,7 +237,7 @@ class LiveRunner:
         """Run a cycle as soon as the rate limit allows."""
         with self._lock:
             if self._pending_since is None:
-                self._pending_since = time.monotonic()
+                self._pending_since = self._clock()
             self._last_event_at = 0.0
             self._wake.notify_all()
 
@@ -286,7 +291,7 @@ class LiveRunner:
     def _on_advance(self, event: events.SourceAdvanced) -> None:
         with self._lock:
             self.events_seen += event.rows
-            now = time.monotonic()
+            now = self._clock()
             if self._pending_since is None:
                 self._pending_since = now
             self._last_event_at = now
@@ -304,14 +309,14 @@ class LiveRunner:
 
     def events_since(self, after: int, timeout: float = 0.0) -> list[dict]:
         """UI events with an id above ``after``, waiting up to ``timeout``."""
-        deadline = time.monotonic() + timeout
+        deadline = time.perf_counter() + timeout
         with self._ui_cond:
             while True:
                 out = [
                     {"id": e.id, "type": e.type, "data": e.data}
                     for e in self._ui_events if e.id > after
                 ]
-                remaining = deadline - time.monotonic()
+                remaining = deadline - time.perf_counter()
                 if out or remaining <= 0 or self._stop.is_set():
                     return out
                 self._ui_cond.wait(remaining)
@@ -333,11 +338,11 @@ class LiveRunner:
 
     def _run(self) -> None:
         s = self.settings
-        self._next_poll = time.monotonic() + s.poll_interval
+        self._next_poll = self._clock() + s.poll_interval
         while not self._stop.is_set():
             run_now = False
             with self._lock:
-                now = time.monotonic()
+                now = self._clock()
                 retry_in = self._next_retry_in()
                 if retry_in is not None and retry_in <= 0 and self._pending_since is None:
                     self._pending_since = now
@@ -419,7 +424,7 @@ class LiveRunner:
             ):
                 # Too soon for this model; come back when its interval is up.
                 with self._lock:
-                    self._pending_since = self._pending_since or time.monotonic()
+                    self._pending_since = self._pending_since or self._clock()
                 continue
             result = self._refresh(name)
             results.append(result)
@@ -430,8 +435,8 @@ class LiveRunner:
         self.cycles += 1
         self.last_cycle_at = utcnow()
         self.last_cycle_ms = int((time.perf_counter() - started) * 1000)
-        if time.monotonic() >= self._next_prune:
-            self._next_prune = time.monotonic() + 600
+        if self._clock() >= self._next_prune:
+            self._next_prune = self._clock() + 600
             try:
                 self._call(lambda cur: prune_advances(cur))
             except Exception as e:
@@ -450,7 +455,7 @@ class LiveRunner:
 
             if isinstance(e, WriteQueueFullError):
                 with self._lock:
-                    self._pending_since = self._pending_since or time.monotonic()
+                    self._pending_since = self._pending_since or self._clock()
                 return RefreshResult(name, "busy", reason="write queue full")
             result = RefreshResult(name, "error", error=str(e))
             self._call(self._record_failure, name, result)
@@ -674,7 +679,7 @@ class LiveRunner:
             logger.debug("live run_log write failed: %s", e)
 
     def _maybe_flush_logs(self) -> None:
-        if time.monotonic() - self._last_log_flush >= self.settings.log_interval:
+        if self._clock() - self._last_log_flush >= self.settings.log_interval:
             try:
                 self._flush_logs()
             except Exception as e:
@@ -683,7 +688,7 @@ class LiveRunner:
     def _flush_logs(self, force: bool = False) -> None:
         with self._lock:
             accum, self._accum = self._accum, {}
-            self._last_log_flush = time.monotonic()
+            self._last_log_flush = self._clock()
         accum = {k: v for k, v in accum.items() if v.refreshes}
         if not accum:
             return
@@ -749,7 +754,7 @@ class LiveRunner:
         return discover_all_models(self.project_dir)
 
     def _load_models(self, force: bool = False) -> None:
-        now = time.monotonic()
+        now = self._clock()
         if not force and now < self._next_sig_check:
             return
         self._next_sig_check = now + 2.0

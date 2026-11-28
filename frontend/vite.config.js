@@ -49,14 +49,22 @@ export default defineConfig({
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
       output: {
+        // Only third-party code is grouped by hand, into chunks whose content
+        // (and so whose hashed name) changes only when a dependency is
+        // upgraded: the server sends assets/ as immutable, so a browser keeps
+        // them across havn releases. Application code is split by the lazy
+        // imports in App.jsx and main.jsx; naming app modules here made Rollup
+        // pull their shared imports (api.ts, contexts) into those chunks, and
+        // the entry then had to download the DAG and dashboard chunks.
         manualChunks(id) {
-          if (id.includes("monaco-editor")) return "monaco";
-          if (id.includes("node_modules/react") || id.includes("node_modules/react-dom")) return "react-vendor";
-          if (id.includes("node_modules/lucide-react")) return "icons";
-          if (id.includes("node_modules/sql-formatter")) return "sql-formatter";
-          if (id.includes("/src/Dashboard") || id.includes("/src/WidgetEditor")) return "dashboards";
-          if (id.includes("/src/DAGPanel") || id.includes("/src/SentinelPanel")) return "dag";
-          if (id.includes("/src/NotebookPanel") || id.includes("/src/ModelNotebookView")) return "notebooks";
+          const path = id.replace(/\\/g, "/");
+          if (!path.includes("/node_modules/")) return undefined;
+          // React, ReactDOM and the scheduler: needed by every page.
+          if (/\/node_modules\/(react|react-dom|scheduler)\//.test(path)) return "react-vendor";
+          // The Monaco loader (Monaco itself is served from /monaco/vs).
+          if (/\/node_modules\/(@monaco-editor|state-local)\//.test(path)) return "monaco";
+          // Only the Query page's Format button uses it.
+          if (/\/node_modules\/(sql-formatter|nearley)\//.test(path)) return "sql-formatter";
           return undefined;
         },
       },

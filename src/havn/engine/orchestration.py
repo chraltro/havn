@@ -48,6 +48,11 @@ class Job:
     # (read_csv, external tables), and jobs always rebuilt everything. Set
     # `full_refresh: false` to skip unchanged models.
     full_refresh: bool = True
+    # Scheduler settings, as written in the job file (None = the project's
+    # `scheduler:` default). Validated by engine.scheduler.check_schedules.
+    overlap: object = None    # "skip" | "queue"
+    catchup: object = None    # bool
+    timezone: object = None   # IANA name, or "local"
 
     def __post_init__(self) -> None:
         # Mirror target <-> targets for backward compatibility
@@ -96,34 +101,10 @@ class JobResult:
 
 
 def ensure_job_runs_table(conn) -> None:
-    """Create the _havn.job_runs table if it doesn't exist."""
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS _havn.job_runs (
-            id              VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
-            job_name        VARCHAR NOT NULL,
-            job_file        VARCHAR NOT NULL,
-            target          VARCHAR NOT NULL,
-            status          VARCHAR NOT NULL DEFAULT 'running',
-            steps_total     INTEGER NOT NULL DEFAULT 0,
-            steps_completed INTEGER NOT NULL DEFAULT 0,
-            steps_failed    INTEGER NOT NULL DEFAULT 0,
-            steps_skipped   INTEGER NOT NULL DEFAULT 0,
-            started_at      TIMESTAMP DEFAULT current_timestamp,
-            finished_at     TIMESTAMP,
-            duration_ms     BIGINT,
-            trigger         VARCHAR DEFAULT 'manual',
-            error           VARCHAR,
-            step_details    JSON
-        )
-    """)
-    # Migration for databases that predate steps_skipped
-    try:
-        conn.execute(
-            "ALTER TABLE _havn.job_runs ADD COLUMN IF NOT EXISTS steps_skipped INTEGER DEFAULT 0"
-        )
-    except Exception:
-        pass
+    """Kept for compatibility; the table is defined in :mod:`havn.engine.migrations`."""
+    from havn.engine.database import ensure_meta_table
+
+    ensure_meta_table(conn)
 
 
 def mark_stale_runs_failed(conn) -> int:
@@ -235,6 +216,9 @@ def discover_jobs(project_dir: Path) -> list[Job]:
                 description=data.get("description", "") or "",
                 file_path=yml_file,
                 full_refresh=_as_bool(data.get("full_refresh", True)),
+                overlap=data.get("overlap"),
+                catchup=data.get("catchup"),
+                timezone=data.get("timezone"),
             ))
         except Exception as e:
             logger.warning("Error parsing %s: %s", yml_file.name, e)

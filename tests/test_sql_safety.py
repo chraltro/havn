@@ -95,6 +95,21 @@ def test_legit_queries_pass_hand_lexer(sql, hand_lexer_only):
     validate_read_only_query(sql)
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "CREATE TABLE x AS PIVOT t ON i USING sum(i)",
+        "INSERT INTO t PIVOT t ON i USING sum(i)",
+        "/* c */ CREATE TABLE x AS PIVOT t ON i USING sum(i)",
+    ],
+)
+def test_writes_wrapping_a_pivot_are_rejected(sql):
+    # DuckDB 2.0 reports these as one MULTI statement with the user's text,
+    # the same type a plain PIVOT gets; 1.x listed the hidden expansion.
+    with pytest.raises(ReadOnlyQueryError):
+        validate_read_only_query(sql)
+
+
 def test_unparseable_sql_is_left_to_execution():
     # Model bodies with {start}/{end} placeholders are validated but never
     # executed verbatim; a DuckDB parse error must not reject them.

@@ -83,11 +83,49 @@ Stream options:
 |--------|------|---------|-------------|
 | `description` | string | `""` | Human-readable description |
 | `schedule` | string | `null` | Cron expression (5-field) |
-| `retries` | int | `0` | Retry attempts per failed step |
+| `retries` | int | `0` | Retry attempts per failed script or model (a failed assertion is not retried) |
 | `retry_delay` | int | `5` | Seconds between retries |
 | `webhook_url` | string | `null` | URL for completion notifications |
+| `overlap` | string | `scheduler.overlap` | `skip` or `queue`: what a fire does while this stream is still running |
+| `catchup` | bool | `scheduler.catchup` | Run once after a restart if fires were missed |
+| `timezone` | string | `scheduler.timezone` | IANA zone the `schedule` is evaluated in, or `local` |
 
-Step actions: `ingest`, `seed`, `transform`, `export`. Each takes a list of targets or `[all]`.
+Step actions: `ingest`, `seed`, `transform`, `export`. Each takes a list of targets or `[all]` (script or seed names, or graph selectors for `transform`).
+
+How a stream runs, the same whether it is started with `havn stream`, by the scheduler or from the web UI:
+
+- Steps run in the order they are listed; a step starts when the one before it has finished.
+- Inside a `transform` step, models build in parallel as soon as their own upstream models are done. The scripts and seeds of one step run one at a time, in name order, and a failed ingest script stops the rest of its step.
+- Before the first model of a `transform` step is built, the models are validated (the same checks as `havn validate`, bind pass included). An error-severity finding stops the stream before anything is built.
+- A failed step (a script error, a model error, an error-severity `@assert`, a policy denial) stops the stream: the later steps are reported as skipped with the failure as the reason, and `havn stream` exits 1.
+- Every script and model run is logged in `_havn.run_log` under one pipeline run id, and the run appears in the Job Results list (`_havn.job_runs`).
+
+Unknown step actions are reported before anything runs.
+
+### Scheduler
+
+Settings for `havn schedule` and `havn serve --schedule`. All optional:
+
+```yaml
+scheduler:
+  max_concurrent: 1          # runs at a time (worker pool size)
+  overlap: skip              # skip | queue
+  catchup: false             # after a restart, run once for missed fires
+  timezone: Europe/Oslo      # IANA name; leave out for the server's local time
+  history_days: 30           # how long _havn.schedule_history keeps rows
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `max_concurrent` | int | `1` | How many scheduled runs may execute at the same time; a change takes effect without a restart. Raise it only for streams and jobs that write different tables; see [Scheduler](scheduler#concurrency). |
+| `overlap` | string | `skip` | When a stream or job is still running (or already waiting) at its next fire: `skip` records the fire as skipped, `queue` lets one run wait. |
+| `catchup` | bool | `false` | On start, fires that passed while the scheduler was down are always recorded as `missed`; with `true` the newest one also runs, once. |
+| `timezone` | string | server local time | Zone that cron expressions are evaluated in. An unknown name is an error (`havn validate` and scheduler start fail); it never falls back to local time. |
+| `history_days` | int | `30` | Retention of the schedule history table. |
+
+`overlap`, `catchup` and `timezone` are defaults: a stream (above) or a job
+file in `orchestration/` can set its own. `timezone: local` on a stream or
+job means the server's local time even when the project default is a zone.
 
 ### Lint
 

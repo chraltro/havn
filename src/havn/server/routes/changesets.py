@@ -57,11 +57,9 @@ def _store_errors(fn, *args, **kwargs):
 
 def _audit(request: Request, user: dict, action: str, resource: str, detail: str | None = None) -> None:
     try:
-        from havn.engine.audit import log_audit
-        from havn.server.deps import _get_shared_conn
+        from havn.server.deps import log_audit_shared
 
-        log_audit(
-            _get_shared_conn(),
+        log_audit_shared(
             user=user.get("username", "anonymous"),
             action=action,
             resource=resource,

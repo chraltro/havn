@@ -125,7 +125,7 @@ def session_query(
         raise HTTPException(404, "Session not found")
 
     # Validate SQL is safe read-only query
-    _validate_query_sql(req.sql)
+    _validate_query_sql(req.sql, conn, user)
 
     from havn.server.deps import _govern
 

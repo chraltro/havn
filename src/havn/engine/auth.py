@@ -85,66 +85,16 @@ def _verify_password(
 
 
 def ensure_auth_tables(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create auth tables if they don't exist."""
-    from havn.engine.database import _is_ducklake_connection, _strip_pk
+    """Make sure ``_havn.users`` and ``_havn.tokens`` exist with every column.
 
-    is_lake = _is_ducklake_connection(conn)
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute(_strip_pk("""
-        CREATE TABLE IF NOT EXISTS _havn.users (
-            username     VARCHAR PRIMARY KEY,
-            password_hash VARCHAR NOT NULL,
-            password_salt VARCHAR NOT NULL,
-            role         VARCHAR NOT NULL DEFAULT 'viewer',
-            display_name VARCHAR,
-            created_at   TIMESTAMP DEFAULT current_timestamp,
-            last_login   TIMESTAMP
-        )
-    """, is_lake))
-    conn.execute(_strip_pk("""
-        CREATE TABLE IF NOT EXISTS _havn.tokens (
-            token        VARCHAR PRIMARY KEY,
-            username     VARCHAR NOT NULL,
-            created_at   TIMESTAMP DEFAULT current_timestamp,
-            expires_at   TIMESTAMP
-        )
-    """, is_lake))
-    _ensure_users_columns(conn)
-
-
-# Columns added to ``_havn.users`` after it first shipped, with their types.
-#   attributes: admin-managed key/value pairs (``{"region": "north"}``) that row
-#     policies read through ``havn_attr('region')``.
-#   password_iterations: the PBKDF2 count the stored hash was made with; NULL
-#     means a legacy row hashed at ``LEGACY_PBKDF2_ITERATIONS``.
-_USERS_ADDED_COLUMNS = (("attributes", "JSON"), ("password_iterations", "INTEGER"))
-
-
-def _ensure_users_columns(conn: duckdb.DuckDBPyConnection) -> None:
-    """Add columns to a ``_havn.users`` table that predates them.
-
-    Checked before altering, because ensure_auth_tables runs on every token
-    validation and an ALTER is a catalog write even when the column is
-    already there.
+    The tables are defined in :mod:`havn.engine.migrations` (baseline). This
+    runs on every token validation, so it must stay cheap: once the process
+    has seen the warehouse file at the current version it is one
+    ``duckdb_databases()`` query (well under a millisecond to about one).
     """
-    try:
-        present = {
-            r[0]
-            for r in conn.execute(
-                "SELECT column_name FROM duckdb_columns() WHERE schema_name = '_havn' "
-                "AND table_name = 'users'"
-            ).fetchall()
-        }
-    except duckdb.Error:
-        logger.debug("Could not read _havn.users columns", exc_info=True)
-        return
-    for name, sql_type in _USERS_ADDED_COLUMNS:
-        if name in present:
-            continue
-        try:
-            conn.execute(f"ALTER TABLE _havn.users ADD COLUMN IF NOT EXISTS {name} {sql_type}")
-        except duckdb.Error:
-            logger.debug("Could not add _havn.users.%s", name, exc_info=True)
+    from havn.engine.database import ensure_meta_table
+
+    ensure_meta_table(conn)
 
 
 def _decode_attributes(raw) -> dict:

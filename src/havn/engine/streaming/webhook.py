@@ -47,19 +47,10 @@ class WebhookStaging:
 
     @staticmethod
     def ensure(conn: duckdb.DuckDBPyConnection) -> None:
-        """Create the staging table if it doesn't exist. Idempotent."""
-        conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-        conn.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {STAGING_TABLE} (
-                id VARCHAR DEFAULT gen_random_uuid()::VARCHAR,
-                source VARCHAR NOT NULL,
-                received_at TIMESTAMP DEFAULT current_timestamp,
-                payload JSON,
-                flushed BOOLEAN DEFAULT false
-            )
-            """
-        )
+        """Make sure the staging table exists (defined in :mod:`havn.engine.migrations`)."""
+        from havn.engine.database import ensure_meta_table
+
+        ensure_meta_table(conn)
 
     @staticmethod
     def backlog(conn: duckdb.DuckDBPyConnection) -> int:

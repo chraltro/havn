@@ -52,6 +52,7 @@ nav:
   - Telemetry: telemetry.md
   - Auth: auth.md
   - MCP Server: mcp.md
+  - Upgrading: upgrading.md
   - What havn Supports: limitations.md
   - CLI Reference: cli-reference.md
   - API Reference: api-reference.md

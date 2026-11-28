@@ -294,6 +294,7 @@ def _evaluate_assertion(
     # expression (`row_count > 0 AND amount >= 0`), so substitute the literal
     # count -- unless the model actually has a column by that name, which wins.
     sql_expr = expr
+    aggregate = _is_aggregate_expression(conn, expr)
     if re.search(r"\brow_count\b", expr):
         has_col = conn.execute(
             "SELECT COUNT(*) FROM information_schema.columns "
@@ -315,7 +316,9 @@ def _evaluate_assertion(
                 # as in the counting form.
                 probe = _row_count_conjuncts(expr)
                 check = None
-                if probe is not None:
+                # Aggregates are left to the paths below; deciding up front
+                # keeps a failing probe from aborting a caller's transaction.
+                if probe is not None and not _is_aggregate_expression(conn, probe):
                     probe_sql = re.sub(r"\brow_count\b", "0", probe)
                     try:
                         check = conn.execute(
@@ -323,7 +326,11 @@ def _evaluate_assertion(
                             f"LEFT JOIN (SELECT * FROM {table} LIMIT 0) AS __t ON true"
                         ).fetchone()
                     except duckdb.Error:
-                        check = None  # aggregates and the like: the paths below
+                        from havn.engine.utils import in_transaction
+
+                        if in_transaction(conn):
+                            raise
+                        check = None  # the paths below report it
                 if check is not None:
                     passed = check[0] is None or bool(check[0])
                     detail = (
@@ -332,6 +339,10 @@ def _evaluate_assertion(
                     )
                     return AssertionResult(expression=expr, passed=passed, detail=detail)
 
+    if aggregate:
+        result = _evaluate_aggregate(conn, table, sql_expr)
+        result.expression = expr
+        return result
     try:
         bad = conn.execute(
             f"SELECT COUNT(*) FROM {table} WHERE NOT ({sql_expr})"
@@ -347,13 +358,85 @@ def _evaluate_assertion(
             passed=False,
             detail=f"{bad_count:,} of {total:,} row(s) violate the expression",
         )
+    except duckdb.Error as first_error:
+        # An aggregate the classifier missed. Retrying is only possible
+        # outside a transaction: inside one, the error has already aborted it.
+        from havn.engine.utils import in_transaction
+
+        if in_transaction(conn):
+            raise
+        try:
+            result = _evaluate_aggregate(conn, table, sql_expr)
+        except duckdb.Error:
+            raise first_error from None
+        result.expression = expr
+        return result
+
+
+_FUNC_NAME_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+
+
+def _aggregate_function_names(conn: duckdb.DuckDBPyConnection) -> set[str]:
+    """Names DuckDB knows as aggregate functions on ``conn`` (extensions included)."""
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT lower(function_name) FROM duckdb_functions() "
+            "WHERE function_type = 'aggregate'"
+        ).fetchall()
     except duckdb.Error:
-        check = conn.execute(
-            f"SELECT CASE WHEN ({expr}) THEN true ELSE false END FROM {table}"
-        ).fetchone()
-        passed = bool(check[0]) if check else False
-        detail = "expression evaluated to true" if passed else "expression evaluated to false"
-        return AssertionResult(expression=expr, passed=passed, detail=detail)
+        return set()
+    return {r[0] for r in rows}
+
+
+def _is_aggregate_expression(conn: duckdb.DuckDBPyConnection, expr: str) -> bool:
+    """Whether ``expr`` aggregates over the table (``sum(x) > 0``) or tests each row.
+
+    Decided before anything runs. Trying the row-level form and falling back
+    on the error is not safe: inside a caller's transaction (a live refresh, a
+    deploy) DuckDB 2.0 aborts the transaction on that first error, and every
+    statement after it fails. A call counts as an aggregate when it is not
+    under a window (``OVER``) or inside a subquery of its own, and either
+    sqlglot knows it as one or DuckDB lists it as an aggregate function.
+    """
+    import sqlglot
+    from sqlglot import exp
+
+    try:
+        tree = sqlglot.parse_one(f"SELECT {expr}", read="duckdb")
+    except Exception:
+        tree = None
+    if tree is None:
+        names = {n.lower() for n in _FUNC_NAME_RE.findall(expr)}
+        return bool(names & _aggregate_function_names(conn))
+
+    agg_names: set[str] | None = None
+    for node in tree.find_all(exp.Func):
+        parent = node.parent
+        nested = False
+        while parent is not None and parent is not tree:
+            if isinstance(parent, (exp.Window, exp.Select, exp.Subquery)):
+                nested = True
+                break
+            parent = parent.parent
+        if nested:
+            continue
+        if isinstance(node, exp.AggFunc):
+            return True
+        if isinstance(node, exp.Anonymous):
+            if agg_names is None:
+                agg_names = _aggregate_function_names(conn)
+            if str(node.name).lower() in agg_names:
+                return True
+    return False
+
+
+def _evaluate_aggregate(conn: duckdb.DuckDBPyConnection, table: str, expr: str) -> AssertionResult:
+    check = conn.execute(
+        f"SELECT CASE WHEN ({expr}) THEN true ELSE false END FROM {table}"
+    ).fetchone()
+    passed = bool(check[0]) if check else False
+    detail = "expression evaluated to true" if passed else "expression evaluated to false"
+    return AssertionResult(expression=expr, passed=passed, detail=detail)
 
 
 def failing_rows_sql(model: SQLModel, expr: str) -> str | None:
@@ -488,26 +571,30 @@ def _save_profile(
     # chosen here and kept on the profile so anomaly detection can leave this
     # build's own row out of its baseline without relying on timestamps.
     import uuid
+
+    from havn.engine.database import meta_column_exists
+
+    # Checked rather than caught: the live runner builds inside a transaction,
+    # and a failed INSERT would abort it.
+    if not meta_column_exists(conn, "profile_history", "id"):
+        return  # profile_history table may not exist in older databases
     history_id = str(uuid.uuid4())
-    try:
-        conn.execute(
-            """
-            INSERT INTO _havn.profile_history
-                (id, model_path, row_count, column_count, null_percentages, distinct_counts, profiled_at)
-            VALUES (?, ?, ?, ?, ?::JSON, ?::JSON, current_timestamp)
-            """,
-            [
-                history_id,
-                model.full_name,
-                profile.row_count,
-                profile.column_count,
-                null_json,
-                distinct_json,
-            ],
-        )
-        profile.history_id = history_id
-    except Exception:
-        pass  # profile_history table may not exist in older databases
+    conn.execute(
+        """
+        INSERT INTO _havn.profile_history
+            (id, model_path, row_count, column_count, null_percentages, distinct_counts, profiled_at)
+        VALUES (?, ?, ?, ?, ?::JSON, ?::JSON, current_timestamp)
+        """,
+        [
+            history_id,
+            model.full_name,
+            profile.row_count,
+            profile.column_count,
+            null_json,
+            distinct_json,
+        ],
+    )
+    profile.history_id = history_id
 
 
 def _save_assertions(
@@ -516,8 +603,18 @@ def _save_assertions(
     results: list[AssertionResult],
 ) -> None:
     """Save assertion results to the metadata table."""
+    from havn.engine.database import meta_column_exists
+
+    if not results:
+        return
+    # Older databases may not have severity/owner columns yet (ALTER TABLE
+    # migration runs in ensure_meta_table). Checked up front: trying the new
+    # insert and falling back on the error aborts a caller's transaction.
+    full = meta_column_exists(conn, "assertion_results", "owner") and meta_column_exists(
+        conn, "assertion_results", "severity"
+    )
     for ar in results:
-        try:
+        if full:
             conn.execute(
                 """
                 INSERT INTO _havn.assertion_results
@@ -526,10 +623,7 @@ def _save_assertions(
                 """,
                 [model.full_name, ar.expression, ar.passed, ar.detail, ar.severity, ar.owner],
             )
-        except Exception:
-            # Older databases may not have severity/owner columns yet
-            # (ALTER TABLE migration runs in ensure_meta_table). Fall back
-            # to the legacy 5-column insert so we don't lose the result.
+        else:
             conn.execute(
                 """
                 INSERT INTO _havn.assertion_results
@@ -546,28 +640,31 @@ def _save_source_freshness(
     results: list[dict],
 ) -> None:
     """Persist source-freshness check results."""
+    from havn.engine.database import meta_column_exists
+
+    # Checked rather than caught, so a missing table cannot abort a caller's
+    # transaction.
+    if not results or not meta_column_exists(conn, "source_freshness", "error"):
+        return
     for r in results:
-        try:
-            conn.execute(
-                """
-                INSERT INTO _havn.source_freshness
-                    (model_path, source_table, on_column, max_age_seconds,
-                     age_seconds, is_stale, severity, error)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    model.full_name,
-                    r["table"],
-                    r.get("on"),
-                    int(r.get("max_age_seconds") or 0),
-                    r.get("age_seconds"),
-                    bool(r["is_stale"]),
-                    r.get("severity", "error"),
-                    r.get("error"),
-                ],
-            )
-        except Exception:
-            pass
+        conn.execute(
+            """
+            INSERT INTO _havn.source_freshness
+                (model_path, source_table, on_column, max_age_seconds,
+                 age_seconds, is_stale, severity, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                model.full_name,
+                r["table"],
+                r.get("on"),
+                int(r.get("max_age_seconds") or 0),
+                r.get("age_seconds"),
+                bool(r["is_stale"]),
+                r.get("severity", "error"),
+                r.get("error"),
+            ],
+        )
 
 
 def declared_checks(model: SQLModel) -> set[str]:

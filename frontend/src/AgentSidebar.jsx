@@ -265,7 +265,7 @@ function ToolEntry({ tool }) {
   );
 }
 
-export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFile, onSelectTable, pendingPrompt, onPromptConsumed, showConfirm }) {
+export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFile, onSelectTable, pendingPrompt, onPromptConsumed, onListeningChange, showConfirm }) {
   const [selectedAgent, setSelectedAgent] = useState("claude");
   const [availableAgents, setAvailableAgents] = useState(null);
   // Per-agent state: { messages, isConnected, isStreaming, permissionMode, selectedModel }
@@ -495,9 +495,9 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
   // Programmatic prompt hook: other panels (e.g. ReviewsPanel's AI Review
   // button) can dispatch a 'havn-agent-send' CustomEvent with { detail:
   // { prompt } } to submit a message through the current agent connection.
-  // Note: this listener only fires when the sidebar is mounted (isOpen=true).
-  // App.jsx also listens for the event and opens the sidebar + re-dispatches
-  // the event so the sidebar can pick it up after mounting.
+  // Note: this listener only fires while the sidebar is mounted. Before that
+  // App.jsx queues the prompt, opens the sidebar and passes it in as
+  // pendingPrompt (see onListeningChange below).
   useEffect(() => {
     const handler = (e) => {
       const prompt = e?.detail?.prompt;
@@ -522,6 +522,15 @@ export default function AgentSidebar({ isOpen, onToggle, onFileChanged, onOpenFi
     return () => window.removeEventListener("havn-agent-send", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAgent, cur.isStreaming]);
+
+  // Tell App the listener above is in place (declared after it, so it runs
+  // after it). Until then App queues a 'havn-agent-send' prompt itself, which
+  // covers an event sent while this chunk was still downloading.
+  useEffect(() => {
+    onListeningChange?.(true);
+    return () => onListeningChange?.(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Consume a pending prompt queued by App.jsx when the sidebar was closed.
   // The parent stores the prompt in a ref and passes it as a prop so we can

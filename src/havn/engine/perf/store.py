@@ -30,67 +30,10 @@ logger = logging.getLogger("havn.perf")
 
 
 def ensure_perf_tables(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create the advisor's tables if they are missing. Cheap to repeat."""
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS _havn.model_perf (
-            id                VARCHAR NOT NULL,
-            model_path        VARCHAR NOT NULL,
-            pipeline_run_id   VARCHAR,
-            status            VARCHAR NOT NULL,
-            materialized      VARCHAR,
-            strategy          VARCHAR,
-            full_refresh      BOOLEAN,
-            started_at        TIMESTAMP,
-            finished_at       TIMESTAMP,
-            duration_ms       BIGINT,
-            rows_before       BIGINT,
-            rows_out          BIGINT,
-            rows_produced     BIGINT,
-            rows_in           BIGINT,
-            rows_scanned      BIGINT,
-            peak_memory_bytes BIGINT,
-            spill_bytes       BIGINT,
-            bytes_read        BIGINT,
-            bytes_written     BIGINT,
-            cpu_time_ms       DOUBLE,
-            plan_captured     BOOLEAN DEFAULT FALSE,
-            plan              JSON,
-            top_operators     JSON,
-            error             VARCHAR
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS _havn.perf_regressions (
-            id               VARCHAR NOT NULL,
-            model_path       VARCHAR NOT NULL,
-            pipeline_run_id  VARCHAR,
-            perf_id          VARCHAR,
-            baseline_perf_id VARCHAR,
-            detected_at      TIMESTAMP,
-            metric           VARCHAR,
-            current_value    DOUBLE,
-            baseline_median  DOUBLE,
-            baseline_mad     DOUBLE,
-            robust_z         DOUBLE,
-            ratio            DOUBLE,
-            normalized       BOOLEAN,
-            message          VARCHAR,
-            plan_diff        JSON,
-            alerted          BOOLEAN DEFAULT FALSE
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS _havn.perf_advice_state (
-            model_path VARCHAR NOT NULL,
-            rule       VARCHAR NOT NULL,
-            status     VARCHAR NOT NULL,
-            until      TIMESTAMP,
-            note       VARCHAR,
-            updated_by VARCHAR,
-            updated_at TIMESTAMP
-        )
-    """)
+    """Kept for compatibility; the table is defined in :mod:`havn.engine.migrations`."""
+    from havn.engine.database import ensure_meta_table
+
+    ensure_meta_table(conn)
 
 
 def local_now() -> datetime:

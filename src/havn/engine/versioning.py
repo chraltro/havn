@@ -35,23 +35,8 @@ logger = logging.getLogger("havn.versioning")
 
 
 def _ensure_version_tables(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create the version history metadata table (no-op on read-only connections)."""
-    from havn.engine.database import _is_ducklake_connection, _strip_pk
-
-    is_lake = _is_ducklake_connection(conn)
-    try:
-        conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-        conn.execute(_strip_pk("""
-            CREATE TABLE IF NOT EXISTS _havn.version_history (
-                version_id      VARCHAR PRIMARY KEY,
-                created_at      TIMESTAMP DEFAULT current_timestamp,
-                description     VARCHAR DEFAULT '',
-                tables_snapshot JSON,
-                trigger         VARCHAR DEFAULT 'manual'
-            )
-        """, is_lake))
-    except Exception:
-        pass  # Read-only connection — table may already exist
+    """Kept for compatibility; the table is defined in :mod:`havn.engine.migrations`."""
+    ensure_meta_table(conn)
 
 
 def create_version(

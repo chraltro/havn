@@ -63,49 +63,10 @@ class ReportError(Exception):
 
 
 def ensure_report_tables(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create the report tables if they do not exist (lazy bootstrap)."""
-    from havn.engine.database import _is_ducklake_connection, _strip_pk
+    """Kept for compatibility; the table is defined in :mod:`havn.engine.migrations`."""
+    from havn.engine.database import ensure_meta_table
 
-    is_lake = _is_ducklake_connection(conn)
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute(_strip_pk("""
-        CREATE TABLE IF NOT EXISTS _havn.reports (
-            id                VARCHAR PRIMARY KEY,
-            name              VARCHAR NOT NULL,
-            dashboard_id      VARCHAR NOT NULL,
-            widget_id         VARCHAR,
-            schedule          VARCHAR,
-            enabled           BOOLEAN DEFAULT TRUE,
-            owner             VARCHAR NOT NULL,
-            recipients        JSON DEFAULT '{}',
-            formats           JSON DEFAULT '[]',
-            filters           JSON DEFAULT '{}',
-            parameters        JSON DEFAULT '{}',
-            condition         JSON,
-            subject           VARCHAR DEFAULT '',
-            message           VARCHAR DEFAULT '',
-            created_at        TIMESTAMP,
-            updated_at        TIMESTAMP,
-            last_run_at       TIMESTAMP,
-            last_status       VARCHAR,
-            last_error        VARCHAR,
-            last_fired_minute TIMESTAMP
-        )
-    """, is_lake))
-    conn.execute(_strip_pk("""
-        CREATE TABLE IF NOT EXISTS _havn.report_deliveries (
-            id            VARCHAR PRIMARY KEY,
-            report_id     VARCHAR NOT NULL,
-            trigger       VARCHAR NOT NULL,
-            status        VARCHAR NOT NULL,
-            condition_met BOOLEAN,
-            channels      JSON,
-            summary       JSON,
-            error         VARCHAR,
-            started_at    TIMESTAMP,
-            finished_at   TIMESTAMP
-        )
-    """, is_lake))
+    ensure_meta_table(conn)
 
 
 _REPORT_COLUMNS = (
@@ -964,13 +925,18 @@ def render_file(conn: duckdb.DuckDBPyConnection, report: dict, config, fmt: str)
     return html.encode("utf-8"), "text/html; charset=utf-8", f"{base}.html"
 
 
-def run_due_reports_for_project(project_dir: Path, now: _dt.datetime | None = None) -> list[dict]:
-    """Scheduler entry point: open the warehouse, run due reports, close it."""
+def run_due_reports_for_project(project_dir: Path, now: _dt.datetime | None = None, config=None) -> list[dict]:
+    """Scheduler entry point: open the warehouse, run due reports, close it.
+
+    ``config``: the project config the scheduler resolved (its host's
+    environment); None loads project.yml as is.
+    """
     from havn.config import load_project
     from havn.engine.backends import create_backend
     from havn.engine.database import open_warehouse
 
-    config = load_project(project_dir)
+    if config is None:
+        config = load_project(project_dir)
     if not create_backend(config.database, project_dir=project_dir).exists():
         return []
     conn = open_warehouse(config, project_dir)

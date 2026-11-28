@@ -162,3 +162,48 @@ governance:
   agent sidebar are refused to governed users; `/v1/sql` results are visible
   only to the user who ran them; diff samples, assertion details and
   collaboration history from other users are withheld from governed users.
+
+## Read-only queries: what the gate enforces and what it does not
+
+Every read surface (`/api/query` and its CSV export, EXPLAIN ANALYZE and
+profile, collaboration sessions, dashboards, published links, reports, the
+semantic layer, `havn ask`, the MCP server) runs SQL through one gate
+(`engine/sql_safety.py`, `engine/sql_functions.py`) and then executes it in a
+read-only guard (`governed_query.read_only_execution`):
+
+- one statement; no writes, also not inside a CTE or subquery;
+- table functions only from a fixed allowlist (`range`, `generate_series`,
+  `unnest`, `json_each`, the catalog listings) or project table macros whose
+  body passes the same check; scalar functions with side effects or file,
+  network or settings access are refused; every function DuckDB ships is
+  classified, and a test fails when a DuckDB release adds one;
+- a function or type the connection's catalog does not already have is
+  refused, so a query cannot make DuckDB download and load an extension;
+- settings (`duckdb_settings()`, `current_setting()`, `SHOW <setting>`),
+  attached database paths and the layout of `_havn` tables are admin-only;
+  DuckDB secrets and logs are never readable through a query;
+- the query runs in a `READ ONLY` transaction with Python replacement scans
+  off.
+
+What DuckDB cannot enforce per connection, and therefore relies on the gate
+alone: `enable_external_access`, `allowed_directories`, `lock_configuration`
+and `autoinstall_known_extensions` / `autoload_known_extensions` apply to the
+whole database instance, and the server's read cursors share that instance
+with pipeline runs and connectors that must read files and load extensions.
+havn leaves them at DuckDB's defaults.
+
+Known gaps operators should be aware of:
+
+- **`havn flight`** (the Arrow Flight SQL server) runs the SQL it receives
+  as-is, with no read-only gate and no governance, behind one shared token.
+  Treat that token as admin access to the warehouse, and do not expose the
+  Flight port to people who should only read.
+- **Python macros run when they are called.** A `@macro` or `@table_macro`
+  function is ordinary Python in the server process. Anyone who can run a
+  query, a viewer included, runs it by calling it, with whatever it does
+  (reading files, calling out over the network). The gate checks the SQL
+  body of a table macro, not the Python behind its UDF. Only put functions
+  in `macros/` that are safe for every reader to call.
+- `duckdb_columns()` and `information_schema` list the names and types of
+  `_havn` columns to every reader (no rows). The schema is the same in every
+  havn install.

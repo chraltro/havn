@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import "./monacoSetup";
 import MonacoEditor from "@monaco-editor/react";
 import { api } from "./api";
+import { ensureSqlLanguageSupport } from "./sqlLanguageSupport";
 
 /**
  * Notebook-style view for a model, SQL or Python.
@@ -17,6 +18,10 @@ export default function ModelNotebookView({ modelName, onClose, onSaved, showCon
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [showLineage, setShowLineage] = useState(false);
+
+  // SQL completion and hover come with the Editor chunk; fetch it if the
+  // idle preload has not yet.
+  useEffect(() => { ensureSqlLanguageSupport(); }, []);
 
   const load = useCallback(async () => {
     setLoading(true);

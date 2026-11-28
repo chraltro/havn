@@ -42,19 +42,35 @@ def serve(
     # Start optional background services
     threads = []
     if watch_files:
-        from havn.server.deps import reregister_macros_on_shared_conns
+        from havn.engine.write_queue import cursor_for
+        from havn.server.deps import _get_shared_conn, reregister_macros_on_shared_conns
 
         watcher = FileWatcher(
             project_dir,
             on_macro_change=reregister_macros_on_shared_conns,
+            # Rebuild on a cursor of the server's shared connection, never
+            # a second connection of its own in this process.
+            connect=lambda: cursor_for(_get_shared_conn()),
         )
         watcher.start()
         threads.append(watcher)
         console.print("[bold]File watcher enabled[/bold]")
 
+    scheduler = None
     if scheduler_on:
-        scheduler = SchedulerThread(project_dir)
-        scheduler.start()
+        from havn.engine.scheduler import SchedulerConfigError
+
+        from havn.server.deps import _get_config_cached
+
+        # The server's own resolution (--env, the environment switched to
+        # in the UI, the checked-out branch's warehouse), so scheduled runs
+        # build the warehouse the UI shows.
+        scheduler = SchedulerThread(project_dir, config_loader=_get_config_cached)
+        try:
+            scheduler.start()
+        except SchedulerConfigError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
         threads.append(scheduler)
         console.print("[bold]Scheduler enabled[/bold]")
 
@@ -123,6 +139,12 @@ def serve(
             serve_info.unlink()
         except Exception:
             pass
+        if scheduler is not None:
+            # No new runs; cancel queued ones and give running ones the
+            # scheduler's grace period. Its workers are daemon threads, so
+            # a run still going after that ends with the process.
+            scheduler.stop()
+            scheduler.join(timeout=scheduler.shutdown_grace + 5)
 
 
 # --- snapshot ---

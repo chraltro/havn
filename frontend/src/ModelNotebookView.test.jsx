@@ -30,7 +30,10 @@ vi.mock("./api", () => ({
   },
 }));
 
+vi.mock("./sqlLanguageSupport", () => ({ ensureSqlLanguageSupport: vi.fn() }));
+
 import { api } from "./api";
+import { ensureSqlLanguageSupport } from "./sqlLanguageSupport";
 import ModelNotebookView from "./ModelNotebookView";
 
 const PATH = "transform/silver/customers.sql";
@@ -62,6 +65,15 @@ beforeEach(() => {
   api.getModelNotebookView.mockResolvedValue(VIEW);
   api.saveFile.mockResolvedValue({});
   api.runTransform.mockResolvedValue({});
+});
+
+describe("SQL language support", () => {
+  it("fetches the SQL completion and hover providers when opened", async () => {
+    // Opened from the DAG or Tables before the idle preload fetched the
+    // Editor chunk, the model's SQL had no completion at all.
+    await renderView();
+    expect(ensureSqlLanguageSupport).toHaveBeenCalled();
+  });
 });
 
 describe("Ctrl/Cmd+S", () => {

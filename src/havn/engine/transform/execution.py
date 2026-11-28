@@ -488,6 +488,12 @@ def _batch_resume_start(
     window at all, and this filter also un-poisons a warehouse that already
     holds some.
     """
+    from havn.engine.database import meta_column_exists
+
+    # Looked up rather than caught, so a missing table cannot abort a
+    # transaction the caller holds.
+    if not meta_column_exists(conn, "batch_state"):
+        return begin
     try:
         rows = conn.execute(
             "SELECT window_start, window_end, status FROM _havn.batch_state "

@@ -277,6 +277,8 @@ def init(
         ".havn/branches/\n"
         # The `havn serve` lockfile: runtime state, never shared.
         ".havn/serve.json\n"
+        # The scheduler's one-per-warehouse lock files: runtime state.
+        ".havn/scheduler/\n"
         # Agent change sets and `havn ask --continue` history: local state.
         ".havn/changesets/\n.havn/ask/\n"
         # Installed package sources are reproducible from havn_packages.lock,
@@ -430,6 +432,15 @@ def validate(
         for step in stream.steps:
             if step.action not in ("ingest", "transform", "export", "seed"):
                 errors.append(f"Stream '{name}': unknown action '{step.action}'")
+
+    # 3b. Scheduler settings: scheduler:, per-stream and per-job overlap,
+    # catchup and timezone (an unknown time zone is an error, never a
+    # silent fallback to local time).
+    from havn.engine.scheduler import check_schedules
+
+    sched_errors, sched_warnings = check_schedules(project_dir, config)
+    errors.extend(sched_errors)
+    warnings.extend(sched_warnings)
 
     # 4. Discover and validate SQL models
     models = discover_all_models(project_dir, config)
@@ -650,6 +661,7 @@ def status(
                 except Exception:
                     pass
             console.print(f"[bold]warehouse:[/bold] {total_tables} tables, {total_rows:,} rows")
+            _print_metadata_schema(conn)
 
             # Last run (skip if meta tables don't exist yet)
             try:
@@ -685,6 +697,31 @@ def status(
             conn.close()
     else:
         console.print("[bold]warehouse:[/bold] [yellow]not created yet[/yellow]")
+
+
+def _print_metadata_schema(conn) -> None:
+    """One line on the ``_havn`` schema version, read without migrating."""
+    from havn.engine.migrations import migration_status
+
+    try:
+        st = migration_status(conn)
+    except Exception as e:
+        console.print(f"[bold]metadata schema:[/bold] [yellow]unreadable ({e})[/yellow]")
+        return
+    if st.newer_than_code:
+        console.print(
+            f"[bold]metadata schema:[/bold] [yellow]version {st.version}, newer than this havn "
+            f"(knows {st.latest}); the warehouse was last opened by a newer release[/yellow]"
+        )
+    elif st.pending:
+        names = ", ".join(f"{m.version} {m.name}" for m in st.pending)
+        console.print(
+            f"[bold]metadata schema:[/bold] version {st.version} of {st.latest}, "
+            f"[yellow]{len(st.pending)} pending ({names})[/yellow]; "
+            f"applied the next time havn opens the warehouse for writing"
+        )
+    else:
+        console.print(f"[bold]metadata schema:[/bold] version {st.version} (up to date)")
 
 
 @app.command()

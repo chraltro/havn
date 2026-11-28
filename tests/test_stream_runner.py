@@ -55,10 +55,27 @@ def _ticks(project: Path) -> int:
         conn.close()
 
 
+_SCHEDULERS: list[SchedulerThread] = []
+
+
+@pytest.fixture(autouse=True)
+def _stop_schedulers():
+    yield
+    while _SCHEDULERS:
+        _SCHEDULERS.pop().stop()
+
+
 def _scheduler(project: Path, started_at: dt.datetime) -> SchedulerThread:
     t = SchedulerThread(project)
     t._started_at = started_at
+    _SCHEDULERS.append(t)
     return t
+
+
+def _tick(t: SchedulerThread, now: dt.datetime) -> None:
+    """One poll, then wait for the runs it handed to the worker pool."""
+    t._tick(now=now)
+    assert t.wait_idle(timeout=120)
 
 
 # ---------------------------------------------------------------------------
@@ -66,53 +83,101 @@ def _scheduler(project: Path, started_at: dt.datetime) -> SchedulerThread:
 # ---------------------------------------------------------------------------
 
 
-def test_should_run_reports_a_fire_missed_during_a_long_run(tmp_path):
+class _Due:
+    """Drives ``SchedulerThread._evaluate`` (the loop's due-time logic) for one
+    cron schedule and records what it dispatches and what it records missed.
+
+    The dispatch and history writes are replaced by recorders, so only the
+    due-time decision is under test; the tick tests below run real streams.
+    """
+
+    def __init__(self, t: SchedulerThread, expr: str, name: str = "s"):
+        from havn.engine.scheduler import ScheduleSpec
+
+        self.t = t
+        self.spec = ScheduleSpec("stream", name, (expr,), "skip", False, None)
+        self.dispatched: list[dt.datetime] = []
+        self.missed: list[dt.datetime] = []
+        t._dispatch = lambda spec, expr, inst, now, trigger="schedule": self.dispatched.append(inst)
+        t._history.insert = lambda rows: self.missed.extend(r["scheduled_for"] for r in rows)
+
+    def __call__(self, now: dt.datetime) -> bool:
+        """One evaluation at ``now`` (naive = local); True when it dispatched."""
+        from havn.engine.schedule_time import as_instant
+
+        before = len(self.dispatched)
+        self.t._evaluate(self.spec, as_instant(now))
+        return len(self.dispatched) > before
+
+
+def _local(*args) -> dt.datetime:
+    from havn.engine.schedule_time import as_instant
+
+    return as_instant(dt.datetime(*args))
+
+
+def test_evaluate_runs_a_fire_missed_during_a_long_run_once(tmp_path):
     t = _scheduler(tmp_path, dt.datetime(2026, 4, 6, 6, 0, 0))
+    due = _Due(t, "5 6 * * *")
     # 06:00:10 poll: the 06:05 schedule is not due yet.
-    assert not t._should_run("s", "5 6 * * *", now=dt.datetime(2026, 4, 6, 6, 0, 10))
+    assert not due(dt.datetime(2026, 4, 6, 6, 0, 10))
     # The loop was busy until 06:21 (a long job): 06:05 is caught up, once.
-    assert t._should_run("s", "5 6 * * *", now=dt.datetime(2026, 4, 6, 6, 21, 0))
-    assert not t._should_run("s", "5 6 * * *", now=dt.datetime(2026, 4, 6, 6, 21, 30))
+    assert due(dt.datetime(2026, 4, 6, 6, 21, 0))
+    assert not due(dt.datetime(2026, 4, 6, 6, 21, 30))
+    assert due.dispatched == [_local(2026, 4, 6, 6, 5)]
+    assert due.missed == []
 
 
-def test_should_run_coalesces_several_missed_fires(tmp_path):
+def test_evaluate_runs_the_newest_of_several_missed_fires_and_records_the_rest(tmp_path):
+    from havn.engine.schedule_history import utc_naive
+
     t = _scheduler(tmp_path, dt.datetime(2026, 4, 6, 6, 0, 30))
-    assert t._should_run("s", "*/5 * * * *", now=dt.datetime(2026, 4, 6, 6, 0, 30))
-    # 06:05, 06:10, 06:15 and 06:20 all passed while busy: one fire.
-    assert t._should_run("s", "*/5 * * * *", now=dt.datetime(2026, 4, 6, 6, 22, 0))
-    assert not t._should_run("s", "*/5 * * * *", now=dt.datetime(2026, 4, 6, 6, 22, 30))
-    assert t._should_run("s", "*/5 * * * *", now=dt.datetime(2026, 4, 6, 6, 25, 1))
+    due = _Due(t, "*/5 * * * *")
+    assert due(dt.datetime(2026, 4, 6, 6, 0, 30))
+    # 06:05, 06:10, 06:15 and 06:20 all passed while busy: one run (06:20),
+    # the older three recorded as missed.
+    assert due(dt.datetime(2026, 4, 6, 6, 22, 0))
+    assert not due(dt.datetime(2026, 4, 6, 6, 22, 30))
+    assert due(dt.datetime(2026, 4, 6, 6, 25, 1))
+    assert due.dispatched == [_local(2026, 4, 6, 6, m) for m in (0, 20, 25)]
+    assert due.missed == [utc_naive(_local(2026, 4, 6, 6, m)) for m in (5, 10, 15)]
 
 
-def test_should_run_never_fires_for_time_before_start(tmp_path):
+def test_evaluate_never_fires_for_time_before_start(tmp_path):
     t = _scheduler(tmp_path, dt.datetime(2026, 4, 6, 7, 0, 10))
+    due = _Due(t, "0 6 * * *", "daily")
     for now in (dt.datetime(2026, 4, 6, 7, 0, 10), dt.datetime(2026, 4, 6, 7, 30)):
-        assert not t._should_run("daily", "0 6 * * *", now=now)
+        assert not due(now)
     # Until the next day's 06:00.
-    assert t._should_run("daily", "0 6 * * *", now=dt.datetime(2026, 4, 7, 6, 0, 20))
+    assert due(dt.datetime(2026, 4, 7, 6, 0, 20))
+    assert due.missed == []
 
 
-def test_should_run_counts_the_start_minute(tmp_path):
+def test_evaluate_counts_the_start_minute(tmp_path):
     # Started a few seconds into 06:00: the 06:00 schedule still runs, as it
     # did when the scheduler matched the current minute.
     t = _scheduler(tmp_path, dt.datetime(2026, 4, 6, 6, 0, 10))
-    assert t._should_run("daily", "0 6 * * *", now=dt.datetime(2026, 4, 6, 6, 0, 10))
-    assert not t._should_run("daily", "0 6 * * *", now=dt.datetime(2026, 4, 6, 6, 0, 40))
+    due = _Due(t, "0 6 * * *", "daily")
+    assert due(dt.datetime(2026, 4, 6, 6, 0, 10))
+    assert not due(dt.datetime(2026, 4, 6, 6, 0, 40))
 
 
 def test_schedule_added_later_does_not_replay_the_past(tmp_path):
     t = _scheduler(tmp_path, dt.datetime(2026, 4, 6, 5, 0))
     t._cron_clock_settled = True  # the first poll has happened
+    due = _Due(t, "0 6 * * *", "new")
     # First seen at 10:00; its 06:00 fire is before it existed.
-    assert not t._should_run("new", "0 6 * * *", now=dt.datetime(2026, 4, 6, 10, 0, 15))
+    assert not due(dt.datetime(2026, 4, 6, 10, 0, 15))
+    assert due.missed == []
 
 
-def test_should_run_does_not_refire_when_clock_steps_back(tmp_path):
+def test_evaluate_does_not_refire_when_clock_steps_back(tmp_path):
     t = _scheduler(tmp_path, dt.datetime(2026, 10, 25, 2, 0))
-    assert t._should_run("s", "30 2 * * *", now=dt.datetime(2026, 10, 25, 2, 30, 5))
-    # DST ends: the wall clock goes back to 02:00 and passes 02:30 again.
-    assert not t._should_run("s", "30 2 * * *", now=dt.datetime(2026, 10, 25, 2, 0, 5))
-    assert not t._should_run("s", "30 2 * * *", now=dt.datetime(2026, 10, 25, 2, 31))
+    due = _Due(t, "30 2 * * *")
+    assert due(dt.datetime(2026, 10, 25, 2, 30, 5))
+    # The clock goes back to 02:00 and passes 02:30 again.
+    assert not due(dt.datetime(2026, 10, 25, 2, 0, 5))
+    assert not due(dt.datetime(2026, 10, 25, 2, 31))
 
 
 def test_tick_runs_a_stream_missed_during_a_long_run_exactly_once(tmp_path):
@@ -129,13 +194,13 @@ def test_tick_runs_a_stream_missed_during_a_long_run_exactly_once(tmp_path):
               - ingest: [tick]
     """)
     t = _scheduler(project, dt.datetime(2026, 4, 6, 6, 0, 0))
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 0, 1))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 0, 1))
     assert _ticks(project) == 0
     # The next poll comes 21 minutes later, after a long 06:00 run.
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 21, 0))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 21, 0))
     assert _ticks(project) == 1
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 21, 30))
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 22, 0))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 21, 30))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 22, 0))
     assert _ticks(project) == 1
 
 
@@ -153,8 +218,8 @@ def test_tick_does_not_catch_up_before_thread_start(tmp_path):
               - ingest: [tick]
     """)
     t = _scheduler(project, dt.datetime(2026, 4, 6, 9, 0, 0))
-    t._tick(now=dt.datetime(2026, 4, 6, 9, 0, 1))
-    t._tick(now=dt.datetime(2026, 4, 6, 9, 0, 31))
+    _tick(t, dt.datetime(2026, 4, 6, 9, 0, 1))
+    _tick(t, dt.datetime(2026, 4, 6, 9, 0, 31))
     assert _ticks(project) == 0
 
 
@@ -172,10 +237,10 @@ def test_job_with_two_schedules_due_in_one_window_fires_once(tmp_path):
         retry: 0
     """), encoding="utf-8")
     t = _scheduler(project, dt.datetime(2026, 4, 6, 6, 0, 0))
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 0, 1))
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 30, 0))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 0, 1))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 30, 0))
     assert _ticks(project) == 1
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 30, 30))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 30, 30))
     assert _ticks(project) == 1
 
 
@@ -242,7 +307,7 @@ def test_scheduler_loop_prints_failed_not_completed(tmp_path, capsys):
     original = sched.console.print
     sched.console.print = lambda *a, **k: printed.append(" ".join(str(x) for x in a))
     try:
-        t._tick(now=dt.datetime(2026, 4, 6, 6, 0, 5))
+        _tick(t, dt.datetime(2026, 4, 6, 6, 0, 5))
     finally:
         sched.console.print = original
     assert any("Stream 'nightly' failed" in line for line in printed), printed
@@ -312,7 +377,7 @@ def test_scheduled_stream_runs_seed_step(tmp_path):
     """)
     (project / "seeds" / "colours.csv").write_text("id,name\n1,red\n2,blue\n", encoding="utf-8")
     t = _scheduler(project, dt.datetime(2026, 4, 6, 6, 0, 0))
-    t._tick(now=dt.datetime(2026, 4, 6, 6, 0, 5))
+    _tick(t, dt.datetime(2026, 4, 6, 6, 0, 5))
     assert _query(project, "SELECT COUNT(*) FROM seeds.colours") == [(2,)]
 
 

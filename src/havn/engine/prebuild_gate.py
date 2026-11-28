@@ -1,14 +1,10 @@
-"""The pre-build validation gate shared by the server's pipeline runners.
+"""The pre-build validation gate of the pipeline engine.
 
-Both pipeline entry points ran ``validate_models`` up front and skipped it
-entirely when the run included ingest steps, on the grounds that landing
-tables do not exist yet on a fresh database. That reasoning holds for the
-name-level checks, but it also meant the most common kind of run -- ingest
-then transform -- got no gate at all.
-
-The fix is to run the same gate, just later: once ingest has produced the
-landing tables and immediately before the first transform. This module holds
-the gate itself so the two call sites stay a couple of lines each.
+Runs ``validate_models`` (name-level checks and the bind pass) over the
+models a run is about to build. With ingest or seeds in the run the landing
+tables may not exist yet, so ``engine.pipeline_engine`` runs the gate once
+the loaders are done and immediately before the first transform, rather than
+skipping it.
 """
 
 from __future__ import annotations
@@ -19,7 +15,7 @@ from typing import Callable
 
 import duckdb
 
-logger = logging.getLogger("havn.server.pipeline")
+logger = logging.getLogger("havn.pipeline")
 
 
 def run_prebuild_gate(
@@ -33,7 +29,7 @@ def run_prebuild_gate(
     """Validate ``models`` and emit every finding. True when the run may go on.
 
     Args:
-        conn: The server's write connection. A cursor is taken off it, and
+        conn: The run's warehouse connection. A cursor is taken off it, and
             the bind pass attaches its own throwaway catalog to it.
         models: The transform models this run would build.
         emit: The pipeline's event emitter.

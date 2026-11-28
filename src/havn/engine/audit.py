@@ -48,30 +48,17 @@ VALID_ACTIONS = frozenset({
 
 
 def ensure_audit_table(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create the audit_log table if it doesn't exist."""
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS _havn.audit_log (
-            id INTEGER PRIMARY KEY DEFAULT nextval('_havn.audit_log_seq'),
-            "user" VARCHAR NOT NULL,
-            action VARCHAR NOT NULL,
-            resource VARCHAR,
-            detail VARCHAR,
-            ip_address VARCHAR,
-            "timestamp" TIMESTAMP DEFAULT current_timestamp
-        )
-    """)
+    """Kept for compatibility; the table is defined in :mod:`havn.engine.migrations`."""
+    from havn.engine.database import ensure_meta_table
+
+    ensure_meta_table(conn)
 
 
 def _ensure_sequence(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create the audit_log sequence if it doesn't exist."""
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    try:
-        conn.execute("CREATE SEQUENCE IF NOT EXISTS _havn.audit_log_seq START 1")
-    except duckdb.CatalogException:
-        pass
-    except Exception as e:
-        logger.debug("CREATE SEQUENCE audit_log_seq failed: %s", e)
+    """Kept for compatibility; the sequence is created by :mod:`havn.engine.migrations`."""
+    from havn.engine.database import ensure_meta_table
+
+    ensure_meta_table(conn)
 
 
 def log_audit(

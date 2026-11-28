@@ -264,6 +264,7 @@ def _run_supervised(
     stop_event: threading.Event | None = None,
     idle_timeout: float | None = None,
     track_child_threads: bool = False,
+    cancel: threading.Event | None = None,
 ) -> dict:
     """Run ``target`` in a thread under the hard and idle timeouts.
 
@@ -290,8 +291,15 @@ def _run_supervised(
     (a notebook checks it between cells: its code cells run in their own
     sandbox thread, which an exception raised here cannot reach).
 
+    ``cancel`` (the pipeline run's cancel event) stops the script the same
+    way a timeout does: DuckDB is interrupted (the statement in flight rolls
+    back) and a stop exception is raised in the script thread once. Unlike a
+    timeout, a cancelled script that does not stop within the grace period
+    is waited for, up to the hard timeout, rather than orphaned: the caller
+    must not report the run over while the script still writes.
+
     Returns ``{"value", "error", "reason", "orphaned", "elapsed"}``, where
-    ``reason`` is None, "timeout" or "idle".
+    ``reason`` is None, "timeout", "idle" or "cancelled".
     """
     box: dict = {}
 
@@ -317,10 +325,15 @@ def _run_supervised(
     last_activity = start
     last_token = activity()
     reason: str | None = None
+    # With a cancel event, wake often enough to answer it promptly.
+    poll = SCRIPT_POLL_INTERVAL_SECONDS if cancel is None else min(SCRIPT_POLL_INTERVAL_SECONDS, 0.2)
     while thread.is_alive():
         remaining = timeout - (time.perf_counter() - start)
-        thread.join(timeout=max(0.0, min(SCRIPT_POLL_INTERVAL_SECONDS, remaining)))
+        thread.join(timeout=max(0.0, min(poll, remaining)))
         if not thread.is_alive():
+            break
+        if cancel is not None and cancel.is_set():
+            reason = "cancelled"
             break
         now = time.perf_counter()
         if now - start >= timeout:
@@ -349,6 +362,19 @@ def _run_supervised(
             and t.name.endswith("(_worker)")
         ] if track_child_threads else []
         orphaned = not _stop_threads(conn, thread, extra, name)
+        if orphaned and reason == "cancelled":
+            # Wait it out (the run stays "cancelling"); only the hard
+            # timeout orphans a cancelled script.
+            while time.perf_counter() - start < timeout:
+                alive = [t for t in [thread, *extra] if t.is_alive()]
+                if not alive:
+                    break
+                try:
+                    conn.interrupt()
+                except Exception:
+                    pass
+                alive[0].join(timeout=min(0.5, max(0.0, timeout - (time.perf_counter() - start))))
+            orphaned = any(t.is_alive() for t in [thread, *extra])
         if orphaned:
             # The thread still holds the connection: later scripts on it
             # are refused; see orphaned_script().
@@ -656,6 +682,7 @@ def run_script(
     pipeline_run_id: str | None = None,
     force: bool = False,
     run_as=None,
+    cancel: threading.Event | None = None,
 ) -> dict:
     """Run a single script (.py or .dpnb).
 
@@ -691,6 +718,9 @@ def run_script(
             them (see ``havn.engine.governance``). None -- CLI runs,
             scheduled jobs, the file watcher -- runs in-process as the
             system, which owns the warehouse file.
+        cancel: Set to stop the script (a cancelled pipeline run). The
+            result's status is then ``"cancelled"``; see ``_run_supervised``.
+            A governed child process is not stopped by it and runs to its end.
 
     Returns:
         Dict with keys: script, status, duration_ms, log_output, error
@@ -730,6 +760,7 @@ def run_script(
             pipeline_run_id=pipeline_run_id,
             force=force,
             run_as=run_as,
+            cancel=cancel,
         )
 
 
@@ -759,6 +790,7 @@ def _run_script_body(
     pipeline_run_id: str | None = None,
     force: bool = False,
     run_as=None,
+    cancel: threading.Event | None = None,
 ) -> dict:
     """Inner implementation — unchanged script-execution logic."""
     ensure_meta_table(conn)
@@ -854,8 +886,11 @@ def _run_script_body(
             stop_event=stop,
             idle_timeout=idle_timeout,
             track_child_threads=True,
+            cancel=cancel,
         )
         duration_ms = int(sup["elapsed"] * 1000)
+        if sup["reason"] == "cancelled":
+            return _cancelled_result(conn, script_path, script_type, sup, "", pipeline_run_id)
         if sup["reason"] is not None:
             error_msg = _timeout_message(sup, timeout, notebook=True)
             logger.warning("Script %s: %s", script_path.name, error_msg)
@@ -932,7 +967,12 @@ def _run_script_body(
         timeout=timeout,
         activity=lambda: (len(stdout_capture.getvalue()), len(stderr_capture.getvalue())),
         idle_timeout=idle_timeout,
+        cancel=cancel,
     )
+
+    if sup["reason"] == "cancelled":
+        return _cancelled_result(conn, script_path, script_type, sup,
+                                 stdout_capture.getvalue() + stderr_capture.getvalue(), pipeline_run_id)
 
     if sup["reason"] is not None:
         duration_ms = int(sup["elapsed"] * 1000)
@@ -983,6 +1023,30 @@ def _run_script_body(
     if use_circuit_breaker:
         _get_circuit_breaker()._record_success(script_path.name)
     return {"script": script_path.name, "status": "success", "duration_ms": duration_ms, "log_output": log_output, "error": None, "rows_affected": rows_affected}
+
+
+def _cancelled_result(conn, script_path: Path, script_type: str, sup: dict, log_output: str,
+                      pipeline_run_id: str | None) -> dict:
+    """The result (and run_log row) of a script stopped by a cancelled run.
+
+    Not a failure: the circuit breaker is not told, and the run reports it
+    as cancelled rather than failed.
+    """
+    duration_ms = int(sup["elapsed"] * 1000)
+    msg = "Cancelled while running"
+    if sup["orphaned"]:
+        msg += "; it did not stop and is still running"
+    log_conn = conn.cursor() if sup["orphaned"] else conn
+    try:
+        log_run(log_conn, script_type, script_path.name, "cancelled", duration_ms, error=msg,
+                log_output=log_output or None, pipeline_run_id=pipeline_run_id)
+    except Exception:
+        logger.debug("Could not log the cancelled script %s", script_path.name, exc_info=True)
+    console.print(f"  [yellow]cancelled[/yellow] [bold]{script_path.name}[/bold]")
+    return {
+        "script": script_path.name, "status": "cancelled", "duration_ms": duration_ms,
+        "log_output": log_output, "error": msg, "orphaned": sup["orphaned"],
+    }
 
 
 def _run_governed_py(

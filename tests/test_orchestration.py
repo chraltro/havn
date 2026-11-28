@@ -956,38 +956,42 @@ def test_api_create_job_rejects_traversal(client):
 # --- Scheduler integration ---
 
 
-def test_scheduler_should_run_handles_job_prefix(project):
-    """SchedulerThread._should_run should accept `job:` prefixed keys."""
-    from havn.engine.scheduler import SchedulerThread
+def test_scheduler_runs_a_job_once_per_fire(project):
+    """A job's cron schedule is dispatched once per fire, under its own key."""
+    import datetime
+
+    from havn.engine.schedule_time import as_instant
+    from havn.engine.scheduler import ScheduleSpec, SchedulerThread
 
     thread = SchedulerThread(project)
-    # `* * * * *` matches every minute, so the first call should return True
-    # (no prior run recorded)
-    assert thread._should_run("job:test-job", "* * * * *") is True
-    # Record a run and verify the second call returns False for the same minute
-    import datetime
-    mk = datetime.datetime.now().replace(second=0, microsecond=0).timestamp()
-    thread._last_run["job:test-job"] = mk
-    assert thread._should_run("job:test-job", "* * * * *") is False
+    dispatched = []
+    thread._dispatch = lambda spec, expr, inst, now, **k: dispatched.append((spec.key, inst))
+    spec = ScheduleSpec("job", "test-job", ("* * * * *",), "skip", False, None)
+    t0 = as_instant(datetime.datetime(2026, 4, 6, 9, 0, 5))
+    thread._started_at = t0
+    thread._evaluate(spec, t0)
+    thread._evaluate(spec, t0 + datetime.timedelta(seconds=30))   # same minute
+    thread._evaluate(spec, t0 + datetime.timedelta(seconds=60))   # next minute
+    assert dispatched == [
+        ("job:test-job", t0.replace(second=0)),
+        ("job:test-job", t0.replace(second=0) + datetime.timedelta(minutes=1)),
+    ]
 
 
 def test_scheduler_cron_zero_step_is_safe(project):
-    """Scheduler cron matcher must not raise on `*/0`."""
-    from havn.engine.scheduler import SchedulerThread
+    """The loop must not raise or dispatch on `*/0`."""
+    import datetime
+
+    from havn.engine.schedule_time import as_instant
+    from havn.engine.scheduler import ScheduleSpec, SchedulerThread
 
     thread = SchedulerThread(project)
-    # Should return False, not raise
-    assert thread._should_run("job:x", "*/0 * * * *") is False
-
-
-def test_scheduler_weekday_posix_convention(project):
-    """Scheduler should use POSIX weekday: 0=Sunday, 1=Monday."""
-    # We can't easily mock datetime.now() without another dep, but we can at
-    # least verify that `_should_run` doesn't crash with weekday patterns and
-    # that the matcher function in orchestration.py (which shares conventions)
-    # agrees with what the scheduler does for the same time. This is covered
-    # by test_cron_weekday_is_posix above.
-    pass
+    dispatched = []
+    thread._dispatch = lambda *a, **k: dispatched.append(a)
+    now = as_instant(datetime.datetime(2026, 4, 6, 9, 0, 5))
+    thread._started_at = now
+    thread._evaluate(ScheduleSpec("job", "x", ("*/0 * * * *",), "skip", False, None), now)
+    assert dispatched == []
 
 
 # --- Cron validation / next run (shared engine.cron parser) ---

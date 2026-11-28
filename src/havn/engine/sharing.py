@@ -48,30 +48,10 @@ class ShareError(Exception):
 
 
 def ensure_sharing_tables(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create ``_havn.dashboard_shares`` if it does not exist (lazy bootstrap)."""
-    from havn.engine.database import _is_ducklake_connection, _strip_pk
+    """Kept for compatibility; the table is defined in :mod:`havn.engine.migrations`."""
+    from havn.engine.database import ensure_meta_table
 
-    is_lake = _is_ducklake_connection(conn)
-    conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-    conn.execute(_strip_pk("""
-        CREATE TABLE IF NOT EXISTS _havn.dashboard_shares (
-            id             VARCHAR PRIMARY KEY,
-            dashboard_id   VARCHAR NOT NULL,
-            mode           VARCHAR NOT NULL,
-            token_hash     VARCHAR,
-            token_hint     VARCHAR,
-            view_as_user   VARCHAR,
-            view_as_role   VARCHAR,
-            label          VARCHAR DEFAULT '',
-            expires_at     TIMESTAMP,
-            revoked_at     TIMESTAMP,
-            revoked_by     VARCHAR,
-            created_by     VARCHAR NOT NULL,
-            created_at     TIMESTAMP DEFAULT current_timestamp,
-            last_viewed_at TIMESTAMP,
-            view_count     BIGINT DEFAULT 0
-        )
-    """, is_lake))
+    ensure_meta_table(conn)
 
 
 def hash_token(token: str) -> str:

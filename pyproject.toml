@@ -24,29 +24,37 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    # DuckLake 1.0 requires DuckDB 1.5.2+. Capped below 2: DuckDB 2.0 changed
-    # the Python API havn is built on (relations no longer hold a result, a
-    # busy connection refuses a second call instead of waiting), and under it
-    # macros fail to register and live models, Python models and performance
-    # capture break. pip picks 2.x on Python 3.11+ without this cap.
-    "duckdb>=1.5.2,<2",
-    "numpy>=1.24",
-    "typer>=0.15.0",
-    "pyyaml>=6.0",
+    # DuckLake 1.0 requires DuckDB 1.5.2+. Tested on 1.5 and 2.0. DuckDB 2.0
+    # needs Python 3.11+, so Python 3.10 installs stay on 1.5. Capped below 3:
+    # each DuckDB major has changed the Python API havn is built on.
+    "duckdb>=1.5.2,<3",
+    # Upper bounds sit on the next major version of what havn is tested on.
+    # 0.x packages are capped below 1.0.
+    "numpy>=1.24,<3",
+    "typer>=0.15.0,<1",
+    "pyyaml>=6.0,<7",
     "ruamel.yaml>=0.18,<0.19",  # yamlio.py moves comment tokens through ruamel internals; tested on 0.18
-    "rich>=13.0",
-    "sqlfluff>=3.0",
-    "watchdog>=4.0",
-    "fastapi>=0.115.0",
-    "python-multipart>=0.0.9",
-    "uvicorn[standard]>=0.34.0",
+    "rich>=13.0,<16",
+    "sqlfluff>=3.0,<5",
+    "watchdog>=4.0,<8",
+    "fastapi>=0.115.0,<1",
+    "python-multipart>=0.0.9,<1",
+    "uvicorn[standard]>=0.34.0,<1",
     "sqlglot>=26.17,<30",
-    "prometheus_client>=0.20",
-    "pyarrow>=18",
-    # DuckDB imports pytz to turn TIMESTAMP WITH TIME ZONE values (anything
-    # built from current_timestamp or now()) into Python objects. Without it
-    # every query returning such a column fails, in the UI and the CLI.
+    "prometheus_client>=0.20,<1",
+    "pyarrow>=18,<27",
+    # Time zone data. DuckDB 1.x imports pytz to turn TIMESTAMP WITH TIME
+    # ZONE values (anything built from current_timestamp or now()) into
+    # Python objects; DuckDB 2.0 uses the standard library's zoneinfo, which
+    # on Windows has no time zone database unless tzdata is installed.
+    # Without them every query returning such a column fails, in the UI and
+    # the CLI. Both are versioned by year of the time zone data they carry,
+    # so they have no upper bound: a cap would block next year's tz rules.
     "pytz>=2023.3",
+    # zoneinfo reads the operating system's time zone database, which
+    # Windows and slim container images do not have; scheduler.timezone
+    # (Europe/Oslo, ...) needs it. zoneinfo falls back to this package.
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]

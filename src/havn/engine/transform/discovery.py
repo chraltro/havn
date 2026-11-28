@@ -778,6 +778,10 @@ def _inputs_newer(conn: duckdb.DuckDBPyConnection, model: SQLModel) -> bool:
     """
     if model.materialized != "table" or not model.depends_on:
         return False
+    from havn.engine.database import meta_column_exists
+
+    if not (meta_column_exists(conn, "model_state") and meta_column_exists(conn, "run_log")):
+        return False
     deps = sorted(model.depends_on)
     try:
         row = conn.execute(
@@ -856,30 +860,34 @@ def _clear_block(conn: duckdb.DuckDBPyConnection, model: SQLModel) -> None:
     runner and the stream pipeline build without (or without acting on)
     assertions, and clearing on build let a scheduled job reopen the gate.
     """
-    try:
+    # Checked rather than caught: this runs inside the live runner's
+    # transaction, which a failed statement would abort.
+    from havn.engine.database import meta_column_exists
+
+    if meta_column_exists(conn, "model_blocked"):
         conn.execute("DELETE FROM _havn.model_blocked WHERE model_path = ?", [model.full_name])
-    except duckdb.CatalogException:
-        pass
 
 
 def blocked_models(conn: duckdb.DuckDBPyConnection) -> set[str]:
     """Every model whose last build an error assertion rejected."""
-    try:
-        return {r[0] for r in conn.execute("SELECT model_path FROM _havn.model_blocked").fetchall()}
-    except duckdb.CatalogException:
+    from havn.engine.database import meta_column_exists
+
+    if not meta_column_exists(conn, "model_blocked"):
         return set()
+    return {r[0] for r in conn.execute("SELECT model_path FROM _havn.model_blocked").fetchall()}
 
 
 def _is_blocked(conn: duckdb.DuckDBPyConnection, model: SQLModel) -> bool:
-    try:
-        row = conn.execute(
-            "SELECT 1 FROM _havn.model_blocked WHERE model_path = ? LIMIT 1",
-            [model.full_name],
-        ).fetchone()
-    except duckdb.CatalogException:
+    from havn.engine.database import meta_column_exists
+
+    if not meta_column_exists(conn, "model_blocked"):
         # A warehouse bootstrapped before the table existed has nothing blocked.
         return False
-    return row is not None
+    row = conn.execute(
+        "SELECT 1 FROM _havn.model_blocked WHERE model_path = ? LIMIT 1",
+        [model.full_name],
+    ).fetchall()
+    return bool(row)
 
 
 def _update_state(

@@ -21,7 +21,7 @@ from pathlib import Path
 import duckdb
 
 from havn.config import DatabaseConfig
-from havn.engine.backends.base import BackendStatus
+from havn.engine.backends.base import BackendStatus, migrate_or_close
 
 logger = logging.getLogger("havn.backends.ducklake")
 
@@ -167,6 +167,8 @@ class DuckLakeBackend:
         from havn.engine.write_queue import tag_default_catalog
         tag_default_catalog(conn, "warehouse")
         self._apply_settings(conn)
+        if not read_only:
+            migrate_or_close(conn)
         if self._project_dir is not None:
             from havn.engine.macros import register_macros
             register_macros(conn, self._project_dir)
@@ -223,3 +225,4 @@ class DuckLakeBackend:
 
     def close(self) -> None:
         pass
+

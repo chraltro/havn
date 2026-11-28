@@ -27,6 +27,8 @@ from typing import Any, Iterator
 
 import duckdb
 
+from havn.engine.profile_json import PER_QUERY_PEAKS, normalize_profile
+
 logger = logging.getLogger("havn.perf")
 
 # Long values in a plan's extra_info (a projection list of 300 columns, a
@@ -60,32 +62,44 @@ class BuildCapture:
     def absorb(self, profile: dict, previous_marks: tuple[int, int] | None = None) -> None:
         """Fold one statement's profile into the build's totals.
 
-        DuckDB's ``system_peak_buffer_memory`` and ``system_peak_temp_dir_size``
-        are high-water marks for the connection that never go down, not
-        per-query figures. They only describe this statement when it raised
-        them (``previous_marks`` are the marks seen before it; None when this
-        connection has not been profiled yet). Otherwise memory falls back to
-        the statement's own ``total_memory_allocated`` and spill to zero.
+        DuckDB 2.0 reports this statement's own peak buffer memory and the
+        bytes it spilled (the profile carries ``PER_QUERY_PEAKS``); both are
+        used as they are.
+
+        DuckDB 1.x's ``system_peak_buffer_memory`` and
+        ``system_peak_temp_dir_size`` are high-water marks for the connection
+        that never go down, not per-query figures. They only describe this
+        statement when it raised them (``previous_marks`` are the marks seen
+        before it; None when this connection has not been profiled yet).
+        Otherwise memory falls back to the statement's own
+        ``total_memory_allocated`` and spill to zero.
         """
         self.statements += 1
         latency = _num(profile.get("latency"))
         self.latency_s += latency
         self.cpu_time_s += _num(profile.get("cpu_time"))
         self.rows_scanned += int(_num(profile.get("cumulative_rows_scanned")))
-        prev_mem, prev_spill = previous_marks or (-1, 0)
-        # Memory peaks do not add up, so a raised mark is the best figure
-        # there is (an upper bound when an earlier statement got close).
-        peak = int(_num(profile.get("total_memory_allocated")))
         system_peak = int(_num(profile.get("system_peak_buffer_memory")))
-        if system_peak > prev_mem:
-            peak = max(peak, system_peak)
-        self.peak_memory_bytes = max(self.peak_memory_bytes, peak)
-        # Spill is charged as the growth of the temp-directory mark: a lower
-        # bound, and zero when this statement spilled less than an earlier
-        # one on the same connection did.
-        spill = int(_num(profile.get("system_peak_temp_dir_size")))
-        if spill > prev_spill:
-            self.spill_bytes += spill - max(prev_spill, 0)
+        if profile.get(PER_QUERY_PEAKS):
+            # total_memory_allocated counts every allocation over the query
+            # (1.2 GB for a 200 MB peak), so it is only a fallback.
+            peak = system_peak or int(_num(profile.get("total_memory_allocated")))
+            self.peak_memory_bytes = max(self.peak_memory_bytes, peak)
+            self.spill_bytes += int(_num(profile.get("total_bytes_spilled")))
+        else:
+            prev_mem, prev_spill = previous_marks or (-1, 0)
+            # Memory peaks do not add up, so a raised mark is the best figure
+            # there is (an upper bound when an earlier statement got close).
+            peak = int(_num(profile.get("total_memory_allocated")))
+            if system_peak > prev_mem:
+                peak = max(peak, system_peak)
+            self.peak_memory_bytes = max(self.peak_memory_bytes, peak)
+            # Spill is charged as the growth of the temp-directory mark: a
+            # lower bound, and zero when this statement spilled less than an
+            # earlier one on the same connection did.
+            spill = int(_num(profile.get("system_peak_temp_dir_size")))
+            if spill > prev_spill:
+                self.spill_bytes += spill - max(prev_spill, 0)
         self.bytes_read += int(_num(profile.get("total_bytes_read")))
         self.bytes_written += int(_num(profile.get("total_bytes_written")))
         plan = compact_plan(profile)
@@ -157,13 +171,14 @@ def run_build_statement(
             result = conn.execute(sql)
             try:
                 raw = conn.get_profiling_information(format="json")
-                profile = json.loads(raw) if raw else None
+                profile = normalize_profile(json.loads(raw)) if raw else None
                 # Something outside the build may still use the connection
                 # between the two calls; a profile of another query is dropped.
                 if profile and _same_query(profile.get("query_name"), sql):
                     key = id(conn)
                     capture.absorb(profile, _marks.get(key))
-                    _remember_marks(key, profile)
+                    if not profile.get(PER_QUERY_PEAKS):
+                        _remember_marks(key, profile)
             except Exception as e:  # a profile is a bonus, never a build failure
                 logger.debug("Could not read the profile for %s: %s", capture.model, e)
             return result
@@ -174,8 +189,9 @@ def run_build_statement(
 _registry_lock = threading.Lock()
 _conn_locks: dict[int, threading.RLock] = {}
 
-# High-water marks last seen per connection, keyed by id(). A recycled id
-# carries over a higher mark, which only makes the next reading conservative.
+# High-water marks last seen per connection, keyed by id(), for DuckDB 1.x
+# profiles only (2.0's peaks are per query). A recycled id carries over a
+# higher mark, which only makes the next reading conservative.
 _marks: dict[int, tuple[int, int]] = {}
 
 

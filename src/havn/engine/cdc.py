@@ -82,23 +82,8 @@ class CDCSyncResult:
 
 
 def ensure_cdc_table(conn: duckdb.DuckDBPyConnection) -> None:
-    """Create the CDC state tracking table (no-op on read-only connections)."""
-    try:
-        conn.execute("CREATE SCHEMA IF NOT EXISTS _havn")
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS _havn.cdc_state (
-                connector_name  VARCHAR NOT NULL,
-                table_name      VARCHAR NOT NULL,
-                cdc_mode        VARCHAR NOT NULL DEFAULT 'full_refresh',
-                watermark_value VARCHAR,
-                file_mtime      DOUBLE,
-                last_sync_at    TIMESTAMP DEFAULT current_timestamp,
-                rows_synced     BIGINT DEFAULT 0,
-                PRIMARY KEY (connector_name, table_name)
-            )
-        """)
-    except Exception:
-        pass  # Read-only connection — table may already exist
+    """Kept for compatibility; the table is defined in :mod:`havn.engine.migrations`."""
+    ensure_meta_table(conn)
 
 
 def get_watermark(

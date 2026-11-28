@@ -1496,11 +1496,16 @@ def test_contract_model_name_is_case_insensitive(tmp_path: Path):
 def test_mixed_case_metadata_keys_are_lowercased_once(tmp_path: Path):
     """Metadata recorded under `silver.Customers` moves to `silver.customers`,
     unless a lowercase row already exists, so a microbatch model resumes
-    where it was instead of reprocessing from begin."""
+    where it was instead of reprocessing from begin. The rename is migration
+    2; the rows are written as a release before it would have left them."""
     from havn.engine.database import ensure_meta_table
+    from havn.engine.migrations import forget_database
 
-    conn = duckdb.connect(str(tmp_path / "w.duckdb"))
+    db_path = tmp_path / "w.duckdb"
+    conn = duckdb.connect(str(db_path))
     ensure_meta_table(conn)
+    conn.execute("DELETE FROM _havn.schema_migrations WHERE version = 2")
+    forget_database(db_path)
     conn.execute(
         "INSERT INTO _havn.model_state (model_path, content_hash, upstream_hash, materialized_as) "
         "VALUES ('silver.Customers', 'h', '', 'table'), ('gold.Report', 'old', '', 'table'), "
