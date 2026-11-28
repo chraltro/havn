@@ -92,10 +92,10 @@ def migrate(
     from havn.engine.migrations import MigrationError, migration_status
 
     # Bring the source's metadata schema up to date before copying it. The
-    # destination is created at the current version, and its _havn tables
-    # are filled by column name; a source at an older version would leave
-    # the destination with rows that lack the newer columns' values while
-    # being recorded as up to date. Opening the source for writing is what
+    # destination is created at the current version and records every
+    # migration as applied, so rows copied from an older source would never
+    # get what later migrations do to rows (migration 2 lowercases model
+    # keys and drops stale duplicates). Opening the source for writing is what
     # every other havn command does, so this changes nothing a normal run
     # would not; it is refused instead when the source is newer than this
     # havn, because those tables have columns the destination cannot hold.
