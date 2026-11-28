@@ -3,6 +3,7 @@ import "./monacoSetup";
 import MonacoEditor from "@monaco-editor/react";
 import { api } from "./api";
 import { drafts, hasUnsavedNotebooks } from "./notebookDrafts";
+import { ensureSqlLanguageSupport } from "./sqlLanguageSupport";
 
 const LINE_HEIGHT = 19;
 const MIN_CELL_LINES = 3;
@@ -12,6 +13,12 @@ function CodeArea({ value, onChange, onKeyDown, minLines = 3, language = "plaint
   const lineCount = (value || "").split("\n").length;
   const editorLines = Math.max(minLines || MIN_CELL_LINES, Math.min(lineCount + 1, MAX_CELL_LINES));
   const [height, setHeight] = useState(editorLines * LINE_HEIGHT + 8);
+
+  // SQL completion and hover come with the Editor chunk; fetch it if the
+  // idle preload has not yet.
+  useEffect(() => {
+    if (language === "sql") ensureSqlLanguageSupport();
+  }, [language]);
 
   // Update height when value changes (recompute from line count)
   useEffect(() => {

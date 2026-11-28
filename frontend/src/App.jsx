@@ -17,6 +17,7 @@ import { useFilesChanged } from "./filesChanged";
 import { clickable } from "./a11y";
 import Onboarding from "./Onboarding";
 import ErrorBoundary from "./ErrorBoundary";
+import { useQueuedAgentPrompts } from "./agentPromptQueue";
 import Hint from "./Hint";
 import { useHintTriggerFn } from "./HintSystem";
 import EnvironmentSwitcher from "./EnvironmentSwitcher";
@@ -583,22 +584,10 @@ function AppContent() {
 
   // Agent sidebar state
   const [agentSidebarOpen, setAgentSidebarOpen] = useState(false);
-  const pendingAgentPromptRef = useRef(null);
-
-  // When any panel dispatches 'havn-agent-send' (e.g. ReviewsPanel's AI Review
-  // button) while the sidebar is closed, queue the prompt in a ref and open
-  // the sidebar.  AgentSidebar picks it up on mount via the pendingPrompt prop.
-  useEffect(() => {
-    const handler = (e) => {
-      const prompt = e?.detail?.prompt;
-      if (!prompt) return;
-      if (agentSidebarOpen) return; // sidebar already listening
-      pendingAgentPromptRef.current = e.detail;
-      setAgentSidebarOpen(true);
-    };
-    window.addEventListener("havn-agent-send", handler);
-    return () => window.removeEventListener("havn-agent-send", handler);
-  }, [agentSidebarOpen]);
+  // 'havn-agent-send' prompts (ReviewsPanel's AI Review button) sent while
+  // the sidebar is closed, or open with its chunk still downloading, are
+  // queued here and handed to it on mount.
+  const agentPrompts = useQueuedAgentPrompts(() => setAgentSidebarOpen(true));
 
   // Once the first page has painted and the browser is idle, fetch the page
   // each nav-rail destination opens on, so a click on one does not wait for
@@ -1760,8 +1749,9 @@ function AppContent() {
                   onFileChanged={() => { reloadActiveFile(); refreshAll(); }}
                   onOpenFile={openFile}
                   onSelectTable={handleSelectTable}
-                  pendingPrompt={pendingAgentPromptRef.current}
-                  onPromptConsumed={() => { pendingAgentPromptRef.current = null; }}
+                  pendingPrompt={agentPrompts.pendingPrompt}
+                  onPromptConsumed={agentPrompts.onPromptConsumed}
+                  onListeningChange={agentPrompts.onListeningChange}
                 />
                 </Suspense>
               </ErrorBoundary>

@@ -12,7 +12,7 @@ vi.mock("./api", () => ({
   },
 }));
 
-const { lazyWithPreload, preloadAll, isChunkLoadError, PanelFallback } = await import("./lazyLoad");
+const { lazyWithPreload, preloadAll, isChunkLoadError, PanelFallback, isNewDeploy, entryScriptFromHtml } = await import("./lazyLoad");
 const { default: ErrorBoundary, reloadOnceForChunkError } = await import("./ErrorBoundary");
 
 // What Chromium throws when a hashed chunk is gone after a deploy.
@@ -93,7 +93,7 @@ describe("lazyWithPreload", () => {
     const factory = vi.fn()
       .mockRejectedValueOnce(chunkError())
       .mockResolvedValueOnce({ default: () => <p>second try</p> });
-    const Panel = lazyWithPreload(factory);
+    const Panel = lazyWithPreload(factory, { retryDelays: [] });
     await expect(Panel.preload()).resolves.toBeUndefined();
     render(<Suspense fallback={null}><Panel /></Suspense>);
     expect(await screen.findByText("second try")).toBeInTheDocument();
@@ -116,10 +116,10 @@ describe("isChunkLoadError", () => {
 });
 
 describe("ErrorBoundary and a chunk that cannot be fetched", () => {
-  function renderMissingChunk(reload) {
-    const Missing = lazyWithPreload(() => Promise.reject(chunkError()));
+  function renderMissingChunk(reload, checkDeploy = async () => true, factory = () => Promise.reject(chunkError())) {
+    const Missing = lazyWithPreload(factory, { retryDelays: [] });
     return render(
-      <ErrorBoundary name="Query" reload={reload}>
+      <ErrorBoundary name="Query" reload={reload} checkDeploy={checkDeploy}>
         <Suspense fallback={<PanelFallback delay={0} />}>
           <Missing />
         </Suspense>
@@ -127,7 +127,7 @@ describe("ErrorBoundary and a chunk that cannot be fetched", () => {
     );
   }
 
-  it("says the app was updated, reloads once by itself, and offers a Reload button", async () => {
+  it("after a new deploy, says the app was updated, reloads once by itself, and offers a Reload button", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
     const reload = vi.fn();
@@ -153,6 +153,25 @@ describe("ErrorBoundary and a chunk that cannot be fetched", () => {
     expect(reload).not.toHaveBeenCalled();
   });
 
+  it("does not reload when the server is unreachable, and Retry loads the part in place", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const reload = vi.fn();
+    let up = false;
+    const factory = vi.fn(() => (up
+      ? Promise.resolve({ default: () => <p>panel is back</p> })
+      : Promise.reject(chunkError())));
+    renderMissingChunk(reload, async () => false, factory);
+
+    expect(await screen.findByText("Could not load this part of havn")).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+
+    up = true;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("panel is back")).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+  });
+
   it("still shows the crash message for an ordinary error", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const reload = vi.fn();
@@ -173,5 +192,67 @@ describe("reloadOnceForChunkError", () => {
     expect(reloadOnceForChunkError(reload, t0 + 30_000)).toBe(false);
     expect(reloadOnceForChunkError(reload, t0 + 61_000)).toBe(true);
     expect(reload).toHaveBeenCalledTimes(2);
+  });
+
+  it("never reloads when the guard cannot be stored", () => {
+    // A cross-site embed or a private window can block storage; without a
+    // stored guard every load would reload again.
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    const reload = vi.fn();
+    expect(reloadOnceForChunkError(reload, 1_000_000)).toBe(false);
+    expect(reloadOnceForChunkError(reload, 9_000_000)).toBe(false);
+    expect(reload).not.toHaveBeenCalled();
+  });
+});
+
+describe("lazyWithPreload retries", () => {
+  it("tries a chunk that could not be fetched again before giving up", async () => {
+    const factory = vi.fn()
+      .mockRejectedValueOnce(chunkError())
+      .mockRejectedValueOnce(chunkError())
+      .mockResolvedValueOnce({ default: () => <p>third time</p> });
+    const Panel = lazyWithPreload(factory, { retryDelays: [1, 1] });
+    render(<ErrorBoundary name="P"><Suspense fallback={null}><Panel /></Suspense></ErrorBoundary>);
+    expect(await screen.findByText("third time")).toBeInTheDocument();
+    expect(factory).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry an error that is not a missing chunk", async () => {
+    const factory = vi.fn().mockRejectedValue(new SyntaxError("Unexpected token"));
+    const Panel = lazyWithPreload(factory, { retryDelays: [1, 1] });
+    await Panel.preload();
+    expect(factory).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("isNewDeploy", () => {
+  const html = (src) => `<!doctype html><html><head><script type="module" crossorigin src="${src}"></script></head></html>`;
+  const answer = (body, ok = true) => vi.fn(async () => ({ ok, text: async () => body }));
+
+  it("is true only when the served index.html starts from another entry script", async () => {
+    const running = "/assets/index-aaa.js";
+    expect(await isNewDeploy({ fetchImpl: answer(html("/assets/index-bbb.js")), running })).toBe(true);
+    expect(await isNewDeploy({ fetchImpl: answer(html("/assets/index-aaa.js")), running })).toBe(false);
+  });
+
+  it("is false when the server is down, erroring or not serving the app", async () => {
+    const running = "/assets/index-aaa.js";
+    const down = vi.fn(async () => { throw new TypeError("Failed to fetch"); });
+    expect(await isNewDeploy({ fetchImpl: down, running })).toBe(false);
+    expect(await isNewDeploy({ fetchImpl: answer("Bad gateway", false), running })).toBe(false);
+    expect(await isNewDeploy({ fetchImpl: answer("<html>proxy page</html>"), running })).toBe(false);
+  });
+
+  it("asks for a fresh copy of index.html", async () => {
+    const fetchImpl = answer(html("/assets/index-bbb.js"));
+    await isNewDeploy({ fetchImpl, running: "/assets/index-aaa.js" });
+    expect(fetchImpl).toHaveBeenCalledWith("/", expect.objectContaining({ cache: "no-store" }));
+  });
+
+  it("reads the entry script from index.html markup", () => {
+    expect(entryScriptFromHtml(html("/assets/index-x.js"))).toBe("/assets/index-x.js");
+    expect(entryScriptFromHtml('<script src="/a.js"></script>')).toBe(null);
   });
 });

@@ -8,34 +8,51 @@ import React, { lazy, useEffect, useState } from "react";
  * connection does not show the loading state at all.
  */
 
+// Pauses before the second and third try of a chunk that could not be fetched.
+const DEFAULT_RETRY_DELAYS = [500, 1500];
+
 /**
  * React.lazy with a `preload()` that starts the download without rendering.
  *
  * The import promise is shared between preload() and the render, so a page
- * preloaded on hover is not fetched twice. A failed preload is forgotten, so
- * the render tries again; a failed render goes to the nearest ErrorBoundary,
- * which treats a chunk that cannot be fetched (a new deploy removed it) as a
- * reason to reload the page (see isChunkLoadError).
+ * preloaded on hover is not fetched twice. A chunk that cannot be fetched is
+ * tried again after a short pause (`retryDelays`), since a server restarting
+ * or a network blip is far more common than a deploy. A load that still
+ * fails is forgotten, so the next preload or mount tries again; a failed
+ * render goes to the nearest ErrorBoundary (see isChunkLoadError).
  */
-export function lazyWithPreload(factory) {
+export function lazyWithPreload(factory, { retryDelays = DEFAULT_RETRY_DELAYS } = {}) {
   let promise = null;
   let loaded = null;
+  const attempt = async () => {
+    for (let i = 0; ; i++) {
+      try {
+        return await factory();
+      } catch (err) {
+        if (i >= retryDelays.length || !isChunkLoadError(err)) throw err;
+        await new Promise((r) => setTimeout(r, retryDelays[i]));
+      }
+    }
+  };
   const load = () => {
     if (!promise) {
-      promise = factory().then(
+      promise = attempt().then(
         (mod) => {
           loaded = mod;
           return mod;
         },
         (err) => {
           promise = null;
+          // React.lazy keeps a rejected load for good, so a later mount (the
+          // ErrorBoundary's Retry) needs a fresh one to fetch again.
+          Lazy = lazy(load);
           throw err;
         },
       );
     }
     return promise;
   };
-  const Lazy = lazy(load);
+  let Lazy = lazy(load);
   // A chunk that has already arrived is rendered directly. Through
   // React.lazy it would still suspend once (React has to await the promise
   // itself), and React holds a fallback it has shown for at least 300 ms, so
@@ -87,6 +104,59 @@ export function isChunkLoadError(error) {
   if (error.name === "ChunkLoadError") return true;
   const message = String(error.message || error);
   return CHUNK_ERROR_PATTERNS.some((re) => re.test(message));
+}
+
+const MODULE_SCRIPT_RE = /<script\b[^>]*\btype=["']module["'][^>]*>/gi;
+const SRC_RE = /\bsrc=["']([^"']+)["']/i;
+
+/** Path of the entry module script an index.html loads, or null. */
+export function entryScriptFromHtml(html, base = "http://localhost/") {
+  for (const tag of String(html || "").match(MODULE_SCRIPT_RE) || []) {
+    const src = tag.match(SRC_RE);
+    if (src) {
+      try {
+        return new URL(src[1], base).pathname;
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+/** Path of the entry module script the running page was started from, or null. */
+export function runningEntryScript(doc = typeof document !== "undefined" ? document : null) {
+  const el = doc?.querySelector?.('script[type="module"][src]');
+  if (!el) return null;
+  try {
+    return new URL(el.getAttribute("src"), doc.baseURI).pathname;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a chunk failed because a new version of havn is being served.
+ *
+ * Fetches index.html bypassing the cache. Only when the server answers and
+ * that page starts from a different entry script than the one running is it
+ * a new deploy, where a reload helps. A server that is down or restarting, or
+ * a network that dropped out, answers false: reloading then lands on the
+ * browser's own error page and throws away whatever was on screen.
+ */
+export async function isNewDeploy({
+  fetchImpl = typeof fetch === "function" ? fetch : null,
+  running = runningEntryScript(),
+} = {}) {
+  if (!fetchImpl || !running) return false;
+  try {
+    const res = await fetchImpl("/", { cache: "no-store", headers: { Accept: "text/html" } });
+    if (!res?.ok) return false;
+    const fresh = entryScriptFromHtml(await res.text());
+    return Boolean(fresh) && fresh !== running;
+  } catch {
+    return false;
+  }
 }
 
 /**
