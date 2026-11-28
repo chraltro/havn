@@ -29,6 +29,7 @@ import datetime
 import logging
 import threading
 import uuid
+from collections import deque
 
 logger = logging.getLogger("havn.scheduler")
 
@@ -144,26 +145,78 @@ class WarehouseLease:
         return self._holders > 0
 
 
+class _Pending:
+    __slots__ = ("fn", "what", "attempts")
+
+    def __init__(self, fn, what: str):
+        self.fn = fn
+        self.what = what
+        self.attempts = 0
+
+
 class HistoryStore:
     """Writes and reads schedule history through a :class:`WarehouseLease`.
 
     Each write takes the lease for its duration (opening the connection
-    only when nothing else holds it) and uses its own cursor. Write
-    failures are logged and swallowed: a history row must never stop a run
-    from happening.
+    only when nothing else holds it) and uses its own cursor. A failed
+    write never stops a run from happening; it is kept and retried, in
+    order, before the next write (the loop writes a heartbeat every tick),
+    so a fire recorded while another process held the warehouse still ends
+    up in history with its outcome. The buffer is bounded
+    (``BUFFER_LIMIT``); a write whose statement itself keeps failing is
+    dropped after ``MAX_ATTEMPTS`` tries rather than holding back every
+    later one.
     """
+
+    BUFFER_LIMIT = 1000
+    MAX_ATTEMPTS = 20
 
     def __init__(self, lease: WarehouseLease, scheduler_id: str):
         self._lease = lease
         self.scheduler_id = scheduler_id
         self._ready = False
+        self._buffer: deque[_Pending] = deque()
+
+    @property
+    def pending_writes(self) -> int:
+        """Writes waiting to be retried."""
+        return len(self._buffer)
 
     # -- plumbing -------------------------------------------------------
 
-    def _with_conn(self, fn, *, what: str):
+    def _keep(self, fn, what: str) -> None:
+        if len(self._buffer) >= self.BUFFER_LIMIT:
+            dropped = self._buffer.popleft()
+            logger.error("Schedule history: dropping a buffered write (%s): %d writes are waiting",
+                         dropped.what, self.BUFFER_LIMIT)
+        self._buffer.append(_Pending(fn, what))
+
+    def _flush(self, cur) -> bool:
+        """Apply buffered writes in order; False when one still fails."""
+        while self._buffer:
+            item = self._buffer[0]
+            try:
+                item.fn(cur)
+            except Exception as exc:
+                item.attempts += 1
+                if item.attempts < self.MAX_ATTEMPTS:
+                    logger.debug("Schedule history: retry of %s failed: %s", item.what, exc)
+                    return False
+                logger.error("Schedule history: giving up on a buffered write (%s) after %d tries: %s",
+                             item.what, item.attempts, exc)
+            self._buffer.popleft()
+        return True
+
+    def _with_conn(self, fn, *, what: str, keep: bool = False):
+        """Run ``fn(cursor)``; with ``keep``, a failed write is buffered for a retry."""
         with _write_lock:
             if not self._lease.try_acquire():
-                logger.warning("Schedule history: could not %s: the warehouse is not available", what)
+                if keep:
+                    self._keep(fn, what)
+                    logger.warning("Schedule history: could not %s: the warehouse is not available; "
+                                   "will retry", what)
+                else:
+                    logger.warning("Schedule history: could not %s: the warehouse is not available", what)
                 return None
             cur = None
             try:
@@ -171,17 +224,43 @@ class HistoryStore:
                 if not self._ready:
                     ensure_schedule_tables(cur)
                     self._ready = True
+                if not self._flush(cur):
+                    # Earlier writes still fail: this one waits behind them.
+                    if keep:
+                        self._keep(fn, what)
+                    return None
+            except Exception as exc:
+                if keep:
+                    self._keep(fn, what)
+                logger.warning("Schedule history: could not %s: %s", what, exc)
+                self._release(cur)
+                return None
+            try:
                 return fn(cur)
             except Exception as exc:
+                if keep:
+                    item = _Pending(fn, what)
+                    item.attempts = 1
+                    if len(self._buffer) >= self.BUFFER_LIMIT:
+                        self._buffer.popleft()
+                    self._buffer.append(item)
                 logger.warning("Schedule history: could not %s: %s", what, exc)
                 return None
             finally:
-                if cur is not None:
-                    try:
-                        cur.close()
-                    except Exception:
-                        pass
-                self._lease.release()
+                self._release(cur)
+
+    def _release(self, cur) -> None:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        self._lease.release()
+
+    def flush(self) -> None:
+        """Retry buffered writes now (the next write does it anyway)."""
+        if self._buffer:
+            self._with_conn(lambda _cur: None, what="retry buffered history writes")
 
     # -- writes ---------------------------------------------------------
 
@@ -202,7 +281,7 @@ class HistoryStore:
                 [[r.get(c) if c != "scheduler_id" else self.scheduler_id for c in cols] for r in rows],
             )
 
-        self._with_conn(go, what="record fires")
+        self._with_conn(go, what="record fires", keep=True)
 
     def mark_started(self, row_id: str, started_at: datetime.datetime, lateness_ms: int) -> None:
         self._with_conn(
@@ -210,7 +289,7 @@ class HistoryStore:
                 "UPDATE _havn.schedule_history SET status = ?, started_at = ?, lateness_ms = ? WHERE id = ?",
                 [STATUS_RUNNING, utc_naive(started_at), lateness_ms, row_id],
             ),
-            what="record a run start",
+            what="record a run start", keep=True,
         )
 
     def mark_finished(
@@ -221,7 +300,7 @@ class HistoryStore:
                 "UPDATE _havn.schedule_history SET status = ?, finished_at = ?, error = ? WHERE id = ?",
                 [status, utc_naive(finished_at), (error or None) and str(error)[:4000], row_id],
             ),
-            what="record a run result",
+            what="record a run result", keep=True,
         )
 
     def mark_status(self, row_ids: list[str], status: str, error: str | None = None) -> None:
@@ -232,7 +311,7 @@ class HistoryStore:
                 "UPDATE _havn.schedule_history SET status = ?, error = ? WHERE id = ?",
                 [[status, error, rid] for rid in row_ids],
             ),
-            what=f"mark runs {status}",
+            what=f"mark runs {status}", keep=True,
         )
 
     def heartbeat(self, now: datetime.datetime) -> None:
