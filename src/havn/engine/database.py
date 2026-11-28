@@ -132,6 +132,8 @@ def connect(
     memory_limit: str | None = None,
     threads: int | None = None,
     project_dir: str | Path | None = None,
+    *,
+    migrate: bool = True,
 ) -> duckdb.DuckDBPyConnection:
     """Open a specific DuckDB file directly (no backend abstraction).
 
@@ -144,17 +146,29 @@ def connect(
         memory_limit: Max memory (e.g. "4GB", "75%", "512MB").
         threads: Max DuckDB threads (default: half of CPU cores).
         project_dir: If provided, auto-register macros from ``project_dir/macros/``.
+        migrate: Bring the file's ``_havn`` schema up to date on a writable
+            open (the default), as the backends do. False leaves the file as
+            it is, for callers that must not change it (taking a backup).
     """
     import os
 
     db_path = str(db_path)
     conn = duckdb.connect(db_path, read_only=read_only)
     if not read_only and db_path != ":memory:":
-        # The file may have been replaced since this process last checked
-        # its metadata schema (a restored backup); check again on next use.
-        from havn.engine.migrations import forget_database
+        if migrate:
+            # Migrate now, before the caller opens a transaction: a migration
+            # that joins a caller's transaction can conflict with another
+            # writer once the process lock is released. This also re-checks
+            # a file replaced since this process last saw it (a restore).
+            from havn.engine.backends.base import migrate_or_close
 
-        forget_database(db_path)
+            migrate_or_close(conn)
+        else:
+            # The file may have been replaced since this process last
+            # checked its metadata schema; check again on next use.
+            from havn.engine.migrations import forget_database
+
+            forget_database(db_path)
     if _progress_bar_enabled():
         conn.execute("SET enable_progress_bar = true")
     else:

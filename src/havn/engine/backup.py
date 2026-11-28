@@ -156,7 +156,9 @@ def create_backup(
     # 1. Flush WAL via CHECKPOINT
     _conn = None
     try:
-        _conn = connect(db_path)
+        # A backup is a copy of the warehouse as it is; taking one must not
+        # upgrade the metadata schema first.
+        _conn = connect(db_path, migrate=False)
         _conn.execute("CHECKPOINT")
     except Exception as e:
         logger.warning("CHECKPOINT skipped (proceeding with copy): %s", e)

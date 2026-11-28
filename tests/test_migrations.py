@@ -464,6 +464,91 @@ def test_lazy_ensure_inside_a_caller_transaction_joins_it(tmp_path):
     conn.close()
 
 
+def test_database_connect_migrates_on_open_and_read_only_does_not(tmp_path):
+    """database.connect() migrates before the caller can open a transaction."""
+    from havn.engine.database import connect
+
+    path = tmp_path / "w.duckdb"
+    _old_warehouse(path)
+
+    ro = connect(path, read_only=True)
+    try:
+        assert migration_status(ro).version == 0
+    finally:
+        ro.close()
+
+    conn = connect(path)
+    try:
+        st = migration_status(conn)
+        assert st.up_to_date, st
+        _assert_full_schema(conn)
+    finally:
+        conn.close()
+
+
+def test_two_transactions_on_a_fresh_database_connect_do_not_conflict(tmp_path):
+    """Before connect() migrated on open, the first ensure_* call in each of
+    two concurrent transactions joined them, and the second commit failed
+    with a write-write conflict on _havn.schema_migrations."""
+    from havn.engine.database import connect, log_run
+
+    path = tmp_path / "w.duckdb"
+    _old_warehouse(path)
+    base = connect(path)
+    errors: list[BaseException] = []
+    barrier = threading.Barrier(2)
+
+    def work(i: int) -> None:
+        cur = base.cursor()
+        try:
+            cur.execute("BEGIN TRANSACTION")
+            barrier.wait(timeout=30)
+            ensure_meta_table(cur)
+            log_run(cur, "transform", f"m{i}", "success")
+            try:
+                barrier.wait(timeout=30)
+            except threading.BrokenBarrierError:
+                pass  # the other thread failed; commit anyway to see our own result
+            cur.execute("COMMIT")
+        except BaseException as e:  # noqa: BLE001 - surfaced below
+            errors.append(e)
+            barrier.abort()
+            try:
+                cur.execute("ROLLBACK")
+            except duckdb.Error:
+                pass
+        finally:
+            cur.close()
+
+    threads = [threading.Thread(target=work, args=(i,)) for i in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+    try:
+        assert not errors, errors
+        assert base.execute(
+            "SELECT version, count(*) FROM _havn.schema_migrations GROUP BY 1 ORDER BY 1"
+        ).fetchall() == [(m.version, 1) for m in MIGRATIONS]
+    finally:
+        base.close()
+
+
+def test_backup_does_not_migrate_the_warehouse(tmp_path):
+    from havn.engine.backup import create_backup
+
+    (tmp_path / "project.yml").write_text(
+        "name: demo\ndatabase:\n  path: warehouse.duckdb\n", encoding="utf-8"
+    )
+    _old_warehouse(tmp_path / "warehouse.duckdb")
+    create_backup(tmp_path, tmp_path / "warehouse.duckdb")
+    ro = duckdb.connect(str(tmp_path / "warehouse.duckdb"), read_only=True)
+    try:
+        assert migration_status(ro).version == 0
+    finally:
+        ro.close()
+
+
 def test_restored_file_is_checked_again_on_reconnect(tmp_path):
     """The per-process cache must not hide an older file put in place later."""
     path = tmp_path / "w.duckdb"
