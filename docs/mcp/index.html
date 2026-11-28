@@ -16,7 +16,7 @@
         <link rel="prev" href="../auth/">
       
       
-        <link rel="next" href="../limitations/">
+        <link rel="next" href="../upgrading/">
       
       
         
@@ -809,6 +809,25 @@
     
   
   MCP Server
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../upgrading/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Upgrading
 
       </a>
     </li>
@@ -1879,6 +1898,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../upgrading/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../limitations/" class="md-nav__link">
         
   
@@ -2147,9 +2193,14 @@ lock is held and tells the agent why.</p>
 <ul>
 <li>Every <code>query</code> / <code>query_metric</code> / introspection call goes through the same
   read-only SQL validation as the web API: single statement, no mutation
-  verbs, no <code>read_csv</code> / <code>read_parquet</code> / HTTP functions.</li>
-<li>Reads use a read-only DuckDB connection — even a validator bypass could
-  not write.</li>
+  verbs (also not inside a CTE), table functions only from a fixed list
+  (<code>range</code>, <code>unnest</code>, <code>json_each</code>, the catalog listings, your project's table
+  macros), and no functions that read files, call out over HTTP or change
+  DuckDB's settings.</li>
+<li>Reads use a read-only DuckDB connection, so a validator bypass could not
+  write to the warehouse. DuckDB's read-only mode does not stop functions
+  that write files elsewhere (log or profiling output), which is why the
+  validator refuses those.</li>
 <li><code>run_transform</code> is the only mutating tool. It builds your own transform
   models (with Pipeline Rewind snapshots when enabled, so agent-triggered
   builds can be rolled back like any other run). Start with <code>--read-only</code>

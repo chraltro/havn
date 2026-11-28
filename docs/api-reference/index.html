@@ -817,6 +817,25 @@
   
   
     <li class="md-tabs__item">
+      <a href="../upgrading/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Upgrading
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
       <a href="../limitations/" class="md-tabs__link">
         
   
@@ -1786,6 +1805,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../upgrading/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../limitations/" class="md-nav__link">
         
   
@@ -2698,6 +2744,17 @@
     <span class="md-ellipsis">
       
         POST /api/stream/cancel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apistreamnameevents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/stream/{name}/events
       
     </span>
   </a>
@@ -4529,6 +4586,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#get-apistreamnameevents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/stream/{name}/events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#get-apistreams" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5785,8 +5853,18 @@ not poll. Heartbeat (<code>: keepalive</code>) every 15 seconds when idle.</p>
 operation_label, stream_name, started_at, total_events, finished, status,
 duration_seconds }</code>. Stale runs older than 10 minutes are auto-cleared.</p>
 <h3 id="post-apistreamcancel">POST /api/stream/cancel<a class="headerlink" href="#post-apistreamcancel" title="Permanent link">&para;</a></h3>
-<p>Request cancellation of the running pipeline. Workers check the cancel
-flag between steps; in-flight queries are not interrupted by default.</p>
+<p>Request cancellation of the running pipeline. No new script or model
+starts. A running ingest or export script is stopped (DuckDB is interrupted
+and the script thread is stopped, as a timeout does) and reported with
+status <code>skipped</code> and the error "Cancelled while running"; a model being
+built finishes. The run's <code>complete</code> event (status <code>cancelled</code>) comes only
+once nothing is running, and only then can another run start. A script that
+cannot be interrupted (blocked in a long call) keeps the run cancelling until
+it returns; so does a script run in a governed child process.</p>
+<h3 id="get-apistreamnameevents">GET /api/stream/{name}/events<a class="headerlink" href="#get-apistreamnameevents" title="Permanent link">&para;</a></h3>
+<p>Legacy: starts stream <code>name</code> and streams its events. Answers 409 when
+another operation (or a scheduled run) is in progress, instead of streaming
+that operation's events.</p>
 <h3 id="get-apistreams">GET /api/streams<a class="headerlink" href="#get-apistreams" title="Permanent link">&para;</a></h3>
 <p>List configured streams with steps and schedules.</p>
 <h3 id="get-apihistory">GET /api/history<a class="headerlink" href="#get-apihistory" title="Permanent link">&para;</a></h3>

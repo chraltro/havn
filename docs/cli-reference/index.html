@@ -819,6 +819,25 @@
   
   
     <li class="md-tabs__item">
+      <a href="../upgrading/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Upgrading
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
       <a href="../limitations/" class="md-tabs__link">
         
   
@@ -1769,6 +1788,33 @@
     
   
     MCP Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../upgrading/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrading
   
 
     
@@ -4454,9 +4500,12 @@ arity mismatches. It does not catch value conversions such as
 <code>CAST(some_varchar AS INTEGER)</code>, which bind clean and fail at run time. See
 <a href="../quality/#validation-and-type-resolution">Data Quality</a>.</p>
 <h3 id="havn-status">havn status<a class="headerlink" href="#havn-status" title="Permanent link">&para;</a></h3>
-<p>Show project health: git info, warehouse stats, last run.</p>
+<p>Show project health: git info, warehouse stats, metadata schema version, last run.</p>
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>status<span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
 </code></pre></div>
+<p>The <code>metadata schema</code> line says whether havn's own tables are up to date, how
+many migrations are pending, or that a newer havn has opened the warehouse.
+It reads only; see <a href="../upgrading/">Upgrading</a>.</p>
 <h3 id="havn-context">havn context<a class="headerlink" href="#havn-context" title="Permanent link">&para;</a></h3>
 <p>Generate a project summary to paste into any AI assistant.</p>
 <div class="highlight"><pre><span></span><code>havn<span class="w"> </span>context<span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
@@ -5099,12 +5148,17 @@ havn<span class="w"> </span>diff<span class="w"> </span>--full
 - <code>reset</code> -- Reset watermarks (requires <code>--connector</code>)</p>
 <h2 id="scheduling">Scheduling<a class="headerlink" href="#scheduling" title="Permanent link">&para;</a></h2>
 <h3 id="havn-schedule">havn schedule<a class="headerlink" href="#havn-schedule" title="Permanent link">&para;</a></h3>
-<p>Start the cron scheduler.</p>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>schedule<span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
+<p>Start the cron scheduler, or show its history. Scheduled runs build the
+environment's warehouse (default: the active environment, as <code>havn stream</code>).
+Only one scheduler may run per warehouse; a second one refuses to start and
+names the process that holds it.</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>schedule<span class="w"> </span><span class="o">[</span>--env<span class="w"> </span>ENV<span class="o">]</span><span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
+havn<span class="w"> </span>schedule<span class="w"> </span>--history<span class="w"> </span><span class="o">[</span>--name<span class="w"> </span>NAME<span class="o">]</span><span class="w"> </span><span class="o">[</span>--status<span class="w"> </span>STATUS<span class="o">]</span><span class="w"> </span><span class="o">[</span>--limit<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--env<span class="w"> </span>ENV<span class="o">]</span>
 </code></pre></div>
 <h3 id="havn-watch">havn watch<a class="headerlink" href="#havn-watch" title="Permanent link">&para;</a></h3>
-<p>Watch for file changes and auto-rebuild.</p>
-<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>watch<span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
+<p>Watch for file changes and auto-rebuild. A rebuild runs two seconds after the
+last save and waits while another run holds the project's run gate.</p>
+<div class="highlight"><pre><span></span><code>havn<span class="w"> </span>watch<span class="w"> </span><span class="o">[</span>--route<span class="w"> </span>GLOB<span class="o">]</span><span class="w"> </span><span class="o">[</span>--project<span class="w"> </span>PATH<span class="o">]</span>
 </code></pre></div>
 <h2 id="masking">Masking<a class="headerlink" href="#masking" title="Permanent link">&para;</a></h2>
 <h3 id="havn-mask-list">havn mask list<a class="headerlink" href="#havn-mask-list" title="Permanent link">&para;</a></h3>

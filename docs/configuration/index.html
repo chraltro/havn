@@ -821,6 +821,25 @@
   
   
     <li class="md-tabs__item">
+      <a href="../upgrading/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Upgrading
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
       <a href="../limitations/" class="md-tabs__link">
         
   
@@ -1098,6 +1117,17 @@
     <span class="md-ellipsis">
       
         Streams
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scheduler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheduler
       
     </span>
   </a>
@@ -2034,6 +2064,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../upgrading/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../limitations/" class="md-nav__link">
         
   
@@ -2195,6 +2252,17 @@
     <span class="md-ellipsis">
       
         Streams
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scheduler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheduler
       
     </span>
   </a>
@@ -2438,7 +2506,7 @@
 <td><code>retries</code></td>
 <td>int</td>
 <td><code>0</code></td>
-<td>Retry attempts per failed step</td>
+<td>Retry attempts per failed script or model (a failed assertion is not retried)</td>
 </tr>
 <tr>
 <td><code>retry_delay</code></td>
@@ -2452,9 +2520,90 @@
 <td><code>null</code></td>
 <td>URL for completion notifications</td>
 </tr>
+<tr>
+<td><code>overlap</code></td>
+<td>string</td>
+<td><code>scheduler.overlap</code></td>
+<td><code>skip</code> or <code>queue</code>: what a fire does while this stream is still running</td>
+</tr>
+<tr>
+<td><code>catchup</code></td>
+<td>bool</td>
+<td><code>scheduler.catchup</code></td>
+<td>Run once after a restart if fires were missed</td>
+</tr>
+<tr>
+<td><code>timezone</code></td>
+<td>string</td>
+<td><code>scheduler.timezone</code></td>
+<td>IANA zone the <code>schedule</code> is evaluated in, or <code>local</code></td>
+</tr>
 </tbody>
 </table>
-<p>Step actions: <code>ingest</code>, <code>seed</code>, <code>transform</code>, <code>export</code>. Each takes a list of targets or <code>[all]</code>.</p>
+<p>Step actions: <code>ingest</code>, <code>seed</code>, <code>transform</code>, <code>export</code>. Each takes a list of targets or <code>[all]</code> (script or seed names, or graph selectors for <code>transform</code>).</p>
+<p>How a stream runs, the same whether it is started with <code>havn stream</code>, by the scheduler or from the web UI:</p>
+<ul>
+<li>Steps run in the order they are listed; a step starts when the one before it has finished.</li>
+<li>Inside a <code>transform</code> step, models build in parallel as soon as their own upstream models are done. The scripts and seeds of one step run one at a time, in name order, and a failed ingest script stops the rest of its step.</li>
+<li>Before the first model of a <code>transform</code> step is built, the models are validated (the same checks as <code>havn validate</code>, bind pass included). An error-severity finding stops the stream before anything is built.</li>
+<li>A failed step (a script error, a model error, an error-severity <code>@assert</code>, a policy denial) stops the stream: the later steps are reported as skipped with the failure as the reason, and <code>havn stream</code> exits 1.</li>
+<li>Every script and model run is logged in <code>_havn.run_log</code> under one pipeline run id, and the run appears in the Job Results list (<code>_havn.job_runs</code>).</li>
+</ul>
+<p>Unknown step actions are reported before anything runs.</p>
+<h3 id="scheduler">Scheduler<a class="headerlink" href="#scheduler" title="Permanent link">&para;</a></h3>
+<p>Settings for <code>havn schedule</code> and <code>havn serve --schedule</code>. All optional:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">scheduler</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">max_concurrent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span><span class="w">          </span><span class="c1"># runs at a time (worker pool size)</span>
+<span class="w">  </span><span class="nt">overlap</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">skip</span><span class="w">              </span><span class="c1"># skip | queue</span>
+<span class="w">  </span><span class="nt">catchup</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">             </span><span class="c1"># after a restart, run once for missed fires</span>
+<span class="w">  </span><span class="nt">timezone</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Europe/Oslo</span><span class="w">      </span><span class="c1"># IANA name; leave out for the server's local time</span>
+<span class="w">  </span><span class="nt">history_days</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span><span class="w">           </span><span class="c1"># how long _havn.schedule_history keeps rows</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>max_concurrent</code></td>
+<td>int</td>
+<td><code>1</code></td>
+<td>How many scheduled runs may execute at the same time; a change takes effect without a restart. Raise it only for streams and jobs that write different tables; see <a href="scheduler#concurrency">Scheduler</a>.</td>
+</tr>
+<tr>
+<td><code>overlap</code></td>
+<td>string</td>
+<td><code>skip</code></td>
+<td>When a stream or job is still running (or already waiting) at its next fire: <code>skip</code> records the fire as skipped, <code>queue</code> lets one run wait.</td>
+</tr>
+<tr>
+<td><code>catchup</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>On start, fires that passed while the scheduler was down are always recorded as <code>missed</code>; with <code>true</code> the newest one also runs, once.</td>
+</tr>
+<tr>
+<td><code>timezone</code></td>
+<td>string</td>
+<td>server local time</td>
+<td>Zone that cron expressions are evaluated in. An unknown name is an error (<code>havn validate</code> and scheduler start fail); it never falls back to local time.</td>
+</tr>
+<tr>
+<td><code>history_days</code></td>
+<td>int</td>
+<td><code>30</code></td>
+<td>Retention of the schedule history table.</td>
+</tr>
+</tbody>
+</table>
+<p><code>overlap</code>, <code>catchup</code> and <code>timezone</code> are defaults: a stream (above) or a job
+file in <code>orchestration/</code> can set its own. <code>timezone: local</code> on a stream or
+job means the server's local time even when the project default is a zone.</p>
 <h3 id="lint">Lint<a class="headerlink" href="#lint" title="Permanent link">&para;</a></h3>
 <p>Configure SQLFluff SQL linting:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">lint</span><span class="p">:</span>

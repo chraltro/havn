@@ -821,6 +821,25 @@
   
   
     <li class="md-tabs__item">
+      <a href="../upgrading/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Upgrading
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
       <a href="../limitations/" class="md-tabs__link">
         
   
@@ -1482,6 +1501,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#read-only-queries-what-the-gate-enforces-and-what-it-does-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Read-only queries: what the gate enforces and what it does not
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1902,6 +1932,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../upgrading/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../limitations/" class="md-nav__link">
         
   
@@ -2066,6 +2123,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#read-only-queries-what-the-gate-enforces-and-what-it-does-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Read-only queries: what the gate enforces and what it does not
+      
+    </span>
+  </a>
   
 </li>
       
@@ -2250,6 +2318,49 @@ from the UI or API run their script steps as the user who started them.</p>
   agent sidebar are refused to governed users; <code>/v1/sql</code> results are visible
   only to the user who ran them; diff samples, assertion details and
   collaboration history from other users are withheld from governed users.</li>
+</ul>
+<h2 id="read-only-queries-what-the-gate-enforces-and-what-it-does-not">Read-only queries: what the gate enforces and what it does not<a class="headerlink" href="#read-only-queries-what-the-gate-enforces-and-what-it-does-not" title="Permanent link">&para;</a></h2>
+<p>Every read surface (<code>/api/query</code> and its CSV export, EXPLAIN ANALYZE and
+profile, collaboration sessions, dashboards, published links, reports, the
+semantic layer, <code>havn ask</code>, the MCP server) runs SQL through one gate
+(<code>engine/sql_safety.py</code>, <code>engine/sql_functions.py</code>) and then executes it in a
+read-only guard (<code>governed_query.read_only_execution</code>):</p>
+<ul>
+<li>one statement; no writes, also not inside a CTE or subquery;</li>
+<li>table functions only from a fixed allowlist (<code>range</code>, <code>generate_series</code>,
+  <code>unnest</code>, <code>json_each</code>, the catalog listings) or project table macros whose
+  body passes the same check; scalar functions with side effects or file,
+  network or settings access are refused; every function DuckDB ships is
+  classified, and a test fails when a DuckDB release adds one;</li>
+<li>a function or type the connection's catalog does not already have is
+  refused, so a query cannot make DuckDB download and load an extension;</li>
+<li>settings (<code>duckdb_settings()</code>, <code>current_setting()</code>, <code>SHOW &lt;setting&gt;</code>),
+  attached database paths and the layout of <code>_havn</code> tables are admin-only;
+  DuckDB secrets and logs are never readable through a query;</li>
+<li>the query runs in a <code>READ ONLY</code> transaction with Python replacement scans
+  off.</li>
+</ul>
+<p>What DuckDB cannot enforce per connection, and therefore relies on the gate
+alone: <code>enable_external_access</code>, <code>allowed_directories</code>, <code>lock_configuration</code>
+and <code>autoinstall_known_extensions</code> / <code>autoload_known_extensions</code> apply to the
+whole database instance, and the server's read cursors share that instance
+with pipeline runs and connectors that must read files and load extensions.
+havn leaves them at DuckDB's defaults.</p>
+<p>Known gaps operators should be aware of:</p>
+<ul>
+<li><strong><code>havn flight</code></strong> (the Arrow Flight SQL server) runs the SQL it receives
+  as-is, with no read-only gate and no governance, behind one shared token.
+  Treat that token as admin access to the warehouse, and do not expose the
+  Flight port to people who should only read.</li>
+<li><strong>Python macros run when they are called.</strong> A <code>@macro</code> or <code>@table_macro</code>
+  function is ordinary Python in the server process. Anyone who can run a
+  query, a viewer included, runs it by calling it, with whatever it does
+  (reading files, calling out over the network). The gate checks the SQL
+  body of a table macro, not the Python behind its UDF. Only put functions
+  in <code>macros/</code> that are safe for every reader to call.</li>
+<li><code>duckdb_columns()</code> and <code>information_schema</code> list the names and types of
+  <code>_havn</code> columns to every reader (no rows). The schema is the same in every
+  havn install.</li>
 </ul>
 
 
