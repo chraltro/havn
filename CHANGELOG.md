@@ -4,6 +4,8 @@ All notable changes to havn are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-28
+
 ### Security
 
 - **On DuckDB 2, the read-only query check let writes through.** DuckDB 2
