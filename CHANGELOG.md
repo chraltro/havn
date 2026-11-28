@@ -34,7 +34,9 @@ All notable changes to havn are documented in this file.
   and finished, how late it started, and whether it succeeded, failed, was
   skipped or was missed. `havn schedule --history` shows it, and so does
   `GET /api/scheduler/history`. Rows are kept for 30 days
-  (`scheduler.history_days`).
+  (`scheduler.history_days`). A fire that comes due while another process
+  holds the warehouse is still recorded, with its outcome, once the
+  warehouse can be opened again.
 - **Overlap rules.** There is now a defined rule for a stream or job that is
   still running, or already waiting, at its next fire time. `overlap: skip`
   (the default) records the fire as skipped; `overlap: queue` lets one run
@@ -42,7 +44,9 @@ All notable changes to havn are documented in this file.
   Set it under `scheduler:` in project.yml, on a stream, or in a job file.
 - **Missed fires after a restart.** When the scheduler starts, fires that
   passed while it was down are recorded as missed. With `catchup: true` the
-  newest of them runs once; by default they are only recorded.
+  newest of them runs once; by default they are only recorded. A fire the
+  history already holds is never run again, also when the scheduler restarts
+  in the same minute.
 - **Time zones for schedules.** `scheduler.timezone` (an IANA name such as
   `Europe/Oslo`), or `timezone:` on a stream or job, sets the zone cron
   expressions are evaluated in. Without it the server's local time is used,
@@ -51,6 +55,16 @@ All notable changes to havn are documented in this file.
   `havn validate` and the scheduler with an error instead of falling back to
   local time. `havn schedule` shows each schedule's next run in its zone.
   havn now depends on `tzdata`, so zone names also work on Windows.
+- **`havn schedule --env`.** The scheduler builds the environment's
+  warehouse, chosen the way `havn stream --env` chooses it (default: the
+  active environment). Under `havn serve --schedule` scheduled runs build the
+  warehouse the web UI shows: the server's `--env`, the environment switched
+  to in the UI, and the checked-out branch's warehouse.
+- **One scheduler per warehouse.** A second scheduler on the same warehouse
+  (`havn schedule` while `havn serve --schedule` runs, or two `havn
+  schedule`s) refuses to start and names the process that holds it. The lock
+  is the operating system's, so it goes away with its process, also after a
+  crash. Two environments of one project can each have their own scheduler.
 
 ### Changed
 
@@ -71,7 +85,9 @@ All notable changes to havn are documented in this file.
   execute one at a time by default (`scheduler.max_concurrent: 1`): two runs
   writing the same warehouse at once can fail on DuckDB write-write
   conflicts, so running several at a time is opt-in and only safe for
-  streams and jobs that write different tables.
+  streams and jobs that write different tables (creating the same schemas
+  and havn's own tables at the same moment is safe). A change to
+  `max_concurrent` in project.yml takes effect without a restart.
 - **Stopping the scheduler is predictable.** Ctrl+C on `havn schedule` (or
   stopping `havn serve --schedule`) cancels runs that have not started and
   gives running ones 30 seconds to finish; a second Ctrl+C quits at once.
@@ -98,6 +114,9 @@ All notable changes to havn are documented in this file.
     one pipeline run id and appears in Job Results (`_havn.job_runs`), also
     when it was started with `havn stream` or by the scheduler.
   - A stream with an unknown step action fails before anything runs.
+  - A run that breaks off with an error of its own (it cannot be planned, or
+    something fails outside a script or model) still sends the stream's
+    webhook and the pipeline alert.
   - The blocking `POST /api/stream/{name}` endpoint runs through the same
     engine. It no longer forces a full rebuild of every model after an
     ingest; models whose inputs got new data are rebuilt by change detection,
@@ -112,6 +131,19 @@ All notable changes to havn are documented in this file.
   holds it, and starting a job from the UI while another run is in progress
   now answers 409 instead of running it alongside. Scheduled runs can still
   overlap each other when `scheduler.max_concurrent` is above 1.
+- **Cancelling a run waits until nothing is writing.** Cancel in the web UI
+  starts no new step; a running script is stopped (as a timeout stops it)
+  and a model being built finishes. The run reports those and ends only
+  then, so the next run cannot start while the cancelled one is still
+  writing. A script that cannot be interrupted (blocked in a long call) keeps
+  the run "cancelling" until it returns. A stopped script shows as cancelled,
+  not failed.
+- **The file watcher waits for running work.** With `havn serve --watch` or
+  `havn watch`, an edit that comes in while a web UI or scheduled run is in
+  progress is no longer built alongside it: the rebuild waits until the run
+  ends (the watcher says so once) and then runs once for all the edits made
+  meanwhile. A burst of saves builds once, two seconds after the last one.
+  Under `havn serve` the rebuild uses the server's own connection.
 
 - **havn runs on DuckDB 2.x as well as 1.5.** The dependency is now
   `duckdb>=1.5.2,<3`. On Python 3.11 and newer pip installs DuckDB 2; Python

@@ -117,7 +117,7 @@ scheduler:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `max_concurrent` | int | `1` | How many scheduled runs may execute at the same time. Raise it only for streams and jobs that write different tables; see [Scheduler](scheduler#concurrency). |
+| `max_concurrent` | int | `1` | How many scheduled runs may execute at the same time; a change takes effect without a restart. Raise it only for streams and jobs that write different tables; see [Scheduler](scheduler#concurrency). |
 | `overlap` | string | `skip` | When a stream or job is still running (or already waiting) at its next fire: `skip` records the fire as skipped, `queue` lets one run wait. |
 | `catchup` | bool | `false` | On start, fires that passed while the scheduler was down are always recorded as `missed`; with `true` the newest one also runs, once. |
 | `timezone` | string | server local time | Zone that cron expressions are evaluated in. An unknown name is an error (`havn validate` and scheduler start fail); it never falls back to local time. |

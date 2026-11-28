@@ -115,13 +115,32 @@ Starting scheduler... (at most 1 run at a time; Ctrl+C to stop)
 
 The next run is shown in the schedule's own time zone (`local` is the server's local time). The scheduler runs as a foreground process. Press Ctrl+C to stop it (see [Stopping](#stopping)).
 
+Scheduled runs build the active environment's warehouse (`havn env use`), or the one `--env` names, chosen exactly as `havn stream --env` chooses it:
+
+```bash
+havn schedule --env prod
+havn schedule --env prod --history
+```
+
 ### With the Web Server
 
 ```bash
 havn serve --schedule
 ```
 
-runs the same scheduler inside the server process.
+runs the same scheduler inside the server process. It resolves the warehouse the way the server does: the server's `--env`, the environment switched to in the web UI, and (without `--auth`, when `branches.enabled`) the checked-out branch's warehouse. So with `havn serve --env prod --schedule`, scheduled runs build the same warehouse the UI shows. The scheduler re-resolves on every tick, so switching the environment in the UI moves scheduled runs with it.
+
+### One scheduler per warehouse
+
+Only one scheduler may run against a warehouse. A second one, whether `havn schedule` while `havn serve --schedule` is running, two `havn schedule` processes, or two schedulers in one process, refuses to start:
+
+```
+Another scheduler is already running on warehouse.duckdb: process 12345 (havn schedule),
+started 2026-11-28T06:00:01+01:00. Only one scheduler may run per warehouse; stop the
+other one first (lock file: .havn/scheduler/warehouse-1a2b3c4d5e6f.lock).
+```
+
+The scheduler holds an operating-system lock on a file under `.havn/scheduler/` for as long as it runs (`msvcrt` on Windows, `flock` elsewhere). The operating system drops it when the process ends, also after a crash or `kill -9`, so a leftover lock file never blocks the next start. The lock is per warehouse: `havn schedule --env dev` and `havn schedule --env prod` can run side by side. Without it, two schedulers would both run every fire, and each one's startup would mark the other's running fires `interrupted`.
 
 ### Settings are checked before anything runs
 
@@ -131,9 +150,9 @@ An unknown time zone name, an `overlap` other than `skip` or `queue`, or a `max_
 
 The scheduler is a dispatch loop and a pool of worker threads:
 
-1. Every 30 seconds the loop re-reads `project.yml` and `orchestration/*.yml` (so schedule changes take effect without a restart), works out which schedules have a fire time since it last looked, and hands those runs to the pool. It never runs a stream or job itself, so it keeps ticking while a long run executes.
+1. Every 30 seconds the loop re-reads `project.yml` and `orchestration/*.yml` (so schedule changes, and a change to `max_concurrent`, take effect without a restart), works out which schedules have a fire time since it last looked, and hands those runs to the pool. It never runs a stream or job itself, so it keeps ticking while a long run executes.
 2. Workers run streams through the same pipeline engine as `havn stream` and the web UI (steps in their listed order, the pre-build validation gate, retries, Pipeline Rewind, the stream's `webhook_url`, the `alerts:` success/failure alert) and jobs as `havn jobs run` would. A stream counts as failed when a step fails, including a transform step where a model errored or an error-severity `@assert` rejected it.
-3. Every fire is written to `_havn.schedule_history`, with how late the run started and how it ended.
+3. Every fire is written to `_havn.schedule_history`, with how late the run started and how it ended. When the warehouse cannot be opened for a history write (another process holds it), the write is kept and retried, in order, on the following ticks, so the fire and its outcome are still recorded. At most 1,000 writes wait; past that the oldest is dropped with an error in the log.
 
 Dashboard reports that are due are checked once per tick, also in the pool.
 
@@ -150,16 +169,16 @@ A run is never started twice at the same time, whatever `max_concurrent` is.
 
 ### Concurrency
 
-`scheduler.max_concurrent` is the number of workers, and it defaults to **1**: scheduled runs execute one at a time, as they always have. Runs that come due together wait in a queue, and their lateness is recorded.
+`scheduler.max_concurrent` is the number of workers, and it defaults to **1**: scheduled runs execute one at a time, as they always have. Runs that come due together wait in a queue, and their lateness is recorded. Raising it takes effect on the next tick; lowering it takes effect as workers finish the runs queued ahead of the change.
 
 Raising it is possible, but runs that overlap in one warehouse can fail. DuckDB allows one writer process per file and resolves concurrent transactions within that process optimistically, so two runs that write the same catalog object conflict. Measured on this codebase (two streams started together in one process, as the scheduler would):
 
-- On a fresh warehouse, the second run failed with `Catalog write-write conflict on create with "_havn"`: both runs create the metadata tables.
+- On a fresh warehouse, both runs create the `_havn` metadata tables and the `landing`, `bronze`, `silver` and `gold` schemas, and the second one used to fail with `Catalog write-write conflict on create`. havn now creates those (and its other tables) under one lock per process and retries a conflict with a writer outside it, so this no longer fails.
 - Two ingest scripts replacing the same landing table failed in 4 of 10 rounds.
-- Two scripts that each run `CREATE SCHEMA IF NOT EXISTS landing` on a warehouse without that schema conflicted.
-- Model builds are safe from each other (havn builds one model at a time per process), and streams that write disjoint, already existing tables ran side by side without errors.
+- Two scripts of your own that each run `CREATE SCHEMA IF NOT EXISTS my_schema` on a warehouse without that schema can still conflict: havn does not see inside scripts.
+- Model builds are safe from each other (havn builds one model at a time per process), and streams that write disjoint tables ran side by side without errors.
 
-So set `max_concurrent` above 1 only when the streams and jobs that can overlap write different tables and the schemas they use already exist. A conflict shows up as a failed run in the history; stream `retries` can absorb an occasional one.
+So set `max_concurrent` above 1 only when the streams and jobs that can overlap write different tables. A conflict shows up as a failed run in the history; stream `retries` can absorb an occasional one.
 
 ### With the web UI (`havn serve --schedule`)
 
@@ -169,6 +188,8 @@ The web UI and the scheduler share one run gate per project, so a run started fr
 - A scheduled run that comes due while a UI run is in progress stays queued and starts as soon as the UI run ends. The wait counts towards its lateness in the history.
 - Starting a UI run while a scheduled run is in progress (or about to start) is refused straight away: the UI says a scheduled run is in progress and names it, and the blocking endpoints answer 409.
 - Scheduled runs share the gate with each other, so `max_concurrent` above 1 still lets them overlap as described above.
+- The file watcher (`havn serve --watch`) takes the gate like a UI run; see [File Watcher](#file-watcher).
+- Cancelling a UI run frees the gate only when nothing of it is still writing: a running script is stopped, a model being built finishes, and only then does the run end.
 
 `havn stream` and `havn jobs run` in a terminal are separate processes; DuckDB's file lock keeps them out of a warehouse a server has open.
 
@@ -179,7 +200,8 @@ The scheduler writes a heartbeat to `_havn.scheduler_state` on every tick. When 
 - Every cron fire that passed while no scheduler was running is recorded in the history as `missed`.
 - With `catchup: true` the newest of them runs once, straight away (the history marks it `catchup` and shows how late it started); the older ones stay `missed`. With `catchup: false` (the default) they are only recorded.
 - On the very first start there is no heartbeat, so nothing counts as missed.
-- At most the newest 100 missed fires per schedule are recorded individually; the log says how many there were.
+- At most the newest 100 missed fires per schedule are recorded individually; the log says how many there were (counted up to 10,000, then given as "at least").
+- A fire the history already holds is never run again. Each schedule starts counting after its newest recorded fire, so a scheduler restarted in the same minute as a fire the previous one ran does not run it a second time.
 
 The same applies when the process was suspended (a laptop asleep): if several fires of one schedule passed between two ticks, the newest runs and the older ones are recorded as `missed`.
 
@@ -237,6 +259,8 @@ havn query "SELECT schedule_name, scheduled_for, status, lateness_ms
 
 Rows older than `scheduler.history_days` (default 30) are deleted at start and hourly.
 
+With `havn schedule --env`, the history shown is that environment's: each warehouse keeps its own.
+
 ## File Watcher
 
 The file watcher monitors `transform/` and `ingest/` for changes and automatically triggers rebuilds.
@@ -257,10 +281,12 @@ Watching for changes... (Ctrl+C to stop)
 ### How It Works
 
 1. Uses the `watchdog` library to monitor filesystem events
-2. Watches `transform/` and `ingest/` directories recursively
-3. When a `.sql` or `.py` file is modified, it triggers an action
-4. For `transform/` changes: runs `havn transform`
-5. Includes 2-second debouncing to avoid multiple rebuilds for rapid saves
+2. Watches `transform/`, `ingest/` and `macros/` recursively
+3. A saved `.sql` or `.py` file under `transform/` marks a rebuild as pending (`--route` narrows it to the matching model)
+4. The rebuild runs two seconds after the last save, so a burst of saves builds once
+5. It takes the project's run gate, as a web UI run does. While a UI or scheduled run holds the gate, the rebuild stays pending (the watcher prints `Rebuild pending; waiting for the current run (...)` once) and runs as soon as the gate is free, covering every edit made meanwhile. No edit is dropped.
+
+Under `havn serve --watch` the rebuild runs on the server's own warehouse connection, so it builds the warehouse the server has open; `havn watch` opens the warehouse itself.
 
 ### Example Session
 
@@ -324,7 +350,7 @@ For production deployments, run the scheduler as a background service:
 nohup havn schedule > /var/log/havn-scheduler.log 2>&1 &
 ```
 
-Run one scheduler per warehouse: either `havn schedule` or `havn serve --schedule`, not both.
+Run one scheduler per warehouse: either `havn schedule` or `havn serve --schedule`, not both. A second one refuses to start (see [One scheduler per warehouse](#one-scheduler-per-warehouse)).
 
 ### Monitoring
 

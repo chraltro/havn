@@ -11,11 +11,17 @@ late or skipped) while a long run executes. What it schedules:
   (``every 2h``) schedules;
 - scheduled dashboard reports (one check per tick, also in the pool).
 
-Pool size is ``scheduler.max_concurrent`` (default 1). One worker means
-runs still execute one at a time, as before: concurrent runs against one
-DuckDB warehouse can fail on write-write conflicts (two runs creating
-``_havn`` metadata tables, two ingest scripts replacing the same landing
-table), so concurrency is opt-in. See docs/scheduler.md.
+Pool size is ``scheduler.max_concurrent`` (default 1, re-read every tick).
+One worker means runs still execute one at a time, as before: concurrent
+runs against one DuckDB warehouse can fail on write-write conflicts (two
+ingest scripts replacing the same landing table; havn's own schema and
+table bootstrap is serialised by ``engine.catalog_ddl``), so concurrency is
+opt-in. See docs/scheduler.md.
+
+One scheduler per warehouse: ``start()`` / ``_startup()`` take an OS-level
+lock (``engine.scheduler_lock``) held until the scheduler stops. A
+schedule's cron clock starts after its newest recorded fire, so a fire the
+history holds is never dispatched again.
 
 Per schedule (stream or job):
 

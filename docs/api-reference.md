@@ -410,8 +410,20 @@ duration_seconds }`. Stale runs older than 10 minutes are auto-cleared.
 
 ### POST /api/stream/cancel
 
-Request cancellation of the running pipeline. Workers check the cancel
-flag between steps; in-flight queries are not interrupted by default.
+Request cancellation of the running pipeline. No new script or model
+starts. A running ingest or export script is stopped (DuckDB is interrupted
+and the script thread is stopped, as a timeout does) and reported with
+status `skipped` and the error "Cancelled while running"; a model being
+built finishes. The run's `complete` event (status `cancelled`) comes only
+once nothing is running, and only then can another run start. A script that
+cannot be interrupted (blocked in a long call) keeps the run cancelling until
+it returns; so does a script run in a governed child process.
+
+### GET /api/stream/{name}/events
+
+Legacy: starts stream `name` and streams its events. Answers 409 when
+another operation (or a scheduled run) is in progress, instead of streaming
+that operation's events.
 
 ### GET /api/streams
 

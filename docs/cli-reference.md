@@ -619,18 +619,23 @@ Actions:
 
 ### havn schedule
 
-Start the cron scheduler.
+Start the cron scheduler, or show its history. Scheduled runs build the
+environment's warehouse (default: the active environment, as `havn stream`).
+Only one scheduler may run per warehouse; a second one refuses to start and
+names the process that holds it.
 
 ```bash
-havn schedule [--project PATH]
+havn schedule [--env ENV] [--project PATH]
+havn schedule --history [--name NAME] [--status STATUS] [--limit N] [--env ENV]
 ```
 
 ### havn watch
 
-Watch for file changes and auto-rebuild.
+Watch for file changes and auto-rebuild. A rebuild runs two seconds after the
+last save and waits while another run holds the project's run gate.
 
 ```bash
-havn watch [--project PATH]
+havn watch [--route GLOB] [--project PATH]
 ```
 
 ## Masking
