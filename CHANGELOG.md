@@ -201,6 +201,33 @@ All notable changes to havn are documented in this file.
 - **`tzdata` is a dependency.** DuckDB 2 reads time zones through Python's
   zoneinfo, which has no time zone database on Windows without it.
 
+- **The web UI opens faster.** Every page used to be downloaded before the
+  first one appeared: 1.6 MB of JavaScript (426 kB compressed), plus the
+  code editor's 1 MB, even for someone who only looked at the Home page.
+  Now the first download is the app's frame and the Home page, 405 kB of
+  JavaScript (122 kB compressed); in a measured load of Home the browser
+  fetched 128 kB instead of 1.5 MB. The other pages, the editor and the
+  agent sidebar are fetched when they are first opened, or before that:
+  when the pointer or keyboard focus reaches their entry in the navigation,
+  and in the background once the first page is on screen, so switching
+  pages does not wait on a normal connection. Opening havn directly on any
+  page (a bookmark, a reload, a shared link) fetches that page straight
+  away. A model notebook or notebook opened before the editor was fetched
+  fetches it then, for SQL completion and hover, and an AI Review sent while
+  the agent sidebar is still downloading reaches it once it is there.
+- **A tab left open across an upgrade recovers by itself.** After havn is
+  updated, a page opened for the first time in an old tab asks for a file the
+  new version no longer has. havn tries the download again, then checks
+  whether the server now serves a newer version; if so it reloads once to
+  pick it up (the browser still asks first if there is unsaved work), and if
+  that does not help it says so and offers a Reload button. When the server
+  is only restarting or the network dropped out, havn does not reload: it
+  says the part could not be loaded and offers Retry, keeping everything on
+  screen. Where the browser blocks storage (some embeds and private windows)
+  havn never reloads by itself, since it could not remember having done so.
+- Published dashboard links download less: they no longer include the
+  dependency graph and the dashboard editor.
+
 ### Fixed
 
 - **Python models and macros on DuckDB 2.** DuckDB 2
@@ -311,35 +338,6 @@ All notable changes to havn are documented in this file.
   Enter on the tour's Back button went back and then forward again. Clicking
   a result cell threw when the page was opened over plain http on a LAN
   address (no clipboard API).
-
-### Changed
-
-- **The web UI opens faster.** Every page used to be downloaded before the
-  first one appeared: 1.6 MB of JavaScript (426 kB compressed), plus the
-  code editor's 1 MB, even for someone who only looked at the Home page.
-  Now the first download is the app's frame and the Home page, 405 kB of
-  JavaScript (122 kB compressed); in a measured load of Home the browser
-  fetched 128 kB instead of 1.5 MB. The other pages, the editor and the
-  agent sidebar are fetched when they are first opened, or before that:
-  when the pointer or keyboard focus reaches their entry in the navigation,
-  and in the background once the first page is on screen, so switching
-  pages does not wait on a normal connection. Opening havn directly on any
-  page (a bookmark, a reload, a shared link) fetches that page straight
-  away. A model notebook or notebook opened before the editor was fetched
-  fetches it then, for SQL completion and hover, and an AI Review sent while
-  the agent sidebar is still downloading reaches it once it is there.
-- **A tab left open across an upgrade recovers by itself.** After havn is
-  updated, a page opened for the first time in an old tab asks for a file the
-  new version no longer has. havn tries the download again, then checks
-  whether the server now serves a newer version; if so it reloads once to
-  pick it up (the browser still asks first if there is unsaved work), and if
-  that does not help it says so and offers a Reload button. When the server
-  is only restarting or the network dropped out, havn does not reload: it
-  says the part could not be loaded and offers Retry, keeping everything on
-  screen. Where the browser blocks storage (some embeds and private windows)
-  havn never reloads by itself, since it could not remember having done so.
-- Published dashboard links download less: they no longer include the
-  dependency graph and the dashboard editor.
 
 ## [0.3.1] - 2026-11-27
 
