@@ -740,7 +740,9 @@ async def run_stream_sse(
     from havn.server.deps import _get_db_path
 
     user = _require_permission(request, "execute")
-    _cancel_flag.clear()
+    # The cancel flag is cleared by _start_operation, and only when this
+    # run actually starts: clearing it here dropped a cancel aimed at the
+    # run already in progress.
     logger.info("Stream SSE requested (legacy): %s (force=%s)", stream_name, force)
 
     # Audit pipeline start
@@ -771,12 +773,15 @@ async def run_stream_sse(
     db_path_str = str(_get_db_path())
     project_dir = _get_project_dir()
 
-    _start_operation(
+    started = _start_operation(
         "stream",
         stream_name,
         _run_pipeline_thread,
         (stream_name, stream_config, project_dir, db_path_str, force, user),
     )
+    if started.get("status") != "started":
+        # Something else is running: do not stream its events as this run's.
+        raise HTTPException(409, started.get("message") or "An operation is already running.")
 
     def _generate():
         import json as _json

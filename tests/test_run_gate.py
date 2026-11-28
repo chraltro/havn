@@ -376,6 +376,42 @@ def test_scheduled_runs_still_overlap_each_other_with_max_concurrent(tmp_path, c
     assert [s for s, _ in _history(project, "hourly")] == ["success"]
 
 
+def test_legacy_sse_endpoint_refuses_while_busy_and_keeps_a_pending_cancel(tmp_path, client_for):
+    """GET /api/stream/{name}/events while another operation runs."""
+    from havn.server.routes import pipeline
+
+    project = _project(tmp_path)
+    client = client_for(project)
+    release = threading.Event()
+
+    def ui_op():
+        try:
+            assert release.wait(60)
+        finally:
+            pipeline._finish_operation()
+
+    assert pipeline._start_operation("stream", "manual", ui_op, ())["status"] == "started"
+    try:
+        client.post("/api/stream/cancel")                 # aimed at the running op
+        assert pipeline._cancel_flag.is_set()
+        r = client.get("/api/stream/manual/events")
+        assert r.status_code == 409
+        assert "already running" in r.json()["detail"]
+        assert pipeline._cancel_flag.is_set()             # not cleared by the refused request
+    finally:
+        release.set()
+        _wait_ui_idle()
+
+    # A scheduled run holding the gate: refused too, not another op's events.
+    ticket = gate_for(project).acquire_shared("stream 'nightly'")
+    try:
+        r = client.get("/api/stream/manual/events")
+        assert r.status_code == 409
+        assert "scheduled run is in progress" in r.json()["detail"]
+    finally:
+        ticket.release()
+
+
 def test_stopping_scheduler_cancels_a_run_waiting_for_the_gate(tmp_path):
     project = _project(tmp_path)
     clock = Clock(dt.datetime(2026, 4, 6, 6, 0, 0, tzinfo=UTC))
