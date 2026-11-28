@@ -19,6 +19,28 @@ from pathlib import Path
 import duckdb
 
 
+def meta_column_exists(conn, table: str, column: str | None = None, schema: str = "_havn") -> bool:
+    """Whether ``schema.table`` (and ``column`` in it) exists in the current database.
+
+    For code that may run inside a caller's transaction (a live refresh, a
+    deploy): "try the statement and catch the missing table" is not safe
+    there, because the failed statement aborts the whole transaction and
+    every statement after it fails. Look first instead.
+    """
+    sql = (
+        "SELECT count(*) FROM duckdb_columns() WHERE database_name = current_database() "
+        "AND schema_name = ? AND table_name = ?"
+    )
+    params = [schema, table]
+    if column is not None:
+        sql += " AND column_name = ?"
+        params.append(column)
+    try:
+        return bool(conn.execute(sql, params).fetchall()[0][0])
+    except duckdb.Error:
+        return False
+
+
 def finish_pending_result(conn) -> None:
     """Run any open ``execute()`` result on ``conn`` to its end.
 

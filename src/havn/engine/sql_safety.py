@@ -317,6 +317,186 @@ def leading_statement_keyword(stmt: str) -> str:
         return "with"
 
 
+# DuckDB 2.0 accepts INSERT / UPDATE / DELETE / COPY (and may accept more) as a
+# CTE body, ``WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d``, and the
+# statement as a whole still reports as a SELECT. These are the verbs that
+# can sit nested inside a statement and write.
+_NESTED_WRITE_VERBS = frozenset({"insert", "update", "delete", "merge", "copy"})
+# Tokens of the cleaned text (strings already '' and comments gone): words,
+# double-quoted identifiers kept whole, and single punctuation characters.
+_TOKEN_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_$]*|"[^"]*"|\S')
+
+
+def _is_word(tok: str) -> bool:
+    return bool(tok) and (tok[0].isalpha() or tok[0] in '_"')
+
+
+def _skip_name(low: list[str], j: int) -> int:
+    """Index after a possibly qualified name (``a``, ``a.b``, ``"a"."b"``), or ``j``."""
+    if j >= len(low) or not _is_word(low[j]):
+        return j
+    j += 1
+    while j + 1 < len(low) and low[j] == "." and _is_word(low[j + 1]):
+        j += 2
+    return j
+
+
+def _skip_group(low: list[str], j: int) -> int:
+    """Index after the parenthesised group opening at ``j``, or ``j``."""
+    if j >= len(low) or low[j] != "(":
+        return j
+    depth = 0
+    while j < len(low):
+        if low[j] == "(":
+            depth += 1
+        elif low[j] == ")":
+            depth -= 1
+            if depth == 0:
+                return j + 1
+        j += 1
+    return j
+
+
+def _write_shape(low: list[str], i: int) -> bool:
+    """Whether the verb at ``low[i]`` opens a statement rather than naming a column."""
+    verb = low[i]
+    nxt = low[i + 1] if i + 1 < len(low) else ""
+    if verb == "insert":
+        return nxt in ("into", "or")
+    if verb == "delete":
+        return nxt == "from"
+    if verb == "merge":
+        return nxt == "into"
+    if verb == "update":
+        # UPDATE name [AS] [alias] SET
+        j = _skip_name(low, i + 1)
+        if j == i + 1:
+            return False
+        if j < len(low) and low[j] == "as":
+            j += 1
+        if j < len(low) and low[j] != "set" and _is_word(low[j]):
+            j += 1
+        return j < len(low) and low[j] == "set"
+    if verb == "copy":
+        if nxt == "from" and i + 2 < len(low) and low[i + 2] == "database":
+            return True
+        j = _skip_group(low, i + 1) if nxt == "(" else _skip_name(low, i + 1)
+        if j == i + 1:
+            return False
+        j = _skip_group(low, j)
+        return j < len(low) and low[j] in ("to", "from")
+    return False
+
+
+def _nested_write_in_cleaned(cleaned: str) -> str | None:
+    """The write verb nested anywhere in ``cleaned``, if there is one.
+
+    ``cleaned`` is the output of :func:`strip_sql_comments_and_strings`, so a
+    keyword inside a string or a comment is already gone and a quoted
+    identifier (``"delete"``) is one token that never matches. Two positions
+    can open a nested statement:
+
+    * right after ``(`` -- a CTE body, ``AS [NOT] MATERIALIZED (``, a
+      subquery, a parenthesised body;
+    * right after the ``)`` that closes a CTE body, where a nested
+      ``WITH x AS (...) DELETE ...`` puts its verb.
+
+    Directly inside a CTE body (``AS (`` / ``MATERIALIZED (``) only a statement
+    can stand, so any non-read verb there is refused outright. Elsewhere the
+    verb must also have its statement shape (``DELETE FROM``, ``UPDATE t SET``,
+    ``INSERT INTO``, ``COPY x TO``), so a column called ``update`` passes.
+    """
+    low = [t.lower() for t in _TOKEN_RE.findall(cleaned)]
+    cte_open: list[bool] = []
+    closes_cte: set[int] = set()
+    for i, tok in enumerate(low):
+        if tok == "(":
+            cte_open.append(i > 0 and low[i - 1] in ("as", "materialized"))
+        elif tok == ")" and cte_open:
+            if cte_open.pop():
+                closes_cte.add(i)
+    for i in range(1, len(low)):
+        tok = low[i]
+        prev = low[i - 1]
+        if prev == "(" and i >= 2 and low[i - 2] in ("as", "materialized"):
+            if tok in _FORBIDDEN_STATEMENT_KEYWORDS:
+                return tok
+        if tok in _NESTED_WRITE_VERBS and (prev == "(" or (i - 1) in closes_cte):
+            if _write_shape(low, i):
+                return tok
+    return None
+
+
+def find_nested_write(sql: str) -> str | None:
+    """Return the data-modifying verb nested inside ``sql`` (a CTE body, a
+    subquery, a nested WITH), or None.
+
+    The top-level verb of a plain ``DELETE FROM t`` is not nested and is not
+    reported; :func:`validate_read_only_query` judges that one separately.
+    Governed write sessions use this to keep a write from hiding inside a
+    statement that reports itself as a SELECT, or inside another write.
+    """
+    return _nested_write_in_cleaned(strip_sql_comments_and_strings(sql))
+
+
+_NESTED_WRITE_MESSAGE = (
+    "Data-modifying statements (INSERT, UPDATE, DELETE, MERGE, COPY) are not "
+    "allowed through the query interface, including inside a CTE or subquery."
+)
+
+
+def _tree_has_write(tree) -> bool:
+    """Whether a ``json_serialize_sql`` tree holds any non-read query node."""
+    stack: list = [tree]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, list):
+            stack.extend(node)
+            continue
+        if not isinstance(node, dict):
+            continue
+        for key in ("node", "query_node"):
+            child = node.get(key)
+            if isinstance(child, dict) and child.get("type") not in _READ_QUERY_NODES:
+                return True
+        ntype = node.get("type")
+        if (isinstance(ntype, str) and ntype.endswith("_QUERY_NODE")) or "info_type" in node:
+            return True
+        stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
+    return False
+
+
+def refuse_nested_writes(sql: str) -> None:
+    """Raise :class:`ReadOnlyQueryError` when a write hides inside ``sql``.
+
+    For a statement DuckDB reports as a SELECT or EXPLAIN that is not checked
+    by :func:`validate_read_only_query` (governed sessions, which may write,
+    but only through statements that say so). Checks the text with the lexer,
+    then DuckDB's parse tree; when there is no tree (a dynamic PIVOT), any
+    write verb in the text is refused.
+    """
+    if find_nested_write(sql) is not None:
+        raise ReadOnlyQueryError(_NESTED_WRITE_MESSAGE)
+    import json
+
+    target = sql
+    if _first_keyword(sql) == "explain":
+        target = _explain_target(sql) or ""
+        if leading_statement_keyword(strip_sql_comments_and_strings(target)) in _FORBIDDEN_STATEMENT_KEYWORDS:
+            raise ReadOnlyQueryError("Only SELECT queries can be explained.")
+    try:
+        raw = _parser_conn().execute("SELECT json_serialize_sql(?)", [target]).fetchall()[0][0]
+        tree = json.loads(raw)
+    except Exception:
+        tree = {"error": True}
+    if tree.get("error"):
+        if _bare_write_word(target) is not None:
+            raise ReadOnlyQueryError(_NESTED_WRITE_MESSAGE)
+        return
+    if _tree_has_write(tree):
+        raise ReadOnlyQueryError(_NESTED_WRITE_MESSAGE)
+
+
 def validate_read_only_query(sql: str) -> None:
     """Reject SQL that is not a safe read-only query.
 
@@ -362,6 +542,11 @@ def validate_read_only_query(sql: str) -> None:
         raise ReadOnlyQueryError(
             "Only SELECT queries are allowed through the query interface."
         )
+    # The leading verb of a WITH statement is the one after its CTEs, but on
+    # DuckDB 2.0 a CTE body can itself be an INSERT / UPDATE / DELETE / COPY
+    # and the whole statement still reports as a SELECT.
+    if _nested_write_in_cleaned(stmt) is not None:
+        raise ReadOnlyQueryError(_NESTED_WRITE_MESSAGE)
     # Note: at this point string literals are already stripped to '', so we
     # can scan the cleaned statement directly. We also have to catch quoted
     # identifiers: DuckDB happily accepts `"read_csv"(...)` and treats the
@@ -420,8 +605,20 @@ _MULTI = _multi_statement_type()
 
 # Words a read-only statement can open with. A MULTI statement (see
 # _check_with_duckdb_parser) is accepted only when its text starts with one.
-# DuckDB has no data-modifying CTEs, so WITH is a read.
-_READ_LEAD_KEYWORDS = frozenset({"select", "with", "from", "pivot", "unpivot", "values", "table", "("})
+# WITH is not a read by itself on DuckDB 2.0 (a CTE body can be a DELETE);
+# _check_parse_tree refuses any write verb in a MULTI statement's text, since
+# its parse tree cannot be inspected. DESCRIBE / SUMMARIZE / SHOW of a dynamic
+# PIVOT are MULTI on 2.0 and SELECT-typed on 1.x; both are reads.
+_READ_LEAD_KEYWORDS = frozenset({
+    "select", "with", "from", "pivot", "unpivot", "values", "table", "(",
+    "describe", "summarize", "show",
+})
+
+# Query node types a read may contain. DuckDB 2.0 serialises a CTE body that
+# writes as INSERT_QUERY_NODE / UPDATE_QUERY_NODE / DELETE_QUERY_NODE /
+# COPY_QUERY_NODE (and whatever it adds next); anything not listed here is
+# refused rather than trusted.
+_READ_QUERY_NODES = frozenset({"SELECT_NODE", "SET_OPERATION_NODE", "RECURSIVE_CTE_NODE", "CTE_NODE"})
 
 
 def _first_keyword(query: str) -> str:
@@ -570,7 +767,20 @@ def _check_parse_tree(query: str) -> None:
             raise ReadOnlyQueryError(
                 "Reading files by path is not allowed through the query interface.",
             )
+        # No tree to inspect, so fail closed: any write verb anywhere in the
+        # text is refused, even one that is only a column name.
+        verb = _bare_write_word(query)
+        if verb is not None:
+            raise ReadOnlyQueryError(
+                f"This query could not be verified as read-only (it mentions {verb.upper()}). "
+                "Quote the identifier, or list the PIVOT values with IN (...).",
+            )
         return
+
+    # DuckDB 2.0 parses a CTE body that writes into INSERT/UPDATE/DELETE/COPY
+    # query nodes, while the statement itself still reports as a SELECT.
+    if _tree_has_write(tree):
+        raise ReadOnlyQueryError(_NESTED_WRITE_MESSAGE)
 
     stack: list = [tree]
     while stack:
@@ -595,6 +805,15 @@ def _check_parse_tree(query: str) -> None:
                 "File-access functions (read_csv, read_parquet, etc.) are not allowed.",
             )
         stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
+
+
+def _bare_write_word(query: str) -> str | None:
+    """The first unquoted INSERT/UPDATE/DELETE/MERGE/COPY word in ``query``, if any."""
+    for tok in _TOKEN_RE.findall(strip_sql_comments_and_strings(query)):
+        low = tok.lower()
+        if low in _NESTED_WRITE_VERBS:
+            return low
+    return None
 
 
 def _has_path_like_token(query: str) -> bool:

@@ -246,7 +246,23 @@ class GovernedSession:
                 "This statement (a dynamic PIVOT) cannot be governed. List the pivot values with IN (...)."
             )
         check_paths(text, self.protected, self.cwd)
+        # DuckDB 2.0 runs INSERT/UPDATE/DELETE/COPY as a CTE body, and the
+        # statement still reports as a SELECT (or as the outer write). Routed
+        # by type, the nested write would skip _write: its governance, the
+        # _havn admin-only check, everything. A write has to be its own
+        # statement here.
+        from havn.engine.sql_safety import ReadOnlyQueryError, find_nested_write, refuse_nested_writes
+
+        if find_nested_write(text) is not None:
+            raise GovernanceError(
+                "INSERT, UPDATE, DELETE, MERGE and COPY inside a CTE or subquery are not "
+                "available in governed sessions. Run the write as its own statement."
+            )
         if kind in (st.SELECT, st.EXPLAIN):
+            try:
+                refuse_nested_writes(text)
+            except ReadOnlyQueryError as e:
+                raise GovernanceError(str(e)) from e
             return self._read(text, params, registered)
         if kind == st.TRANSACTION:
             return self._run(text, params)

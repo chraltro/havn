@@ -96,10 +96,17 @@ class QueryIdentity:
 
 def _stored_attributes(conn: duckdb.DuckDBPyConnection, username: str) -> dict:
     """A user's attributes from ``_havn.users``; {} for synthetic or missing users."""
+    # Look before reading: a failed statement aborts the caller's transaction
+    # when there is one, so "try it and catch the missing table" is not safe.
+    from havn.engine.database import meta_column_exists
+
+    if not meta_column_exists(conn, "users", "attributes"):
+        return {}
     try:
         row = conn.execute(
             "SELECT attributes FROM _havn.users WHERE username = ?", [username]
-        ).fetchone()
+        ).fetchall()
+        row = row[0] if row else None
     except duckdb.Error:
         return {}
     if not row:
@@ -305,6 +312,22 @@ def run_governed_query(
     errors: list[BaseException] = []
 
     def _exec() -> None:
+        # Last line of defence behind the validator: run the read in a READ
+        # ONLY transaction, so a write that slipped past it (DuckDB 2.0 runs
+        # INSERT/UPDATE/DELETE inside a CTE of a "SELECT") fails instead of
+        # changing the database. It does not stop COPY ... TO a file, temp
+        # tables or SET; those are the validator's job. A caller's own open
+        # transaction is left alone: BEGIN inside it would abort it.
+        from havn.engine.utils import in_transaction
+
+        read_only_txn = False
+        try:
+            if not in_transaction(conn):
+                conn.execute("BEGIN TRANSACTION READ ONLY")
+                read_only_txn = True
+        except BaseException as e:  # noqa: BLE001 - re-raised on the caller's thread
+            errors.append(e)
+            return
         try:
             result = conn.execute(wrapped, params)
             description = result.description or []
@@ -319,6 +342,12 @@ def run_governed_query(
             holder["rows"] = rows
         except BaseException as e:  # noqa: BLE001 - re-raised on the caller's thread
             errors.append(e)
+        finally:
+            if read_only_txn:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
 
     label = task_label or f"sql:{sql[:60]}"
     manager = get_resource_manager()
