@@ -608,25 +608,6 @@ class SchedulerThread(threading.Thread):
         base = now if self._started_at is None or self._cron_clock_settled else as_instant(self._started_at)
         return as_instant(base).replace(second=0, microsecond=0) - datetime.timedelta(microseconds=1)
 
-    def _should_run(self, name: str, cron_expr: str, now=None, tz=None) -> bool:
-        """True when ``cron_expr`` had a fire time since ``name`` was last evaluated.
-
-        Each call advances ``name``'s clock to ``now``, so a fire is reported
-        once, and several fires that passed between two evaluations are
-        reported as one. Uses POSIX cron weekdays (0=Sunday). An invalid
-        expression never fires. ``now`` (naive = local time) is injectable.
-        """
-        from havn.engine.schedule_time import as_instant, next_fire
-
-        now = as_instant(now) if now is not None else self._now()
-        last = self._cron_clock.get(name)
-        if last is None:
-            last = self._clock_origin(now)
-        # Only move forward: a clock that steps back must not fire twice.
-        self._cron_clock[name] = max(last, now)
-        nxt = next_fire(cron_expr, last, tz)
-        return nxt is not None and nxt <= now
-
     # -- lifecycle -----------------------------------------------------
 
     def stop(self) -> None:
