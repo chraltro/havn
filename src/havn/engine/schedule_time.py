@@ -131,24 +131,55 @@ def next_fire(expr: str, after: datetime.datetime, tz) -> datetime.datetime | No
     return None
 
 
+# With a ``limit``, fires older than the newest ``limit`` are only counted,
+# and only up to this many: the count is for a log line, and walking every
+# minute of a year-long outage (``* * * * *``) took seconds.
+FIRES_COUNT_CAP = 10_000
+
+
+def _walk(expr: str, start: datetime.datetime, end: datetime.datetime, tz,
+          cap: int | None = None) -> list[datetime.datetime]:
+    """Fires in ``(start, end]`` oldest first; at most ``cap`` of them."""
+    out: list[datetime.datetime] = []
+    cursor = start
+    while cap is None or len(out) < cap:
+        nxt = next_fire(expr, cursor, tz)
+        if nxt is None or nxt > end:
+            break
+        out.append(nxt)
+        cursor = nxt
+    return out
+
+
 def fires_between(
     expr: str, start: datetime.datetime, end: datetime.datetime, tz, *, limit: int | None = None,
+    count_cap: int = FIRES_COUNT_CAP,
 ) -> tuple[list[datetime.datetime], int]:
     """Fire instants in ``(start, end]``, oldest first, and how many there were.
 
-    With ``limit``, only the newest ``limit`` fires are kept in the list; the
-    count still covers the whole window.
+    With ``limit``, only the newest ``limit`` fires are returned, and the
+    work is bounded: they are found by walking a window that grows back
+    from ``end`` (doubling) until it holds ``limit`` fires, and the older
+    fires are counted up to ``count_cap`` only. The count is then exact
+    when it is at most ``limit + count_cap``, and a lower bound beyond.
     """
-    out: list[datetime.datetime] = []
-    total = 0
-    cursor = as_instant(start)
+    start = as_instant(start)
     end = as_instant(end)
+    if end <= start:
+        return [], 0
+    if limit is None:
+        out = _walk(expr, start, end, tz)
+        return out, len(out)
+    limit = max(0, int(limit))
+    span = datetime.timedelta(hours=1)
     while True:
-        nxt = next_fire(expr, cursor, tz)
-        if nxt is None or nxt > end:
-            return out, total
-        total += 1
-        out.append(nxt)
-        if limit is not None and len(out) > limit:
-            out.pop(0)
-        cursor = nxt
+        lo = max(start, end - span)
+        recent = _walk(expr, lo, end, tz)
+        if len(recent) >= limit or lo == start:
+            break
+        span *= 2
+    newest = recent[-limit:] if limit else []
+    older = len(recent) - len(newest)
+    if lo > start:
+        older += len(_walk(expr, start, lo, tz, cap=count_cap))
+    return newest, len(newest) + older

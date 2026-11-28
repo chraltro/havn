@@ -743,7 +743,7 @@ class SchedulerThread(threading.Thread):
         start) nothing counts as missed.
         """
         from havn.engine.schedule_history import STATUS_MISSED
-        from havn.engine.schedule_time import fires_between
+        from havn.engine.schedule_time import FIRES_COUNT_CAP, fires_between
 
         now = now or self._now()
         if self._started_at is None:
@@ -772,8 +772,10 @@ class SchedulerThread(threading.Thread):
                 fires, total = fires_between(expr, max(anchors), origin, tz, limit=self.MISSED_ROWS_LIMIT)
                 if total > len(fires):
                     logger.warning(
-                        "%s %s: %d fires passed while the scheduler was down; recording the newest %d",
-                        spec.kind, spec.name, total, len(fires),
+                        "%s %s: %s%d fires passed while the scheduler was down; recording the newest %d",
+                        spec.kind, spec.name,
+                        "at least " if total - len(fires) >= FIRES_COUNT_CAP else "",
+                        total, len(fires),
                     )
                 for f in fires:
                     missed.setdefault(f, expr)
