@@ -122,25 +122,31 @@ def test_lock_held_by_another_process_names_it_and_dies_with_it(tmp_path):
     project = _project(tmp_path)
     key = warehouse_key(type("C", (), {"database": type("D", (), {"path": "dev.duckdb"})()})(), project)
     holder = textwrap.dedent(f"""
-        import sys, time
+        import os, sys, time
         from pathlib import Path
         from havn.engine.scheduler_lock import SchedulerLock
         lock = SchedulerLock(Path(r"{project}"), "{key}", warehouse="dev.duckdb")
         lock.acquire()
-        print("locked", flush=True)
-        time.sleep(120)
+        print("locked", os.getpid(), flush=True)
+        sys.stdin.readline()
+        os._exit(1)  # a crash: no release, no cleanup
     """)
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join([str(Path(__file__).resolve().parents[1] / "src"),
                                          env.get("PYTHONPATH", "")])
-    proc = subprocess.Popen([sys.executable, "-c", holder], stdout=subprocess.PIPE, text=True, env=env)
+    proc = subprocess.Popen([sys.executable, "-c", holder], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, text=True, env=env)
     try:
-        assert proc.stdout.readline().strip() == "locked"
+        word, holder_pid = proc.stdout.readline().split()
+        assert word == "locked"
         with pytest.raises(SchedulerLockedError) as err:
             _scheduler(project)._startup(NOW)
-        assert f"process {proc.pid}" in str(err.value)
+        # The holder's own pid (a venv's python.exe on Windows is a launcher
+        # whose child is the real interpreter).
+        assert f"process {holder_pid}" in str(err.value)
     finally:
-        proc.kill()  # a crash: no release, no cleanup
+        proc.stdin.write("die\n")
+        proc.stdin.close()
         proc.wait(30)
         proc.stdout.close()
     # The OS dropped the lock with the process; the stale files do not matter.
