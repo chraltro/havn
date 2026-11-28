@@ -356,6 +356,8 @@ def test_failing_migration_rolls_back_is_not_recorded_and_raises(tmp_path, monke
     message = str(info.value)
     assert f"migration {broken.version} (broken)" in message
     assert info.value.migration is broken
+    assert not info.value.in_caller_transaction
+    assert "That migration was rolled back and not recorded" in message
 
     assert [v for v, _ in _recorded(conn)] == [m.version for m in MIGRATIONS]
     tables = {r[0] for r in conn.execute(
@@ -370,6 +372,29 @@ def test_failing_migration_rolls_back_is_not_recorded_and_raises(tmp_path, monke
     forget_database(path)
     with pytest.raises(MigrationError):
         ensure_migrated(conn)
+    conn.close()
+
+
+def test_failing_migration_inside_a_caller_transaction_says_so(tmp_path, monkeypatch):
+    """The runner cannot roll back a transaction it did not open; the error
+    must not claim it did."""
+    path = tmp_path / "w.duckdb"
+    conn = duckdb.connect(str(path))
+    apply_migrations(conn)
+    broken = Migration(CURRENT_VERSION + 1, "broken", _broken)
+    monkeypatch.setattr(migrations, "MIGRATIONS", MIGRATIONS + (broken,))
+    monkeypatch.setattr(migrations, "CURRENT_VERSION", broken.version)
+    forget_database(path)
+
+    conn.execute("BEGIN TRANSACTION")
+    with pytest.raises(MigrationError) as info:
+        ensure_migrated(conn)
+    conn.execute("ROLLBACK")
+    message = str(info.value)
+    assert info.value.in_caller_transaction
+    assert "was rolled back and not recorded" not in message
+    assert "inside an open transaction of the caller" in message
+    assert [v for v, _ in _recorded(conn)] == [m.version for m in MIGRATIONS]
     conn.close()
 
 

@@ -7,15 +7,20 @@ only when it commits.
 
 When migrations run
 -------------------
-- Opening the configured warehouse for writing (both backends'
-  ``connect(read_only=False)``) checks the version and applies what is
-  pending. On an up-to-date warehouse that is four tiny queries (about
-  2 ms), independent of how many tables the warehouse holds.
-- Every ``ensure_*_table`` helper calls :func:`ensure_migrated`, which is a
-  set lookup once this process has seen the database at the current version,
-  so connections opened some other way (``database.connect``, a plain
-  ``duckdb.connect`` in a test) are migrated on first use, as the lazy
-  helpers did before.
+- Opening a warehouse for writing (both backends'
+  ``connect(read_only=False)`` and ``database.connect(read_only=False)``)
+  checks the version and applies what is pending, before the caller can
+  open a transaction. On an up-to-date warehouse that is four tiny queries
+  (about 2 ms), independent of how many tables the warehouse holds.
+- Every ``ensure_*_table`` helper calls :func:`ensure_migrated`, so a
+  connection opened some other way (a plain ``duckdb.connect`` in a test or
+  a script) is migrated on first use, as the lazy helpers did before. Once
+  this process has seen a database file at the current version that call
+  is one ``duckdb_databases()`` query (roughly 0.3 to 1 ms). An in-memory
+  database is never remembered as settled, so there it reads the applied
+  versions every time. If that first use happens inside the caller's open
+  transaction the migration joins it (DuckDB has no nested transactions),
+  and is kept or lost with it.
 - Read-only connections never migrate. Code reading through them keeps
   handling an absent table, as it always has.
 
@@ -32,9 +37,9 @@ half-read result blocks the connection, so every query is read with
 
 A warehouse written by a newer havn (its highest applied version is above
 ``CURRENT_VERSION``) is left alone: nothing is applied and a warning is
-logged once per process. Migrations are additive by policy (new tables and
-columns only), so an older havn keeps working with the tables it knows; see
-docs/upgrading.md.
+logged once per process. Migrations never drop, rename or retype a column
+(they add tables and columns, and may rewrite rows, as migration 2 does), so
+an older havn keeps working with the tables it knows; see docs/upgrading.md.
 """
 
 from __future__ import annotations
@@ -77,15 +82,33 @@ CURRENT_VERSION = MIGRATIONS[-1].version
 class MigrationError(RuntimeError):
     """A metadata migration failed; the warehouse is left at the previous version."""
 
-    def __init__(self, migration: Migration, database: str, cause: BaseException):
+    def __init__(
+        self,
+        migration: Migration,
+        database: str,
+        cause: BaseException,
+        *,
+        in_caller_transaction: bool = False,
+    ):
         self.migration = migration
         self.database = database
         self.cause = cause
+        self.in_caller_transaction = in_caller_transaction
+        if in_caller_transaction:
+            outcome = (
+                "It ran inside an open transaction of the caller, which must now be "
+                "rolled back: nothing done in that transaction is kept, including "
+                "this migration and any applied in it before; migrations committed "
+                "earlier are kept."
+            )
+        else:
+            outcome = (
+                "That migration was rolled back and not recorded; earlier ones are kept."
+            )
         super().__init__(
             f"Upgrading havn's metadata schema failed at migration "
             f"{migration.version} ({migration.name}) on {database}: {cause}. "
-            f"That migration was rolled back and not recorded; earlier ones are kept. "
-            f"Restore a backup or report this error with the message above."
+            f"{outcome} Restore a backup or report this error with the message above."
         )
 
 
@@ -304,7 +327,9 @@ def _apply_locked(conn: duckdb.DuckDBPyConnection, path: str | None) -> list[Mig
                     conn.execute("ROLLBACK")
                 except duckdb.Error:
                     logger.debug("ROLLBACK after a failed migration failed", exc_info=True)
-            raise MigrationError(migration, label, e) from e
+            raise MigrationError(
+                migration, label, e, in_caller_transaction=not own_transaction
+            ) from e
         done.append(migration)
         logger.log(
             logging.DEBUG if fresh else logging.INFO,
