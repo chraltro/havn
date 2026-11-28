@@ -395,10 +395,37 @@ def _exists(cur, schema, name):
                   [schema, name]))
 
 
+class _Clock:
+    """The runner's monotonic clock: real time, until the test freezes it.
+
+    Frozen, a burst of commits takes no time on the runner's clock however
+    slow the machine is (the burst used to be timed by wall clock and, on a
+    loaded machine, spread past the debounce window into extra refreshes).
+    """
+
+    def __init__(self):
+        self.frozen: float | None = None
+        self.offset = 0.0
+
+    def __call__(self) -> float:
+        return self.frozen if self.frozen is not None else time.monotonic() + self.offset
+
+    def freeze(self) -> None:
+        self.frozen = self()
+
+    def resume_after(self, seconds: float) -> None:
+        """Unfreeze, ``seconds`` later on the runner's clock than when frozen."""
+        target = self.frozen + seconds
+        self.offset = target - time.monotonic()
+        self.frozen = None
+
+
 def test_coalesces_a_burst_into_few_refreshes(chain):
     root, wq, cur = chain
-    settings = LiveSettings(**{**FAST.to_dict(), "min_interval": 0.5, "debounce": 0.3, "max_latency": 2.0})
-    runner = LiveRunner(root, wq, settings=settings)
+    settings = LiveSettings(**{**FAST.to_dict(), "min_interval": 0.5, "debounce": 0.3,
+                               "max_latency": 2.0, "poll_interval": 3600})
+    clock = _Clock()
+    runner = LiveRunner(root, wq, settings=settings, clock=clock)
     runner.start()
     try:
         insert_events(cur, [(0, 1, "eu", "I", 1)])
@@ -406,12 +433,19 @@ def test_coalesces_a_burst_into_few_refreshes(chain):
         wait_until(lambda: _exists(cur, "gold", "by_region"))
         wait_until(lambda: runner.snapshot()["models"]["gold.by_region"]["refreshes"] >= 1)
         before = runner.snapshot()["models"]["bronze.orders"]["refreshes"]
-        for i in range(1, 41):  # 40 commits in quick succession
+        clock.freeze()
+        for i in range(1, 41):  # 40 commits within one debounce window
             insert_events(cur, [(i, 1, "eu", "I", i + 1)])
             advance_source(cur, "landing.orders")
+        # Nothing refreshes while the burst is still inside the window...
+        time.sleep(settings.debounce * 2)
+        assert runner.snapshot()["models"]["bronze.orders"]["refreshes"] == before
+        assert q(cur, "SELECT n FROM gold.by_region WHERE region='eu'") == [(1,)]
+        # ...and once the window has closed, the whole burst lands in one cycle.
+        clock.resume_after(settings.debounce + 0.01)
         wait_until(lambda: q(cur, "SELECT n FROM gold.by_region WHERE region='eu'") == [(41,)])
         after = runner.snapshot()["models"]["bronze.orders"]["refreshes"]
-        assert 1 <= after - before <= 5, after - before
+        assert after - before == 1, after - before
     finally:
         runner.stop()
 
